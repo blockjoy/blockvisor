@@ -3,5 +3,8 @@ connect_timeout_seconds = 15
 idle_timeout_seconds = 15
 max_lifetime_seconds = 300
 
-[authy]
-api_key = "yb0mhD2F2Otb5CJxRoPWLWnTNeQgGs5U"
+[twilio_verify]
+twilio_account_sid = ""
+twilio_auth_token = ""
+service_id = ""
+app_friendly_name = ""

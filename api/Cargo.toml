@@ -21,7 +21,6 @@ serde_json = "1.0.79"
 sqlx = {version = "0.5.13", features = ["postgres", "runtime-tokio-rustls", "migrate", "chrono", "uuid"]}
 
 argon2 = "0.4.0"
-authy = "0.9.8"
 futures-util = "0.3.15"
 headers = "0.3"
 jsonwebtoken = "7.2.0"
@@ -37,6 +36,7 @@ tracing-opentelemetry = "0.17.2"
 tracing-subscriber = {version = "0.3.10", features = ["env-filter", "json"]}
 uuid = {version = "0.8.2", features = ["v4", "serde"]}
 validator = {version = "0.13.0", features = ["derive"]}
+twilio-oai-verify-v2 = { git = "https://github.com/PiDelport/twilio-oai-rust" }
 
 [features]
 default = ["tracing/release_max_level_debug"]

@@ -1,18 +1,22 @@
 use crate::auth::Authentication;
+use crate::config::Twilio;
+use crate::models::PasswordResetRequest;
 use crate::models::PwdResetInfo;
 use crate::models::RegistrationReq;
+use crate::models::TwilioVerify;
 use crate::models::User;
 use crate::models::UserLoginRequest;
 use crate::models::UserRefreshRequest;
-use crate::models::{AuthyRegistrationReq, AuthyUser, AuthyVerifyReq, PasswordResetRequest};
 use crate::result::Result;
-use authy::Client;
 use axum::{
     response::{IntoResponse, Response},
     Extension, Json,
 };
 use sqlx::PgPool;
 use tracing::instrument;
+use twilio_oai_verify_v2::apis::default_api::CreateChallengeParams;
+use twilio_oai_verify_v2::apis::default_api::CreateNewFactorParams;
+use twilio_oai_verify_v2::apis::default_api::UpdateFactorParams;
 use uuid::Uuid;
 
 type ApiResponse = Result<Response>;
@@ -117,36 +121,87 @@ pub async fn update_pwd(
     }
 }
 
-// TODO : move to config files
-const API_URL: &str = "https://api.authy.com";
-const API_KEY: &str = "yb0mhD2F2Otb5CJxRoPWLWnTNeQgGs5U";
-
-pub async fn authy_register(
-    Json(authy_reg_req): Json<AuthyRegistrationReq>,
-    // Extension(db_pool): Extension<PgPool>,
+#[instrument(skip(db))]
+pub async fn enable_two_factor(
+    auth: Authentication,
+    Extension(db): Extension<PgPool>,
 ) -> ApiResponse {
-    let client = Client::new(API_URL, API_KEY);
-    let result = AuthyUser::register(&client, &authy_reg_req).await;
+    let user = auth.get_user(&db).await?;
+    let result = User::two_factor(&user.id, &db, true).await;
     match result {
-        Ok(user) => Ok((Json(user)).into_response()),
+        Ok(summary) => Ok((Json(summary)).into_response()),
         Err(err) => Err(err),
     }
 }
 
-pub async fn authy_qr(// Json(authy_id_req): Json<AuthyIDReq>,
-    // Extension(db_pool): Extension<PgPool>,
+#[instrument(skip(db))]
+pub async fn disable_two_factor(
+    auth: Authentication,
+    Extension(db): Extension<PgPool>,
 ) -> ApiResponse {
-    unimplemented!()
+    let user = auth.get_user(&db).await?;
+    let result = User::two_factor(&user.id, &db, false).await;
+    match result {
+        Ok(summary) => Ok((Json(summary)).into_response()),
+        Err(err) => Err(err),
+    }
 }
 
-pub async fn authy_verify(
-    Json(authy_verify_req): Json<AuthyVerifyReq>,
-    // Extension(db_pool): Extension<PgPool>,
+#[instrument(skip(db))]
+pub async fn register_two_factor(
+    auth: Authentication,
+    Extension(db): Extension<PgPool>,
+    Extension(twilio): Extension<Twilio>,
 ) -> ApiResponse {
-    let client = Client::new(API_URL, API_KEY);
-    let result = AuthyUser::verify(&client, &authy_verify_req).await;
+    let user = auth.get_user(&db).await?;
+    let mut params = CreateNewFactorParams::default();
+    params.service_sid = twilio.service_id;
+    params.identity = user.id.to_string();
+    params.friendly_name = twilio.app_friendly_name;
+    params.factor_type = String::from("totp");
+    let result = TwilioVerify::register_oai_service(&twilio.config, params).await;
     match result {
-        Ok(verified) => Ok((Json(verified)).into_response()),
+        Ok(summary) => Ok((Json(summary)).into_response()),
+        Err(err) => Err(err),
+    }
+}
+
+#[instrument(skip(db))]
+pub async fn verify_two_factor_registration(
+    auth: Authentication,
+    Json(twilio_verify): Json<TwilioVerify>,
+    Extension(db): Extension<PgPool>,
+    Extension(twilio): Extension<Twilio>,
+) -> ApiResponse {
+    let user = auth.get_user(&db).await?;
+    let mut params = UpdateFactorParams::default();
+    params.service_sid = twilio.service_id;
+    params.identity = user.id.to_string();
+    params.sid = twilio_verify.factor_sid;
+    params.auth_payload = Some(twilio_verify.token);
+    let result = TwilioVerify::verify_oai_registration(&twilio.config, params).await;
+    match result {
+        Ok(summary) => Ok((Json(summary)).into_response()),
+        Err(err) => Err(err),
+    }
+}
+
+#[instrument(skip(db))]
+pub async fn verify_two_factor(
+    auth: Authentication,
+    Json(twilio_verify): Json<TwilioVerify>,
+    Extension(db): Extension<PgPool>,
+    Extension(twilio): Extension<Twilio>,
+) -> ApiResponse {
+    let user = auth.get_user(&db).await?;
+    let mut params = CreateChallengeParams::default();
+    params.service_sid = twilio.service_id;
+    params.identity = user.id.to_string();
+    params.factor_sid = twilio_verify.factor_sid;
+    params.auth_payload = Some(twilio_verify.token);
+    let result = TwilioVerify::verify_oai(&twilio.config, params).await;
+    match result {
+        Ok(summary) => Ok((Json(summary)).into_response()),
         Err(err) => Err(err),
     }
 }

@@ -13,6 +13,7 @@ use config::{Config, ConfigError, Environment, File};
 use dotenv::dotenv;
 use secrecy::Secret;
 use serde::Deserialize;
+use twilio_oai_verify_v2::apis::configuration::Configuration;
 
 /// The root configuration object, holding all available configuration details
 /// as inner public fields
@@ -30,7 +31,7 @@ pub struct AppConfig {
     pub telemetry: TelemetryConfig,
     /// Configuration pertaining specifically to authy 2FA
     #[serde(default)]
-    pub authy: AuthyConfig,
+    pub twilio_verify: TwilioVerifyConfig,
 }
 
 impl AppConfig {
@@ -142,12 +143,37 @@ pub struct TelemetryConfig {
     pub log_format: LogFormat,
 }
 
-/// Configuration pertaining specifically to Authy 2FA
+/// Configuration pertaining specifically to Twilio Verify 2FA
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct AuthyConfig {
-    /// api key for your authy application
+pub struct TwilioVerifyConfig {
+    /// Twilio Account Key
     #[serde(default)]
-    pub api_key: String,
+    pub twilio_account_sid: String,
+    /// Twilio Account Auth Token
+    #[serde(default)]
+    pub twilio_auth_token: String,
+    /// Service ID of Twilio Verify application you created
+    #[serde(default)]
+    pub service_id: String,
+    /// App User Friendly name to appear on authenticator application eg(Authy, Google Authenticator, etc.)
+    #[serde(default)]
+    pub app_friendly_name: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Twilio {
+    pub config: Configuration,
+    pub service_id: String,
+    pub app_friendly_name: String,
+}
+impl Twilio {
+    pub fn new(config: Configuration, service_id: String, app_friendly_name: String) -> Self {
+        Twilio {
+            config,
+            service_id,
+            app_friendly_name,
+        }
+    }
 }
 
 #[cfg(test)]

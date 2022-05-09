@@ -14,5 +14,8 @@ listen_port = 8080
 log_format = "full"
 opentelemetry = false
 
-[authy]
-api_key = ""
+[twilio_verify]
+twilio_account_sid = ""
+twilio_auth_token = ""
+service_id = ""
+app_friendly_name = ""

@@ -1,5 +1,6 @@
 //! [`axum`]-specific logic for offering a REST API
 
+use crate::config::Twilio;
 use crate::handlers;
 use crate::{config::AppConfig, db};
 use anyhow::Result;
@@ -19,6 +20,7 @@ use std::{
 use tokio::signal::unix::{signal, SignalKind};
 use tower_http::trace::TraceLayer;
 use tracing::{debug_span, field, info, span, Span};
+use twilio_oai_verify_v2::apis::configuration::{BasicAuth, Configuration};
 
 /// Internal helper for [`tower_http::trace::TraceLayer`] to create
 /// [`tracing::Span`]s around a request.
@@ -74,6 +76,17 @@ pub async fn start(config: &AppConfig) -> Result<()> {
 
     let pool = db::new_pool(config).await?;
 
+    let mut twilio_verify_conf = Configuration::new();
+    let basic_auth: BasicAuth = (
+        config.twilio_verify.twilio_account_sid.to_string(),
+        Some(config.twilio_verify.twilio_auth_token.to_string()),
+    );
+    twilio_verify_conf.basic_auth = Some(basic_auth);
+    let twilio = Twilio::new(
+        twilio_verify_conf,
+        config.twilio_verify.service_id.to_string(),
+        config.twilio_verify.app_friendly_name.to_string(),
+    );
     let app = Router::new()
         .route("/health", get(handlers::health))
         .route("/v1/users", post(handlers::create_user))
@@ -85,10 +98,21 @@ pub async fn start(config: &AppConfig) -> Result<()> {
             post(handlers::reset_pwd).put(handlers::update_pwd),
         )
         .route("/v1/refresh", post(handlers::refresh))
-        .route("/v1/authy/register", post(handlers::authy_register))
-        .route("/v1/authy/verify", post(handlers::authy_verify))
-        // .route("/authy/qr", post(handlers::authy_qr))
+        .route(
+            "/v1/two-factor",
+            post(handlers::enable_two_factor).delete(handlers::disable_two_factor),
+        )
+        .route(
+            "/v1/two-factor/register",
+            post(handlers::register_two_factor),
+        )
+        .route(
+            "/v1/two-factor/register/verify",
+            post(handlers::verify_two_factor_registration),
+        )
+        .route("/v1/two-factor/verify", post(handlers::verify_two_factor))
         .layer(Extension(pool))
+        .layer(Extension(twilio))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(make_span)

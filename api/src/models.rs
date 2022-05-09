@@ -6,18 +6,24 @@ use argon2::{
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
     Argon2,
 };
-use authy::api::user;
-use authy::Client;
 use chrono::{DateTime, Utc};
 use sendgrid::v3::{Content, Email, Message, Personalization, Sender};
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, FromRow, PgConnection, PgPool, Row};
 use std::{fmt, str::FromStr};
+use twilio_oai_verify_v2::{
+    apis::{
+        configuration::Configuration,
+        default_api::{
+            create_challenge, create_new_factor, update_factor, CreateChallengeParams,
+            CreateChallengeSuccess, CreateNewFactorParams, CreateNewFactorSuccess,
+            UpdateFactorParams, UpdateFactorSuccess,
+        },
+    },
+    models::{verify_v2_service_entity_challenge, verify_v2_service_entity_factor},
+};
 use uuid::Uuid;
 use validator::Validate;
-
-type AuthyUserApi = authy::User;
-
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "enum_org_role", rename_all = "snake_case")]
@@ -95,6 +101,7 @@ pub struct User {
     pub token: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub two_factor: bool,
 }
 
 impl From<PgRow> for User {
@@ -129,6 +136,9 @@ impl From<PgRow> for User {
             updated_at: row
                 .try_get("updated_at")
                 .expect("Couldn't try_get updated_at for user."),
+            two_factor: row
+                .try_get("two_factor")
+                .expect("Couldn't try_get two_factor for user."),
         }
     }
 }
@@ -178,6 +188,7 @@ pub struct Org {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
 impl User {
     pub async fn create_user(req: RegistrationReq, db_pool: &PgPool) -> Result<Self> {
         let _ = req
@@ -226,6 +237,19 @@ impl User {
         } else {
             Err(AppError::ValidationError("Invalid password.".to_string()))
         }
+    }
+
+    pub async fn two_factor(id: &Uuid, db_pool: &PgPool, register: bool) -> Result<bool> {
+        sqlx::query(r#"UPDATE users SET two_factor = $1 WHERE id = $2"#)
+            .bind(register)
+            .bind(id)
+            .execute(db_pool)
+            .await
+            .map_err(AppError::from)?;
+
+        let user = User::find_by_id(*id, db_pool).await?;
+        let two_factor = user.two_factor;
+        Ok(two_factor)
     }
 
     pub async fn login(user_login_req: UserLoginRequest, db_pool: &PgPool) -> Result<User> {
@@ -461,59 +485,90 @@ impl Org {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct AuthyUser;
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Binding {
+    secret: String,
+    uri: String,
+}
 
-impl AuthyUser {
-    pub async fn register(
-        client: &Client,
-        authy_reg_req: &AuthyRegistrationReq,
-    ) -> Result<AuthyIDReq> {
-        let (_, user) = user::create(
-            client,
-            authy_reg_req.email.as_str(),
-            authy_reg_req.country_code,
-            authy_reg_req.phone.as_str(),
-            false,
-        )
-        .unwrap();
-        Ok(AuthyIDReq::new(user.id))
-    }
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateNewFactorResponse {
+    binding: Binding,
+    sid: String,
+}
 
-    pub async fn qr(_client: &Client) -> Result<()> {
-        unimplemented!()
-    }
-
-    pub async fn verify(client: &Client, authy_verify_req: &AuthyVerifyReq) -> Result<bool> {
-        let mut user = AuthyUserApi::find(client, authy_verify_req.authy_id).unwrap();
-        let result = user.verify(client, authy_verify_req.token.as_str());
-        match result {
-            Ok(verifies) => Ok(verifies),
-            Err(_) => Err(AppError::ValidationError("Invalid token.".to_string())),
+impl CreateNewFactorResponse {
+    fn new(binding: Binding, sid: &str) -> Self {
+        CreateNewFactorResponse {
+            binding,
+            sid: sid.to_string(),
         }
     }
 }
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AuthyRegistrationReq {
-    pub country_code: u16,
-    pub phone: String,
-    pub email: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Copy)]
-pub struct AuthyIDReq {
-    pub authy_id: u32,
-}
-
-impl AuthyIDReq {
-    pub fn new(authy_id: u32) -> Self {
-        AuthyIDReq { authy_id }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AuthyVerifyReq {
-    pub authy_id: u32,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TwilioVerify {
+    pub factor_sid: String,
     pub token: String,
+}
+
+impl TwilioVerify {
+    pub async fn register_oai_service(
+        configuration: &Configuration,
+        create_new_factor_params: CreateNewFactorParams,
+    ) -> Result<CreateNewFactorResponse> {
+        let result = create_new_factor(configuration, create_new_factor_params).await;
+        match result {
+            Ok(response_content) => match response_content.entity.unwrap() {
+                CreateNewFactorSuccess::Status201(entity) => {
+                    let binding_json = entity.binding.expect("Cannot find Twilio TOTP binding");
+                    let binding: Binding = serde_json::from_value(binding_json)
+                        .expect("Cannot find Twilio TOTP binding attributes");
+                    let sid = entity.sid.expect("Cannot find Twilio factor sid");
+                    Ok(CreateNewFactorResponse::new(binding, &sid))
+                }
+                CreateNewFactorSuccess::UnknownValue(_) => {
+                    Err(AppError::ValidationError("Twilio bad request.".to_string()))
+                }
+            },
+            Err(err) => Err(AppError::InvalidAuthentication(anyhow!(err.to_string()))),
+        }
+    }
+
+    pub async fn verify_oai_registration(
+        configuration: &Configuration,
+        verify_factor_params: UpdateFactorParams,
+    ) -> Result<verify_v2_service_entity_factor::Status> {
+        let result = update_factor(configuration, verify_factor_params).await;
+        match result {
+            Ok(response_content) => match response_content.entity.unwrap() {
+                UpdateFactorSuccess::Status200(entity) => {
+                    let verify_status = entity.status.expect("Cannot find Twilio verify status");
+                    Ok(verify_status)
+                }
+                UpdateFactorSuccess::UnknownValue(_) => {
+                    Err(AppError::ValidationError("Twilio bad request.".to_string()))
+                }
+            },
+            Err(err) => Err(AppError::InvalidAuthentication(anyhow!(err.to_string()))),
+        }
+    }
+
+    pub async fn verify_oai(
+        configuration: &Configuration,
+        create_challenge_params: CreateChallengeParams,
+    ) -> Result<verify_v2_service_entity_challenge::Status> {
+        let result = create_challenge(configuration, create_challenge_params).await;
+        match result {
+            Ok(response_content) => match response_content.entity.unwrap() {
+                CreateChallengeSuccess::Status201(entity) => {
+                    let verify_status = entity.status.expect("Cannot find Twilio verify status");
+                    Ok(verify_status)
+                }
+                CreateChallengeSuccess::UnknownValue(_) => {
+                    Err(AppError::ValidationError("Twilio bad request.".to_string()))
+                }
+            },
+            Err(err) => Err(AppError::InvalidAuthentication(anyhow!(err.to_string()))),
+        }
+    }
 }

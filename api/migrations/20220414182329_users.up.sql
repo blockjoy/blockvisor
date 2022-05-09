@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS users (
 	token TEXT UNIQUE,
 	refresh TEXT UNIQUE DEFAULT uuid_generate_v4(),
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	two_factor BOOLEAN DEFAULT FALSE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email on users (email);

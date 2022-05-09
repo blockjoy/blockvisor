@@ -167,9 +167,9 @@ impl Authentication {
         }
     }
 
-    pub async fn get_user(&self, pool: PgPool) -> Result<User> {
+    pub async fn get_user(&self, pool: &PgPool) -> Result<User> {
         match self {
-            Self::User(u) => User::find_by_id(u.id, &pool).await,
+            Self::User(u) => User::find_by_id(u.id, pool).await,
             _ => Err(AppError::InsufficientPermissionsError),
         }
     }
