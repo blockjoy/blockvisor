@@ -4,6 +4,10 @@
 
 The api server. Handles REST/gRPC interfaces for frontend and blockvisord.
 
+## blockvisor-api-client-rs
+
+The client api. Handle commands to hosts
+
 ## babel
 
 The translation layer to communicate with various blockchains.
