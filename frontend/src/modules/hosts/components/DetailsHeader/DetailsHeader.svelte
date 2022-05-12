@@ -17,6 +17,10 @@
   export let state = '';
   export let form;
 
+  export let data: HostDetails;
+
+  const { ip_addr, location, status, name } = data;
+
   let isModalOpen = false;
 
   const handleDeleteModalOpen = (e) => {
@@ -39,11 +43,11 @@
 
 <header class={classes}>
   <div>
-    <h2 class="t-xlarge details-header__title">HostFox</h2>
+    <h2 class="t-xlarge details-header__title">{name}</h2>
     <aside class="t-small details-header__summary">
       <div class="t-color-text-2 details-header__node-info">
-        <small class="t-small">212.213.214.2</small>
-        <date>Zagreb, Croatia</date>
+        <small class="t-small">{ip_addr}</small>
+        <date>{location}</date>
       </div>
       <PillBox>
         <Pill removable={false} transition={fadeDefault}>nodeTag1</Pill>
@@ -66,7 +70,7 @@
     </Select>
     <div class="details-header__wrapper">
       <div class="t-uppercase t-microlabel details-header__state">
-        <DataState {state} />
+        <DataState {status} />
       </div>
       <div class="container--buttons">
         <IconButton

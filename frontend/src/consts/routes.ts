@@ -9,7 +9,7 @@ export const ROUTES = {
   HOSTS: '/app/hosts',
   HOST_ADD: '/app/host/add',
   HOST_GROUP: (id: string) => `/app/hosts/group/${id}`,
-  HOST_DETAILS: (id: string) => `/app/host/${id}`,
+  HOST_DETAILS: (id: string) => `/app/hosts/group/${id}`,
   NODES: '/app/nodes',
   NODE_ADD: '/app/node/add',
   NODE_DETAILS: (id: string) => `/app/node/${id}`,

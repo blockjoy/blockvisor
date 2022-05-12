@@ -1,11 +1,9 @@
 <script lang="ts">
   import HierarchyList from 'components/HierarchyList/HierarchyList.svelte';
-
-  import { user } from 'modules/authentication/store';
   import GroupEdit from 'modules/forms/components/GroupEdit/GroupEdit.svelte';
+  import { fetchAllHosts, hosts } from 'modules/hosts/store/hostsStore';
   import NodeGroupAdd from 'modules/nodes/components/NodeGroupAdd/NodeGroupAdd.svelte';
   import { onMount } from 'svelte';
-  import { fetchAllHosts, hosts } from 'modules/hosts/store/hostsStore';
 
   let isAddingNewGroup = false;
   let editingId;
@@ -24,6 +22,7 @@
   on:click
   handleConfirm={handleEditConfirm}
   {handleEdit}
+  hideList={true}
   {editingId}
   nodes={$hosts}
 >
