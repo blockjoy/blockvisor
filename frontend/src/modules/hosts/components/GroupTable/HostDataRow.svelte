@@ -10,7 +10,7 @@
   import ButtonWithDropdown from 'modules/app/components/ButtonWithDropdown/ButtonWithDropdown.svelte';
   import CopyNode from 'modules/dashboard/components/CopyNode/CopyNode.svelte';
   import TokenIcon from 'components/TokenIcon/TokenIcon.svelte';
-  import formatDistanceToNow from 'date-fns/formatDistanceToNow';
+  import { formatDistanceToNow } from 'date-fns';
 
   export let name;
   export let status;
