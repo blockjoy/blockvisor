@@ -18,6 +18,7 @@ chrono = {version = "0.4", features = ["serde"]}
 clap = {version = "3.1.15", features = ["derive"]}
 daemonize = "0.4.1"
 local-ip-address = "0.4.4"
+openssl = {version = "0.10", features = ["vendored"]}
 reqwest = {version = "0.11.10", features = ["json"]}
 serde = "1.0.136"
 serde_json = "1.0.79"
