@@ -10,7 +10,6 @@
     sortActive = { id, value };
   };
 </script>
-
 <table class="table hosts-table">
   <colgroup>
     <col width="320px" />
@@ -34,7 +33,10 @@
     </tr>
   </thead>
   <tbody>
-    <HostDataRow {...hosts} />
+    
+    {#each hosts as host}
+    <HostDataRow {...host} />
+    {/each}
   </tbody>
 </table>
 

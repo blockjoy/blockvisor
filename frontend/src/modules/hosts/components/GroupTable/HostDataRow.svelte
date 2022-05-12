@@ -8,12 +8,15 @@
   import IconDocument from 'icons/document-12.svg';
   import IconDots from 'icons/dots-12.svg';
   import ButtonWithDropdown from 'modules/app/components/ButtonWithDropdown/ButtonWithDropdown.svelte';
+import CopyNode from 'modules/dashboard/components/CopyNode/CopyNode.svelte';
+import TokenIcon from 'components/TokenIcon/TokenIcon.svelte';
 
   export let name;
   export let status;
   export let ip_addr;
   export let url;
   export let location;
+  export let id;
 
   const classes = ['table__row host-data-row', `host-data-row--${status}`].join(
     ' ',
@@ -21,18 +24,23 @@
 </script>
 
 <tr class={classes}>
-  <td class="host-data-row__col">
+  <td class="node-data-row__token">
+    <TokenIcon icon={"algo"} />
+  </td>
+
+  <td class="host-data-row__col host-data-row__details">
     <a class="u-link-reset" href={url}>
       {name}
     </a>
-    <small class="host-data-row__info t-small">
-      <span>
-        {ip_addr}
-      </span>
-      <address>
-        {location}
-      </address>
-    </small>
+    <div class="host-data-row__info">
+      <CopyNode value="abc">
+        <small
+          title={`Copy ${id} to clipboard`}
+          >{id}</small
+        >
+      </CopyNode>
+      <span class="t-color-text-2">{ip_addr}</span>
+    </div>
   </td>
   <td class="host-data-row__col t-uppercase t-microlabel host-data-row__state">
     <!-- Temp fix since statuses are not the same and we don't have icons for new statuses. -->

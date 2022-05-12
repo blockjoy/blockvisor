@@ -9,15 +9,17 @@
   import IconDocument from 'icons/document-12.svg';
   import IconCog from 'icons/cog-12.svg';
   import IconPlus from 'icons/plus-12.svg';
-
+  import { useForm } from 'svelte-use-form';
   import { onMount } from 'svelte';
   import { ROUTES } from 'consts/routes';
   import HostGroup from 'modules/hosts/components/HostGroup/HostGroup.svelte';
   import Button from 'components/Button/Button.svelte';
   import { selectedHosts, fetchHostById } from 'modules/hosts/store/hostsStore';
   import { page } from '$app/stores';
-  import { user } from 'modules/authentication/store';
+import DetailsTable from 'modules/hosts/components/DetailsTable/DetailsTable.svelte';
+import DetailsHeader from 'modules/hosts/components/DetailsHeader/DetailsHeader.svelte';
 
+  const id = $page.params.id;
   onMount(() => {
     app.setBreadcrumbs([
       {
@@ -34,8 +36,9 @@
   $: {
     fetchHostById($page.params.id);
   }
-</script>
 
+  const form = useForm();
+</script>
 <ActionTitleHeader className="container--pull-back">
   <h2 class="t-large" slot="title">All Hosts</h2>
   <ButtonWithDropdown slot="action">
@@ -62,6 +65,9 @@
     </DropdownLinkList>
   </ButtonWithDropdown>
 </ActionTitleHeader>
+
+<DetailsHeader data={$selectedHosts} {form} state="consensus" {id} />
+<DetailsTable data={$selectedHosts} />
 
 <section class="container--medium-large ">
   <HostGroup selectedHosts={$selectedHosts} id={$page.params.id}>

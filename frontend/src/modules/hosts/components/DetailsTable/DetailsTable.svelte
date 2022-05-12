@@ -1,5 +1,15 @@
-<script>
+<script lang="ts">
+import { format } from 'date-fns';
+
   import HostDataRow from './HostDataRow.svelte';
+
+
+  export let data : HostDetails;
+
+  const {
+  os,
+  os_version,
+  created_at} = data;
 </script>
 
 <table class="table details-table">
@@ -10,16 +20,16 @@
 
   <tbody>
     <HostDataRow>
-      <svelte:fragment slot="title">Created</svelte:fragment>
-      05/23/2022
+      <svelte:fragment slot="title">OS</svelte:fragment>
+      {os}
+    </HostDataRow>
+    <HostDataRow>
+      <svelte:fragment slot="title">OS Version</svelte:fragment>
+      {os_version}
     </HostDataRow>
     <HostDataRow>
       <svelte:fragment slot="title">Created</svelte:fragment>
-      05/23/2022
-    </HostDataRow>
-    <HostDataRow>
-      <svelte:fragment slot="title">Created</svelte:fragment>
-      05/23/2022
+      {created_at && format(+new Date(created_at),'MM/dd/yyyy')}
     </HostDataRow>
   </tbody>
 </table>
