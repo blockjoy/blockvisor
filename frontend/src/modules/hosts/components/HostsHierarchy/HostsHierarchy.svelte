@@ -22,6 +22,7 @@
   on:click
   handleConfirm={handleEditConfirm}
   {handleEdit}
+  hideList={true}
   {editingId}
   nodes={$hosts}
 >

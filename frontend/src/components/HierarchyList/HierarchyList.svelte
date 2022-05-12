@@ -7,33 +7,36 @@
   export let handleConfirm;
   export let handleEdit;
   export let editingId;
+  export let hideList;
 </script>
 
 {#if Boolean(nodes.length)}
   <ul class="u-list-reset hierarchy-list">
     {#each nodes as { children, ...node }}
       <Node on:click {...node} isParent={Boolean(children?.length)}>
-        {#if Boolean(children?.length) || $$slots.action}
-          <ul class="u-list-reset hierarchy-list__list">
-            {#each children as child}
-              <Node
-                isEditing={editingId === child.id}
-                {handleConfirm}
-                {handleEdit}
-                on:click
-                {...child}
-                isParent={false}
-              />
-            {/each}
-            {#if $$slots.default}
-              <slot />
-            {/if}
-            {#if $$slots.action}
-              <li class="hierarchy-list__action">
-                <slot name="action" />
-              </li>
-            {/if}
-          </ul>
+        {#if !hideList}
+          {#if Boolean(children?.length) || $$slots.action}
+            <ul class="u-list-reset hierarchy-list__list">
+              {#each children as child}
+                <Node
+                  isEditing={editingId === child.id}
+                  {handleConfirm}
+                  {handleEdit}
+                  on:click
+                  {...child}
+                  isParent={false}
+                />
+              {/each}
+              {#if $$slots.default}
+                <slot />
+              {/if}
+              {#if $$slots.action}
+                <li class="hierarchy-list__action">
+                  <slot name="action" />
+                </li>
+              {/if}
+            </ul>
+          {/if}
         {/if}
       </Node>
     {/each}

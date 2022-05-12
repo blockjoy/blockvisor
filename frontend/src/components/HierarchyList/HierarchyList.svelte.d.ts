@@ -5,6 +5,7 @@ export interface HierarchyListProps {
   editingId?: string | null;
   handleConfirm?: VoidFunction;
   handleEdit?: (e: KeyboardEvent) => void;
+  hideList?: boolean;
 }
 
 export interface HierarchyListSlots {
