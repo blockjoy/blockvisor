@@ -28,15 +28,15 @@
 <nav class="app-nav">
   <ul class="u-list-reset app-nav__list">
     <li class="app-nav__item">
-      <AppButton {activeApp} on:click={handleAppChange} value={APPS.BROADCAST}>
-        <LogoBroadcast />
-        <span class="app-nav__label  t-micro">Broadcast</span>
-      </AppButton>
-    </li>
-    <li class="app-nav__item">
       <AppButton {activeApp} on:click={handleAppChange} value={APPS.BLOCKVISOR}>
         <LogoBlockVisor />
         <span class="app-nav__label t-micro">BlockVisor</span>
+      </AppButton>
+    </li>
+    <li class="app-nav__item">
+      <AppButton {activeApp} on:click={handleAppChange} value={APPS.BROADCAST}>
+        <LogoBroadcast />
+        <span class="app-nav__label  t-micro">Broadcast</span>
       </AppButton>
     </li>
   </ul>
