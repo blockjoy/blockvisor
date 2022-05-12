@@ -3,6 +3,7 @@
   import HostDataRow from './HostDataRow.svelte';
 
   export let hosts;
+  export let linkToHostDetails;
 
   let sortActive;
 
@@ -44,7 +45,14 @@
   </thead>
   <tbody>
     {#each hosts as host}
-      <HostDataRow {...host} />
+      <HostDataRow
+        {linkToHostDetails}
+        name={host.address_name}
+        status={host.status}
+        ipAddr={host.ip_addr}
+        id={host.id}
+        createdAt={host.created_at}
+      />
     {/each}
   </tbody>
 </table>

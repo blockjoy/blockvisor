@@ -6,6 +6,8 @@
 
   export let selectedHosts;
   export let id;
+
+  console.log(selectedHosts);
 </script>
 
 <article class="host-group">
@@ -21,7 +23,7 @@
   </div>
 
   {#if selectedHosts.validators?.length}
-    <GroupTable hosts={selectedHosts.validators} />
+    <GroupTable hosts={selectedHosts.validators} linkToHostDetails={false} />
   {:else}
     <div class="host-group--empty">
       <EmptyColumn id={`graphic-${id}`}>

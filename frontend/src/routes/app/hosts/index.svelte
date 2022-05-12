@@ -63,6 +63,6 @@
 
 <section class="container--medium-large ">
   {#if $hosts[0]?.children}
-    <GroupTable hosts={$hosts[0]?.children} />
+    <GroupTable hosts={$hosts[0]?.children} linkToHostDetails={true} />
   {/if}
 </section>

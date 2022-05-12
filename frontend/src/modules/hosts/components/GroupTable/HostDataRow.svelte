@@ -12,11 +12,12 @@
   import TokenIcon from 'components/TokenIcon/TokenIcon.svelte';
   import { formatDistanceToNow } from 'date-fns';
 
-  export let name;
-  export let status;
-  export let ip_addr;
-  export let id;
-  export let created_at;
+  export let name = '';
+  export let status = '';
+  export let ipAddr = '';
+  export let id = '';
+  export let createdAt = '';
+  export let linkToHostDetails;
 
   const classes = ['table__row host-data-row', `host-data-row--${status}`].join(
     ' ',
@@ -32,13 +33,15 @@
     <div title={name} class="t-ellipsis">
       <a
         class="u-link-reset host-data-row__link"
-        href={ROUTES.HOST_DETAILS(id)}
+        href={linkToHostDetails
+          ? ROUTES.HOST_DETAILS(id)
+          : ROUTES.NODE_DETAILS(id)}
       >
         {name}
       </a>
     </div>
     <small class="t-small t-color-text-2 host-data-row__details-added"
-      >{created_at && formatDistanceToNow(+new Date(created_at))}</small
+      >{createdAt && formatDistanceToNow(+new Date(createdAt))}</small
     >
     <div class="node-data-row__info">
       <CopyNode value="abc">
@@ -48,11 +51,11 @@
           >{id}</small
         >
       </CopyNode>
-      <span class="t-small t-color-text-2">{ip_addr}</span>
+      <span class="t-small t-color-text-2">{ipAddr}</span>
     </div>
   </td>
   <td class="t-small t-color-text-2 host-data-row__col host-data-row__added"
-    >{created_at && formatDistanceToNow(+new Date(created_at))} ago</td
+    >{createdAt && formatDistanceToNow(+new Date(createdAt))} ago</td
   >
   <td class="t-uppercase t-color-text-3 t-microlabel host-data-row__state">
     <DataState {status} />
