@@ -14,10 +14,11 @@
   import { ROUTES } from 'consts/routes';
   import HostGroup from 'modules/hosts/components/HostGroup/HostGroup.svelte';
   import Button from 'components/Button/Button.svelte';
-  import { selectedHosts, fetchHostById } from 'modules/hosts/store/hostsStore';
+  import { selectedHosts, fetchHostById, isLoading } from 'modules/hosts/store/hostsStore';
   import { page } from '$app/stores';
-import DetailsTable from 'modules/hosts/components/DetailsTable/DetailsTable.svelte';
-import DetailsHeader from 'modules/hosts/components/DetailsHeader/DetailsHeader.svelte';
+  import DetailsTable from 'modules/hosts/components/DetailsTable/DetailsTable.svelte';
+  import DetailsHeader from 'modules/hosts/components/DetailsHeader/DetailsHeader.svelte';
+  import LoadingSpinner from 'components/Spinner/LoadingSpinner.svelte';
 
   const id = $page.params.id;
   onMount(() => {
@@ -39,6 +40,12 @@ import DetailsHeader from 'modules/hosts/components/DetailsHeader/DetailsHeader.
 
   const form = useForm();
 </script>
+{#if $isLoading}
+  <div class="center">
+    <LoadingSpinner id='js-spinner' size="page" />
+  </div>
+
+{:else}
 <ActionTitleHeader className="container--pull-back">
   <h2 class="t-large" slot="title">All Hosts</h2>
   <ButtonWithDropdown slot="action">
@@ -77,3 +84,11 @@ import DetailsHeader from 'modules/hosts/components/DetailsHeader/DetailsHeader.
     >
   </HostGroup>
 </section>
+{/if}
+
+<style>
+  .center {
+    display: flex;
+    justify-content: center;
+  }
+</style>

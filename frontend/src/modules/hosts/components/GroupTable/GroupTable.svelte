@@ -9,31 +9,40 @@
   const handleSort = (id: string, value: SorterValues) => {
     sortActive = { id, value };
   };
+  console.log("hosts", hosts)
 </script>
 <table class="table hosts-table">
   <colgroup>
-    <col width="320px" />
-    <col width="100px" />
+    <col width="40px" />
+    <col width="280px" />
+    <col width="160px" />
+    <col />
     <col />
   </colgroup>
   <thead>
     <tr>
       <th class="table__heading">
-        <Sorter callback={handleSort} active={sortActive} id="name">Name</Sorter
+        <Sorter id="token" active={sortActive} callback={handleSort}>
+          <span class="visually-hidden">Token</span>
+        </Sorter>
+      </th>
+      <th class="table__heading">
+        <Sorter id="name" active={sortActive} callback={handleSort}>Name</Sorter
         >
       </th>
       <th class="table__heading">
-        <Sorter callback={handleSort} active={sortActive} id="status"
+        <Sorter id="added" active={sortActive} callback={handleSort}
+          >Added</Sorter
+        >
+      </th>
+      <th class="table__heading">
+        <Sorter id="status" active={sortActive} callback={handleSort}
           >Status</Sorter
         >
-      </th>
-      <th class="table__heading">
-        <span class="visually-hidden">Actions</span>
       </th>
     </tr>
   </thead>
   <tbody>
-    
     {#each hosts as host}
     <HostDataRow {...host} />
     {/each}
@@ -42,6 +51,8 @@
 
 <style>
   .hosts-table {
+    margin-top: 60px;
+
     @media (--screen-medium-larger-max) {
       thead {
         display: none;
