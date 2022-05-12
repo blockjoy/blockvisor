@@ -29,8 +29,6 @@ export const fetchAllHosts = async () => {
     };
   });
 
-  console.log(all_hosts);
-
   hosts.set(all_hosts);
 };
 

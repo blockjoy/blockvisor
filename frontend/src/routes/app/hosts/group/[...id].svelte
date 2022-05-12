@@ -47,8 +47,6 @@
   }
 
   const form = useForm();
-
-  console.log($selectedHosts);
 </script>
 
 {#if $isLoading}

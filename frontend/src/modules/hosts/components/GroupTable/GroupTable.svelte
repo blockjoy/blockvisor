@@ -44,7 +44,7 @@
   </thead>
   <tbody>
     {#each hosts as host}
-      <HostDataRow {...host} fromIndex={true} />
+      <HostDataRow {...host} />
     {/each}
   </tbody>
 </table>

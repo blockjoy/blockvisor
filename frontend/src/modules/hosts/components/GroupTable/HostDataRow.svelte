@@ -15,8 +15,6 @@
   export let name;
   export let status;
   export let ip_addr;
-  export let url;
-  export let location;
   export let id;
   export let created_at;
 
