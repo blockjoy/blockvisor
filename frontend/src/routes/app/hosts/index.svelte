@@ -63,8 +63,8 @@
 </ActionTitleHeader>
 
 <section class="container--medium-large ">
-  {#each $hosts as host}
-    <HostGroup selectedHosts={host}>
+  {#each $hosts[0].children as host}
+    <HostGroup selectedHosts={host} id={host.id}>
       <svelte:fragment slot="title">Host group 1</svelte:fragment>
       <Button asLink href="#" style="outline" size="small" slot="action"
         >View</Button
