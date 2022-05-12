@@ -1,19 +1,18 @@
 <script lang="ts">
   import ActionTitleHeader from 'components/ActionTitleHeader/ActionTitleHeader.svelte';
+  import Button from 'components/Button/Button.svelte';
+  import DropdownItem from 'components/Dropdown/DropdownItem.svelte';
+  import DropdownLinkList from 'components/Dropdown/DropdownList.svelte';
+  import { ROUTES } from 'consts/routes';
+  import IconCog from 'icons/cog-12.svg';
+  import IconDocument from 'icons/document-12.svg';
+  import IconAccount from 'icons/person-12.svg';
+  import IconPlus from 'icons/plus-12.svg';
   import ButtonWithDropdown from 'modules/app/components/ButtonWithDropdown/ButtonWithDropdown.svelte';
   import { app } from 'modules/app/store';
-  import DropdownLinkList from 'components/Dropdown/DropdownList.svelte';
-  import DropdownItem from 'components/Dropdown/DropdownItem.svelte';
-
-  import IconAccount from 'icons/person-12.svg';
-  import IconDocument from 'icons/document-12.svg';
-  import IconCog from 'icons/cog-12.svg';
-  import IconPlus from 'icons/plus-12.svg';
-
-  import { onMount } from 'svelte';
   import HostGroup from 'modules/hosts/components/HostGroup/HostGroup.svelte';
-  import Button from 'components/Button/Button.svelte';
-  import { ROUTES } from 'consts/routes';
+  import { fetchAllHosts, hosts } from 'modules/hosts/store/hostsStore';
+  import { onMount } from 'svelte';
 
   onMount(() => {
     app.setBreadcrumbs([
@@ -27,6 +26,10 @@
       },
     ]);
   });
+
+  fetchAllHosts();
+
+  console.log($hosts);
 </script>
 
 <ActionTitleHeader className="container--pull-back">
@@ -60,5 +63,12 @@
 </ActionTitleHeader>
 
 <section class="container--medium-large ">
-  <p>Select host group.</p>
+  {#each $hosts as host}
+    <HostGroup selectedHosts={host}>
+      <svelte:fragment slot="title">Host group 1</svelte:fragment>
+      <Button asLink href="#" style="outline" size="small" slot="action"
+        >View</Button
+      >
+    </HostGroup>
+  {/each}
 </section>

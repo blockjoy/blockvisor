@@ -15,7 +15,12 @@
   import { ROUTES } from 'consts/routes';
   import HostGroup from 'modules/hosts/components/HostGroup/HostGroup.svelte';
   import Button from 'components/Button/Button.svelte';
-  import { selectedHosts, fetchHostById, isLoading } from 'modules/hosts/store/hostsStore';
+  import {
+    selectedHosts,
+    fetchHostById,
+    isLoading,
+    hosts,
+  } from 'modules/hosts/store/hostsStore';
   import { page } from '$app/stores';
   import DetailsTable from 'modules/hosts/components/DetailsTable/DetailsTable.svelte';
   import DetailsHeader from 'modules/hosts/components/DetailsHeader/DetailsHeader.svelte';
@@ -42,60 +47,62 @@
   }
 
   const form = useForm();
-  console.log("host", $selectedHosts)
 </script>
+
 {#if $isLoading}
   <div class="center">
-    <LoadingSpinner id='js-spinner' size="page" />
+    <LoadingSpinner id="js-spinner" size="page" />
   </div>
 {:else}
-<ActionTitleHeader className="container--pull-back">
-  <h2 class="t-large" slot="title">All Hosts</h2>
-  <ButtonWithDropdown slot="action">
-    <svelte:fragment slot="label">Filter <IconPlus /></svelte:fragment>
-    <DropdownLinkList slot="content">
-      <li>
-        <DropdownItem as="button">
-          <IconAccount />
-          Profile</DropdownItem
-        >
-      </li>
-      <li>
-        <DropdownItem as="button">
-          <IconDocument />
-          Billing</DropdownItem
-        >
-      </li>
-      <li>
-        <DropdownItem as="button">
-          <IconCog />
-          Settings</DropdownItem
-        >
-      </li>
-    </DropdownLinkList>
-  </ButtonWithDropdown>
-</ActionTitleHeader>
+  <ActionTitleHeader className="container--pull-back">
+    <h2 class="t-large" slot="title">All Hosts</h2>
+    <ButtonWithDropdown slot="action">
+      <svelte:fragment slot="label">Filter <IconPlus /></svelte:fragment>
+      <DropdownLinkList slot="content">
+        <li>
+          <DropdownItem as="button">
+            <IconAccount />
+            Profile</DropdownItem
+          >
+        </li>
+        <li>
+          <DropdownItem as="button">
+            <IconDocument />
+            Billing</DropdownItem
+          >
+        </li>
+        <li>
+          <DropdownItem as="button">
+            <IconCog />
+            Settings</DropdownItem
+          >
+        </li>
+      </DropdownLinkList>
+    </ButtonWithDropdown>
+  </ActionTitleHeader>
 
-<DetailsHeader data={$selectedHosts} {form} state="consensus" {id} />
-<div class="info-container">
-  <CpuInfo label="CPU USAGE" value="60%" />
-  <MemoryInfo value="1.3GB" maxValue="7.9GB" label="Memory">
-    <Memory />
-  </MemoryInfo>
-  <MemoryInfo value="70.6GB" maxValue="128GB" label="Disk Space">
-    <DiskInfo />
-  </MemoryInfo>
-</div>
-<DetailsTable data={$selectedHosts} />
+  <DetailsHeader data={$selectedHosts} {form} state="consensus" {id} />
+  <div class="info-container">
+    <CpuInfo label="CPU USAGE" value="60%" />
+    <MemoryInfo value="1.3GB" maxValue="7.9GB" label="Memory">
+      <Memory />
+    </MemoryInfo>
+    <MemoryInfo value="70.6GB" maxValue="128GB" label="Disk Space">
+      <DiskInfo />
+    </MemoryInfo>
+  </div>
+  <DetailsTable data={$selectedHosts} />
 
-<section class="container--medium-large ">
-  <HostGroup selectedHosts={$selectedHosts} id={$page.params.id}>
-    <svelte:fragment slot="title">Host group 1</svelte:fragment>
-    <Button asLink href="#" style="outline" size="small" slot="action"
-      >View</Button
-    >
-  </HostGroup>
-</section>
+  <section class="container--medium-large ">
+    {#each $hosts as host}
+      <HostGroup selectedHosts={host} id={$page.params.id}>
+        <svelte:fragment slot="title">Host group 1</svelte:fragment>
+        <Button asLink href="#" style="outline" size="small" slot="action"
+          >View</Button
+        >
+      </HostGroup>
+    {/each}
+  </section>
 {/if}
 
 <style>
@@ -105,7 +112,6 @@
   }
 
   .info-container {
-
     @media (min-width: 768px) {
       display: flex;
     }
