@@ -10,6 +10,7 @@
   import IconPlus from 'icons/plus-12.svg';
   import ButtonWithDropdown from 'modules/app/components/ButtonWithDropdown/ButtonWithDropdown.svelte';
   import { app } from 'modules/app/store';
+  import GroupTable from 'modules/hosts/components/GroupTable/GroupTable.svelte';
   import HostGroup from 'modules/hosts/components/HostGroup/HostGroup.svelte';
   import { fetchAllHosts, hosts } from 'modules/hosts/store/hostsStore';
   import { onMount } from 'svelte';
@@ -28,8 +29,6 @@
   });
 
   fetchAllHosts();
-
-  console.log($hosts);
 </script>
 
 <ActionTitleHeader className="container--pull-back">
@@ -63,12 +62,7 @@
 </ActionTitleHeader>
 
 <section class="container--medium-large ">
-  {#each $hosts[0].children as host}
-    <HostGroup selectedHosts={host} id={host.id}>
-      <svelte:fragment slot="title">Host group 1</svelte:fragment>
-      <Button asLink href="#" style="outline" size="small" slot="action"
-        >View</Button
-      >
-    </HostGroup>
-  {/each}
+  {#if $hosts[0]?.children}
+    <GroupTable hosts={$hosts[0]?.children} />
+  {/if}
 </section>

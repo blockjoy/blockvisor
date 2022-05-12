@@ -47,6 +47,8 @@
   }
 
   const form = useForm();
+
+  console.log($selectedHosts);
 </script>
 
 {#if $isLoading}
@@ -94,14 +96,12 @@
   <DetailsTable data={$selectedHosts} />
 
   <section class="container--medium-large ">
-    {#each $hosts as host}
-      <HostGroup selectedHosts={host} id={$page.params.id}>
-        <svelte:fragment slot="title">Host group 1</svelte:fragment>
-        <Button asLink href="#" style="outline" size="small" slot="action"
-          >View</Button
-        >
-      </HostGroup>
-    {/each}
+    <HostGroup selectedHosts={$selectedHosts} id={$page.params.id}>
+      <svelte:fragment slot="title">Host group 1</svelte:fragment>
+      <Button asLink href="#" style="outline" size="small" slot="action"
+        >View</Button
+      >
+    </HostGroup>
   </section>
 {/if}
 

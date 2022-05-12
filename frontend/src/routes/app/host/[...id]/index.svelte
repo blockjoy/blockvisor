@@ -15,7 +15,7 @@
 <DetailsLayout>
   <BackButton slot="nav" />
 
-  <DetailsHeader {form} {id} state="issue" />
+  <!-- <DetailsHeader {form} {id} state="issue" /> -->
 
-  <DetailsTable />
+  <!-- <DetailsTable /> -->
 </DetailsLayout>

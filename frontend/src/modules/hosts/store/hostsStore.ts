@@ -25,8 +25,11 @@ export const fetchAllHosts = async () => {
       location: item.location,
       href: ROUTES.HOST_GROUP(item.id),
       id: item.id,
+      ...item,
     };
   });
+
+  console.log(all_hosts);
 
   hosts.set(all_hosts);
 };

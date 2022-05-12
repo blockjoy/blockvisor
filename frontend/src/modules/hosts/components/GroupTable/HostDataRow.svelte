@@ -34,7 +34,7 @@
     <div title={name} class="t-ellipsis">
       <a
         class="u-link-reset host-data-row__link"
-        href={ROUTES.NODE_DETAILS(id)}
+        href={ROUTES.HOST_DETAILS(id)}
       >
         {name}
       </a>
@@ -209,4 +209,3 @@
     }
   }
 </style>
-
