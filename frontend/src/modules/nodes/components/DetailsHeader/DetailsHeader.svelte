@@ -17,7 +17,7 @@
   import IconDelete from 'icons/trash-12.svg';
   import IconUser from 'icons/person-12.svg';
   import IconButton from 'components/IconButton/IconButton.svelte';
-  import { formatDistanceToNow } from 'date-fns';
+  import formatDistanceToNow from 'date-fns/formatDistanceToNow';
 
   export let id;
   export let state = '';

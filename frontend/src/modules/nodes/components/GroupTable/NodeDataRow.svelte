@@ -11,7 +11,7 @@
   import IconDocument from 'icons/document-12.svg';
   import IconDots from 'icons/dots-12.svg';
   import ButtonWithDropdown from 'modules/app/components/ButtonWithDropdown/ButtonWithDropdown.svelte';
-  import { formatDistanceToNow } from 'date-fns';
+  import formatDistanceToNow from 'date-fns/formatDistanceToNow';
 
   export let token;
   export let id;
