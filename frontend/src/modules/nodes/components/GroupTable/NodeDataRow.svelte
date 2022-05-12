@@ -13,19 +13,15 @@
   import ButtonWithDropdown from 'modules/app/components/ButtonWithDropdown/ButtonWithDropdown.svelte';
   import { formatDistanceToNow } from 'date-fns';
 
-  export let token = 'eth';
-  export let id = '9b74c98979b74c9897';
-  export let ip_addr = '212.213.214.2';
-  export let address_name = 'YellowBeaver';
-  export let created_at = '5 weeks ago';
-  export let status = 'unstaked';
-
-  const classes = ['table__row node-data-row', `node-data-row--${status}`].join(
-    ' ',
-  );
+  export let token;
+  export let id;
+  export let ip_addr;
+  export let address_name;
+  export let created_at;
+  export let status;
 </script>
 
-<tr class={classes}>
+<tr class={`table__row node-data-row node-data-row--${status}`}>
   <td class="node-data-row__token">
     <TokenIcon icon={token} />
   </td>
@@ -63,7 +59,7 @@
     <ButtonWithDropdown
       position="right"
       iconButton
-      buttonProps={{ style: 'ghost', size: 'tiny' }}
+      buttonProps={{ style: 'ghost', size: 'small' }}
       slot="action"
     >
       <svelte:fragment slot="label">

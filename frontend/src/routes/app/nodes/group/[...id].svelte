@@ -17,7 +17,6 @@
     selectedNode,
     selectedUser,
   } from 'modules/nodes/store/nodesStore';
-  import { user } from 'modules/authentication/store';
 
   let currentPage = 1;
   const id = $page.params.id;

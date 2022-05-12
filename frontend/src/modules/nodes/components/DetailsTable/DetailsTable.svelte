@@ -13,7 +13,6 @@
     total_penalty,
     user_id,
   } = data;
-  console.log('data', data);
 </script>
 
 <table class="table">

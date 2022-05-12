@@ -9,14 +9,16 @@
   import StepSecond from './StepSecond.svelte';
   import StepThird from './StepThird.svelte';
   import StepFourth from './StepFourth.svelte';
+  import StepFifth from './StepFifth.svelte';
   import GhostForm from './GhostForm.svelte';
 
-  const components = [StepFirst, StepSecond, StepThird, StepFourth];
+  const components = [StepFirst, StepSecond, StepThird, StepFourth, StepFifth];
   const layoutProps = [
     { title: 'Add a Node', size: ' large' },
     { title: 'Add a Node', size: 'large' },
     { title: 'Add a Node', size: 'large' },
     { title: 'Provision Host', size: 'large' },
+    { title: 'Review & Finish', size: 'large' },
   ];
 
   let activeComponent = null;

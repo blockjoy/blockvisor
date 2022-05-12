@@ -44,7 +44,10 @@
         <StepLabel {setStep} {currentStep} step={3}>Add a host</StepLabel>
       </li>
       <li in:fade={{ duration: 250, delay: 660 }}>
-        <StepLabel {setStep} {currentStep} step={4}>Review & finish</StepLabel>
+        <StepLabel {setStep} {currentStep} step={4}>Provision host</StepLabel>
+      </li>
+      <li in:fade={{ duration: 250, delay: 660 }}>
+        <StepLabel {setStep} {currentStep} step={5}>Review & finish</StepLabel>
       </li>
     </StepList>
   </aside>
