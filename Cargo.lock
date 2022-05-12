@@ -517,7 +517,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "blockvisor-api-client-rs"
+name = "blockvisor-client-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",

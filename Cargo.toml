@@ -5,5 +5,5 @@ members = [
   "babel",
   "blockvisord",
   "turnstile",
-  "blockvisor-api-client-rs",
+  "blockvisor-client-rs",
 ]

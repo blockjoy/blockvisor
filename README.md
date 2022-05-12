@@ -4,7 +4,7 @@
 
 The api server. Handles REST/gRPC interfaces for frontend and blockvisord.
 
-## blockvisor-api-client-rs
+## blockvisor-client-rs
 
 The client api. Handle commands to hosts
 
