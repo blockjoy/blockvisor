@@ -9,8 +9,8 @@
   const handleSort = (id: string, value: SorterValues) => {
     sortActive = { id, value };
   };
-  console.log("hosts", hosts)
 </script>
+
 <table class="table hosts-table">
   <colgroup>
     <col width="40px" />
@@ -44,7 +44,7 @@
   </thead>
   <tbody>
     {#each hosts as host}
-    <HostDataRow {...host} />
+      <HostDataRow {...host} />
     {/each}
   </tbody>
 </table>
