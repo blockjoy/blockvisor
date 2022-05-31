@@ -33,23 +33,23 @@ pub fn get_ip_address(ifa_name: &str) -> String {
 }
 
 // used for testing purposes
-pub async fn dummy_apply_config(containers: &Containers, machine_index: &mut usize) -> Result<()> {
+pub async fn dummy_apply_config(containers: &Containers) -> Result<()> {
     for (id, container_config) in &containers.containers {
+        let machine_index = containers.containers.len();
         // remove deleted nodes
         if container_config.status == ContainerStatus::Deleted {
             if DummyNode::exists(id).await {
-                let mut node = DummyNode::connect(id, *machine_index).await?;
+                let mut node = DummyNode::connect(id, machine_index).await?;
                 node.delete().await?;
             }
         } else {
             // create non existing nodes
             if !DummyNode::exists(id).await {
-                DummyNode::create(id, *machine_index).await?;
-                *machine_index += 1;
+                DummyNode::create(id, machine_index).await?;
             }
 
             // fix nodes status
-            let mut node = DummyNode::connect(id, *machine_index).await?;
+            let mut node = DummyNode::connect(id, machine_index).await?;
             let state = node.state().await?;
             if state != container_config.status {
                 info!(
