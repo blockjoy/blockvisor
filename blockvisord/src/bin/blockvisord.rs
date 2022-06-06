@@ -17,11 +17,11 @@ async fn main() -> Result<()> {
 
     let config = Config::load().await?;
     loop {
-        let containers = Containers::load().await?;
+        let mut containers = Containers::load().await?;
 
         let vmm = std::env::var("VMM").unwrap_or_else(|_| "dummy".into());
         if vmm == "dummy" {
-            dummy_apply_config(&containers).await?;
+            dummy_apply_config(&mut containers).await?;
         }
 
         process_pending_commands(&config).await?;

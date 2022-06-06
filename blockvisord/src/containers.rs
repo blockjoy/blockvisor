@@ -3,12 +3,9 @@ use async_trait::async_trait;
 use firec::config::JailerMode;
 use firec::Machine;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
 use tokio::fs;
 use tracing::info;
 use uuid::Uuid;
@@ -217,7 +214,7 @@ impl NodeContainer for DummyNode {
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct Containers {
     pub containers: HashMap<Uuid, ContainerData>,
-    machine_index: Arc<Mutex<u32>>,
+    pub machine_index: u32,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -252,13 +249,11 @@ impl Containers {
         Path::new(&*REGISTRY_CONFIG_FILE).exists()
     }
 
-    /// Get the next machine index and increment it.
-    pub fn next_network_interface(&self) -> NetworkInterface {
-        let mut machine_index = self.machine_index.lock().expect("lock poisoned");
-
-        let idx_bytes = machine_index.to_be_bytes();
-        let iface = NetworkInterface {
-            name: format!("bv{}", *machine_index),
+    /// Create network interface from machine index
+    pub fn network_interface(&self) -> NetworkInterface {
+        let idx_bytes = self.machine_index.to_be_bytes();
+        NetworkInterface {
+            name: format!("bv{}", self.machine_index),
             // FIXME: Hardcoding address for now.
             ip: IpAddr::V4(Ipv4Addr::new(
                 idx_bytes[0] + 74,
@@ -266,10 +261,7 @@ impl Containers {
                 idx_bytes[2] + 82,
                 idx_bytes[3] + 83,
             )),
-        };
-        *machine_index += 1;
-
-        iface
+        }
     }
 }
 
@@ -283,15 +275,16 @@ pub struct NetworkInterface {
 mod tests {
     #[test]
     fn network_interface_gen() {
-        let containers = super::Containers::default();
-        let iface = containers.next_network_interface();
+        let mut containers = super::Containers::default();
+        let iface = containers.network_interface();
         assert_eq!(iface.name, "bv0");
         assert_eq!(
             iface.ip,
             super::IpAddr::V4(super::Ipv4Addr::new(74, 50, 82, 83))
         );
 
-        let iface = containers.next_network_interface();
+        containers.machine_index += 1;
+        let iface = containers.network_interface();
         assert_eq!(iface.name, "bv1");
         assert_eq!(
             iface.ip,
@@ -299,8 +292,8 @@ mod tests {
         );
 
         // Let's take the machine_index beyond u8 boundry.
-        *containers.machine_index.lock().expect("lock poisoned") = u8::MAX as u32 + 1;
-        let iface = containers.next_network_interface();
+        containers.machine_index = u8::MAX as u32 + 1;
+        let iface = containers.network_interface();
         assert_eq!(iface.name, format!("bv{}", u8::MAX as u32 + 1));
         assert_eq!(
             iface.ip,
