@@ -24,6 +24,8 @@ async fn main() -> Result<()> {
             dummy_apply_config(&mut containers).await?;
         }
 
+        containers.save().await?;
+
         process_pending_commands(&config).await?;
 
         sleep(Duration::from_secs(5)).await;
