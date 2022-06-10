@@ -1,4 +1,4 @@
-use anyhow::{bail, Ok, Result};
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 use firec::config::JailerMode;
 use firec::Machine;
@@ -69,7 +69,7 @@ pub trait NodeContainer {
     async fn kill(&mut self) -> Result<()>;
 
     /// Deletes the container.
-    async fn delete(&mut self) -> Result<()>;
+    async fn delete(mut self) -> Result<()>;
 }
 
 pub struct LinuxNode {
@@ -96,16 +96,18 @@ impl NodeContainer for LinuxNode {
     }
 
     async fn exists(id: Uuid) -> bool {
-        let cmd = id.to_string();
-        get_process_pid(FC_BIN_NAME, &cmd).is_ok()
+        Path::new(&format!("{CHROOT_PATH}/{FC_BIN_NAME}/{id}")).exists()
     }
 
     #[instrument]
     async fn connect(id: Uuid, network_interface: &NetworkInterface) -> Result<Self> {
         let config = LinuxNode::create_config(id, network_interface)?;
         let cmd = id.to_string();
-        let pid = get_process_pid(FC_BIN_NAME, &cmd)?;
-        let machine = firec::Machine::connect(config, pid).await;
+        let state = match get_process_pid(FC_BIN_NAME, &cmd) {
+            Ok(pid) => firec::MachineState::RUNNING { pid },
+            Err(_) => firec::MachineState::SHUTOFF,
+        };
+        let machine = firec::Machine::connect(config, state).await;
 
         Ok(Self { id, machine })
     }
@@ -120,7 +122,11 @@ impl NodeContainer for LinuxNode {
     }
 
     async fn state(&self) -> Result<ContainerState> {
-        unimplemented!()
+        let cmd = self.id().to_string();
+        match get_process_pid(FC_BIN_NAME, &cmd) {
+            Ok(_) => Ok(ContainerState::Started),
+            Err(_) => Ok(ContainerState::Created),
+        }
     }
 
     #[instrument(skip(self))]
@@ -144,8 +150,8 @@ impl NodeContainer for LinuxNode {
     }
 
     #[instrument(skip(self))]
-    async fn delete(&mut self) -> Result<()> {
-        unimplemented!()
+    async fn delete(mut self) -> Result<()> {
+        self.machine.delete().await.map_err(Into::into)
     }
 }
 
@@ -247,7 +253,7 @@ impl NodeContainer for DummyNode {
         Ok(())
     }
 
-    async fn delete(&mut self) -> Result<()> {
+    async fn delete(mut self) -> Result<()> {
         info!("Deleting node: {}", self.id());
         self.kill().await?;
         fs::remove_file(format!("/tmp/{}.txt", self.id)).await?;

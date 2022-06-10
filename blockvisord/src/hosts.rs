@@ -1,4 +1,4 @@
-use crate::containers::{ContainerState, Containers, DummyNode, NodeContainer};
+use crate::containers::{ContainerState, Containers, DummyNode, LinuxNode, NodeContainer};
 use anyhow::Result;
 use sysinfo::{DiskExt, System, SystemExt};
 use tracing::info;
@@ -40,7 +40,7 @@ pub async fn dummy_apply_config(containers: &Containers) -> Result<()> {
         // remove deleted nodes
         if container_config.state == ContainerState::Deleted {
             if DummyNode::exists(id).await {
-                let mut node = DummyNode::connect(id, &network_interface).await?;
+                let node = DummyNode::connect(id, &network_interface).await?;
                 node.delete().await?;
             }
         } else {
@@ -51,6 +51,42 @@ pub async fn dummy_apply_config(containers: &Containers) -> Result<()> {
 
             // fix nodes state
             let mut node = DummyNode::connect(id, &network_interface).await?;
+            let state = node.state().await?;
+            if state != container_config.state {
+                info!(
+                    "Changing state from {:?} to {:?}: {}",
+                    state, container_config.state, id
+                );
+                match container_config.state {
+                    ContainerState::Started => node.start().await?,
+                    ContainerState::Stopped => node.kill().await?,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn linux_apply_config(containers: &Containers) -> Result<()> {
+    for (id, container_config) in &containers.containers {
+        let id = *id;
+        let network_interface = containers.next_network_interface();
+        // remove deleted nodes
+        if container_config.state == ContainerState::Deleted {
+            if LinuxNode::exists(id).await {
+                let node = LinuxNode::connect(id, &network_interface).await?;
+                node.delete().await?;
+            }
+        } else {
+            // create non existing nodes
+            if !LinuxNode::exists(id).await {
+                LinuxNode::create(id, &network_interface).await?;
+            }
+
+            // fix nodes state
+            let mut node = LinuxNode::connect(id, &network_interface).await?;
             let state = node.state().await?;
             if state != container_config.state {
                 info!(
