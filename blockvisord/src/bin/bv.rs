@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
     client::{APIClient, HostCreateRequest},
@@ -59,10 +59,6 @@ async fn main() -> Result<()> {
             }
         }
         Command::Start(_) => {
-            if !Config::exists() {
-                bail!("Error: not configured, please run `configure` first");
-            }
-
             // Enable the service to start on host bootup and start it.
             println!("Enabling blockvisor service to start on host boot.");
             systemd_manager_proxy

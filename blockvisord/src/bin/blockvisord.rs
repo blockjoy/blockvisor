@@ -16,7 +16,6 @@ async fn main() -> Result<()> {
     setup_logging()?;
     info!("Starting...");
 
-    let config = Config::load().await?;
     let containers = Containers::load().await?;
     let _conn = ConnectionBuilder::system()?
         .name(NodeProxy::DESTINATION)?
@@ -24,8 +23,14 @@ async fn main() -> Result<()> {
         .build()
         .await?;
 
+    info!("Serving...");
     loop {
-        process_pending_commands(&config).await?;
+        if !Config::exists() {
+            info!("Host not configured, please run `init` first");
+        } else {
+            let config = Config::load().await?;
+            process_pending_commands(&config).await?;
+        }
 
         sleep(Duration::from_secs(5)).await;
     }
