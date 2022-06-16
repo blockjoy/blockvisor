@@ -12,7 +12,7 @@ jobs:
 
   build:
     name: Build, push, and deploy
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: api
