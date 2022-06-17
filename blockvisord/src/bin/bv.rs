@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
         }
         Command::Start(_) => {
             if !Config::exists() {
-                bail!("Error: not configured, please run `configure` first");
+                bail!("Host is not registered, please run `init` first");
             }
 
             // Enable the service to start on host bootup and start it.

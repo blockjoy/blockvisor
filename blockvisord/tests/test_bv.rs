@@ -14,7 +14,7 @@ fn test_cmd_bv_start_no_init() {
         .env("HOME", tmp_dir.as_os_str())
         .assert()
         .failure()
-        .stderr("Error: Error: not configured, please run `configure` first\n");
+        .stderr("Error: Host is not registered, please run `init` first\n");
 }
 
 #[tokio::test]
