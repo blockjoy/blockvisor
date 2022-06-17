@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tokio::fs;
+use tokio::fs::{self, DirBuilder};
 use tracing::info;
 
 const HOST_CONFIG_FILENAME: &str = "blockvisor.toml";
@@ -28,6 +28,11 @@ impl Config {
     }
 
     pub async fn save(&self) -> Result<()> {
+        let parent = &*HOST_CONFIG_FILE.parent().unwrap();
+        if !Path::new(parent).exists() {
+            info!("Ensuring config dir is present: {}", parent.display());
+            DirBuilder::new().recursive(true).create(parent).await?
+        }
         info!("Writing host config: {}", HOST_CONFIG_FILE.display());
         let config = toml::Value::try_from(self)?;
         let config = toml::to_string(&config)?;
