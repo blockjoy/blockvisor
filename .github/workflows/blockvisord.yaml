@@ -31,7 +31,7 @@ jobs:
           override: true
       - name: Test
         run: >
-          cargo test -p blockvisord
+          cargo test -p blockvisord -- --include-ignored
   lints:
     name: Lints
     runs-on: self-hosted
