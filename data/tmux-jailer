@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# Firecracker jailer wrapper to start the binary in a tmux session.
+#
+# Usage:
+#
+# tmux-jailer JAILERS_ARGS..
+
+for ARG in "$@"; do
+    if test -n "$ID_ARG"; then
+        VM_ID="$ARG"
+
+        break
+    fi
+
+    if test "$ARG" = "--id"; then
+        # Next arg is the ID.
+        ID_ARG=1
+    fi
+done
+
+if test -z "$VM_ID"; then
+    echo "'--id' argument must be provided to jailer binary."
+
+    exit -1
+fi
+
+tmux new-session -d -s "$VM_ID" jailer "$@"
+
