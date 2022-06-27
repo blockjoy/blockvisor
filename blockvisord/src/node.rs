@@ -24,6 +24,7 @@ const KERNEL_PATH: &str = "/var/demo/debian-vmlinux";
 const ROOT_FS: &str = "/var/demo/debian.ext4";
 const CHROOT_PATH: &str = "/var/demo/helium";
 const FC_BIN_PATH: &str = "/usr/bin/firecracker";
+const JAILER_BINARY_PATH: &str = "/usr/bin/tmux-jailer";
 const FC_BIN_NAME: &str = "firecracker";
 const FC_SOCKET_PATH: &str = "/firecracker.socket";
 
@@ -116,6 +117,7 @@ impl Node {
             // Jailer configuration.
             .jailer_cfg()
             .chroot_base_dir(Path::new(CHROOT_PATH))
+            .jailer_binary(Path::new(JAILER_BINARY_PATH))
             .exec_file(Path::new(FC_BIN_PATH))
             .mode(JailerMode::Daemon)
             .build()
