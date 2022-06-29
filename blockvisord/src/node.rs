@@ -1,5 +1,4 @@
 use anyhow::{bail, Result};
-use firec::config::JailerMode;
 use firec::Machine;
 use std::path::Path;
 use std::time::Duration;
@@ -119,7 +118,6 @@ impl Node {
             .chroot_base_dir(Path::new(CHROOT_PATH))
             .jailer_binary(Path::new(JAILER_BINARY_PATH))
             .exec_file(Path::new(FC_BIN_PATH))
-            .mode(JailerMode::Daemon)
             .build()
             // Machine configuration.
             .machine_cfg()
