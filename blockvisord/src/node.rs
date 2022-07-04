@@ -6,7 +6,6 @@ use std::time::Duration;
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::time::sleep;
 use tracing::{instrument, trace};
-use uuid::Uuid;
 
 use crate::{
     network_interface::NetworkInterface,
@@ -32,7 +31,7 @@ impl Node {
     /// TODO: machine_index is a hack. Remove after demo.
     #[instrument]
     pub async fn create(data: NodeData) -> Result<Self> {
-        let config = Node::create_config(data.id, &data.network_interface)?;
+        let config = Node::create_config(&data.id, &data.network_interface)?;
         let machine = firec::Machine::create(config).await?;
         data.save().await?;
 
@@ -42,7 +41,7 @@ impl Node {
     /// Returns node previously created on this host.
     #[instrument]
     pub async fn connect(data: NodeData) -> Result<Self> {
-        let config = Node::create_config(data.id, &data.network_interface)?;
+        let config = Node::create_config(&data.id, &data.network_interface)?;
         let cmd = data.id.to_string();
         let state = match get_process_pid(FC_BIN_NAME, &cmd) {
             Ok(pid) => firec::MachineState::RUNNING { pid },
@@ -54,7 +53,7 @@ impl Node {
     }
 
     /// Returns the node's `id`.
-    pub fn id(&self) -> &Uuid {
+    pub fn id(&self) -> &str {
         &self.data.id
     }
 
@@ -102,7 +101,7 @@ impl Node {
     }
 
     fn create_config(
-        id: Uuid,
+        id: &str,
         network_interface: &NetworkInterface,
     ) -> Result<firec::config::Config<'static>> {
         let kernel_args = format!(
@@ -112,7 +111,7 @@ impl Node {
         );
         let iface = firec::config::network::Interface::new(network_interface.name.clone(), "eth0");
 
-        let config = firec::config::Config::builder(Some(id), Path::new(KERNEL_PATH))
+        let config = firec::config::Config::builder(id.to_string(), Path::new(KERNEL_PATH))
             // Jailer configuration.
             .jailer_cfg()
             .chroot_base_dir(Path::new(CHROOT_PATH))

@@ -1,4 +1,3 @@
-use uuid::Uuid;
 use zbus::{dbus_proxy, Result};
 
 use crate::node_data::NodeData;
@@ -9,10 +8,10 @@ use crate::node_data::NodeData;
     default_service = "com.BlockJoy.blockvisor"
 )]
 trait Node {
-    async fn create(&self, id: &Uuid, chain: &str) -> Result<()>;
-    async fn delete(&self, id: &Uuid) -> Result<()>;
-    async fn start(&self, id: &Uuid) -> Result<()>;
-    async fn stop(&self, id: &Uuid) -> Result<()>;
+    async fn create(&self, id: &str, chain: &str) -> Result<()>;
+    async fn delete(&self, id: &str) -> Result<()>;
+    async fn start(&self, id: &str) -> Result<()>;
+    async fn stop(&self, id: &str) -> Result<()>;
     async fn list(&self) -> Result<Vec<NodeData>>;
 
     // TODO: Rest of the NodeCommand variants.

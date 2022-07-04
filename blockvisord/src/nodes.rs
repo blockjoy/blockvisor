@@ -8,7 +8,6 @@ use std::{
 };
 use tokio::fs::{self, read_dir};
 use tracing::{debug, info, instrument, warn};
-use uuid::Uuid;
 use zbus::export::futures_util::TryFutureExt;
 use zbus::{dbus_interface, fdo};
 
@@ -38,7 +37,7 @@ pub enum ServiceStatus {
 
 #[derive(Debug, Default)]
 pub struct Nodes {
-    pub nodes: HashMap<Uuid, Node>,
+    pub nodes: HashMap<String, Node>,
     data: CommonData,
 }
 
@@ -50,10 +49,10 @@ pub struct CommonData {
 #[dbus_interface(interface = "com.BlockJoy.blockvisor.Node")]
 impl Nodes {
     #[instrument(skip(self))]
-    async fn create(&mut self, id: Uuid, chain: String) -> fdo::Result<()> {
+    async fn create(&mut self, id: String, chain: String) -> fdo::Result<()> {
         let network_interface = self.next_network_interface();
         let node = NodeData {
-            id,
+            id: id.clone(),
             chain,
             state: NodeState::Stopped,
             network_interface,
@@ -62,15 +61,15 @@ impl Nodes {
         let node = Node::create(node)
             .await
             .map_err(|e| fdo::Error::IOError(e.to_string()))?;
-        self.nodes.insert(id, node);
         debug!("Container with id `{}` created", id);
+        self.nodes.insert(id, node);
 
         fdo::Result::Ok(())
     }
 
     #[instrument(skip(self))]
-    async fn delete(&mut self, id: Uuid) -> fdo::Result<()> {
-        let node = self.nodes.remove(&id).ok_or_else(|| {
+    async fn delete(&mut self, id: &str) -> fdo::Result<()> {
+        let node = self.nodes.remove(id).ok_or_else(|| {
             let msg = format!("Container with id {} not found", id);
             fdo::Error::FileNotFound(msg)
         })?;
@@ -83,8 +82,8 @@ impl Nodes {
     }
 
     #[instrument(skip(self))]
-    async fn start(&mut self, id: Uuid) -> fdo::Result<()> {
-        let node = self.nodes.get_mut(&id).ok_or_else(|| {
+    async fn start(&mut self, id: &str) -> fdo::Result<()> {
+        let node = self.nodes.get_mut(id).ok_or_else(|| {
             let msg = format!("Container with id {} not found", id);
             fdo::Error::FileNotFound(msg)
         })?;
@@ -98,8 +97,8 @@ impl Nodes {
     }
 
     #[instrument(skip(self))]
-    async fn stop(&mut self, id: Uuid) -> fdo::Result<()> {
-        let node = self.nodes.get_mut(&id).ok_or_else(|| {
+    async fn stop(&mut self, id: &str) -> fdo::Result<()> {
+        let node = self.nodes.get_mut(id).ok_or_else(|| {
             let msg = format!("Container with id {} not found", id);
             fdo::Error::FileNotFound(msg)
         })?;
@@ -152,7 +151,7 @@ impl Nodes {
             }
             match NodeData::load(&*path).and_then(Node::connect).await {
                 Ok(node) => {
-                    this.nodes.insert(node.data.id, node);
+                    this.nodes.insert(node.data.id.clone(), node);
                 }
                 Err(e) => warn!("Failed to read node file `{}`: {}", path.display(), e),
             }

@@ -1268,7 +1268,7 @@ dependencies = [
 [[package]]
 name = "firec"
 version = "0.1.1"
-source = "git+https://github.com/blockjoy/firec.git#bbcc5fe6ec588be96929eedb94ddce9294664794"
+source = "git+https://github.com/blockjoy/firec.git?rev=02b994a90cdb#02b994a90cdbbe42f9b5240dff5462d31055a0a4"
 dependencies = [
  "derivative",
  "futures-util",
@@ -1281,7 +1281,6 @@ dependencies = [
  "tokio 1.18.1",
  "tracing",
  "users",
- "uuid 1.0.0",
 ]
 
 [[package]]

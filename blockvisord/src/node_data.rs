@@ -10,7 +10,6 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tracing::info;
-use uuid::Uuid;
 use zbus::zvariant::Type;
 
 use crate::{network_interface::NetworkInterface, nodes::REGISTRY_CONFIG_DIR};
@@ -37,7 +36,7 @@ impl fmt::Display for NodeState {
 #[derive(Deserialize, Serialize, Debug, Clone, Type, Table)]
 pub struct NodeData {
     #[table(title = "VM ID", justify = "Justify::Right", color = "Cyan")]
-    pub id: Uuid,
+    pub id: String,
     #[table(title = "Chain", color = "Blue")]
     pub chain: String,
     #[table(title = "State", customize_fn = "style_node_state")]

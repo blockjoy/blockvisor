@@ -174,7 +174,7 @@ async fn process_node_command(command: &NodeCommand) -> Result<()> {
             }
         }
         NodeCommand::Create { chain } => {
-            let id = Uuid::new_v4();
+            let id = Uuid::new_v4().to_string();
             node_proxy.create(&id, chain).await?;
             println!("Created new node for `{}` chain with ID `{}`", chain, id);
         }

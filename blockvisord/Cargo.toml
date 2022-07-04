@@ -37,7 +37,7 @@ tracing-subscriber = {version = "0.3.11", features = ["env-filter", "fmt", "std"
 uuid = {version = "1.0.0", features = ["serde", "v4"]}
 zbus = {version = "2.3.0", features = ["tokio", "uuid"], default-features = false}
 
-firec = {git = "https://github.com/blockjoy/firec.git"}
+firec = {git = "https://github.com/blockjoy/firec.git", rev = "02b994a90cdb"}
 
 [dev-dependencies]
 assert_cmd = "2.0.4"
