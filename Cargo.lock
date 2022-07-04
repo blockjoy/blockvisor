@@ -5237,7 +5237,6 @@ dependencies = [
  "libc",
  "serde",
  "static_assertions",
- "uuid 1.0.0",
  "zvariant_derive",
 ]
 
