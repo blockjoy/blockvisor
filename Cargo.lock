@@ -578,6 +578,7 @@ dependencies = [
  "httpmock",
  "lazy_static",
  "local-ip-address",
+ "petname",
  "predicates",
  "reqwest 0.11.10",
  "serde",
@@ -2011,7 +2012,7 @@ checksum = "480d9158c9977bff0bc024a11dcad04efcd3955c1e55301092b13fc439d41720"
 dependencies = [
  "async-channel",
  "castaway",
- "crossbeam-utils 0.7.2",
+ "crossbeam-utils 0.8.8",
  "curl",
  "curl-sys",
  "encoding_rs",
@@ -2820,6 +2821,16 @@ checksum = "4a13a2fa9d0b63e5f22328828741e523766fff0ee9e779316902290dff3f824f"
 dependencies = [
  "fixedbitset",
  "indexmap",
+]
+
+[[package]]
+name = "petname"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9474d20c003131d8945af478b25c8e29477a522e408ae4ca8e8822839f5fd2f2"
+dependencies = [
+ "itertools",
+ "rand 0.8.5",
 ]
 
 [[package]]

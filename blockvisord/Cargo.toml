@@ -26,6 +26,7 @@ cli-table = "0.4"
 home = "0.5.3"
 lazy_static = "1.4.0"
 local-ip-address = "0.4.4"
+petname = {version = "1.1.2", features = ["default_dictionary", "std_rng"], default-features = false}
 reqwest = {version = "0.11.10", features = ["json"]}
 serde = {version = "1.0.136", features = ["rc"]}
 serde_json = "1.0.79"
