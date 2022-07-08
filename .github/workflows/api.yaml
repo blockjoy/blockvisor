@@ -75,9 +75,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: -p api -- --check
+          args: -- --check
       - name: Catch common mistakes
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -p api -- -D warnings
+          args: -- -D warnings
