@@ -81,8 +81,7 @@ fn test_bv_cmd_node_lifecycle() {
     let vm_id = stdout
         .trim_start_matches(&format!("Created new node for `{chain_id}` chain with ID "))
         .split('`')
-        .skip(1)
-        .next()
+        .nth(1)
         .unwrap();
     println!("create vm_id: {vm_id}");
     sleep(Duration::from_secs(1));

@@ -18,7 +18,7 @@ use validator::Validate;
 
 type AuthyUserApi = authy::User;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "enum_org_role", rename_all = "snake_case")]
 pub enum UserOrgRole {
@@ -35,7 +35,7 @@ impl fmt::Display for UserOrgRole {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "enum_user_role", rename_all = "snake_case")]
 pub enum UserRole {
@@ -235,7 +235,7 @@ impl User {
             .map_err(|_e| {
                 AppError::InvalidAuthentication(anyhow!("Email or password is invalid."))
             })?;
-        let _ = user.verify_password(&user_login_req.password)?;
+        user.verify_password(&user_login_req.password)?;
         Ok(user)
     }
 
@@ -343,14 +343,13 @@ impl User {
     }
 
     pub async fn reset_password(req: &PwdResetInfo, db_pool: &PgPool) -> Result<User> {
-        let _ = req
-            .validate()
+        req.validate()
             .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
         match auth::validate_jwt(&req.token)? {
             auth::JwtValidationStatus::Valid(auth_data) => {
                 let user = User::find_by_id(auth_data.user_id, db_pool).await?;
-                return User::update_password(user, &req.password, db_pool).await;
+                User::update_password(user, &req.password, db_pool).await
             }
             _ => Err(AppError::InsufficientPermissionsError),
         }

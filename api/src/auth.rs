@@ -112,7 +112,7 @@ fn get_current_timestamp() -> i64 {
     Utc::now().timestamp()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Copy)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Copy)]
 pub struct UserAuthInfo {
     pub id: Uuid,
     pub role: UserRole,
@@ -120,7 +120,7 @@ pub struct UserAuthInfo {
 
 pub type UserAuthToken = String;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Authentication {
     User(UserAuthInfo),
     Service(UserAuthToken),
