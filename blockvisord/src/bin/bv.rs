@@ -45,7 +45,6 @@ async fn main() -> Result<()> {
                 ip_addr: ip,
                 val_ip_addrs: None,
             };
-            println!("{:?}", create);
 
             let client = APIClient::new(&cmd_args.blockjoy_api_url, timeout)?;
             let host = client.register_host(&cmd_args.otp, &create).await?;
