@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 #[cfg(target_os = "linux")]
 use serial_test::serial;
 #[cfg(target_os = "linux")]
-use tokio::time::Duration;
+use tokio::time::{sleep, Duration};
 
 #[test]
 #[serial]
@@ -279,4 +279,15 @@ async fn test_bv_cmd_init_localhost() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Configuring blockvisor"));
+    sleep(Duration::from_secs(1)).await;
+
+    println!("list nodes created and started by init");
+    Command::cargo_bin("bv")
+        .unwrap()
+        .args(&["node", "list"])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(blockchain_id))
+        .stdout(predicate::str::contains("Running"));
 }

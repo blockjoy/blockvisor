@@ -1,21 +1,22 @@
 use anyhow::{bail, Result};
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
-    client::{APIClient, HostCreateRequest},
+    client::{APIClient, HostCreateRequest, NodeStatus},
     config::Config,
     dbus::NodeProxy,
     hosts::{get_host_info, get_ip_address},
     node_data::NodeState,
     nodes::Nodes,
     pretty_table::PrettyTable,
-    systemd::{ManagerProxy, UnitStartMode, UnitStopMode},
+    systemd::{ManagerProxy, UnitRestartMode, UnitStartMode, UnitStopMode},
 };
 use clap::Parser;
 use cli_table::print_stdout;
 use petname::Petnames;
+// use std::future::ready;
 use tokio::time::Duration;
 use uuid::Uuid;
-use zbus::Connection;
+use zbus::{export::futures_util::StreamExt, fdo, Connection};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,6 +25,7 @@ async fn main() -> Result<()> {
 
     let conn = Connection::system().await?;
     let systemd_manager_proxy = ManagerProxy::new(&conn).await?;
+    let node_proxy = NodeProxy::new(&conn).await?;
 
     match args.command {
         Command::Init(cmd_args) => {
@@ -59,6 +61,46 @@ async fn main() -> Result<()> {
 
             if !Nodes::exists() {
                 Nodes::default().save().await?;
+            }
+
+            let mut owner_changed_stream = node_proxy.receive_owner_changed().await.unwrap();
+
+            println!("Enabling blockvisor service to start on host boot.");
+            systemd_manager_proxy
+                .enable_unit_files(&["blockvisor.service"], false, false)
+                .await?;
+            // sleep(Duration::from_secs(1)).await;
+
+            println!("Restarting blockvisor service");
+            systemd_manager_proxy
+                .restart_unit("blockvisor.service", UnitRestartMode::Fail)
+                .await?;
+            println!("blockvisor service restarted successfully");
+
+            // wait until everything settles down
+            // sleep(Duration::from_secs(5)).await;
+
+            owner_changed_stream.next().await;
+
+            if let Some(nodes) = host.nodes {
+                for node in nodes {
+                    if node.status != NodeStatus::Creating {
+                        println!("Incorrect node status: {:?}", node.status);
+                        continue;
+                    };
+
+                    let id = &node.id;
+                    let name = &node.name.unwrap_or_default();
+                    let chain = &node.blockchain_id.to_string();
+                    node_proxy.create(id, name, chain).await?;
+                    println!(
+                        "Created new node for `{}` chain with ID `{}` and name `{}`",
+                        chain, id, name
+                    );
+
+                    node_proxy.start(&id.to_string()).await?;
+                    println!("Started node `{}`", id);
+                }
             }
         }
         Command::Reset(cmd_args) => {
@@ -97,15 +139,29 @@ async fn main() -> Result<()> {
                 bail!("Host is not registered, please run `init` first");
             }
 
+            let proxy = fdo::DBusProxy::new(&conn).await.unwrap();
+
+            let mut name_acquired_stream = proxy.receive_name_acquired().await.unwrap();
+            // .filter(|signal| {
+            //     let args = signal.args().unwrap();
+            //     ready(args.name() == "com.BlockJoy.blockvisor")
+            // });
+
             // Enable the service to start on host bootup and start it.
             println!("Enabling blockvisor service to start on host boot.");
             systemd_manager_proxy
                 .enable_unit_files(&["blockvisor.service"], false, false)
                 .await?;
+
             println!("Starting blockvisor service");
             systemd_manager_proxy
                 .start_unit("blockvisor.service", UnitStartMode::Fail)
                 .await?;
+
+            while let Some(signal) = name_acquired_stream.next().await {
+                println!("{:?}", signal.args().unwrap().name());
+            }
+            // name_acquired_stream.next().await;
 
             println!("blockvisor service started successfully");
         }

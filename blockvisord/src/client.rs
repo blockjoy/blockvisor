@@ -146,6 +146,77 @@ pub struct HostCreateResponse {
     pub val_ip_addrs: Option<String>,
     pub token: String,
     pub created_at: DateTime<Utc>,
+    pub nodes: Option<Vec<Node>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Node {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub host_id: Uuid,
+    pub name: Option<String>,
+    pub groups: Option<String>,
+    pub version: Option<String>,
+    pub ip_addr: Option<String>,
+    pub blockchain_id: Uuid,
+    pub node_type: NodeType,
+    pub address: Option<String>,
+    pub wallet_address: Option<String>,
+    pub block_height: Option<i64>,
+    pub node_data: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub status: NodeStatus,
+    pub is_online: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeStatus {
+    Available,
+    Broadcasting,
+    Cancelled,
+    Consensus,
+    Creating,
+    Delegating,
+    Delinquent,
+    Disabled,
+    Earning,
+    Electing,
+    Elected,
+    Exporting,
+    Ingesting,
+    Installing,
+    Migrating,
+    Mining,
+    Minting,
+    Processing,
+    Relaying,
+    Removed,
+    Removing,
+    Running,
+    Snapshoting,
+    Staked,
+    Staking,
+    Started,
+    Starting,
+    Stopped,
+    Stopping,
+    Synced,
+    Syncing,
+    Upgrading,
+    Validating,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeType {
+    Api,
+    Etl,
+    Node,
+    Oracle,
+    Relay,
+    Validator,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
