@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package blockjoy.api.v1;
+
+import "messages.proto";
+
+enum ConnectionStatus {
+    UndefinedConnectionStatus = 0;
+    Online = 1;
+    Offline = 2;
+}
+
+message HostInfo {
+    Uuid host_id = 1;
+    optional string name = 2;
+    optional string version = 3;
+    optional string location = 4;
+    optional int64 cpu_count = 5;
+    optional int64 mem_size = 6;
+    optional int64 disk_size = 7;
+    optional string os = 8;
+    optional string os_version = 9;
+    optional string ip = 10;
+}
+
+message ProvisionHostRequest {
+    Uuid request_id = 1;
+    string otp = 2;
+    Uuid org_id = 3;
+    HostInfo info = 4;
+    repeated string validator_ips = 5;
+    string token = 6;
+    ConnectionStatus status = 7;
+}
+
+message ProvisionHostResponse {
+    Uuid host_id = 1;
+    string token = 2;
+    repeated string messages = 3;
+    optional Uuid origin_request_id = 4;
+}
+
+message HostInfoUpdateRequest {
+    Uuid request_id = 1;
+    HostInfo info = 2;
+}
+
+message HostInfoUpdateResponse {
+    repeated string messages = 1;
+    optional Uuid origin_request_id = 2;
+}
+
+// @see https://github.com/blockjoy/stakejoy-api/blob/86ee17643d02af81221ee2fa6403fc34155fe087/src/models/mod.rs#L54
+message HostUpdateBVS {
+    string version = 1;
+}
+
+// @see https://github.com/blockjoy/stakejoy-api/blob/86ee17643d02af81221ee2fa6403fc34155fe087/src/models/mod.rs#L54
+message HostRestartBVS {}
+
+// @see https://github.com/blockjoy/stakejoy-api/blob/86ee17643d02af81221ee2fa6403fc34155fe087/src/models/mod.rs#L54
+message HostRemoveBVS {}
+
+message HostGenericCommand {
+    repeated Parameter params = 1;
+}
+
+message HostInfoGet {}
+
+message HostCommand {
+    Uuid host_id = 1;
+    CommandMeta meta = 2;
+
+    oneof command {
+        HostGenericCommand generic = 3;
+        HostInfoGet info_get = 4;
+        HostUpdateBVS update_bvs = 5;
+        HostRestartBVS restart_bvs = 6;
+        HostRemoveBVS remove_bvs = 7;
+    }
+}

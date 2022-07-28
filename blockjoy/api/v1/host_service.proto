@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package blockjoy.api.v1;
+
+import "host.proto";
+
+service Hosts {
+    rpc Provision(ProvisionHostRequest) returns (ProvisionHostResponse) {}
+    rpc InfoUpdate(HostInfoUpdateRequest) returns (HostInfoUpdateResponse) {}
+}

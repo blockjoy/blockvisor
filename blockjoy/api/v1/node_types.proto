@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package blockjoy.api.v1;
+
+// Declare node type
+message NodeType {
+  // Describe the status of the node itself
+  enum NodeStatus {
+    option allow_alias = true;
+    // Reserving values up to 15 for possible later use
+    // Up to 15 to ensure only 1 byte is used for the most common values
+    reserved 9 to 15;
+
+    UndefinedStatus = 0;
+    Creating = 1;
+    Available = 2;
+    Running = 2;
+    Started = 2;
+    Starting = 3;
+    Stopping = 4;
+    Stopped = 5;
+    Upgrading = 6;
+    Upgraded = 7;
+    Deleting = 8;
+  }
+
+  // Describe the node's syncing status
+  enum SyncStatus {
+    // Reserving values up to 15 for possible later use
+    // Up to 15 to ensure only 1 byte is used for the most common values
+    reserved 3 to 15;
+
+    UndefinedSyncStatus = 0;
+    Syncing = 1;
+    Synced = 2;
+  }
+
+  // Describe the node's chain related status
+  enum ChainStatus {
+    UndefinedChainStatus = 0;
+    Broadcasting = 1;
+    Cancelled = 2;
+    Consensus = 3;
+    Delegating = 4;
+    Delinquent = 5;
+    Disabled = 6;
+    Earning = 7;
+    Electing = 8;
+    Elected = 9;
+    Exporting = 10;
+    Ingesting = 11;
+    Installing = 12;
+    Migrating = 13;
+    Mining = 14;
+    Minting = 15;
+    Processing = 16;
+    Relaying = 17;
+    Removed = 18;
+    Removing = 19;
+    Snapshotting = 20;
+    Staked = 21;
+    Staking = 22;
+    Validating = 23;
+  }
+
+  // Define the type of node
+  enum Type {
+    UndefinedType = 0;
+    Generic = 1;
+    API = 2;
+    ETL = 3;
+    Miner = 4;
+    Validator = 5;
+  }
+
+  NodeStatus node_status = 1;
+  SyncStatus sync_status = 2;
+  ChainStatus chain_status = 3;
+  Type type = 4;
+}

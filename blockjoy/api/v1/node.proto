@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package blockjoy.api.v1;
+
+import "messages.proto";
+import "node_types.proto";
+
+message NodeInfo {
+    Uuid node_id = 1;
+    optional string name = 2;
+    optional string ip = 3;
+    optional int64 block_height = 6;
+    optional string onchain_name = 7;
+    optional NodeType node_type = 8;
+}
+
+message NodeStart {}
+
+message NodeStop {}
+
+message NodeRestart {}
+
+message NodeUpgrade {
+    ContainerImage image = 1;
+}
+
+message NodeInfoUpdate {
+    optional string name = 1;
+}
+
+message NodeInfoGet {}
+
+message NodeGenericCommand {
+    repeated Parameter params = 1;
+}
+
+message NodeCreate {
+    string name = 1;
+    ContainerImage image = 2;
+}
+
+message NodeDelete {}
+
+message NodeCommand {
+    Uuid node_id = 1;
+    CommandMeta meta = 2;
+
+    oneof command {
+        NodeGenericCommand generic = 3;
+        NodeStart start = 4;
+        NodeStop stop = 5;
+        NodeRestart restart = 6;
+        NodeUpgrade upgrade = 7;
+        NodeInfoUpdate update = 8;
+        NodeInfoGet info_get = 9;
+        NodeCreate create = 10;
+        NodeDelete delete = 11;
+    };
+}
