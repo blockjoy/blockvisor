@@ -282,3 +282,8 @@ async fn test_bv_cmd_init_localhost() {
         .success()
         .stdout(predicate::str::contains("Configuring blockvisor"));
 }
+
+#[test]
+fn test() {
+    assert!(true);
+}

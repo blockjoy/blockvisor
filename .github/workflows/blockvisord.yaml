@@ -41,16 +41,16 @@ jobs:
       - name: Reinstall
         run: >
           make reinstall
-      - name: Start test env
-        run: >
-          docker compose up -d
+      # - name: Start test env
+      #   run: >
+      #     docker compose up -d
       - name: Test
         run: >
-          cargo test 
-      - name: Shutdown test env
-        if: always()
-        run: >
-          docker compose down
+          cargo test
+      # - name: Shutdown test env
+      #   if: always()
+      #   run: >
+      #     docker compose down
   lints:
     name: Lints
     runs-on: self-hosted
