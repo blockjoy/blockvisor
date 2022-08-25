@@ -83,6 +83,8 @@ impl Node {
 
                 if let Err(err) = self.machine.force_shutdown().await {
                     trace!("Forced shutdown error: {err}");
+                } else {
+                    sleep(Duration::from_secs(1)).await;
                 }
             }
         }
