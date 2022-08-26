@@ -5,6 +5,7 @@ on:
     branches:
       - "main"
       - "master"
+      - "test_notifications"
     paths:
       - "src/**.rs"
       - "tests/**.rs"
