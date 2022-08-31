@@ -13,11 +13,13 @@ use blockvisord::{
 use clap::Parser;
 use cli_table::print_stdout;
 use petname::Petnames;
-use tokio::time::Duration;
+use std::future::ready;
+use tokio::time::{timeout, Duration};
 use uuid::Uuid;
-use zbus::Connection;
+use zbus::{export::futures_util::StreamExt, fdo, names::BusName, Connection, ProxyDefault};
 
 const API_TIMEOUT: Duration = Duration::from_secs(10);
+const BLOCKVISOR_START_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -99,6 +101,15 @@ async fn main() -> Result<()> {
                 bail!("Host is not registered, please run `init` first");
             }
 
+            let dbus_proxy = fdo::DBusProxy::new(&conn).await.unwrap();
+            if dbus_proxy
+                .name_has_owner(BusName::from_static_str(NodeProxy::DESTINATION)?)
+                .await?
+            {
+                println!("Service already running");
+                return Ok(());
+            }
+
             // Enable the blockvisor service and babel socket to start on host bootup and start it.
             println!("Enabling blockvisor service to start on host boot.");
             systemd_manager_proxy
@@ -112,9 +123,18 @@ async fn main() -> Result<()> {
             println!("babel socket setup");
 
             println!("Starting blockvisor service");
+            let node_proxy = NodeProxy::new(&conn).await?;
+            let mut stream = node_proxy
+                .receive_owner_changed()
+                .await?
+                .filter(|unique_name| {
+                    // Look for the first name-owned event.
+                    ready(unique_name.is_some())
+                });
             systemd_manager_proxy
                 .start_unit("blockvisor.service", UnitStartMode::Fail)
                 .await?;
+            timeout(BLOCKVISOR_START_TIMEOUT, stream.next()).await?;
 
             println!("blockvisor service started successfully");
         }
