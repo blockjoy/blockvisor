@@ -3,7 +3,10 @@ use firec::config::JailerMode;
 use firec::Machine;
 use std::{future::ready, path::Path, time::Duration};
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
-use tokio::{fs, time::timeout};
+use tokio::{
+    fs,
+    time::{sleep, timeout},
+};
 use tracing::{instrument, log::warn, trace};
 use uuid::Uuid;
 use zbus::{export::futures_util::StreamExt, Connection, Proxy};
@@ -141,6 +144,10 @@ impl Node {
         }
         self.data.status = NodeStatus::Stopped;
         self.data.save().await?;
+
+        // FIXME: for some reason firecracker socket is not created by
+        // consequent start command if we do not wait a bit here
+        sleep(Duration::from_secs(1)).await;
 
         Ok(())
     }
