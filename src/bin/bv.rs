@@ -110,6 +110,16 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
+            let mut stream = dbus_proxy
+                .receive_name_owner_changed()
+                .await?
+                .filter(|signal| {
+                    let args = signal.args().unwrap();
+                    // `NameAcquired` is emitted twice, first when the unique name is assigned on
+                    // connection and secondly after we ask for a specific name.
+                    ready(args.name() == NodeProxy::DESTINATION)
+                });
+
             // Enable the blockvisor service and babel socket to start on host bootup and start it.
             println!("Enabling blockvisor service to start on host boot.");
             systemd_manager_proxy
@@ -123,17 +133,10 @@ async fn main() -> Result<()> {
             println!("babel socket setup");
 
             println!("Starting blockvisor service");
-            let node_proxy = NodeProxy::new(&conn).await?;
-            let mut stream = node_proxy
-                .receive_owner_changed()
-                .await?
-                .filter(|unique_name| {
-                    // Look for the first name-owned event.
-                    ready(unique_name.is_some())
-                });
             systemd_manager_proxy
                 .start_unit("blockvisor.service", UnitStartMode::Fail)
                 .await?;
+
             timeout(BLOCKVISOR_START_TIMEOUT, stream.next()).await?;
 
             println!("blockvisor service started successfully");
