@@ -26,10 +26,20 @@ jobs:
         with:
           toolchain: stable
           profile: minimal
+          target: x86_64-unknown-linux-musl
           override: true
-      - name: Build
+      - name: Build blockvisord
         run: >
           cargo build -p blockvisord
+      - name: Build babel
+        run: >
+          cargo build -p babel --target x86_64-unknown-linux-musl
+      - name: Put babel into rootfs image
+        shell: bash
+        run: |
+          mount /var/lib/blockvisor/debian.ext4 /mnt/fc
+          cp target/x86_64-unknown-linux-musl/debug/babel /mnt/fc/usr/bin/babel
+          umount /mnt/fc
       - name: Reinstall
         run: >
           make reinstall
