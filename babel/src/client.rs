@@ -124,7 +124,7 @@ impl Client {
     ) -> Result<BlockchainResponse, error::Error> {
         use config::MethodResponseFormat::*;
 
-        let args = vec!["-c", &command];
+        let args = vec!["-c", command];
         let output = tokio::process::Command::new("sh")
             .args(args)
             .output()
@@ -222,13 +222,15 @@ mod tests {
     #[tokio::test]
     async fn test_sh() {
         let cfg = Babel {
-            urn: "".to_string(),
             export: None,
             env: None,
             config: Config {
                 babel_version: "0.1.0".to_string(),
                 node_version: "1.51.3".to_string(),
+                protocol: "helium".to_string(),
                 node_type: "".to_string(),
+                data_directory_mount_point: "/tmp".to_string(),
+                entry_point: "echo 1".to_string(),
                 description: None,
                 api_host: None,
             },
@@ -294,13 +296,15 @@ mod tests {
         });
 
         let cfg = Babel {
-            urn: "".to_string(),
             export: None,
             env: None,
             config: Config {
                 babel_version: "0.1.0".to_string(),
                 node_version: "1.51.3".to_string(),
+                protocol: "helium".to_string(),
                 node_type: "".to_string(),
+                data_directory_mount_point: "/tmp".to_string(),
+                entry_point: "echo 1".to_string(),
                 description: None,
                 api_host: Some(format!("http://{}", server.address())),
             },
@@ -341,13 +345,15 @@ mod tests {
         });
 
         let cfg = Babel {
-            urn: "".to_string(),
             export: None,
             env: None,
             config: Config {
                 babel_version: "0.1.0".to_string(),
                 node_version: "1.51.3".to_string(),
+                protocol: "helium".to_string(),
                 node_type: "".to_string(),
+                data_directory_mount_point: "/tmp".to_string(),
+                entry_point: "echo 1".to_string(),
                 description: None,
                 api_host: Some(format!("http://{}", server.address())),
             },
@@ -399,13 +405,15 @@ mod tests {
         });
 
         let cfg = Babel {
-            urn: "".to_string(),
             export: None,
             env: None,
             config: Config {
                 babel_version: "0.1.0".to_string(),
                 node_version: "1.51.3".to_string(),
+                protocol: "helium".to_string(),
                 node_type: "".to_string(),
+                data_directory_mount_point: "/tmp".to_string(),
+                entry_point: "echo 1".to_string(),
                 description: None,
                 api_host: Some(format!("http://{}", server.address())),
             },
