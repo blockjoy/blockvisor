@@ -137,7 +137,7 @@ impl Client {
         match response_config.format {
             Json => {
                 let content: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-                Ok(content.into())
+                content.try_into()
             }
             Raw => {
                 let content = String::from_utf8_lossy(&output.stdout).to_string();
@@ -179,15 +179,14 @@ pub struct BlockchainResponse {
     value: String,
 }
 
-impl From<serde_json::Value> for BlockchainResponse {
-    fn from(content: serde_json::Value) -> Self {
-        Self {
-            value: content
-                .get("todo we gotta get this from the config")
-                .and_then(|val| val.as_str())
-                .unwrap_or_default()
-                .to_string(),
-        }
+impl TryFrom<serde_json::Value> for BlockchainResponse {
+    type Error = error::Error;
+
+    fn try_from(content: serde_json::Value) -> Result<Self, Self::Error> {
+        let res = Self {
+            value: serde_json::to_string(&content)?,
+        };
+        Ok(res)
     }
 }
 
@@ -272,7 +271,7 @@ mod tests {
             name: "json".to_string(),
         });
         let output = client.handle(json_cmd).await.unwrap();
-        assert_eq!(output.unwrap_blockchain().value, "make a toast");
+        assert_eq!(output.unwrap_blockchain().value, "\"make a toast\"");
 
         let unknown_cmd = BabelRequest::BlockchainCommand(BlockchainCommand {
             name: "unknown".to_string(),
