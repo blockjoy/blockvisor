@@ -307,7 +307,7 @@ impl Node {
     pub async fn call_method<T>(
         &mut self,
         method: &str,
-        params: HashMap<String, String>,
+        params: HashMap<String, Vec<String>>,
     ) -> Result<T>
     where
         T: FromStr,

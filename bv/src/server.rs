@@ -330,6 +330,11 @@ impl bv_pb::blockvisor_server::Blockvisor for BlockvisorServer {
         status_check().await?;
         let request = request.into_inner();
         let node_id = helpers::parse_uuid(request.node_id)?;
+        let params = request
+            .params
+            .into_iter()
+            .map(|(k, v)| (k, v.param))
+            .collect();
         let value = self
             .nodes
             .lock()
@@ -337,7 +342,7 @@ impl bv_pb::blockvisor_server::Blockvisor for BlockvisorServer {
             .nodes
             .get_mut(&node_id)
             .ok_or_else(|| Status::invalid_argument("No such node"))?
-            .call_method(&request.method, request.params)
+            .call_method(&request.method, params)
             .await
             .map_err(|e| Status::internal(&format!("Call to babel failed: `{e}`")))?;
         Ok(Response::new(bv_pb::BlockchainResponse { value }))

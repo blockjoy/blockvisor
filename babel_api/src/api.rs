@@ -38,8 +38,10 @@ pub enum BabelRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockchainCommand {
     pub name: String,
-    pub params: collections::HashMap<String, String>,
+    pub params: BlockchainParams,
 }
+
+pub type BlockchainParams = collections::HashMap<String, Vec<String>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum BabelResponse {

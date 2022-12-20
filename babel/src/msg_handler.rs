@@ -191,7 +191,7 @@ impl MsgHandler {
     async fn handle_jrpc(
         &self,
         method: &str,
-        params: HashMap<String, String>,
+        params: BlockchainParams,
         resp_config: &config::JrpcResponse,
     ) -> Result<BlockchainResponse> {
         let url = self
@@ -200,6 +200,7 @@ impl MsgHandler {
             .api_host
             .as_deref()
             .ok_or_else(|| error::Error::no_host(method))?;
+        let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
         let method = Self::render(method, &params)?;
         let text: String = self
             .post(url)
@@ -221,7 +222,7 @@ impl MsgHandler {
     async fn handle_rest(
         &self,
         method: &str,
-        params: HashMap<String, String>,
+        params: BlockchainParams,
         resp_config: &config::RestResponse,
     ) -> Result<BlockchainResponse> {
         let host = self
@@ -235,6 +236,7 @@ impl MsgHandler {
             host.trim_end_matches('/'),
             method.trim_start_matches('/')
         );
+        let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
         let url = Self::render(&url, &params)?;
         let text = self.post(url.as_str()).send().await?.text().await?;
         let value = match &resp_config.field {
@@ -246,12 +248,18 @@ impl MsgHandler {
 
     async fn handle_sh(
         command: &str,
-        params: HashMap<String, String>,
+        params: BlockchainParams,
         response_config: &config::ShResponse,
     ) -> Result<BlockchainResponse> {
         use config::MethodResponseFormat::*;
 
         let command = &mut command.to_string();
+
+        // For sh we need to sanitize each param, then join them.
+        let params = params
+            .into_iter()
+            .map(|(k, v)| Ok((k, Self::sanitize_param(&v)?)))
+            .collect::<Result<_>>()?;
         let command = Self::render(command, &params)?;
 
         let args = vec!["-c", &command];
@@ -283,10 +291,10 @@ impl MsgHandler {
     /// values in the `params` dictionary.
     fn render(template: &str, params: &HashMap<String, String>) -> Result<String> {
         let mut res = template.to_string();
-        // This formats a parameter like `url` as `{{URL}}`
-        let fmt_key = |k: &String| format!("{{{{{}}}}}", k.to_uppercase());
         for (k, v) in params {
-            res = res.replace(&fmt_key(k), &Self::sanitize_param(v)?);
+            // This formats a parameter like `url` as `{{URL}}`
+            let k = format!("{{{{{}}}}}", k.to_uppercase());
+            res = res.replace(&k, v);
         }
         Ok(res)
     }
@@ -294,15 +302,36 @@ impl MsgHandler {
     /// Allowing people to subsitute arbitrary data into sh-commands is unsafe. We therefore run
     /// this function over each value before we substitute it. This function is deliberatly more
     /// restrictive than needed; it just filters out each character that is not a number or a
-    /// string or absolutely needed to form a url.
-    fn sanitize_param(param: &str) -> Result<String> {
-        const ALLOWLIST: [char; 2] = ['/', ':'];
-        let is_safe = |c: char| c.is_alphanumeric() || ALLOWLIST.contains(&c);
-        param
-            .chars()
-            .all(is_safe)
-            .then(|| param.to_string())
-            .ok_or_else(error::Error::unsafe_sub)
+    /// string or absolutely needed to form a url or json file.
+    fn sanitize_param(param: &[String]) -> Result<String> {
+        let res = param
+            .iter()
+            // We escape each individual argument
+            .map(|p| p.chars().map(Self::escape_char).collect::<Result<String>>())
+            // Now join the iterator of Strings into a single String, using `" "` as a seperator.
+            // This means our final string looks like `"arg 1" "arg 2" "arg 3"`, and that makes it
+            // ready to be subsituted into the sh command.
+            .try_fold("\"".to_string(), |acc, elem| {
+                elem.map(|elem| acc + "\" \"" + &elem)
+            })?;
+        Ok(res + "\"")
+    }
+
+    /// If the character is allowed, escapes a character into something we can use for a
+    /// bash-subsitution.
+    fn escape_char(c: char) -> Result<String> {
+        match c {
+            // Alphanumerics do not need escaping.
+            _ if c.is_alphanumeric() => Ok(c.to_string()),
+            // Quotes need to be escaped.
+            '"' => Ok(format!("\\{c}")),
+            // Newlines must be esacped
+            '\n' => Ok("\\n".to_string()),
+            // These are the special characters we allow that do not need esacping.
+            '/' | ':' | '{' | '}' | ' ' => Ok(c.to_string()),
+            // If none of these cases match, we return an error.
+            _ => Err(error::Error::unsafe_sub()),
+        }
     }
 }
 
@@ -758,9 +787,12 @@ mod tests {
 
     #[test]
     fn test_render() {
-        let params = [("par1", "val1"), ("pAr2", "val2"), ("PAR3", "val3")]
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+        let s = |s: &str| s.to_string(); // to make the test less verbose
+        let par1 = s("val1");
+        let par2 = s("val2");
+        let par3 = s("val3");
+        let params = [(s("par1"), par1), (s("pAr2"), par2), (s("PAR3"), par3)]
+            .into_iter()
             .collect();
         let render = |tmplt| MsgHandler::render(tmplt, &params).unwrap();
 

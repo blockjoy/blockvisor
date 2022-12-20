@@ -217,3 +217,8 @@ body = "mkdir -p /opt/secrets && echo first > /opt/secrets/first.key && echo sec
     [methods.response]
     status = 0
     format = "raw"
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = "echo 'noop for helium'"

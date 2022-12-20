@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{bail, Result};
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
@@ -8,8 +10,10 @@ use blockvisord::{
     nodes::{CommonData, Nodes},
     pretty_table::{PrettyTable, PrettyTableRow},
     server::{
-        bv_pb, bv_pb::blockvisor_client::BlockvisorClient, bv_pb::Node, BlockvisorServer,
-        BLOCKVISOR_SERVICE_URL,
+        bv_pb::blockvisor_client::BlockvisorClient,
+        bv_pb::Node,
+        bv_pb::{self, BlockchainRequestParams},
+        BlockvisorServer, BLOCKVISOR_SERVICE_URL,
     },
     utils::run_cmd,
 };
@@ -433,15 +437,19 @@ impl NodeClient {
                 params,
             } => {
                 let node_id = self.resolve_id_or_name(&id_or_name).await?;
-                let params = params
+                let params: HashMap<String, Vec<String>> = params
                     .as_deref()
+                    // If params were provided, we json-deserialize them
                     .map(serde_json::from_str)
                     .transpose()?
                     .unwrap_or_default();
                 let req = bv_pb::BlockchainRequest {
                     method,
                     node_id: node_id.to_string(),
-                    params,
+                    params: params
+                        .into_iter()
+                        .map(|(name, param)| (name, BlockchainRequestParams { param }))
+                        .collect(),
                 };
                 match self.client.blockchain(req).await {
                     Ok(result) => println!("{}", result.into_inner().value),

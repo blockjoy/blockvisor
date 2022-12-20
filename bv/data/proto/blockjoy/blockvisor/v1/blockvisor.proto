@@ -130,7 +130,11 @@ message BlockchainRequest {
     /// The id of the node that this message should be sent to.
     string node_id = 2;
     /// These should be the parameters that are needed to perform the method call.
-    map<string, string> params = 3;
+    map<string, BlockchainRequestParams> params = 3;
+}
+
+message BlockchainRequestParams {
+    repeated string param = 1;
 }
 
 message BlockchainResponse {
