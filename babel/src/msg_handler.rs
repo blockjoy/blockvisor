@@ -790,17 +790,17 @@ mod tests {
         let s = |s: &str| s.to_string(); // to make the test less verbose
         let par1 = s("val1");
         let par2 = s("val2");
-        let par3 = s("val3");
+        let par3 = s("val3 val4");
         let params = [(s("par1"), par1), (s("pAr2"), par2), (s("PAR3"), par3)]
             .into_iter()
             .collect();
-        let render = |tmplt| MsgHandler::render(tmplt, &params).unwrap();
+        let render = |template| MsgHandler::render(template, &params).unwrap();
 
         assert_eq!(render("{{PAR1}} bla"), "val1 bla");
         assert_eq!(render("{{PAR2}} waa"), "val2 waa");
-        assert_eq!(render("{{PAR3}} kra"), "val3 kra");
+        assert_eq!(render("{{PAR3}} kra"), "val3 val4 kra");
         assert_eq!(render("{{par1}} woo"), "{{par1}} woo");
         assert_eq!(render("{{pAr2}} koo"), "{{pAr2}} koo");
-        assert_eq!(render("{{PAR3}} doo"), "val3 doo");
+        assert_eq!(render("{{PAR3}} doo"), "val3 val4 doo");
     }
 }

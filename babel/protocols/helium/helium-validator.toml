@@ -222,3 +222,7 @@ body = "mkdir -p /opt/secrets && echo first > /opt/secrets/first.key && echo sec
 name = "init"
 transport = "sh"
 body = "echo 'noop for helium'"
+
+    [methods.response]
+    status = 200
+    format = "raw"

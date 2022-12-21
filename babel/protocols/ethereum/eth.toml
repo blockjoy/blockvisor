@@ -74,10 +74,14 @@ method = "/eth/v1/beacon/genesis"
 
 [[methods]]
 name = "init"
-tranpsort = "sh"
+transport = "sh"
 body = """
 echo {{secret}} > /blockjoy/secret && \
     rm /blockjoy/validator_keys/* && \
     for key in {{keys}}; do echo $key > /blockjoy/validator_keys/${uuidgen}.json; done && \
     lighthouse --network {{network}} account validator import --directory /blockjoy/validator_keys --reuse-password --password-file /blockjoy/secret
 """
+
+    [methods.response]
+    status = 200
+    format = "raw"
