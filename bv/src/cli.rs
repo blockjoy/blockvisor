@@ -111,6 +111,12 @@ pub enum NodeCommand {
         /// Gateway IP Address
         #[clap(long)]
         gateway: Option<String>,
+
+        /// The properties that are passed to the node. These are used for running certain babel
+        /// commands. For example, the ether nodes require that at least one property whose name
+        /// starts with `key` is passed here like so: `bv node create --props '{"key1": "asdf"}'`.
+        #[clap(long)]
+        props: Option<String>,
     },
 
     /// Upgrade node

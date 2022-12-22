@@ -1,6 +1,4 @@
 pub mod bv_pb {
-    // https://github.com/tokio-rs/prost/issues/661
-    #![allow(clippy::derive_partial_eq_without_eq)]
     tonic::include_proto!("blockjoy.blockvisor.v1");
 }
 
@@ -83,11 +81,23 @@ impl bv_pb::blockvisor_server::Blockvisor for BlockvisorServer {
             .image
             .ok_or_else(|| Status::invalid_argument("Image not provided"))?
             .into();
+        let properties = request
+            .properties
+            .into_iter()
+            .map(|p| (p.name, p.value))
+            .collect();
 
         self.nodes
             .write()
             .await
-            .create(id, request.name, image, request.ip, request.gateway)
+            .create(
+                id,
+                request.name,
+                image,
+                request.ip,
+                request.gateway,
+                properties,
+            )
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
 

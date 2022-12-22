@@ -10,7 +10,6 @@ use tokio::sync::{broadcast, watch, Mutex};
 use tonic::{Request, Response, Status, Streaming};
 
 pub mod pb {
-    // https://github.com/tokio-rs/prost/issues/661
     #![allow(clippy::derive_partial_eq_without_eq)]
     tonic::include_proto!("blockjoy.babelsup.v1");
 }

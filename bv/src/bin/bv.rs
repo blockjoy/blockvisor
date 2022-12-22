@@ -11,8 +11,7 @@ use blockvisord::{
     pretty_table::{PrettyTable, PrettyTableRow},
     server::{
         bv_pb::blockvisor_client::BlockvisorClient,
-        bv_pb::Node,
-        bv_pb::{self, BlockchainRequestParams},
+        bv_pb::{self, BlockchainRequestParams, Node, Parameter},
         BlockvisorServer, BLOCKVISOR_SERVICE_URL,
     },
     utils::run_cmd,
@@ -336,13 +335,27 @@ impl NodeClient {
                     println!("No nodes found.");
                 }
             }
-            NodeCommand::Create { image, ip, gateway } => {
+            NodeCommand::Create {
+                image,
+                ip,
+                gateway,
+                props,
+            } => {
                 let id = Uuid::new_v4();
                 let name = Petnames::default().generate_one(3, "_");
                 let node_image = parse_image(&image)?;
                 // TODO: this configurations is useful for testing on CI machine
                 let gateway = gateway.unwrap_or_else(|| "216.18.214.193".to_string());
                 let ip = ip.unwrap_or_else(|| "216.18.214.195".to_string());
+                let props: HashMap<String, String> = props
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or_default();
+                let properties = props
+                    .into_iter()
+                    .map(|(name, value)| Parameter { name, value })
+                    .collect();
                 self.client
                     .create_node(bv_pb::CreateNodeRequest {
                         id: id.to_string(),
@@ -350,6 +363,7 @@ impl NodeClient {
                         image: Some(node_image),
                         ip,
                         gateway,
+                        properties,
                     })
                     .await?;
                 println!(

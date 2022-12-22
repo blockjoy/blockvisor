@@ -18,8 +18,6 @@ use crate::node_connection::babelsup_pb::babel_sup_client::BabelSupClient;
 use crate::{env::*, node::VSOCK_PATH};
 
 pub mod babelsup_pb {
-    // https://github.com/tokio-rs/prost/issues/661
-    #![allow(clippy::derive_partial_eq_without_eq)]
     tonic::include_proto!("blockjoy.babelsup.v1");
 }
 

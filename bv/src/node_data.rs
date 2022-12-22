@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -49,6 +50,8 @@ pub struct NodeData {
     pub image: NodeImage,
     pub network_interface: NetworkInterface,
     pub requirements: NodeRequirements,
+    #[serde(default)]
+    pub properties: NodeProperties,
 }
 
 impl NodeData {
@@ -95,5 +98,14 @@ impl NodeData {
         } else {
             NodeStatus::Failed
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct NodeProperties(pub HashMap<String, String>);
+
+impl From<HashMap<String, String>> for NodeProperties {
+    fn from(map: HashMap<String, String>) -> Self {
+        Self(map)
     }
 }

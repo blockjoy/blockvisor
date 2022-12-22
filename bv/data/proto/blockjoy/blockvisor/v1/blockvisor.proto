@@ -43,12 +43,18 @@ message StartUpdateResponse {
     ServiceStatus status = 1;
 }
 
+message Parameter {
+    string name = 1;
+    string value = 2;
+}
+
 message CreateNodeRequest {
     string id = 1;
     string name = 2;
     NodeImage image = 3;
     string ip = 4;
     string gateway = 5;
+    repeated Parameter properties = 7;
 }
 
 message CreateNodeResponse {}

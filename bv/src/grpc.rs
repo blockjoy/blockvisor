@@ -1,5 +1,5 @@
 use crate::get_bv_status;
-use crate::node_data::NodeImage;
+use crate::node_data::{NodeImage, NodeProperties, NodeStatus};
 use crate::nodes::Nodes;
 use crate::server::bv_pb;
 use anyhow::{anyhow, bail, Result};
@@ -16,8 +16,6 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 pub mod pb {
-    // https://github.com/tokio-rs/prost/issues/661
-    #![allow(clippy::derive_partial_eq_without_eq)]
     tonic::include_proto!("blockjoy.api.v1");
 }
 
@@ -160,10 +158,15 @@ async fn process_node_command(
                     .image
                     .ok_or_else(|| anyhow!("Image not provided"))?
                     .into();
+                let properties = args
+                    .properties
+                    .into_iter()
+                    .map(|p| (p.name, p.value))
+                    .collect();
                 nodes
                     .write()
                     .await
-                    .create(node_id, args.name, image, args.ip, args.gateway)
+                    .create(node_id, args.name, image, args.ip, args.gateway, properties)
                     .await?;
             }
             Command::Delete(_) => {
@@ -186,7 +189,32 @@ async fn process_node_command(
                     .into();
                 nodes.write().await.upgrade(node_id, image).await?;
             }
-            Command::Update(_) => unimplemented!(),
+            Command::Update(pb::NodeInfoUpdate {
+                name,
+                self_update,
+                properties,
+            }) => {
+                let mut nodes = nodes.write().await;
+                let node = nodes
+                    .nodes
+                    .get_mut(&node_id)
+                    .ok_or_else(|| anyhow!("No node exists with id `{node_id}`"))?;
+                let is_running = node.status() == NodeStatus::Running;
+                // Stopping a node that is not running is a no-op
+                node.stop().await?;
+
+                // If the fields we receive are populated, we update the node data.
+                name.map(|name| node.data.name = name);
+                self_update.map(|su| node.data.self_update = su);
+                if !properties.is_empty() {
+                    let map = properties.into_iter().map(|p| (p.name, p.value)).collect();
+                    node.data.properties = NodeProperties(map);
+                }
+
+                if is_running {
+                    node.start().await?;
+                }
+            }
             Command::InfoGet(_) => unimplemented!(),
             Command::Generic(_) => unimplemented!(),
         },

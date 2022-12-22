@@ -7,12 +7,12 @@ use tokio::{fs::DirBuilder, time::sleep};
 use tracing::{debug, instrument, trace};
 use uuid::Uuid;
 
-use crate::node_connection::NODE_RECONNECT_TIMEOUT;
+use crate::node_connection::{NODE_RECONNECT_TIMEOUT, NODE_START_TIMEOUT};
 use crate::{
     cookbook_service::CookbookService,
     env::*,
     node_connection,
-    node_connection::{NodeConnection, NODE_START_TIMEOUT},
+    node_connection::NodeConnection,
     node_data::{NodeData, NodeImage, NodeStatus},
     utils::{get_process_pid, run_cmd},
 };
@@ -110,6 +110,7 @@ impl Node {
         self.machine.start().await?;
         self.node_conn = NodeConnection::try_open(self.id(), NODE_START_TIMEOUT).await?;
 
+        // We save the `running` status only after all of the previous steps have succeeded.
         self.data.expected_status = NodeStatus::Running;
         self.data.save().await
     }
@@ -275,6 +276,10 @@ impl Node {
     /// Returns whether this node is in consensus or not.
     pub async fn consensus(&mut self) -> Result<bool> {
         self.call_method("consensus", HashMap::new()).await
+    }
+
+    pub async fn init(&mut self, params: HashMap<String, Vec<String>>) -> Result<String> {
+        self.call_method("init", params).await
     }
 
     /// This function calls babel by sending a blockchain command using the specified method name.

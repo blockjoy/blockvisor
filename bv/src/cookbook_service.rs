@@ -13,8 +13,6 @@ use tonic::transport::Channel;
 use tracing::{info, instrument};
 
 pub mod cb_pb {
-    // https://github.com/tokio-rs/prost/issues/661
-    #![allow(clippy::derive_partial_eq_without_eq)]
     tonic::include_proto!("blockjoy.api.v1.babel");
 }
 
