@@ -1,13 +1,14 @@
-use crate::grpc::pb;
+use crate::api::pb;
 use anyhow::{Context, Result};
 use blockvisord::{
     config::Config,
-    grpc, hosts,
+    hosts,
     logging::setup_logging,
     node_data::NodeStatus,
     node_metrics,
     nodes::Nodes,
     server::{bv_pb, BlockvisorServer, BLOCKVISOR_SERVICE_PORT},
+    services::api,
     try_set_bv_status,
 };
 use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
@@ -16,7 +17,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tonic::transport::{Channel, Endpoint, Server};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -35,17 +36,17 @@ async fn main() -> Result<()> {
     };
     let internal_api_server_future = create_server(url, server);
 
-    let token = grpc::AuthToken(config.token.to_owned());
+    let token = api::AuthToken(config.token.to_owned());
     let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
     let external_api_client_future = async {
         let channel = wait_for_channel(&endpoint).await;
 
         info!("Creating gRPC client...");
-        let mut client = grpc::CommandsClient::with_auth(channel, token.clone());
+        let mut client = api::CommandsClient::with_auth(channel, token.clone());
 
         loop {
             if let Err(e) =
-                grpc::process_commands_stream(&mut client, nodes.clone(), updates_tx.clone()).await
+                api::process_commands_stream(&mut client, nodes.clone(), updates_tx.clone()).await
             {
                 error!("Error processing pending commands: {:?}", e);
             }
@@ -74,7 +75,7 @@ async fn main() -> Result<()> {
                             }
                         }
                         NodeStatus::Failed => {
-                            info!("Recovery: node with ID `{id}` cannot be recovered");
+                            warn!("Recovery: node with ID `{id}` cannot be recovered");
                         }
                     }
                 }
@@ -122,10 +123,10 @@ async fn wait_for_channel(endpoint: &Endpoint) -> Channel {
 
 /// This task runs every minute to aggregate metrics from every node. It will call into the nodes
 /// query their metrics, then send them to blockvisor-api.
-async fn node_metrics(nodes: Arc<RwLock<Nodes>>, endpoint: &Endpoint, token: grpc::AuthToken) {
+async fn node_metrics(nodes: Arc<RwLock<Nodes>>, endpoint: &Endpoint, token: api::AuthToken) {
     let mut timer = tokio::time::interval(node_metrics::COLLECT_INTERVAL);
     let channel = wait_for_channel(endpoint).await;
-    let mut client = grpc::MetricsClient::with_auth(channel, token);
+    let mut client = api::MetricsClient::with_auth(channel, token);
     loop {
         timer.tick().await;
         let mut lock = nodes.write().await;
@@ -139,16 +140,22 @@ async fn node_metrics(nodes: Arc<RwLock<Nodes>>, endpoint: &Endpoint, token: grp
     }
 }
 
-async fn host_metrics(host_id: String, endpoint: &Endpoint, token: grpc::AuthToken) {
+async fn host_metrics(host_id: String, endpoint: &Endpoint, token: api::AuthToken) {
     let mut timer = tokio::time::interval(hosts::COLLECT_INTERVAL);
     let channel = wait_for_channel(endpoint).await;
-    let mut client = grpc::MetricsClient::with_auth(channel, token);
+    let mut client = api::MetricsClient::with_auth(channel, token);
     loop {
         timer.tick().await;
-        let metrics = blockvisord::hosts::get_host_metrics();
-        let metrics = pb::HostMetricsRequest::new(host_id.clone(), metrics);
-        if let Err(e) = client.host(metrics).await {
-            error!("Could not send host metrics! `{e}`");
-        }
+        match blockvisord::hosts::get_host_metrics() {
+            Ok(metrics) => {
+                let metrics = pb::HostMetricsRequest::new(host_id.clone(), metrics);
+                if let Err(e) = client.host(metrics).await {
+                    error!("Could not send host metrics! `{e}`");
+                }
+            }
+            Err(e) => {
+                error!("Could not collect host metrics! `{e}`");
+            }
+        };
     }
 }

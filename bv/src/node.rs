@@ -4,16 +4,16 @@ use firec::Machine;
 use futures_util::StreamExt;
 use std::{collections::HashMap, path::Path, str::FromStr, time::Duration};
 use tokio::{fs::DirBuilder, time::sleep};
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, warn};
 use uuid::Uuid;
 
 use crate::node_connection::{NODE_RECONNECT_TIMEOUT, NODE_START_TIMEOUT};
 use crate::{
-    cookbook_service::CookbookService,
     env::*,
     node_connection,
     node_connection::NodeConnection,
     node_data::{NodeData, NodeImage, NodeStatus},
+    services::cookbook::CookbookService,
     utils::{get_process_pid, run_cmd},
 };
 
@@ -24,7 +24,6 @@ pub struct Node {
     node_conn: NodeConnection,
 }
 
-// FIXME: Hardcoding everything for now.
 pub const FC_BIN_NAME: &str = "firecracker";
 const FC_BIN_PATH: &str = "/usr/bin/firecracker";
 const FC_SOCKET_PATH: &str = "/firecracker.socket";
@@ -132,7 +131,7 @@ impl Node {
             firec::MachineState::SHUTOFF => {}
             firec::MachineState::RUNNING { .. } => {
                 if let Err(err) = self.machine.shutdown().await {
-                    trace!("Graceful shutdown failed: {err}");
+                    warn!("Graceful shutdown failed: {err}");
 
                     if let Err(err) = self.machine.force_shutdown().await {
                         bail!("Forced shutdown failed: {err}");
@@ -140,7 +139,7 @@ impl Node {
                 }
                 self.node_conn.wait_for_disconnect(&self.id()).await;
 
-                // FIXME: for some reason firecracker socket is not created by
+                // TODO: for some reason firecracker socket is not created by
                 // consequent start command if we do not wait a bit here
                 sleep(Duration::from_secs(10)).await;
             }

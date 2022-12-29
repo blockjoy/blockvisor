@@ -32,11 +32,11 @@ pub async fn serve(
                 if let Some(res) = res {
                     match res {
                         Ok(stream) => {
-                            tracing::debug!("Stream opened, delegating to handler.");
+                            tracing::debug!("Stream opened, delegating to handler");
                             tokio::spawn(serve_stream(stream, handler.clone()));
                         }
                         Err(_) => {
-                            tracing::debug!("Receiving streams failed. Aborting server.");
+                            tracing::warn!("Receiving streams failed. Aborting server");
                             run.stop();
                         }
                     }
@@ -57,7 +57,7 @@ async fn serve_stream(mut stream: VsockStream, handler: Arc<impl Handler>) {
             Err(_) => break,
         };
         if len == 0 {
-            tracing::info!("Vsock stream closed. Shutting down connection handler.");
+            tracing::info!("Vsock stream closed. Shutting down connection handler");
             break;
         }
         buf.resize(len, 0);

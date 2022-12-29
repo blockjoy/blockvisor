@@ -1,11 +1,8 @@
 pub mod cli;
 pub mod config;
-pub mod cookbook_service;
 pub mod env;
-pub mod grpc;
 pub mod hosts;
 pub mod installer;
-pub mod key_service;
 pub mod logging;
 pub mod network_interface;
 pub mod node;
@@ -15,6 +12,7 @@ pub mod node_metrics;
 pub mod nodes;
 pub mod pretty_table;
 pub mod server;
+pub mod services;
 pub mod utils;
 
 use crate::server::bv_pb;

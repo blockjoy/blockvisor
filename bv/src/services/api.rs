@@ -92,7 +92,7 @@ pub async fn process_commands_stream(
 
     info!("Getting pending commands from stream...");
     while let Some(received) = commands_stream.next().await {
-        info!("received: {received:?}");
+        info!("Received command: {received:?}");
         let received = received?;
 
         let update = match received.r#type {

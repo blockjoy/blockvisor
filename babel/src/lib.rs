@@ -1,4 +1,3 @@
-// TODO: What are we going to use as backup when vsock is disabled?
 pub mod babelsup_service;
 pub mod config;
 pub mod env;

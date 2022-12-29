@@ -13,13 +13,15 @@ use uuid::Uuid;
 
 use crate::{
     config::Config,
-    cookbook_service::CookbookService,
     env::{REGISTRY_CONFIG_DIR, REGISTRY_CONFIG_FILE},
-    grpc::{pb, pb::node_info::ContainerStatus},
-    key_service::KeyService,
     network_interface::NetworkInterface,
     node::Node,
     node_data::{NodeData, NodeImage, NodeRequirements, NodeStatus},
+    services::{
+        api::{pb, pb::node_info::ContainerStatus},
+        cookbook::CookbookService,
+        keyfiles::KeyService,
+    },
 };
 
 fn id_not_found(id: Uuid) -> anyhow::Error {

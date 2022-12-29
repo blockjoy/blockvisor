@@ -1,13 +1,13 @@
 use anyhow::{bail, Context, Result};
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::process::Command;
-use tracing::trace;
+use tracing::{debug, info};
 
 /// Runs the specified command and returns error on failure.
 pub async fn run_cmd(cmd: &str, args: &[&str]) -> Result<()> {
     let mut cmd = Command::new(cmd);
     cmd.args(args);
-    trace!("Running command: `{:?}`", cmd);
+    info!("Running command: `{:?}`", cmd);
     match cmd
         .status()
         .await
@@ -23,7 +23,7 @@ pub async fn run_cmd(cmd: &str, args: &[&str]) -> Result<()> {
 /// Get the pid of the running VM process knowing its process name and part of command line.
 pub fn get_process_pid(process_name: &str, cmd: &str) -> Result<i32> {
     let mut sys = System::new();
-    trace!("Retrieving pid for process `{process_name}` and cmd like `{cmd}`");
+    debug!("Retrieving pid for process `{process_name}` and cmd like `{cmd}`");
     // TODO: would be great to save the System and not do a full refresh each time
     sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::everything()));
     let processes: Vec<_> = sys

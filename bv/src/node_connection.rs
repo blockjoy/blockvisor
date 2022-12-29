@@ -65,7 +65,7 @@ impl NodeConnection {
             .into_inner()
             .babel_status;
         if babel_status != babelsup_pb::check_babel_response::BabelStatus::Ok as i32 {
-            info!("Invalid or missing Babel service, install new one");
+            info!("Invalid or missing Babel service on VM, installing new one");
             client
                 .start_new_babel(tokio_stream::iter(babel_bin))
                 .await?;
@@ -93,7 +93,7 @@ impl NodeConnection {
             NodeConnectionState::Closed => bail!("Cannot change port: node connection is closed"),
             NodeConnectionState::Babel { .. } => {}
             NodeConnectionState::BabelSup { .. } => {
-                info!("Reconnecting to babel");
+                debug!("Reconnecting to babel");
                 self.state = NodeConnectionState::Babel {
                     stream: open_stream(self.node_id, BABEL_VSOCK_PORT, CONNECTION_SWITCH_TIMEOUT)
                         .await?,
@@ -111,7 +111,7 @@ impl NodeConnection {
             NodeConnectionState::Closed => bail!("Cannot change port: node connection is closed"),
             NodeConnectionState::Babel { stream } => {
                 stream.shutdown().await?;
-                info!("Reconnecting to babelsup");
+                debug!("Reconnecting to babelsup");
                 self.state = NodeConnectionState::BabelSup {
                     client: connect_babelsup(self.node_id, CONNECTION_SWITCH_TIMEOUT).await?,
                 };
@@ -214,9 +214,9 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<()> {
     use std::io::ErrorKind::WouldBlock;
 
     let open_message = format!("CONNECT {port}\n");
-    debug!("Sending open message : `{open_message:?}`.");
+    debug!("Sending open message: `{open_message:?}`");
     timeout(SOCKET_TIMEOUT, stream.write(open_message.as_bytes())).await??;
-    debug!("Sent open message.");
+    debug!("Sent open message");
     let mut sock_opened_buf = [0; 20];
     loop {
         stream.readable().await?;

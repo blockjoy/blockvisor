@@ -1,8 +1,8 @@
 //! Here we have the code related to the metrics for nodes. We
 
-use crate::grpc::pb;
 use crate::node;
 use crate::node_data::NodeStatus;
+use crate::services::api::pb;
 use std::collections::HashMap;
 use tracing::warn;
 

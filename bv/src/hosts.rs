@@ -1,6 +1,8 @@
-use crate::grpc::pb;
+use crate::services::api::pb;
+use anyhow::Result;
 use std::collections::HashMap;
 use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, System, SystemExt};
+use systemstat::{saturating_sub_bytes, Platform, System as System2};
 
 /// The interval by which we collect metrics from this host.
 pub const COLLECT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -53,18 +55,21 @@ pub struct HostMetrics {
     pub uptime: u64,
 }
 
-pub fn get_host_metrics() -> HostMetrics {
+pub fn get_host_metrics() -> Result<HostMetrics> {
     let mut sys = System::new_all();
     // We need to refresh twice:
     // https://docs.rs/sysinfo/latest/sysinfo/trait.CpuExt.html#tymethod.cpu_usage
     sys.refresh_all();
     sys.refresh_cpu_specifics(sysinfo::CpuRefreshKind::new().with_cpu_usage());
 
+    // sysinfo produced wrong results, so let's try how this crate works
+    let sys2 = System2::new();
+    let mem = sys2.memory()?;
+
     let load = sys.load_average();
-    HostMetrics {
+    Ok(HostMetrics {
         used_cpu: sys.global_cpu_info().cpu_usage() as u32,
-        // TODO: This produces the wrong result, investigate why.
-        used_memory: sys.used_memory(),
+        used_memory: saturating_sub_bytes(mem.total, mem.free).as_u64(),
         used_disk_space: sys
             .disks()
             .iter()
@@ -83,7 +88,7 @@ pub fn get_host_metrics() -> HostMetrics {
             .map(|(_, n)| n.total_transmitted())
             .sum(),
         uptime: sys.uptime(),
-    }
+    })
 }
 
 impl pb::HostMetricsRequest {

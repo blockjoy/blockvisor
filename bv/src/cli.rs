@@ -159,13 +159,6 @@ pub enum NodeCommand {
         id_or_names: Vec<String>,
     },
 
-    /// Attach to node console
-    #[clap(alias = "c")]
-    Console {
-        /// Node id or name
-        id_or_name: String,
-    },
-
     /// Display node logs
     #[clap(alias = "l")]
     Logs {
@@ -239,18 +232,6 @@ pub enum ChainCommand {
         /// Display the first N items
         #[clap(long, short, default_value = "10")]
         number: usize,
-    },
-
-    /// Display chain status
-    Status {
-        /// Chain identifier
-        id: String,
-    },
-
-    /// Run chain synchronization process
-    Sync {
-        /// Chain identifier
-        id: String,
     },
 }
 

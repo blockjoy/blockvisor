@@ -73,7 +73,7 @@ impl<T: Timer> Installer<T> {
         if self.is_blacklisted(THIS_VERSION)? {
             bail!("BV {THIS_VERSION} is on a blacklist - can't install")
         }
-        println!("installing BV {THIS_VERSION} ...");
+        println!("installing BV {THIS_VERSION}...");
 
         match self.preinstall() {
             Ok(backup_status) => {
@@ -365,7 +365,7 @@ impl<T: Timer> Installer<T> {
     }
 
     fn cleanup(&self) -> Result<()> {
-        println!("vleanup old BV files:");
+        println!("cleanup old BV files:");
         let persistent = [
             &self.paths.blacklist,
             &self.paths.current,

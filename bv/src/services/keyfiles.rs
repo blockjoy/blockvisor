@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use tonic::transport::Channel;
 use uuid::Uuid;
 
-use crate::grpc::{pb, with_auth};
+use crate::services::api::{pb, with_auth};
 
 pub struct KeyService {
     token: String,

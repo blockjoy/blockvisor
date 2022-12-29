@@ -3,7 +3,8 @@ use assert_cmd::Command;
 #[cfg(target_os = "linux")]
 use assert_fs::TempDir;
 #[cfg(target_os = "linux")]
-use blockvisord::grpc::{self, pb};
+use blockvisord::services::api::{self, pb};
+#[cfg(target_os = "linux")]
 use blockvisord::set_bv_status;
 #[cfg(target_os = "linux")]
 use futures_util::FutureExt;
@@ -11,6 +12,7 @@ use futures_util::FutureExt;
 use predicates::prelude::*;
 #[cfg(target_os = "linux")]
 use serial_test::serial;
+#[cfg(target_os = "linux")]
 use std::{env, fs};
 #[cfg(target_os = "linux")]
 use std::{net::ToSocketAddrs, sync::Arc};
@@ -541,9 +543,9 @@ async fn test_bv_cmd_cookbook_download() {
 #[cfg(target_os = "linux")]
 async fn test_bv_cmd_grpc_commands() {
     use blockvisord::config::Config;
-    use blockvisord::grpc::process_commands_stream;
     use blockvisord::nodes::Nodes;
     use blockvisord::server::bv_pb;
+    use blockvisord::services::api::process_commands_stream;
     use serde_json::json;
     use std::str::FromStr;
     use stub_server::StubServer;
@@ -753,12 +755,12 @@ async fn test_bv_cmd_grpc_commands() {
     let updates_tx = nodes.get_updates_sender().await.unwrap().clone();
     let nodes = Arc::new(RwLock::new(nodes));
 
-    let token = grpc::AuthToken(config.token);
+    let token = api::AuthToken(config.token);
     let endpoint = Endpoint::from_str(&config.blockjoy_api_url).unwrap();
     let client_future = async {
         sleep(Duration::from_secs(5)).await;
         let channel = Endpoint::connect(&endpoint).await.unwrap();
-        let mut client = grpc::CommandsClient::with_auth(channel, token);
+        let mut client = api::CommandsClient::with_auth(channel, token);
         process_commands_stream(&mut client, nodes.clone(), updates_tx.clone())
             .await
             .unwrap();
