@@ -211,7 +211,8 @@ async fn process_node_command(
                     node.data.self_update = self_update;
                 }
                 if !properties.is_empty() {
-                    node.data.properties = properties.into_iter().map(|p| (p.name, p.value)).collect();
+                    node.data.properties =
+                        properties.into_iter().map(|p| (p.name, p.value)).collect();
                 }
                 node.data.save().await?;
 

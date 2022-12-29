@@ -207,9 +207,7 @@ impl Nodes {
 
         let _ = self.send_container_status(&id, ContainerStatus::Running);
 
-        let secret_keys = self
-            .exchange_keys(&id)
-            .await
+        let secret_keys = dbg!(self.exchange_keys(&id).await)
             .with_context(|| "Failed to retrieve keys when starting node")?;
 
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
