@@ -1,5 +1,5 @@
 use crate::get_bv_status;
-use crate::node_data::{NodeImage, NodeStatus};
+use crate::node_data::NodeImage;
 use crate::nodes::Nodes;
 use crate::server::bv_pb;
 use anyhow::{anyhow, bail, Result};
@@ -199,9 +199,6 @@ async fn process_node_command(
                     .nodes
                     .get_mut(&node_id)
                     .ok_or_else(|| anyhow!("No node exists with id `{node_id}`"))?;
-                let is_running = node.status() == NodeStatus::Running;
-                // Stopping a node that is not running is a no-op
-                node.stop().await?;
 
                 // If the fields we receive are populated, we update the node data.
                 if let Some(name) = name {
@@ -215,10 +212,6 @@ async fn process_node_command(
                         properties.into_iter().map(|p| (p.name, p.value)).collect();
                 }
                 node.data.save().await?;
-
-                if is_running {
-                    node.start().await?;
-                }
             }
             Command::InfoGet(_) => unimplemented!(),
             Command::Generic(_) => unimplemented!(),
