@@ -207,8 +207,13 @@ impl Nodes {
 
         let _ = self.send_container_status(&id, ContainerStatus::Running);
 
-        let secret_keys = dbg!(self.exchange_keys(&id).await)
-            .with_context(|| "Failed to retrieve keys when starting node")?;
+        let secret_keys = match self.exchange_keys(&id).await {
+            Ok(secret_keys) => secret_keys,
+            Err(e) => {
+                error!("Failed to retrieve keys when starting node: `{e}`");
+                HashMap::new()
+            }
+        };
 
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
 
