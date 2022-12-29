@@ -496,15 +496,3 @@ pub fn check_babel_version(min_babel_version: &str) -> Result<()> {
     }
     Ok(())
 }
-
-#[derive(serde::Deserialize)]
-#[allow(dead_code)]
-struct NodeType {
-    name: String,
-    ui_type: String,
-    label: String,
-    description: String,
-    disabled: String,
-    required: String,
-    value: String,
-}
