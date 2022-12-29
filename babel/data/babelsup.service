@@ -9,7 +9,9 @@ Environment="RUST_LOG=debug"
 # TODO: We need to run things as a special system user.
 # User=blockvisor
 ExecStart=/usr/bin/babelsup
-Restart=always
+TimeoutStopSec=15
+Restart=on-failure
+SuccessAction=reboot
 
 [Install]
 WantedBy=multi-user.target

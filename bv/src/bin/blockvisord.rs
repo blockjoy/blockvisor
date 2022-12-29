@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
 
     let nodes_recovery_future = async {
         loop {
-            let list = nodes.read().await.list().await;
+            let list = nodes.write().await.list().await;
 
             for node in list {
                 let id = &node.id;

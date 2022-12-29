@@ -4,7 +4,7 @@ use firec::Machine;
 use futures_util::StreamExt;
 use std::{collections::HashMap, path::Path, str::FromStr, time::Duration};
 use tokio::{fs::DirBuilder, time::sleep};
-use tracing::{debug, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::node_connection::{NODE_RECONNECT_TIMEOUT, NODE_START_TIMEOUT};
@@ -99,15 +99,20 @@ impl Node {
     /// Starts the node.
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
+        info!("expected status: {}", self.expected_status());
+        info!("status: {}", self.status());
+        info!("connection: {:?}", self.node_conn);
         if self.status() == NodeStatus::Running
             || (self.status() == NodeStatus::Failed
                 && self.expected_status() == NodeStatus::Stopped)
         {
+            info!("will not start");
             return Ok(());
         }
 
         self.machine.start().await?;
         self.node_conn = NodeConnection::try_open(self.id(), NODE_START_TIMEOUT).await?;
+        info!("connection: {:?}", self.node_conn);
 
         // We save the `running` status only after all of the previous steps have succeeded.
         self.data.expected_status = NodeStatus::Running;
@@ -127,26 +132,36 @@ impl Node {
     /// Stops the running node.
     #[instrument(skip(self))]
     pub async fn stop(&mut self) -> Result<()> {
+        info!("expected status: {}", self.expected_status());
+        info!("status: {}", self.status());
+        info!("connection: {:?}", self.node_conn);
         match self.machine.state() {
             firec::MachineState::SHUTOFF => {}
             firec::MachineState::RUNNING { .. } => {
                 if let Err(err) = self.machine.shutdown().await {
-                    warn!("Graceful shutdown failed: {err}");
+                    warn!("Ctrl-Alt-Del shutdown failed: {err}");
 
                     if let Err(err) = self.machine.force_shutdown().await {
                         bail!("Forced shutdown failed: {err}");
                     }
                 }
-                self.node_conn.wait_for_disconnect(&self.id()).await;
-
-                // TODO: for some reason firecracker socket is not created by
-                // consequent start command if we do not wait a bit here
-                sleep(Duration::from_secs(10)).await;
             }
         }
+
+        loop {
+            match get_process_pid(FC_BIN_NAME, &self.data.id.to_string()) {
+                Ok(_) => {
+                    info!("waiting to stop");
+                    sleep(Duration::from_secs(1)).await;
+                }
+                Err(_) => break,
+            }
+        }
+
         self.data.expected_status = NodeStatus::Stopped;
         self.data.save().await?;
         self.node_conn = NodeConnection::closed(self.id());
+        info!("connection: {:?}", self.node_conn);
 
         Ok(())
     }

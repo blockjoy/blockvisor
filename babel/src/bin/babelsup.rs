@@ -68,6 +68,7 @@ async fn serve(
     babel_change_tx: watch::Sender<Option<u32>>,
 ) -> eyre::Result<()> {
     let babelsup_service = babel::babelsup_service::BabelSupService::new(
+        run.clone(),
         logs_rx,
         babel_change_tx,
         babel::env::BABEL_BIN_PATH.clone(),

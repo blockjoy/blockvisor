@@ -90,7 +90,9 @@ impl NodeConnection {
         request: S,
     ) -> Result<D> {
         match &mut self.state {
-            NodeConnectionState::Closed => bail!("Cannot change port: node connection is closed"),
+            NodeConnectionState::Closed => {
+                bail!("Cannot change port to babel: node connection is closed")
+            }
             NodeConnectionState::Babel { .. } => {}
             NodeConnectionState::BabelSup { .. } => {
                 debug!("Reconnecting to babel");
@@ -108,7 +110,9 @@ impl NodeConnection {
     /// This function gets gRPC client connected to babelsup. It reconnect to babelsup if necessary.
     pub async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient<Channel>> {
         match &mut self.state {
-            NodeConnectionState::Closed => bail!("Cannot change port: node connection is closed"),
+            NodeConnectionState::Closed => {
+                bail!("Cannot change port to babelsup: node connection is closed")
+            }
             NodeConnectionState::Babel { stream } => {
                 stream.shutdown().await?;
                 debug!("Reconnecting to babelsup");

@@ -1,4 +1,5 @@
 use crate::babelsup_service::pb::{start_new_babel_request, StartNewBabelRequest};
+use crate::run_flag::RunFlag;
 use crate::utils;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -15,6 +16,7 @@ pub mod pb {
 }
 
 pub struct BabelSupService {
+    run: RunFlag,
     logs_rx: Arc<Mutex<broadcast::Receiver<String>>>,
     babel_change_tx: watch::Sender<Option<u32>>,
     babel_bin_path: PathBuf,
@@ -85,15 +87,25 @@ impl pb::babel_sup_server::BabelSup for BabelSupService {
             )))
         }
     }
+
+    async fn shutdown(
+        &self,
+        _request: Request<pb::ShutdownRequest>,
+    ) -> Result<Response<pb::ShutdownResponse>, Status> {
+        self.run.clone().stop();
+        Ok(Response::new(pb::ShutdownResponse {}))
+    }
 }
 
 impl BabelSupService {
     pub fn new(
+        run: RunFlag,
         logs_rx: broadcast::Receiver<String>,
         babel_change_tx: watch::Sender<Option<u32>>,
         babel_bin_path: PathBuf,
     ) -> Self {
         Self {
+            run,
             logs_rx: Arc::new(Mutex::new(logs_rx)),
             babel_change_tx,
             babel_bin_path,
@@ -161,7 +173,9 @@ mod tests {
         babel_change_tx: watch::Sender<Option<u32>>,
         uds_stream: UnixListenerStream,
     ) -> Result<()> {
-        let sup_service = BabelSupService::new(logs_rx, babel_change_tx, tmp_root.join("babel"));
+        let run = RunFlag::default();
+        let sup_service =
+            BabelSupService::new(run, logs_rx, babel_change_tx, tmp_root.join("babel"));
         Server::builder()
             .max_concurrent_streams(1)
             .add_service(pb::babel_sup_server::BabelSupServer::new(sup_service))
@@ -274,7 +288,9 @@ mod tests {
         let (_, logs_rx) = broadcast::channel(16);
 
         let (babel_change_tx, _) = watch::channel(None);
+        let run = RunFlag::default();
         let sup_service = BabelSupService::new(
+            run.clone(),
             logs_rx.resubscribe(),
             babel_change_tx,
             babel_bin_path.clone(),
@@ -291,6 +307,7 @@ mod tests {
 
         let (babel_change_tx, _) = watch::channel(Some(321));
         let sup_service = BabelSupService::new(
+            run.clone(),
             logs_rx.resubscribe(),
             babel_change_tx,
             babel_bin_path.clone(),

@@ -6,7 +6,12 @@ service BabelSup {
     rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse);
     rpc CheckBabel(CheckBabelRequest) returns (CheckBabelResponse);
     rpc StartNewBabel(stream StartNewBabelRequest) returns (StartNewBabelResponse);
+    rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
+
+message ShutdownRequest {}
+
+message ShutdownResponse {}
 
 message GetLogsRequest {}
 
@@ -35,5 +40,4 @@ message StartNewBabelRequest {
     }
 }
 
-message StartNewBabelResponse {
-}
+message StartNewBabelResponse {}
