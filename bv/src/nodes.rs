@@ -16,7 +16,7 @@ use crate::{
     env::{REGISTRY_CONFIG_DIR, REGISTRY_CONFIG_FILE},
     network_interface::NetworkInterface,
     node::Node,
-    node_data::{NodeData, NodeImage, NodeRequirements, NodeStatus},
+    node_data::{NodeData, NodeImage, NodeRequirements, NodeStatus, NodeProperties},
     services::{
         api::{pb, pb::node_info::ContainerStatus},
         cookbook::CookbookService,
@@ -61,7 +61,7 @@ impl Nodes {
         image: NodeImage,
         ip: String,
         gateway: String,
-        properties: HashMap<String, String>,
+        properties: NodeProperties,
     ) -> Result<()> {
         if self.nodes.contains_key(&id) {
             bail!(format!("Node with id `{}` exists", &id));
@@ -201,7 +201,6 @@ impl Nodes {
         let node_keys = node
             .data
             .properties
-            .0
             .iter()
             .map(|(k, v)| (k.clone(), v.as_bytes().into()))
             .collect();
@@ -348,7 +347,7 @@ impl Nodes {
                 })
                 .collect();
             key_service.upload_keys(id, gen_keys.clone()).await?;
-            // return Ok(gen_keys.into_iter().map(|k| (k.name, k.content)))
+            return Ok(gen_keys.into_iter().map(|k| (k.name, k.content)).collect());
         }
 
         let all_keys = api_keys.into_iter().chain(node_keys.into_iter()).collect();
@@ -491,10 +490,7 @@ impl Nodes {
 pub fn check_babel_version(min_babel_version: &str) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     if version < min_babel_version {
-        bail!(format!(
-            "Required minimum babel version is `{}`, running is `{}`",
-            min_babel_version, version
-        ));
+        bail!("Required minimum babel version is `{min_babel_version}`, running is `{version}`");
     }
     Ok(())
 }

@@ -1,5 +1,5 @@
 use crate::get_bv_status;
-use crate::node_data::{NodeImage, NodeProperties, NodeStatus};
+use crate::node_data::{NodeImage, NodeStatus};
 use crate::nodes::Nodes;
 use crate::server::bv_pb;
 use anyhow::{anyhow, bail, Result};
@@ -207,8 +207,8 @@ async fn process_node_command(
                 name.map(|name| node.data.name = name);
                 self_update.map(|su| node.data.self_update = su);
                 if !properties.is_empty() {
-                    let map = properties.into_iter().map(|p| (p.name, p.value)).collect();
-                    node.data.properties = NodeProperties(map);
+                    node.data.properties =
+                        properties.into_iter().map(|p| (p.name, p.value)).collect();
                 }
 
                 if is_running {
