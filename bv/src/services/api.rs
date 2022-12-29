@@ -204,12 +204,16 @@ async fn process_node_command(
                 node.stop().await?;
 
                 // If the fields we receive are populated, we update the node data.
-                name.map(|name| node.data.name = name);
-                self_update.map(|su| node.data.self_update = su);
-                if !properties.is_empty() {
-                    node.data.properties =
-                        properties.into_iter().map(|p| (p.name, p.value)).collect();
+                if let Some(name) = name {
+                    node.data.name = name;
                 }
+                if let Some(self_update) = self_update {
+                    node.data.self_update = self_update;
+                }
+                if !properties.is_empty() {
+                    node.data.properties = properties.into_iter().map(|p| (p.name, p.value)).collect();
+                }
+                node.data.save().await?;
 
                 if is_running {
                     node.start().await?;

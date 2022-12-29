@@ -16,7 +16,7 @@ use crate::{
     env::{REGISTRY_CONFIG_DIR, REGISTRY_CONFIG_FILE},
     network_interface::NetworkInterface,
     node::Node,
-    node_data::{NodeData, NodeImage, NodeRequirements, NodeStatus, NodeProperties},
+    node_data::{NodeData, NodeImage, NodeProperties, NodeRequirements, NodeStatus},
     services::{
         api::{pb, pb::node_info::ContainerStatus},
         cookbook::CookbookService,
@@ -64,11 +64,11 @@ impl Nodes {
         properties: NodeProperties,
     ) -> Result<()> {
         if self.nodes.contains_key(&id) {
-            bail!(format!("Node with id `{}` exists", &id));
+            bail!("Node with id `{id}` exists");
         }
 
         if self.node_ids.contains_key(&name) {
-            bail!(format!("Node with name `{}` exists", &name));
+            bail!("Node with name `{name}` exists");
         }
 
         let babel = self.fetch_image_data(&image).await?;
@@ -95,7 +95,7 @@ impl Nodes {
             network_interface,
             requirements,
             self_update: false,
-            properties: properties.into(),
+            properties,
         };
         self.save().await?;
 
