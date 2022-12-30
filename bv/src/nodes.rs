@@ -242,7 +242,7 @@ impl Nodes {
         for (name, content) in secret_keys.into_iter().chain(node_keys) {
             if let Some(&name) = STRING_SECRETS.iter().find(|&&n| n == name) {
                 params.insert(name.to_string(), vec![String::from_utf8(content)?]);
-            } else if let Some(&name) = LIST_SECRETS.iter().find(|&&n| n == name) {
+            } else if let Some(&name) = LIST_SECRETS.iter().find(|&&n| name.starts_with(n)) {
                 params
                     .entry(name.to_string())
                     .or_default()
