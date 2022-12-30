@@ -54,7 +54,7 @@ message CreateNodeRequest {
     NodeImage image = 3;
     string ip = 4;
     string gateway = 5;
-    repeated Parameter properties = 7;
+    repeated Parameter properties = 6;
 }
 
 message CreateNodeResponse {}

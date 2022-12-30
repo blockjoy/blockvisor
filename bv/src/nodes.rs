@@ -225,18 +225,26 @@ impl Nodes {
 
     /// Prepares the init params into a representation that the sh-commands we use in babel
     /// expects. This means that we need to take the secret that is stored in the KeyService, and
-    /// the secrets that are stored in the node data.
+    /// the secrets that are stored in the node data. The result is a map from String to
+    /// Vec<String>. This is because for some secrets, it is possible to provide multiple values.
+    /// We call these the `LIST_SECRETS`. The secrets for which it is possible to provided only one
+    /// value we call the `STRING_SECRETS`.
     fn prep_init_params(
         secret_keys: HashMap<String, Vec<u8>>,
         node_keys: HashMap<String, Vec<u8>>,
     ) -> Result<HashMap<String, Vec<String>>> {
+        /// The list of possible string secret names.
+        const STRING_SECRETS: [&str; 1] = ["secret"];
+        /// The list of possible list secret names.
+        const LIST_SECRETS: [&str; 1] = ["key"];
+
         let mut params = HashMap::new();
         for (name, content) in secret_keys.into_iter().chain(node_keys) {
-            if name == "secret" {
-                params.insert("secret".to_string(), vec![String::from_utf8(content)?]);
-            } else if name.starts_with("key") {
+            if let Some(&name) = STRING_SECRETS.iter().find(|&&n| n == name) {
+                params.insert(name.to_string(), vec![String::from_utf8(content)?]);
+            } else if let Some(&name) = LIST_SECRETS.iter().find(|&&n| n == name) {
                 params
-                    .entry("key".to_string())
+                    .entry(name.to_string())
                     .or_default()
                     .push(String::from_utf8(content)?);
             }
