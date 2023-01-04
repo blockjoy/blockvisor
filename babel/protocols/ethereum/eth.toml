@@ -22,12 +22,8 @@ backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
 
     [[supervisor.entry_point]]
-    command = "/usr/bin/geth"
-    args = ["--syncmode snap", "--http", "--http.api", "eth,net,engine,admin", "--mainnet", "--datadir", "/blockjoy/.ethereum", "--ethash.dagdir", "/blockjoy/.ethash"]
-
-    [[supervisor.entry_point]]
     command = "/usr/bin/lighthouse"
-    args = ["--datadir", "/blockjoy/lighthouse", "bn", "--checkpoint-sync-url", "https://mainnet-checkpoint-sync.stakely.io", "--execution-endpoint", "http://localhost:8551", "--execution-jwt", "/blockjoy/.ethereum/geth/jwtsecret"]
+    args = ["--datadir", "/blockjoy/lighthouse", "vc", "--network","{{network}}", "--http","--suggested-fee-recipient", "{{eth_wallet}}", "--beacon-nodes", "{{beacon_nodes_csv}}" ]
 
 [keys]
 "*" = "/opt/secrets"
