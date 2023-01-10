@@ -31,7 +31,7 @@ impl CookbookService {
         let client =
             cb_pb::cook_book_service_client::CookBookServiceClient::connect(url.to_string())
                 .await
-                .context("Failed to connect to cookbook service")?;
+                .context(format!("Failed to connect to cookbook service at {url}"))?;
 
         Ok(Self {
             token: token.to_string(),
