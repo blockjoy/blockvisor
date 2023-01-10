@@ -13,7 +13,7 @@ impl KeyService {
     pub async fn connect(url: &str, token: &str) -> Result<Self> {
         let client = pb::key_files_client::KeyFilesClient::connect(url.to_string())
             .await
-            .context("Failed to connect to key service")?;
+            .context(format!("Failed to connect to key service at {url}"))?;
         Ok(Self {
             token: token.to_string(),
             client,
