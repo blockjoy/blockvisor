@@ -45,7 +45,7 @@ method = "" # find
 [[methods]]
 name = "address"
 transport = "rest"
-method = "eth/v1/node/identity" 
+method = "eth/v1/node/identity"
 
     [methods.response]
     status = 200
@@ -55,7 +55,7 @@ method = "eth/v1/node/identity"
 [[methods]]
 name = "status"
 transport = "rest"
-method = "eth/v1/node/syncing" 
+method = "eth/v1/node/syncing"
 
     [methods.response]
     status = 200
@@ -65,7 +65,7 @@ method = "eth/v1/node/syncing"
 [[methods]]
 name = "genesis_info"
 transport = "rest"
-method = "/eth/v1/beacon/genesis" 
+method = "/eth/v1/beacon/genesis"
 
     [methods.response]
     status = 200
@@ -78,8 +78,9 @@ transport = "sh"
 body = """
 test /blockjoy/.init && \
     echo {{SECRET}} > /blockjoy/secret && \
+    mkdir /blockjoy/validator_keys -p && \
     rm /blockjoy/validator_keys/* -f && \
-    for key in {{KEYS}}; do echo $key > /blockjoy/validator_keys/${uuidgen}.json; done && \
+    for key in {{KEYS}}; do echo $key > /blockjoy/validator_keys/$key.json; done && \
     lighthouse --network {{NETWORK}} account validator import --directory /blockjoy/validator_keys --reuse-password --password-file /blockjoy/secret && \
     touch /blockjoy/.init
 """

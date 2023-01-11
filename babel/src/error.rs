@@ -29,8 +29,8 @@ pub enum Error {
 
     /// We return this type when the parameters required for a blockchain method call contain
     /// injection-unsafe characters.
-    #[error("Unsafe subsitution")]
-    UnsafeSubsitution,
+    #[error("Unsafe subsitution: {0}")]
+    UnsafeSubsitution(char),
 }
 
 impl Error {
@@ -60,7 +60,7 @@ impl Error {
     }
 
     /// Convenience method to construct the UnsafeSubsitution variant.
-    pub fn unsafe_sub() -> Self {
-        Self::UnsafeSubsitution
+    pub fn unsafe_sub(c: char) -> Self {
+        Self::UnsafeSubsitution(c)
     }
 }

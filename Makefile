@@ -54,7 +54,7 @@ install: bundle
 	systemctl enable blockvisor.service
 	for image in $$(find /var/lib/blockvisor/images/ -name *.img); do \
 		mount $$image /mnt/fc; \
-		install -m u=rwx,g=rx,o=rx target/x86_64-unknown-linux-musl/debug/babelsup /mnt/fc/usr/bin/; \
+		install -m u=rwx,g=rx,o=rx target/x86_64-unknown-linux-musl/release/babelsup /mnt/fc/usr/bin/; \
 		install -m u=rw,g=r,o=r babel/data/babelsup.service /mnt/fc/etc/systemd/system/; \
 		install -m u=rw,g=r,o=r babel/protocols/helium/helium-validator.toml /mnt/fc/etc/babel.conf; \
 		ln -s /mnt/fc/etc/systemd/system/babelsup.service /mnt/fc/etc/systemd/system/multi-user.target.wants/babelsup.service; \
