@@ -324,7 +324,7 @@ impl MsgHandler {
             // Alphanumerics do not need escaping.
             _ if c.is_alphanumeric() => Ok(c.to_string()),
             // Quotes need to be escaped.
-            '"' => Ok(format!("\\{c}")),
+            '"' => Ok("\\\"".to_string()),
             // Newlines must be esacped
             '\n' => Ok("\\n".to_string()),
             // These are the special characters we allow that do not need esacping.
