@@ -215,8 +215,11 @@ impl Node {
     fn create_config(data: &NodeData) -> Result<firec::config::Config<'static>> {
         let kernel_args = format!(
             "console=ttyS0 reboot=k panic=1 pci=off random.trust_cpu=on \
-            ip={}::{}:255.255.255.240::eth0:on blockvisor.node={}",
-            data.network_interface.ip, data.network_interface.gateway, data.id,
+            ip={}::{}:255.255.255.240::eth0:on {}{}",
+            data.network_interface.ip,
+            data.network_interface.gateway,
+            babel_api::BABELSUP_ENTRYPOINT_PARAMS,
+            "{}" //TODO MJR get entrypoint params from data
         );
         let iface =
             firec::config::network::Interface::new(data.network_interface.name.clone(), "eth0");

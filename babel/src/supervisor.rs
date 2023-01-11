@@ -1,13 +1,16 @@
 use crate::log_buffer::LogBuffer;
 use crate::run_flag::RunFlag;
+use crate::utils;
 use async_trait::async_trait;
 use babel_api::config::{Entrypoint, SupervisorConfig as Config};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Instant;
+use sysinfo::{Pid, Process, ProcessExt, System, SystemExt};
 use tokio::process::Command;
 use tokio::sync::{broadcast, watch};
 use tokio::time::Duration;
@@ -35,41 +38,69 @@ pub struct Supervisor<T: Timer> {
 impl<T: Timer> Supervisor<T> {
     pub fn new(
         run: RunFlag,
-        config: Config,
+        kernel_cmdline: &str,
+        mut config: Config,
         babel_path: PathBuf,
         babel_change_rx: watch::Receiver<Option<u32>>,
-    ) -> Self {
+    ) -> eyre::Result<Self> {
+        if let Some(entrypoint_params) = parse_entrypoint_params(kernel_cmdline)? {
+            // we don't need to sanitize entrypoint_params since they already passed kernel cmdline args gateway
+            config.entry_point.iter_mut().for_each(|item| {
+                item.args
+                    .iter_mut()
+                    .for_each(|arg| *arg = utils::render(arg.as_str(), &entrypoint_params))
+            })
+        }
         let log_buffer = LogBuffer::new(config.log_buffer_capacity_ln);
-        Self {
+        Ok(Self {
             run,
             config,
             babel_path,
             log_buffer,
             babel_change_rx,
             phantom: Default::default(),
-        }
+        })
     }
 
     pub fn get_logs_rx(&self) -> broadcast::Receiver<String> {
         self.log_buffer.subscribe()
     }
 
-    pub async fn run(self) -> eyre::Result<()> {
+    pub async fn run(self) {
         let mut babel_change_rx = self.babel_change_rx.clone();
         let mut run = self.run.clone();
+        // if there is no babel binary yet, then just wait for babel start signal from blockvisord
         if babel_change_rx.borrow_and_update().is_none() {
             tokio::select!(
-                res = babel_change_rx.changed() => {res},
-                _ = run.wait() => {Ok(())},
-            )?;
+                _ = babel_change_rx.changed() => {},
+                _ = run.wait() => {},
+            );
         }
+
+        self.kill_all_remnants();
+
         let mut futures = FuturesUnordered::new();
         for entry_point in &self.config.entry_point {
             futures.push(self.run_entrypoint(entry_point));
         }
         let entry_futures = async { while (futures.next().await).is_some() {} };
         tokio::join!(entry_futures, self.run_babel(babel_change_rx));
-        Ok(())
+    }
+
+    /// Check if there are no remnant child processes after previous run.
+    /// If so, just kill them all.
+    fn kill_all_remnants(&self) {
+        let mut sys = System::new();
+        sys.refresh_processes();
+        let ps = sys.processes();
+        kill_remnants(
+            &self.babel_path.to_string_lossy().to_string(),
+            &Default::default(),
+            ps,
+        );
+        for entry_point in &self.config.entry_point {
+            kill_remnants(&entry_point.command, &entry_point.args, ps);
+        }
     }
 
     async fn run_babel(&self, mut babel_change_rx: watch::Receiver<Option<u32>>) {
@@ -134,6 +165,43 @@ impl<T: Timer> Supervisor<T> {
             }
         }
     }
+}
+
+fn kill_remnants(cmd: &String, args: &Vec<String>, ps: &HashMap<Pid, Process>) {
+    let remnants: Vec<_> = ps
+        .iter()
+        .filter(|(_, process)| {
+            let proc_call = process.cmd();
+            if let Some(proc_cmd) = proc_call.first() {
+                if proc_cmd == "/bin/sh" {
+                    // if first element is shell call, just ignore it and treat second as cmd, rest are arguments
+                    proc_call.len() > 1 && cmd == &proc_call[1] && args == &proc_call[2..].to_vec()
+                } else {
+                    // first element is cmd, rest are arguments
+                    cmd == proc_cmd && args == &proc_call[1..].to_vec()
+                }
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    for (_, proc) in remnants {
+        proc.kill();
+        proc.wait();
+    }
+}
+
+fn parse_entrypoint_params(
+    cmdline: &str,
+) -> Result<Option<HashMap<String, String>>, serde_json::Error> {
+    cmdline
+        .split(' ')
+        .find_map(|x| {
+            x.strip_prefix(babel_api::BABELSUP_ENTRYPOINT_PARAMS)
+                .map(serde_json::from_str::<HashMap<String, String>>)
+        })
+        .transpose()
 }
 
 struct Backoff<T: Timer> {
@@ -251,7 +319,7 @@ mod tests {
                 }
             })
             .await;
-            // and send restart signal
+            // and send stop signal
             test_run.stop();
         });
     }
@@ -277,20 +345,26 @@ mod tests {
 
         let mut test_run = test_env.run.clone();
         let now_ctx = MockTestTimer::now_context();
+        let sleep_ctx = MockTestTimer::sleep_context();
         now_ctx.expect().once().returning(move || now);
         now_ctx.expect().once().returning(move || now);
-        now_ctx.expect().once().returning(move || {
+        now_ctx
+            .expect()
+            .times(3)
+            .returning(move || now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1)));
+        sleep_ctx.expect().once().returning(move |_| {
             test_run.stop();
-            now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1))
         });
+
         Supervisor::<MockTestTimer>::new(
             test_env.run,
+            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        )
+        )?
         .run()
-        .await?;
+        .await;
         Ok(())
     }
 
@@ -317,18 +391,20 @@ mod tests {
         now_ctx.expect().times(2).returning(move || now);
         sleep_ctx
             .expect()
+            .once()
             .with(predicate::eq(Duration::from_millis(10 * 2u64.pow(RANGE))))
             .returning(move |_| {
                 test_run.stop();
             });
         Supervisor::<MockTestTimer>::new(
             test_env.run,
+            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        )
+        )?
         .run()
-        .await?;
+        .await;
         Ok(())
     }
 
@@ -377,12 +453,13 @@ mod tests {
         let _ = fs::remove_file(&file_path);
         Supervisor::<MockTestTimer>::new(
             test_env.run,
+            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        )
+        )?
         .run()
-        .await?;
+        .await;
         assert!(!file_path.exists());
         Ok(())
     }
@@ -405,10 +482,11 @@ mod tests {
         let babel_change_tx = Arc::new(test_env.babel_change_tx);
         let supervisor = Supervisor::<MockTestTimer>::new(
             test_env.run,
+            Default::default(),
             cfg.clone(),
             test_env.babel_path.clone(),
             test_env.babel_change_rx,
-        );
+        )?;
 
         let now = Instant::now();
         let now_ctx = MockTestTimer::now_context();
@@ -442,7 +520,7 @@ mod tests {
             now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1))
         });
 
-        supervisor.run().await?;
+        supervisor.run().await;
         assert!(test_env.ctrl_file.exists());
         Ok(())
     }
@@ -460,7 +538,7 @@ mod tests {
                 args: vec!["test".to_owned()],
             }],
         };
-        let test_run = test_env.run.clone();
+        let mut test_run = test_env.run.clone();
 
         let now = Instant::now();
 
@@ -471,16 +549,18 @@ mod tests {
         sleep_ctx.expect().times(3).returning(|_| ());
         let control_file = test_env.ctrl_file.clone();
         sleep_ctx.expect().returning(move |_| {
+            test_run.stop();
             wait_for_babel(test_run.clone(), control_file.clone());
         });
         let supervisor = Supervisor::<MockTestTimer>::new(
             test_env.run,
+            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        );
+        )?;
         let mut rx = supervisor.get_logs_rx();
-        supervisor.run().await?;
+        supervisor.run().await;
 
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {
@@ -509,22 +589,143 @@ mod tests {
 
         let supervisor = Supervisor::<MockTestTimer>::new(
             test_env.run,
+            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        );
+        )?;
 
         let now_ctx = MockTestTimer::now_context();
         now_ctx.expect().once().returning(move || now);
         wait_for_babel(test_run.clone(), test_env.ctrl_file.clone());
         let mut rx = supervisor.get_logs_rx();
-        supervisor.run().await?;
+        supervisor.run().await;
 
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {
             lines.push(line);
         }
         assert_eq!(vec!["babel log\n"], lines);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_kill_remnants() -> Result<()> {
+        let test_env = setup_test_env()?;
+        let mut cmd = Command::new(&test_env.babel_path);
+        cmd.args(["a", "b", "c"]);
+        let mut child = cmd.spawn()?;
+        let test_run = test_env.run.clone();
+        wait_for_babel(test_run.clone(), test_env.ctrl_file.clone());
+        let mut sys = System::new();
+        sys.refresh_processes();
+        let ps = sys.processes();
+        kill_remnants(
+            &test_env.babel_path.to_string_lossy().to_string(),
+            &["a".to_string(), "b".to_string(), "c".to_string()].to_vec(),
+            ps,
+        );
+        assert!(child.kill().await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_parse_entrypoint_params() -> Result<()> {
+        assert_eq!(None, parse_entrypoint_params(r#"{"A":"valA","B":"valB"}"#)?);
+        assert!(
+            parse_entrypoint_params(r#"babelsup.entrypoint_params={"A":"valA","B":3}"#).is_err()
+        );
+        assert_eq!(
+            Some(HashMap::from([
+                ("A".to_string(), "valA".to_string()),
+                ("B".to_string(), "valB".to_string()),
+            ])),
+            parse_entrypoint_params(r#"babelsup.entrypoint_params={"A":"valA","B":"valB"}"#)?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_entrypoint_params_applied() -> Result<()> {
+        let test_env = setup_test_env()?;
+        let cfg = Config {
+            entry_point: vec![
+                Entrypoint {
+                    command: "cmd1".to_owned(),
+                    args: vec!["{{A}} and {{B}}".to_owned(), "only {{B}}".to_owned()],
+                },
+                Entrypoint {
+                    command: "cmd2".to_owned(),
+                    args: vec![
+                        "{{B}} and {{A}} twice {{A}}".to_owned(),
+                        "none{a}".to_owned(),
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(Supervisor::<MockTestTimer>::new(
+            test_env.run.clone(),
+            r#"babelsup.entrypoint_params={InvalidJson}"#,
+            cfg.clone(),
+            test_env.babel_path.clone(),
+            test_env.babel_change_rx.clone(),
+        )
+        .is_err());
+
+        let supervisor = Supervisor::<MockTestTimer>::new(
+            test_env.run,
+            r#"babelsup.entrypoint_params={"A":"valA","B":"valB"}"#,
+            cfg,
+            test_env.babel_path,
+            test_env.babel_change_rx,
+        )?;
+        assert_eq!(
+            "valA and valB",
+            supervisor
+                .config
+                .entry_point
+                .first()
+                .unwrap()
+                .args
+                .first()
+                .unwrap()
+        );
+        assert_eq!(
+            "only valB",
+            supervisor
+                .config
+                .entry_point
+                .first()
+                .unwrap()
+                .args
+                .last()
+                .unwrap()
+        );
+        assert_eq!(
+            "valB and valA twice valA",
+            supervisor
+                .config
+                .entry_point
+                .last()
+                .unwrap()
+                .args
+                .first()
+                .unwrap()
+        );
+        assert_eq!(
+            "none{a}",
+            supervisor
+                .config
+                .entry_point
+                .last()
+                .unwrap()
+                .args
+                .last()
+                .unwrap()
+        );
         Ok(())
     }
 }

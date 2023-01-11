@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use blockvisord::config::Config;
 use blockvisord::hosts::get_host_info;
-use blockvisord::nodes::{CommonData, Nodes};
 use blockvisord::self_updater;
 use blockvisord::services::api::pb;
 use clap::{crate_version, ArgGroup, Parser};
@@ -93,10 +92,6 @@ async fn main() -> Result<()> {
             update_check_interval_secs: None,
         };
         api_config.save().await?;
-        if !Nodes::exists() {
-            let nodes_data = CommonData { machine_index: 0 };
-            Nodes::new(api_config.clone(), nodes_data).save().await?;
-        }
         Some(api_config)
     } else {
         None
@@ -113,7 +108,7 @@ async fn main() -> Result<()> {
         let mut updater = self_updater::SelfUpdater::<self_updater::SysTimer>::new(&api_config)?;
         let bundle_id = updater
             .get_latest()
-            .await
+            .await?
             .ok_or_else(|| anyhow!("No bv bundle found"))?;
         updater.download_and_install(bundle_id).await?;
     }

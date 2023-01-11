@@ -72,7 +72,7 @@ impl<T: Sleeper> SelfUpdater<T> {
     }
 
     async fn check_for_update(&mut self) -> bool {
-        if let Some(latest_bundle) = self.get_latest().await {
+        if let Ok(Some(latest_bundle)) = self.get_latest().await {
             if let Ordering::Greater = utils::semver_cmp(&latest_bundle.version, CURRENT_VERSION) {
                 if !self
                     .is_blacklisted(&latest_bundle.version)
@@ -88,7 +88,7 @@ impl<T: Sleeper> SelfUpdater<T> {
         true
     }
 
-    pub async fn get_latest(&mut self) -> Option<cb_pb::BundleIdentifier> {
+    pub async fn get_latest(&mut self) -> Result<Option<cb_pb::BundleIdentifier>> {
         let mut resp = self
             .bundles
             .list_bundle_versions(with_auth(
@@ -97,12 +97,11 @@ impl<T: Sleeper> SelfUpdater<T> {
                 },
                 &self.auth_token,
             ))
-            .await
-            .ok()?
+            .await?
             .into_inner();
         resp.identifiers
             .sort_by(|a, b| utils::semver_cmp(&b.version, &a.version));
-        resp.identifiers.first().cloned()
+        Ok(resp.identifiers.first().cloned())
     }
 
     async fn is_blacklisted(&self, version: &str) -> Result<bool> {
@@ -296,7 +295,7 @@ mod tests {
         };
 
         // no server
-        assert_eq!(None, test_env.updater.get_latest().await);
+        assert!(test_env.updater.get_latest().await.is_err());
 
         let mut bundles_mock = MockTestBundleService::new();
         bundles_mock
@@ -328,8 +327,11 @@ mod tests {
             });
         let bundle_server = test_env.start_test_server(bundles_mock);
 
-        assert_eq!(None, test_env.updater.get_latest().await);
-        assert_eq!(Some(bundle_id), test_env.updater.get_latest().await);
+        assert_eq!(None, test_env.updater.get_latest().await.unwrap());
+        assert_eq!(
+            Some(bundle_id),
+            test_env.updater.get_latest().await.unwrap()
+        );
         bundle_server.assert().await;
         Ok(())
     }

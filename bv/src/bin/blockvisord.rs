@@ -1,5 +1,6 @@
 use crate::api::pb;
 use anyhow::{Context, Result};
+use blockvisord::nodes::CommonData;
 use blockvisord::self_updater::SelfUpdater;
 use blockvisord::{
     config::Config,
@@ -27,7 +28,15 @@ async fn main() -> Result<()> {
     info!("Starting...");
 
     let config = Config::load().await.context("failed to load host config")?;
-    let nodes = Nodes::load(config.clone()).await?;
+    let nodes = if Nodes::exists() {
+        Nodes::load(config.clone()).await?
+    } else {
+        let nodes_data = CommonData { machine_index: 0 };
+        let nodes = Nodes::new(config.clone(), nodes_data);
+        nodes.save().await?;
+        nodes
+    };
+
     try_set_bv_status(bv_pb::ServiceStatus::Ok).await;
     let updates_tx = nodes.get_updates_sender().await?.clone();
     let nodes = Arc::new(RwLock::new(nodes));

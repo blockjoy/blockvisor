@@ -3,6 +3,7 @@ use babel::{babelsup_service, utils};
 use babel::{config, logging, run_flag::RunFlag, supervisor};
 use eyre::Context;
 use std::time::{Duration, Instant};
+use tokio::fs;
 use tokio::fs::DirBuilder;
 use tokio::sync::{broadcast, watch};
 use tonic::transport::Server;
@@ -30,22 +31,28 @@ async fn main() -> eyre::Result<()> {
         .await?;
     tracing::debug!("Mounted data directory: {output:?}");
 
-    let run = RunFlag::run_until_ctrlc();
+    let mut run = RunFlag::run_until_ctrlc();
 
     let (babel_change_tx, babel_change_rx) =
         watch::channel(utils::file_checksum(&babel::env::BABEL_BIN_PATH).await.ok());
 
     let supervisor = supervisor::Supervisor::<SysTimer>::new(
         run.clone(),
+        &fs::read_to_string(babel::env::PROC_CMDLINE_PATH.as_path()).await?,
         cfg.supervisor,
         babel::env::BABEL_BIN_PATH.clone(),
         babel_change_rx,
-    );
+    )?;
     let logs_rx = supervisor.get_logs_rx();
-    let (supervisor, sup_server) =
-        tokio::join!(supervisor.run(), serve(run, logs_rx, babel_change_tx),);
-    supervisor?;
-    sup_server
+    let supervisor_handle = tokio::spawn(supervisor.run());
+    let res = serve(run.clone(), logs_rx, babel_change_tx).await;
+    if run.load() {
+        // make sure to stop supervisor gracefully
+        // in case of abnormal server shutdown
+        run.stop();
+        supervisor_handle.await?;
+    }
+    res
 }
 
 struct SysTimer;
