@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
         }
         Command::Start(_) => {
             if !Config::exists() {
-                bail!("Host is not registered, please run `init` first");
+                bail!("Host is not registered, please run `bvup` first");
             }
 
             if BlockvisorServer::is_running().await {
@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
         }
         Command::Status(_) => {
             if !Config::exists() {
-                bail!("Host is not registered, please run `init` first");
+                bail!("Host is not registered, please run `bvup` first");
             }
 
             if BlockvisorServer::is_running().await {

@@ -23,9 +23,6 @@ pub mod babelsup_pb {
 
 pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
-pub const NODE_START_TIMEOUT: Duration = Duration::from_secs(60);
-pub const NODE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-pub const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 const GRPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const GRPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -167,13 +164,21 @@ async fn open_stream(node_id: uuid::Uuid, port: u32, max_delay: Duration) -> Res
             Ok(mut stream) => match handshake(&mut stream, port).await {
                 Ok(_) => break Ok(stream),
                 Err(e) if elapsed() < max_delay => {
-                    debug!("Handshake error, retrying in 5 seconds: {e}");
+                    debug!(
+                        "Handshake error, retrying in {} seconds: {}",
+                        RETRY_INTERVAL.as_secs(),
+                        e
+                    );
                     sleep(RETRY_INTERVAL).await;
                 }
                 Err(e) => break Err(anyhow!("handshake error {e}")),
             },
             Err(e) if elapsed() < max_delay => {
-                debug!("No socket file yet, retrying in 5 seconds: {e}");
+                debug!(
+                    "No socket file yet, retrying in {} seconds: {}",
+                    RETRY_INTERVAL.as_secs(),
+                    e
+                );
                 sleep(RETRY_INTERVAL).await;
             }
             Err(e) => break Err(anyhow!("uds connect error {e}")),

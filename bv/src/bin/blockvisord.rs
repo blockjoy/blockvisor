@@ -22,6 +22,9 @@ use tokio::{
 use tonic::transport::{Channel, Endpoint, Server};
 use tracing::{error, info, warn};
 
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
+const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
 #[tokio::main]
 async fn main() -> Result<()> {
     setup_logging()?;
@@ -61,7 +64,7 @@ async fn main() -> Result<()> {
             {
                 error!("Error processing pending commands: {:?}", e);
             }
-            sleep(Duration::from_secs(5)).await;
+            sleep(RECONNECT_INTERVAL).await;
         }
     };
 
@@ -91,7 +94,7 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            sleep(Duration::from_secs(5)).await;
+            sleep(RECOVERY_CHECK_INTERVAL).await;
         }
     };
 
@@ -128,7 +131,7 @@ async fn wait_for_channel(endpoint: &Endpoint) -> Channel {
             Ok(channel) => return channel,
             Err(e) => {
                 error!("Error connecting to endpoint: {:?}", e);
-                sleep(Duration::from_secs(5)).await;
+                sleep(RECONNECT_INTERVAL).await;
             }
         }
     }

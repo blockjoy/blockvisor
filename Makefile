@@ -29,10 +29,8 @@ bundle: get-firecraker build-release
 	cp target/x86_64-unknown-linux-musl/release/installer /tmp/bundle
 	cp bv/data/tmux.service /tmp/bundle/blockvisor/services
 	cp bv/data/blockvisor.service /tmp/bundle/blockvisor/services
-	mkdir -p /tmp/bundle/babel/bin /tmp/bundle/babel/services
+	mkdir -p /tmp/bundle/babel/bin
 	cp target/x86_64-unknown-linux-musl/release/babel /tmp/bundle/babel/bin
-	cp target/x86_64-unknown-linux-musl/release/babelsup /tmp/bundle/babel/bin
-	cp babel/data/babelsup.service /tmp/bundle/babel/services
 	mkdir -p /tmp/bundle/firecracker/bin
 	cp /tmp/fc/firecracker /tmp/bundle/firecracker/bin
 	cp /tmp/fc/jailer /tmp/bundle/firecracker/bin

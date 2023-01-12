@@ -79,7 +79,7 @@ fn test_bv_cmd_start_no_init() {
         .env("BV_ROOT", tmp_dir.as_os_str())
         .assert()
         .failure()
-        .stderr("Error: Host is not registered, please run `init` first\n");
+        .stderr("Error: Host is not registered, please run `bvup` first\n");
 }
 
 #[test]

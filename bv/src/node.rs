@@ -10,7 +10,6 @@ use tokio::{fs::DirBuilder, time::sleep};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::node_connection::{NODE_RECONNECT_TIMEOUT, NODE_START_TIMEOUT, NODE_STOP_TIMEOUT};
 use crate::node_data::NodeProperties;
 use crate::{
     env::*,
@@ -20,6 +19,11 @@ use crate::{
     services::cookbook::CookbookService,
     utils::{get_process_pid, run_cmd},
 };
+
+const NODE_START_TIMEOUT: Duration = Duration::from_secs(60);
+const NODE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
+const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
 pub struct Node {
@@ -45,7 +49,7 @@ impl Node {
         let node_id = data.id;
         let config = Node::create_config(&data).await?;
         Node::create_data_image(&node_id, data.requirements.disk_size_gb).await?;
-        let machine = firec::Machine::create(config).await?;
+        let machine = Machine::create(config).await?;
 
         data.save().await?;
 
@@ -75,7 +79,7 @@ impl Node {
                 NodeConnection::closed(data.id),
             ),
         };
-        let machine = firec::Machine::connect(config, state).await;
+        let machine = Machine::connect(config, state).await;
         Ok(Self {
             data,
             machine,
@@ -152,7 +156,7 @@ impl Node {
             match get_process_pid(FC_BIN_NAME, &self.data.id.to_string()) {
                 Ok(_) if elapsed() < NODE_STOP_TIMEOUT => {
                     debug!("Firecracker process not shutdown yet, will retry");
-                    sleep(Duration::from_secs(1)).await;
+                    sleep(NODE_STOPPED_CHECK_INTERVAL).await;
                 }
                 Ok(_) => {
                     bail!("Firecracker shutdown timeout");
@@ -365,6 +369,7 @@ impl Node {
     /// Returns the methods that are supported by this blockchain. Calling any method on this
     /// blockchain that is not listed here will result in an error being returned.
     pub async fn capabilities(&mut self) -> Result<Vec<String>> {
+        // TODO don't need to ask babel anymore, we have babel.conf
         let request = babel_api::BabelRequest::ListCapabilities;
         let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
         let capabilities = match resp {
