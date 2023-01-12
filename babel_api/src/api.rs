@@ -58,6 +58,7 @@ pub struct BlockchainKey {
 #[derive(Debug, Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum BabelMethod {
+    Init,
     Address,
     BlockAge,
     Consensus,
