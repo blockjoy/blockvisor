@@ -74,7 +74,6 @@ impl LogBuffer {
                         }
                         Ok(0) => break,
                         Ok(_) => {
-                            line.truncate(2048); // limit line length
                             let _ = tx.send(line);
                         }
                     }

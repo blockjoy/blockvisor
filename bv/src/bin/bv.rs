@@ -16,7 +16,7 @@ use blockvisord::{
 use clap::Parser;
 use cli_table::print_stdout;
 use petname::Petnames;
-use std::collections::HashMap;
+use std::{collections::HashMap, io::BufRead};
 use tokio::time::{sleep, Duration};
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -31,16 +31,10 @@ async fn main() -> Result<()> {
 
     match args.command {
         Command::Reset(cmd_args) => {
-            let confirm = if cmd_args.yes {
-                true
-            } else {
-                let mut input = String::new();
-                println!(
-                    "Are you sure you want to delete all nodes and remove the host from API? [y/N]:"
-                );
-                std::io::stdin().read_line(&mut input)?;
-                input.trim().to_lowercase() == "y"
-            };
+            let confirm = ask_confirm(
+                "Are you sure you want to delete all nodes and remove the host from API?",
+                cmd_args.yes,
+            )?;
 
             if confirm {
                 let mut service_client = BlockvisorClient::connect(BLOCKVISOR_SERVICE_URL).await?;
@@ -349,16 +343,19 @@ impl NodeClient {
                 let ids = self.get_node_ids(id_or_names).await?;
                 self.stop_nodes(&ids).await?;
             }
-            NodeCommand::Delete { id_or_names, all } => {
+            NodeCommand::Delete {
+                id_or_names,
+                all,
+                yes,
+            } => {
                 // We only respect the `--all` flag when `id_or_names` is empty, in order to
                 // prevent a typo from accidentally deleting all nodes.
                 let id_or_names = if id_or_names.is_empty() && all {
-                    let mut input = String::new();
-                    println!("Are you sure you want to delete all nodes? [y/N]:");
-                    std::io::stdin().read_line(&mut input)?;
-                    if input.trim().to_lowercase() != "y" {
+                    let confirm = ask_confirm("Are you sure you want to delete all nodes?", yes)?;
+                    if !confirm {
                         return Ok(());
                     }
+
                     self.fetch_nodes()
                         .await?
                         .into_iter()
@@ -466,6 +463,23 @@ impl NodeClient {
         }
         Ok(())
     }
+}
+
+/// Requests confirmation from the user, i.e. the user must type `y` to continue.
+///
+/// ### Params
+/// msg:    the message that is displayed to the user to request access. On display this function
+///         will append ` [y/N]` to the message.
+/// dash_y: if this flag is true, requesting user input is skippend and `true` is immediately
+///         returned.
+fn ask_confirm(msg: &str, dash_y: bool) -> Result<bool> {
+    if dash_y {
+        return Ok(true);
+    }
+    println!("{msg} [y/N]:");
+    let mut input = String::new();
+    std::io::stdin().lock().read_line(&mut input)?;
+    Ok(input.trim().to_lowercase() == "y")
 }
 
 fn fmt_opt<T: std::fmt::Display>(opt: Option<T>) -> String {

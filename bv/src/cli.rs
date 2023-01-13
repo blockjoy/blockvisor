@@ -134,6 +134,10 @@ pub enum NodeCommand {
         /// Delete all nodes on this host.
         #[clap(long, short)]
         all: bool,
+
+        /// Skip all [y/N] prompts and `just do it`.
+        #[clap(short, long)]
+        yes: bool,
     },
 
     /// Display node logs
