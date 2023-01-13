@@ -1,9 +1,7 @@
 use crate::log_buffer::LogBuffer;
 use crate::run_flag::RunFlag;
-use crate::utils;
 use async_trait::async_trait;
 use babel_api::config::{Entrypoint, SupervisorConfig as Config};
-use base64::Engine;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -39,28 +37,19 @@ pub struct Supervisor<T: Timer> {
 impl<T: Timer> Supervisor<T> {
     pub fn new(
         run: RunFlag,
-        kernel_cmdline: &str,
-        mut config: Config,
+        config: Config,
         babel_path: PathBuf,
         babel_change_rx: watch::Receiver<Option<u32>>,
-    ) -> eyre::Result<Self> {
-        if let Some(entrypoint_params) = parse_entrypoint_params(kernel_cmdline)? {
-            // we don't need to sanitize entrypoint_params since they already passed kernel cmdline args gateway
-            config.entry_point.iter_mut().for_each(|item| {
-                item.args
-                    .iter_mut()
-                    .for_each(|arg| *arg = utils::render(arg.as_str(), &entrypoint_params))
-            })
-        }
+    ) -> Self {
         let log_buffer = LogBuffer::new(config.log_buffer_capacity_ln);
-        Ok(Self {
+        Self {
             run,
             config,
             babel_path,
             log_buffer,
             babel_change_rx,
             phantom: Default::default(),
-        })
+        }
     }
 
     pub fn get_logs_rx(&self) -> broadcast::Receiver<String> {
@@ -191,23 +180,6 @@ fn kill_remnants(cmd: &String, args: &Vec<String>, ps: &HashMap<Pid, Process>) {
         proc.kill();
         proc.wait();
     }
-}
-
-fn parse_entrypoint_params(cmdline: &str) -> eyre::Result<Option<HashMap<String, String>>> {
-    cmdline
-        // split cmdline into separate arguments
-        .split(' ')
-        .find_map(|arg| {
-            // find one that starts with babel_api::BABELSUP_ENTRYPOINT_PARAMS and strip prefix
-            arg.strip_prefix(babel_api::BABELSUP_ENTRYPOINT_PARAMS)
-                .map(|val| {
-                    // decode value from base64 and parse as params map using 'postcard'
-                    Ok(postcard::from_bytes::<HashMap<String, String>>(
-                        &base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(val)?,
-                    )?)
-                })
-        })
-        .transpose()
 }
 
 struct Backoff<T: Timer> {
@@ -364,11 +336,10 @@ mod tests {
 
         Supervisor::<MockTestTimer>::new(
             test_env.run,
-            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        )?
+        )
         .run()
         .await;
         Ok(())
@@ -404,11 +375,10 @@ mod tests {
             });
         Supervisor::<MockTestTimer>::new(
             test_env.run,
-            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        )?
+        )
         .run()
         .await;
         Ok(())
@@ -459,11 +429,10 @@ mod tests {
         let _ = fs::remove_file(&file_path);
         Supervisor::<MockTestTimer>::new(
             test_env.run,
-            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        )?
+        )
         .run()
         .await;
         assert!(!file_path.exists());
@@ -488,11 +457,10 @@ mod tests {
         let babel_change_tx = Arc::new(test_env.babel_change_tx);
         let supervisor = Supervisor::<MockTestTimer>::new(
             test_env.run,
-            Default::default(),
             cfg.clone(),
             test_env.babel_path.clone(),
             test_env.babel_change_rx,
-        )?;
+        );
 
         let now = Instant::now();
         let now_ctx = MockTestTimer::now_context();
@@ -560,11 +528,10 @@ mod tests {
         });
         let supervisor = Supervisor::<MockTestTimer>::new(
             test_env.run,
-            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        )?;
+        );
         let mut rx = supervisor.get_logs_rx();
         supervisor.run().await;
 
@@ -595,11 +562,10 @@ mod tests {
 
         let supervisor = Supervisor::<MockTestTimer>::new(
             test_env.run,
-            Default::default(),
             cfg,
             test_env.babel_path,
             test_env.babel_change_rx,
-        )?;
+        );
 
         let now_ctx = MockTestTimer::now_context();
         now_ctx.expect().once().returning(move || now);
@@ -634,124 +600,5 @@ mod tests {
         );
         assert!(child.kill().await.is_err());
         Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_parse_entrypoint_params() -> Result<()> {
-        assert_eq!(None, parse_entrypoint_params("no params")?);
-        assert!(parse_entrypoint_params(&format!(
-            "{}{}",
-            babel_api::BABELSUP_ENTRYPOINT_PARAMS,
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("invalid param")
-        ))
-        .is_err());
-        assert_eq!(
-            Some(HashMap::from([
-                ("A".to_string(), "valA".to_string()),
-                ("B".to_string(), "valB".to_string()),
-            ])),
-            parse_entrypoint_params(&format!(
-                "{}{}",
-                babel_api::BABELSUP_ENTRYPOINT_PARAMS,
-                encode([("A", "valA"), ("B", "valB")])
-            ))?
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_entrypoint_params_applied() -> Result<()> {
-        let test_env = setup_test_env()?;
-        let cfg = Config {
-            entry_point: vec![
-                Entrypoint {
-                    command: "cmd1".to_owned(),
-                    args: vec!["{{A}} and {{B}}".to_owned(), "only {{B}}".to_owned()],
-                },
-                Entrypoint {
-                    command: "cmd2".to_owned(),
-                    args: vec![
-                        "{{B}} and {{A}} twice {{A}}".to_owned(),
-                        "none{a}".to_owned(),
-                    ],
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert!(Supervisor::<MockTestTimer>::new(
-            test_env.run.clone(),
-            &format!(
-                "{}{}",
-                babel_api::BABELSUP_ENTRYPOINT_PARAMS,
-                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("{InvalidJson}")
-            ),
-            cfg.clone(),
-            test_env.babel_path.clone(),
-            test_env.babel_change_rx.clone(),
-        )
-        .is_err());
-
-        let supervisor = Supervisor::<MockTestTimer>::new(
-            test_env.run,
-            &format!(
-                "{}{}",
-                babel_api::BABELSUP_ENTRYPOINT_PARAMS,
-                encode([("A", "valA"), ("B", "valB")])
-            ),
-            cfg,
-            test_env.babel_path,
-            test_env.babel_change_rx,
-        )?;
-        assert_eq!(
-            "valA and valB",
-            supervisor
-                .config
-                .entry_point
-                .first()
-                .unwrap()
-                .args
-                .first()
-                .unwrap()
-        );
-        assert_eq!(
-            "only valB",
-            supervisor
-                .config
-                .entry_point
-                .first()
-                .unwrap()
-                .args
-                .last()
-                .unwrap()
-        );
-        assert_eq!(
-            "valB and valA twice valA",
-            supervisor
-                .config
-                .entry_point
-                .last()
-                .unwrap()
-                .args
-                .first()
-                .unwrap()
-        );
-        assert_eq!(
-            "none{a}",
-            supervisor
-                .config
-                .entry_point
-                .last()
-                .unwrap()
-                .args
-                .last()
-                .unwrap()
-        );
-        Ok(())
-    }
-
-    fn encode<const N: usize>(arr: [(&str, &str); N]) -> String {
-        base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(postcard::to_allocvec(&HashMap::from(arr)).unwrap())
     }
 }

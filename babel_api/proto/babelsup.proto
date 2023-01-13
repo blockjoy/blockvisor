@@ -6,6 +6,7 @@ service BabelSup {
     rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse);
     rpc CheckBabel(CheckBabelRequest) returns (CheckBabelResponse);
     rpc StartNewBabel(stream StartNewBabelRequest) returns (StartNewBabelResponse);
+    rpc SetupSupervisor(SetupSupervisorRequest) returns (SetupSupervisorResponse);
 }
 
 message GetLogsRequest {}
@@ -36,4 +37,11 @@ message StartNewBabelRequest {
 }
 
 message StartNewBabelResponse {
+}
+
+message SetupSupervisorRequest {
+    string config = 1;
+}
+
+message SetupSupervisorResponse {
 }

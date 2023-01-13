@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use base64::Engine;
 use jsonwebtoken as jwt;
 use serde::Serialize;
 
@@ -44,7 +45,7 @@ impl TokenGenerator {
         };
 
         match Self::encode(&claim, &secret) {
-            Ok(token) => base64::encode(token),
+            Ok(token) => base64::engine::general_purpose::STANDARD.encode(token),
             Err(_) => String::default(),
         }
     }

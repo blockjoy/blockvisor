@@ -1,6 +1,5 @@
 use anyhow::{bail, Context, Result};
-use babel_api::config::Entrypoint;
-use base64::Engine;
+use babel_api::{BabelRequest, BabelResponse};
 use firec::config::JailerMode;
 use firec::Machine;
 use futures_util::StreamExt;
@@ -11,11 +10,10 @@ use tokio::{fs::DirBuilder, time::sleep};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::node_data::NodeProperties;
 use crate::{
     env::*,
     node_connection,
-    node_connection::NodeConnection,
+    node_connection::{babelsup_pb, NodeConnection},
     node_data::{NodeData, NodeImage, NodeStatus},
     services::cookbook::CookbookService,
     utils::{get_process_pid, run_cmd},
@@ -119,6 +117,16 @@ impl Node {
 
         self.machine.start().await?;
         self.node_conn = NodeConnection::try_open(self.id(), NODE_START_TIMEOUT).await?;
+        let config = toml::to_string(&self.data.babel_conf.supervisor)?;
+        self.node_conn
+            .babelsup_client()
+            .await?
+            .setup_supervisor(babelsup_pb::SetupSupervisorRequest { config })
+            .await?;
+        let resp = self.node_conn.babel_rpc(BabelRequest::Ping).await;
+        if !matches!(resp, Ok(BabelResponse::Pong)) {
+            bail!("Babel Ping request did not respond with `Pong`, but `{resp:?}`")
+        }
 
         // We save the `running` status only after all of the previous steps have succeeded.
         self.data.expected_status = NodeStatus::Running;
@@ -221,45 +229,11 @@ impl Node {
         Ok(())
     }
 
-    fn build_entrypoint_params(
-        entry_points: &[Entrypoint],
-        properties: &NodeProperties,
-    ) -> Result<String> {
-        // join all entrypoints arguments
-        let args = entry_points
-            .iter()
-            .fold(String::new(), |mut args, entrypoint| {
-                args.push_str(&entrypoint.args.join(""));
-                args
-            });
-        let params: HashMap<&String, &String> = properties
-            .iter()
-            // leave only properties that are used in entrypoints args
-            .filter(|(key, _)| args.contains(&format!("{{{{{}}}}}", key.to_uppercase())))
-            .collect();
-        // validate params values and fail early
-        if let Some((key, invalid_value)) = params.iter().find(|(_, value)| {
-            !value
-                .chars()
-                .all(|c| c.is_alphanumeric() || "_-,.".contains(c))
-        }) {
-            bail!("entry_point param '{key}' has invalid value '{invalid_value}'")
-        }
-        Ok(
-            base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(postcard::to_allocvec(&params)?),
-        )
-    }
-
     async fn create_config(data: &NodeData) -> Result<firec::config::Config<'static>> {
-        let babel = CookbookService::get_babel_config(&data.image).await?;
         let kernel_args = format!(
             "console=ttyS0 reboot=k panic=1 pci=off random.trust_cpu=on \
-            ip={}::{}:255.255.255.240::eth0:on {}{}",
-            data.network_interface.ip,
-            data.network_interface.gateway,
-            babel_api::BABELSUP_ENTRYPOINT_PARAMS,
-            Self::build_entrypoint_params(&babel.supervisor.entry_point, &data.properties)?,
+            ip={}::{}:255.255.255.240::eth0:on",
+            data.network_interface.ip, data.network_interface.gateway,
         );
         if kernel_args.len() > MAX_KERNEL_ARGS_LEN {
             bail!("to long kernel_args {kernel_args}")
@@ -433,44 +407,5 @@ impl Node {
     pub async fn generate_keys(&mut self) -> Result<String> {
         self.call_method(&babel_api::BabelMethod::GenerateKeys, HashMap::new())
             .await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_build_entrypoint_params() -> Result<()> {
-        let entrypoints = vec![Entrypoint {
-            command: "irrelevant".to_string(),
-            args: vec![
-                "none_parametrized_argument".to_string(),
-                "first_parametrized_{{PARAM1}}_argument".to_string(),
-                "second_parametrized{{PARAM1}}_{{PARAM2}}_argument".to_string(),
-            ],
-        }];
-        let mut node_props = HashMap::from([
-            ("PARAM1".to_string(), "Value.1,-_Q".to_string()),
-            ("PARAM2".to_string(), "Value.2,-_Q".to_string()),
-            ("PARAM3".to_string(), "?Value.1,-_Q".to_string()),
-        ]);
-        assert_eq!(
-            HashMap::from([
-                ("PARAM1".to_string(), "Value.1,-_Q".to_string()),
-                ("PARAM2".to_string(), "Value.2,-_Q".to_string()),
-            ]),
-            postcard::from_bytes::<HashMap<String, String>>(
-                &base64::engine::general_purpose::URL_SAFE_NO_PAD
-                    .decode(Node::build_entrypoint_params(&entrypoints, &node_props)?)?,
-            )?
-        );
-        assert_eq!(
-            "AA",
-            Node::build_entrypoint_params(&entrypoints, &Default::default())?
-        );
-        node_props.get_mut("PARAM1").unwrap().push('@');
-        assert!(Node::build_entrypoint_params(&entrypoints, &node_props).is_err());
-        Ok(())
     }
 }

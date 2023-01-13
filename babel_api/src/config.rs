@@ -26,7 +26,7 @@ pub struct SupervisorConfig {
     pub entry_point: Vec<Entrypoint>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Entrypoint {
     pub command: String,
     pub args: Vec<String>,

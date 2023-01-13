@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use babel_api::config::Babel;
+use babel_api::config::{Babel, Entrypoint};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -22,6 +22,7 @@ use crate::{
         cookbook::CookbookService,
         keyfiles::KeyService,
     },
+    utils,
 };
 
 fn id_not_found(id: Uuid) -> anyhow::Error {
@@ -71,8 +72,10 @@ impl Nodes {
             bail!("Node with name `{name}` exists");
         }
 
-        let babel_conf = self.fetch_image_data(&image).await?;
+        let mut babel_conf = self.fetch_image_data(&image).await?;
         check_babel_version(&babel_conf.config.min_babel_version)?;
+        babel_conf.supervisor.entry_point =
+            render_entry_point_args(&babel_conf.supervisor.entry_point, &properties)?;
 
         let _ = self.send_container_status(&id, ContainerStatus::Creating);
 
@@ -87,7 +90,7 @@ impl Nodes {
             image,
             expected_status: NodeStatus::Stopped,
             network_interface,
-            babel_conf, // TODO MJR put here whole babel config with entrypoint args placeholders filled up
+            babel_conf,
             self_update: false,
             properties,
         };
@@ -489,4 +492,92 @@ pub fn check_babel_version(min_babel_version: &str) -> Result<()> {
         bail!("Required minimum babel version is `{min_babel_version}`, running is `{version}`");
     }
     Ok(())
+}
+
+fn render_entry_point_args(
+    entry_points: &[Entrypoint],
+    params: &NodeProperties,
+) -> Result<Vec<Entrypoint>> {
+    // join all entrypoints arguments
+    let args = entry_points
+        .iter()
+        .fold(String::new(), |mut args, entrypoint| {
+            args.push_str(&entrypoint.args.join(""));
+            args
+        });
+    let params: HashMap<&String, &String> = params
+        .iter()
+        // leave only properties that are used in entrypoints args
+        .filter(|(key, _)| args.contains(&format!("{{{{{}}}}}", key.to_uppercase())))
+        .collect();
+    // validate params values and fail early
+    if let Some((key, invalid_value)) = params.iter().find(|(_, value)| {
+        !value
+            .chars()
+            .all(|c| c.is_alphanumeric() || "_-,.".contains(c))
+    }) {
+        bail!("entry_point param '{key}' has invalid value '{invalid_value}'")
+    }
+
+    let mut entry_points = entry_points.to_vec();
+    for item in &mut entry_points {
+        for arg in &mut item.args {
+            *arg = utils::render(arg.as_str(), &params);
+        }
+    }
+    Ok(entry_points)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_entry_point_args() -> Result<()> {
+        let entrypoints = vec![
+            Entrypoint {
+                command: "cmd1".to_string(),
+                args: vec![
+                    "none_parametrized_argument".to_string(),
+                    "first_parametrized_{{PARAM1}}_argument".to_string(),
+                    "second_parametrized_{{PARAM1}}_{{PARAM2}}_argument".to_string(),
+                ],
+            },
+            Entrypoint {
+                command: "cmd2".to_owned(),
+                args: vec![
+                    "{{PARAM1}} and {{PARAM2}} twice {{PARAM1}}".to_owned(),
+                    "none{a} or {{MISSING}}".to_owned(),
+                ],
+            },
+        ];
+        let mut node_props = HashMap::from([
+            ("PARAM1".to_string(), "Value.1,-_Q".to_string()),
+            ("PARAM2".to_string(), "Value.2,-_Q".to_string()),
+            ("PARAM3".to_string(), "!Invalid_but_not_used".to_string()),
+        ]);
+        assert_eq!(
+            vec![
+                Entrypoint {
+                    command: "cmd1".to_string(),
+                    args: vec![
+                        "none_parametrized_argument".to_string(),
+                        "first_parametrized_Value.1,-_Q_argument".to_string(),
+                        "second_parametrized_Value.1,-_Q_Value.2,-_Q_argument".to_string(),
+                    ],
+                },
+                Entrypoint {
+                    command: "cmd2".to_owned(),
+                    args: vec![
+                        "Value.1,-_Q and Value.2,-_Q twice Value.1,-_Q".to_owned(),
+                        "none{a} or {{MISSING}}".to_owned(),
+                    ],
+                }
+            ],
+            render_entry_point_args(&entrypoints, &node_props)?
+        );
+        node_props.get_mut("PARAM1").unwrap().push('@');
+        assert!(render_entry_point_args(&entrypoints, &node_props).is_err());
+        Ok(())
+    }
 }

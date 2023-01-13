@@ -1,7 +1,9 @@
 use anyhow::{bail, Context, Result};
 use semver::Version;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fmt::Display;
 use std::path::PathBuf;
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::fs;
@@ -115,8 +117,21 @@ pub fn semver_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
+/// Renders a template by filling in uppercased, `{{ }}`-delimited template strings with the
+/// values in the `params` dictionary.
+pub fn render(template: &str, params: &HashMap<impl Display, impl Display>) -> String {
+    let mut res = template.to_string();
+    for (key, value) in params {
+        // This formats a parameter like `url` as `{{URL}}`
+        let placeholder = format!("{{{{{}}}}}", key.to_string().to_uppercase());
+        res = res.replace(&placeholder, &value.to_string());
+    }
+    res
+}
+
 #[cfg(test)]
 pub mod tests {
+    use super::*;
     use http::{Request, Response};
     use hyper::Body;
     use std::convert::Infallible;
@@ -209,5 +224,24 @@ pub mod tests {
                     .unwrap();
             }),
         }
+    }
+
+    #[test]
+    fn test_render() {
+        let s = |s: &str| s.to_string(); // to make the test less verbose
+        let par1 = s("val1");
+        let par2 = s("val2");
+        let par3 = s("val3 val4");
+        let params = [(s("par1"), par1), (s("pAr2"), par2), (s("PAR3"), par3)]
+            .into_iter()
+            .collect();
+        let render = |template| render(template, &params);
+
+        assert_eq!(render("{{PAR1}} bla"), "val1 bla");
+        assert_eq!(render("{{PAR2}} waa"), "val2 waa");
+        assert_eq!(render("{{PAR3}} kra"), "val3 val4 kra");
+        assert_eq!(render("{{par1}} woo"), "{{par1}} woo");
+        assert_eq!(render("{{pAr2}} koo"), "{{pAr2}} koo");
+        assert_eq!(render("{{PAR3}} doo"), "val3 val4 doo");
     }
 }

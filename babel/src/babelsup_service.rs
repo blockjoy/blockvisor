@@ -1,4 +1,7 @@
-use crate::babelsup_service::pb::{start_new_babel_request, StartNewBabelRequest};
+use crate::babelsup_service::pb::{
+    start_new_babel_request, SetSupervisorConfigRequest, SetSupervisorConfigResponse,
+    StartNewBabelRequest,
+};
 use crate::utils;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -84,6 +87,13 @@ impl pb::babel_sup_server::BabelSup for BabelSupService {
                  doesn't match expected ({expected_checksum})"
             )))
         }
+    }
+
+    async fn set_supervisor_config(
+        &self,
+        _request: Request<SetSupervisorConfigRequest>,
+    ) -> Result<Response<SetSupervisorConfigResponse>, Status> {
+        todo!()
     }
 }
 

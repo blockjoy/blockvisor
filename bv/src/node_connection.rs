@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use babel_api::{BabelRequest, BabelResponse};
 use std::env;
 use std::time::Duration;
 use tokio::fs::File;
@@ -67,16 +66,10 @@ impl NodeConnection {
                 .start_new_babel(tokio_stream::iter(babel_bin))
                 .await?;
         }
-        let mut connection = Self {
+        Ok(Self {
             node_id,
             state: NodeConnectionState::BabelSup { client },
-        };
-        let resp = connection.babel_rpc(BabelRequest::Ping).await;
-        if matches!(resp, Ok(BabelResponse::Pong)) {
-            Ok(connection)
-        } else {
-            bail!("Babel Ping request did not respond with `Pong`, but `{resp:?}`")
-        }
+        })
     }
 
     /// This function combines the capabilities from `write_data` and `read_data` to allow you to
