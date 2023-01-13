@@ -16,7 +16,7 @@ use crate::{
     env::{REGISTRY_CONFIG_DIR, REGISTRY_CONFIG_FILE},
     network_interface::NetworkInterface,
     node::Node,
-    node_data::{NodeData, NodeImage, NodeProperties, NodeRequirements, NodeStatus},
+    node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     services::{
         api::{pb, pb::node_info::ContainerStatus},
         cookbook::CookbookService,
@@ -71,8 +71,8 @@ impl Nodes {
             bail!("Node with name `{name}` exists");
         }
 
-        let babel = self.fetch_image_data(&image).await?;
-        check_babel_version(&babel.config.min_babel_version)?;
+        let babel_conf = self.fetch_image_data(&image).await?;
+        check_babel_version(&babel_conf.config.min_babel_version)?;
 
         let _ = self.send_container_status(&id, ContainerStatus::Creating);
 
@@ -81,19 +81,13 @@ impl Nodes {
         let gateway = gateway.parse()?;
         let network_interface = self.create_network_interface(ip, gateway).await?;
 
-        let requirements = NodeRequirements {
-            vcpu_count: babel.requirements.vcpu_count,
-            mem_size_mb: babel.requirements.mem_size_mb,
-            disk_size_gb: babel.requirements.disk_size_gb,
-        };
-
         let node = NodeData {
             id,
             name: name.clone(),
             image,
             expected_status: NodeStatus::Stopped,
             network_interface,
-            requirements,
+            babel_conf, // TODO MJR put here whole babel config with entrypoint args placeholders filled up
             self_update: false,
             properties,
         };
@@ -126,9 +120,9 @@ impl Nodes {
         if image.node_type != node.data.image.node_type {
             bail!("Cannot upgrade node type to `{}`", image.node_type);
         }
-        if node.data.requirements.vcpu_count != babel.requirements.vcpu_count
-            || node.data.requirements.mem_size_mb != babel.requirements.mem_size_mb
-            || node.data.requirements.disk_size_gb != babel.requirements.disk_size_gb
+        if node.data.babel_conf.requirements.vcpu_count != babel.requirements.vcpu_count
+            || node.data.babel_conf.requirements.mem_size_mb != babel.requirements.mem_size_mb
+            || node.data.babel_conf.requirements.disk_size_gb != babel.requirements.disk_size_gb
         {
             bail!("Cannot upgrade node requirements");
         }

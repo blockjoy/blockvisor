@@ -49,7 +49,7 @@ impl Node {
     pub async fn create(data: NodeData) -> Result<Self> {
         let node_id = data.id;
         let config = Node::create_config(&data).await?;
-        Node::create_data_image(&node_id, data.requirements.disk_size_gb).await?;
+        Node::create_data_image(&node_id, data.babel_conf.requirements.disk_size_gb).await?;
         let machine = Machine::create(config).await?;
 
         data.save().await?;
@@ -280,8 +280,8 @@ impl Node {
             .build()
             // Machine configuration.
             .machine_cfg()
-            .vcpu_count(data.requirements.vcpu_count)
-            .mem_size_mib(data.requirements.mem_size_mb as i64)
+            .vcpu_count(data.babel_conf.requirements.vcpu_count)
+            .mem_size_mib(data.babel_conf.requirements.mem_size_mb as i64)
             .build()
             // Add root drive.
             .add_drive("root", root_fs_path)
@@ -376,14 +376,13 @@ impl Node {
     /// Returns the methods that are supported by this blockchain. Calling any method on this
     /// blockchain that is not listed here will result in an error being returned.
     pub async fn capabilities(&mut self) -> Result<Vec<String>> {
-        // TODO don't need to ask babel anymore, we have babel.conf
-        let request = babel_api::BabelRequest::ListCapabilities;
-        let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
-        let capabilities = match resp {
-            babel_api::BabelResponse::ListCapabilities(caps) => caps,
-            e => bail!("Unexpected BabelResponse for `capabilities`: `{e:?}`"),
-        };
-        Ok(capabilities)
+        Ok(self
+            .data
+            .babel_conf
+            .methods
+            .keys()
+            .map(|method| method.to_string())
+            .collect())
     }
 
     /// Checks if node has some particular capability

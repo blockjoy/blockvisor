@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, collections::HashMap};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Babel {
     pub export: Option<Vec<String>>,
     pub env: Option<Env>,
@@ -15,7 +15,7 @@ pub struct Babel {
     pub methods: BTreeMap<String, Method>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupervisorConfig {
     ///  if entry_point stay alive given amount of time (in miliseconds) backof is reset
     pub backoff_timeout_ms: u64,
@@ -26,7 +26,7 @@ pub struct SupervisorConfig {
     pub entry_point: Vec<Entrypoint>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entrypoint {
     pub command: String,
     pub args: Vec<String>,
@@ -56,12 +56,12 @@ where
     Ok(map)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Env {
     pub path_append: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// A semver version of the babel program, indicating the minimum version of the babel
     /// program that a config file is compatible with.
@@ -84,7 +84,7 @@ pub struct Config {
     pub data_directory_mount_point: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Requirements {
     // Virtual cores to share with VM
     pub vcpu_count: usize,
@@ -94,7 +94,7 @@ pub struct Requirements {
     pub disk_size_gb: usize,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum NetType {
     Dev,
@@ -102,7 +102,7 @@ pub enum NetType {
     Main,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NetConfiguration {
     pub name: String,
     pub url: String,
@@ -110,7 +110,7 @@ pub struct NetConfiguration {
     pub meta: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "transport", rename_all = "kebab-case")]
 pub enum Method {
     Jrpc {
@@ -151,26 +151,26 @@ impl Method {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JrpcResponse {
     pub code: u32,
     pub field: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RestResponse {
     pub status: u32,
     pub field: Option<String>,
     pub format: MethodResponseFormat,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShResponse {
     pub status: i32,
     pub format: MethodResponseFormat,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MethodResponseFormat {
     Raw,
