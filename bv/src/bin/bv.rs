@@ -349,7 +349,24 @@ impl NodeClient {
                 let ids = self.get_node_ids(id_or_names).await?;
                 self.stop_nodes(&ids).await?;
             }
-            NodeCommand::Delete { id_or_names } => {
+            NodeCommand::Delete { id_or_names, all } => {
+                // We only respect the `--all` flag when `id_or_names` is empty, in order to
+                // prevent a typo from accidentally deleting all nodes.
+                let id_or_names = if id_or_names.is_empty() && all {
+                    let mut input = String::new();
+                    println!("Are you sure you want to delete all nodes? [y/N]:");
+                    std::io::stdin().read_line(&mut input)?;
+                    if input.trim().to_lowercase() != "y" {
+                        return Ok(());
+                    }
+                    self.fetch_nodes()
+                        .await?
+                        .into_iter()
+                        .map(|n| n.id)
+                        .collect()
+                } else {
+                    id_or_names
+                };
                 for id_or_name in id_or_names {
                     let id = self.resolve_id_or_name(&id_or_name).await?.to_string();
                     self.client

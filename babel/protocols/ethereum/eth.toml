@@ -80,7 +80,7 @@ test /blockjoy/.init && \
     echo {{SECRET}} > /blockjoy/secret && \
     mkdir /blockjoy/validator_keys -p && \
     rm /blockjoy/validator_keys/* -f && \
-    for key in {{KEYS}}; do echo $key > /blockjoy/validator_keys/$key.json; done && \
+    for key in {{KEYS}}; do echo $key > /blockjoy/validator_keys/keystore-$(shuf -i 100000-999999 -n 1).json; done && \
     lighthouse --network {{NETWORK}} account validator import --directory /blockjoy/validator_keys --reuse-password --password-file /blockjoy/secret && \
     touch /blockjoy/.init
 """
