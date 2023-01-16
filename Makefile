@@ -50,14 +50,20 @@ install: bundle
 
 	systemctl daemon-reload
 	systemctl enable blockvisor.service
-	for image in $$(find /var/lib/blockvisor/images/ -name *.img); do \
+	for image in $$(find /var/lib/blockvisor/images/ -name "*.img"); do \
+		echo $$image; \
 		mount $$image /mnt/fc; \
 		rm -f /mnt/fc/usr/bin/babel; \
 		install -m u=rwx,g=rx,o=rx target/x86_64-unknown-linux-musl/release/babelsup /mnt/fc/usr/bin/; \
 		install -m u=rw,g=r,o=r babel/data/babelsup.service /mnt/fc/etc/systemd/system/; \
 		install -m u=rw,g=r,o=r babel/protocols/helium/helium-validator.toml /mnt/fc/etc/babel.conf; \
+		rm -f /mnt/fc/etc/systemd/system/multi-user.target.wants/babelsup.service; \
 		ln -s /mnt/fc/etc/systemd/system/babelsup.service /mnt/fc/etc/systemd/system/multi-user.target.wants/babelsup.service; \
 		umount /mnt/fc; \
+	done
+	for babel_conf in $$(find /var/lib/blockvisor/images/ -name "*.toml"); do \
+		echo $$babel_conf; \
+		cp -f babel/protocols/helium/helium-validator.toml $$babel_conf; \
 	done
 
 reinstall:
