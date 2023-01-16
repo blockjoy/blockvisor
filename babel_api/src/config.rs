@@ -17,6 +17,8 @@ pub struct Babel {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupervisorConfig {
+    /// Path to mount data drive to
+    pub data_directory_mount_point: String,
     ///  if entry_point stay alive given amount of time (in miliseconds) backof is reset
     pub backoff_timeout_ms: u64,
     /// base time (in miliseconds) for backof, multiplied by consecutive power of 2 each time
@@ -35,6 +37,7 @@ pub struct Entrypoint {
 impl Default for SupervisorConfig {
     fn default() -> Self {
         Self {
+            data_directory_mount_point: "/blockjoy/miner/data".to_string(),
             backoff_timeout_ms: 60_000,
             backoff_base_ms: 100,
             log_buffer_capacity_ln: 1_000,
@@ -80,8 +83,6 @@ pub struct Config {
     /// Ports used by blockchain software
     /// Ports visibility will be controlled with some kind of firewall
     pub ports: Vec<u16>,
-    /// Path to mount data drive to
-    pub data_directory_mount_point: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

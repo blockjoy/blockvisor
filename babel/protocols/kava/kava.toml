@@ -12,7 +12,6 @@ description = "kava blockchain validator"
 api_host = "http://localhost:26656/"
 # kava evm endopoint to connect to metamask: http://localhost:8545
 ports = [26656, 8545]
-data_directory_mount_point = "/blockjoy/miner/data"
 
 [requirements]
 vcpu_count = 2
@@ -23,6 +22,7 @@ disk_size_gb = 500
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
+data_directory_mount_point = "/blockjoy/miner/data"
 
     [[supervisor.entry_point]]
     command = "todo"

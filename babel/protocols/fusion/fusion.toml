@@ -11,7 +11,6 @@ min_babel_version = "0.0.1"
 description = "fusion blockchain validator"
 api_host = "http://localhost:9000/"
 ports = [9000]
-data_directory_mount_point = "/blockjoy/miner/data"
 
 [requirements] 
 vcpu_count = 2
@@ -22,6 +21,7 @@ disk_size_gb = 100
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
+data_directory_mount_point = "/blockjoy/miner/data"
 
     [[supervisor.entry_point]]
     command = "todo"
