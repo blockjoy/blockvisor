@@ -1,5 +1,6 @@
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::SendError;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
@@ -15,13 +16,20 @@ pub struct LogBuffer {
 impl LogBuffer {
     /// Create new LogBuffer with given capacity.
     /// NOTE: According to `tokio::broadcast` implementation capacity is rounded up to next power of 2.
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(mut capacity: usize) -> Self {
+        if capacity == 0 {
+            capacity = 1; // tokio panic if it's 0, but we don't
+        }
         let (tx, rx) = broadcast::channel(capacity);
         Self { tx, rx }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<String> {
         self.rx.resubscribe()
+    }
+
+    pub fn send(&self, msg: String) -> Result<usize, SendError<String>> {
+        self.tx.send(msg)
     }
 
     pub fn attach<T, U>(

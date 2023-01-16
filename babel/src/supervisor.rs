@@ -1,7 +1,11 @@
+/// This module implements supervisor for node entry points. It spawn child processes as defined in
+/// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
+/// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::log_buffer::LogBuffer;
 use crate::run_flag::RunFlag;
 use async_trait::async_trait;
-use babel_api::config::{Entrypoint, SupervisorConfig as Config};
+use babel_api::config::{Entrypoint, SupervisorConfig};
+use eyre::bail;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -11,9 +15,9 @@ use std::process::Stdio;
 use std::time::Instant;
 use sysinfo::{Pid, Process, ProcessExt, System, SystemExt};
 use tokio::process::Command;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{oneshot, watch};
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Time abstraction for better testing.
 #[async_trait]
@@ -22,59 +26,92 @@ pub trait Timer {
     async fn sleep(duration: Duration);
 }
 
-/// This module implements supervisor for node entry points. It spawn child processes as defined in
-/// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
-/// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
-pub struct Supervisor<T: Timer> {
+pub fn load_config(toml_str: &str) -> eyre::Result<SupervisorConfig> {
+    let cfg: SupervisorConfig = toml::from_str(toml_str)?;
+    if cfg.entry_point.is_empty() {
+        bail!("no entry point defined");
+    }
+    debug!("Loaded supervisor configuration: {:?}", &cfg);
+    Ok(cfg)
+}
+
+pub struct SupervisorSetup {
+    pub log_buffer: LogBuffer,
+    pub config: SupervisorConfig,
+}
+
+impl SupervisorSetup {
+    pub fn new(config: SupervisorConfig) -> Self {
+        let log_buffer = LogBuffer::new(config.log_buffer_capacity_ln);
+        Self { log_buffer, config }
+    }
+}
+
+pub type BabelChangeTx = watch::Sender<Option<u32>>;
+pub type BabelChangeRx = watch::Receiver<Option<u32>>;
+pub type SupervisorSetupRx = oneshot::Receiver<SupervisorSetup>;
+pub type SupervisorSetupTx = Option<oneshot::Sender<SupervisorSetup>>;
+
+pub async fn run<T: Timer>(
     run: RunFlag,
-    config: Config,
+    babel_path: PathBuf,
+    sup_setup_rx: SupervisorSetupRx,
+    babel_change_rx: BabelChangeRx,
+) {
+    let babel_change_rx = wait_for_babel_bin(run.clone(), babel_change_rx).await;
+    if let Some(supervisor) = wait_for_setup::<T>(run, babel_path, sup_setup_rx).await {
+        supervisor.kill_all_remnants();
+
+        let mut futures = FuturesUnordered::new();
+        for entry_point in &supervisor.config.entry_point {
+            futures.push(supervisor.run_entrypoint(entry_point));
+        }
+        let entry_futures = async { while (futures.next().await).is_some() {} };
+        tokio::join!(entry_futures, supervisor.run_babel(babel_change_rx));
+    }
+}
+
+async fn wait_for_babel_bin(mut run: RunFlag, mut babel_change_rx: BabelChangeRx) -> BabelChangeRx {
+    // if there is no babel binary yet, then just wait for babel start signal from blockvisord
+    if babel_change_rx.borrow_and_update().is_none() {
+        tokio::select!(
+            _ = babel_change_rx.changed() => {},
+            _ = run.wait() => {},
+        );
+    }
+    babel_change_rx
+}
+
+async fn wait_for_setup<T: Timer>(
+    mut run: RunFlag,
+    babel_path: PathBuf,
+    sup_setup_rx: SupervisorSetupRx,
+) -> Option<Supervisor<T>> {
+    tokio::select!(
+        setup = sup_setup_rx => {
+            Some(Supervisor::new(run, babel_path, setup.ok()?))
+        },
+        _ = run.wait() => None, // return anything
+    )
+}
+
+struct Supervisor<T: Timer> {
+    run: RunFlag,
     babel_path: PathBuf,
     log_buffer: LogBuffer,
-    babel_change_rx: watch::Receiver<Option<u32>>,
+    config: SupervisorConfig,
     phantom: PhantomData<T>,
 }
 
 impl<T: Timer> Supervisor<T> {
-    pub fn new(
-        run: RunFlag,
-        config: Config,
-        babel_path: PathBuf,
-        babel_change_rx: watch::Receiver<Option<u32>>,
-    ) -> Self {
-        let log_buffer = LogBuffer::new(config.log_buffer_capacity_ln);
-        Self {
+    fn new(run: RunFlag, babel_path: PathBuf, setup: SupervisorSetup) -> Self {
+        Supervisor {
             run,
-            config,
             babel_path,
-            log_buffer,
-            babel_change_rx,
+            log_buffer: setup.log_buffer,
+            config: setup.config,
             phantom: Default::default(),
         }
-    }
-
-    pub fn get_logs_rx(&self) -> broadcast::Receiver<String> {
-        self.log_buffer.subscribe()
-    }
-
-    pub async fn run(self) {
-        let mut babel_change_rx = self.babel_change_rx.clone();
-        let mut run = self.run.clone();
-        // if there is no babel binary yet, then just wait for babel start signal from blockvisord
-        if babel_change_rx.borrow_and_update().is_none() {
-            tokio::select!(
-                _ = babel_change_rx.changed() => {},
-                _ = run.wait() => {},
-            );
-        }
-
-        self.kill_all_remnants();
-
-        let mut futures = FuturesUnordered::new();
-        for entry_point in &self.config.entry_point {
-            futures.push(self.run_entrypoint(entry_point));
-        }
-        let entry_futures = async { while (futures.next().await).is_some() {} };
-        tokio::join!(entry_futures, self.run_babel(babel_change_rx));
     }
 
     /// Check if there are no remnant child processes after previous run.
@@ -93,7 +130,7 @@ impl<T: Timer> Supervisor<T> {
         }
     }
 
-    async fn run_babel(&self, mut babel_change_rx: watch::Receiver<Option<u32>>) {
+    async fn run_babel(&self, mut babel_change_rx: BabelChangeRx) {
         let mut cmd = Command::new(&self.babel_path);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut run = self.run.clone();
@@ -192,7 +229,7 @@ struct Backoff<T: Timer> {
 }
 
 impl<T: Timer> Backoff<T> {
-    fn new(run: RunFlag, config: &Config) -> Self {
+    fn new(run: RunFlag, config: &SupervisorConfig) -> Self {
         Self {
             counter: 0,
             timestamp: Instant::now(),
@@ -238,6 +275,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Instant;
+    use tokio::sync::broadcast;
     use tokio::time::Duration;
 
     mock! {
@@ -255,8 +293,20 @@ mod tests {
         ctrl_file: PathBuf,
         babel_path: PathBuf,
         run: RunFlag,
-        babel_change_tx: watch::Sender<Option<u32>>,
-        babel_change_rx: watch::Receiver<Option<u32>>,
+        babel_change_tx: BabelChangeTx,
+        babel_change_rx: BabelChangeRx,
+        sup_setup_tx: SupervisorSetupTx,
+        sup_setup_rx: SupervisorSetupRx,
+    }
+
+    impl TestEnv {
+        fn setup(&mut self, config: SupervisorConfig) -> Option<broadcast::Receiver<String>> {
+            let sup_setup_tx = self.sup_setup_tx.take()?;
+            let sup_setup = SupervisorSetup::new(config);
+            let rx = sup_setup.log_buffer.subscribe();
+            sup_setup_tx.send(sup_setup).ok();
+            Some(rx)
+        }
     }
 
     fn setup_test_env() -> Result<TestEnv> {
@@ -278,6 +328,7 @@ mod tests {
         writeln!(babel, "touch {}", ctrl_file.to_string_lossy())?;
         writeln!(babel, "sleep infinity")?;
         let (babel_change_tx, babel_change_rx) = watch::channel(Some(0));
+        let (sup_setup_tx, sup_setup_rx) = oneshot::channel();
         Ok(TestEnv {
             tmp_root,
             ctrl_file,
@@ -285,6 +336,8 @@ mod tests {
             run,
             babel_change_tx,
             babel_change_rx,
+            sup_setup_tx: Some(sup_setup_tx),
+            sup_setup_rx,
         })
     }
 
@@ -302,10 +355,11 @@ mod tests {
         });
     }
 
-    fn minimal_cfg() -> Config {
-        Config {
+    fn minimal_cfg() -> SupervisorConfig {
+        SupervisorConfig {
             backoff_timeout_ms: 600,
             backoff_base_ms: 10,
+            log_buffer_capacity_ln: 10,
             entry_point: vec![Entrypoint {
                 command: "echo".to_owned(),
                 args: vec!["test".to_owned()],
@@ -317,7 +371,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_backoff_timeout_ms() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
         let cfg = minimal_cfg();
         let now = Instant::now();
 
@@ -334,13 +388,13 @@ mod tests {
             test_run.stop();
         });
 
-        Supervisor::<MockTestTimer>::new(
+        test_env.setup(cfg);
+        run::<MockTestTimer>(
             test_env.run,
-            cfg,
             test_env.babel_path,
+            test_env.sup_setup_rx,
             test_env.babel_change_rx,
         )
-        .run()
         .await;
         Ok(())
     }
@@ -348,8 +402,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_exponential_backoff() -> Result<()> {
-        let test_env = setup_test_env()?;
-        let cfg = minimal_cfg();
+        let mut test_env = setup_test_env()?;
         let mut test_run = test_env.run.clone();
 
         let now = Instant::now();
@@ -373,13 +426,13 @@ mod tests {
             .returning(move |_| {
                 test_run.stop();
             });
-        Supervisor::<MockTestTimer>::new(
+        test_env.setup(minimal_cfg());
+        run::<MockTestTimer>(
             test_env.run,
-            cfg,
             test_env.babel_path,
+            test_env.sup_setup_rx,
             test_env.babel_change_rx,
         )
-        .run()
         .await;
         Ok(())
     }
@@ -387,9 +440,9 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_multiple_entry_points() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
         let file_path = test_env.tmp_root.join("test_multiple_entry_points");
-        let cfg = Config {
+        let cfg = SupervisorConfig {
             backoff_timeout_ms: 600,
             backoff_base_ms: 10,
             entry_point: vec![
@@ -427,13 +480,13 @@ mod tests {
             test_run.stop();
         });
         let _ = fs::remove_file(&file_path);
-        Supervisor::<MockTestTimer>::new(
+        test_env.setup(cfg);
+        run::<MockTestTimer>(
             test_env.run,
-            cfg,
             test_env.babel_path,
+            test_env.sup_setup_rx,
             test_env.babel_change_rx,
         )
-        .run()
         .await;
         assert!(!file_path.exists());
         Ok(())
@@ -442,8 +495,8 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_babel_restart() -> Result<()> {
-        let test_env = setup_test_env()?;
-        let cfg = Config {
+        let mut test_env = setup_test_env()?;
+        let cfg = SupervisorConfig {
             backoff_timeout_ms: 600,
             backoff_base_ms: 10,
             entry_point: vec![Entrypoint {
@@ -454,13 +507,8 @@ mod tests {
         };
         let mut test_run = test_env.run.clone();
 
+        test_env.setup(cfg.clone());
         let babel_change_tx = Arc::new(test_env.babel_change_tx);
-        let supervisor = Supervisor::<MockTestTimer>::new(
-            test_env.run,
-            cfg.clone(),
-            test_env.babel_path.clone(),
-            test_env.babel_change_rx,
-        );
 
         let now = Instant::now();
         let now_ctx = MockTestTimer::now_context();
@@ -494,7 +542,13 @@ mod tests {
             now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1))
         });
 
-        supervisor.run().await;
+        run::<MockTestTimer>(
+            test_env.run,
+            test_env.babel_path,
+            test_env.sup_setup_rx,
+            test_env.babel_change_rx,
+        )
+        .await;
         assert!(test_env.ctrl_file.exists());
         Ok(())
     }
@@ -502,16 +556,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_logs() -> Result<()> {
-        let test_env = setup_test_env()?;
-        let cfg = Config {
-            backoff_timeout_ms: 600,
-            backoff_base_ms: 10,
-            log_buffer_capacity_ln: 10,
-            entry_point: vec![Entrypoint {
-                command: "echo".to_owned(),
-                args: vec!["test".to_owned()],
-            }],
-        };
+        let mut test_env = setup_test_env()?;
         let mut test_run = test_env.run.clone();
 
         let now = Instant::now();
@@ -526,14 +571,14 @@ mod tests {
             test_run.stop();
             wait_for_babel(test_run.clone(), control_file.clone());
         });
-        let supervisor = Supervisor::<MockTestTimer>::new(
+        let mut rx = test_env.setup(minimal_cfg()).unwrap();
+        run::<MockTestTimer>(
             test_env.run,
-            cfg,
             test_env.babel_path,
+            test_env.sup_setup_rx,
             test_env.babel_change_rx,
-        );
-        let mut rx = supervisor.get_logs_rx();
-        supervisor.run().await;
+        )
+        .await;
 
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {
@@ -550,28 +595,28 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_babel_only() -> Result<()> {
-        let test_env = setup_test_env()?;
-        let cfg = Config {
+        let mut test_env = setup_test_env()?;
+        let cfg = SupervisorConfig {
             backoff_timeout_ms: 600,
             backoff_base_ms: 10,
+            log_buffer_capacity_ln: 10,
             ..Default::default()
         };
         let test_run = test_env.run.clone();
 
         let now = Instant::now();
 
-        let supervisor = Supervisor::<MockTestTimer>::new(
-            test_env.run,
-            cfg,
-            test_env.babel_path,
-            test_env.babel_change_rx,
-        );
-
         let now_ctx = MockTestTimer::now_context();
         now_ctx.expect().once().returning(move || now);
         wait_for_babel(test_run.clone(), test_env.ctrl_file.clone());
-        let mut rx = supervisor.get_logs_rx();
-        supervisor.run().await;
+        let mut rx = test_env.setup(cfg).unwrap();
+        run::<MockTestTimer>(
+            test_env.run,
+            test_env.babel_path,
+            test_env.sup_setup_rx,
+            test_env.babel_change_rx,
+        )
+        .await;
 
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {

@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 use babel::{babelsup_service, utils};
 use babel::{config, logging, run_flag::RunFlag, supervisor};
-use eyre::Context;
+use babel_api::config::SupervisorConfig;
+use eyre::{anyhow, Context};
 use std::time::{Duration, Instant};
+use tokio::fs;
 use tokio::fs::DirBuilder;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{oneshot, watch};
 use tonic::transport::Server;
 
 const DATA_DRIVE_PATH: &str = "/dev/vdb";
@@ -17,7 +19,7 @@ async fn main() -> eyre::Result<()> {
 
     let cfg = config::load(&babel::env::BABEL_CONFIG_PATH).await?;
 
-    let data_dir = &cfg.config.data_directory_mount_point;
+    let data_dir = &cfg.supervisor.data_directory_mount_point;
     tracing::info!("Recursively creating data directory at {data_dir}");
     DirBuilder::new().recursive(true).create(&data_dir).await?;
     tracing::info!("Mounting data directory at {data_dir}");
@@ -34,16 +36,23 @@ async fn main() -> eyre::Result<()> {
 
     let (babel_change_tx, babel_change_rx) =
         watch::channel(utils::file_checksum(&babel::env::BABEL_BIN_PATH).await.ok());
+    let (sup_setup_tx, sup_setup_rx) = oneshot::channel();
+    let sup_setup_tx = if let Ok(cfg) = load_config().await {
+        sup_setup_tx
+            .send(supervisor::SupervisorSetup::new(cfg))
+            .map_err(|_| anyhow!("failed to setup supervisor"))?;
+        None
+    } else {
+        Some(sup_setup_tx)
+    };
 
-    let supervisor = supervisor::Supervisor::<SysTimer>::new(
+    let supervisor_handle = tokio::spawn(supervisor::run::<SysTimer>(
         run.clone(),
-        cfg.supervisor,
         babel::env::BABEL_BIN_PATH.clone(),
+        sup_setup_rx,
         babel_change_rx,
-    );
-    let logs_rx = supervisor.get_logs_rx();
-    let supervisor_handle = tokio::spawn(supervisor.run());
-    let res = serve(run.clone(), logs_rx, babel_change_tx).await;
+    ));
+    let res = serve(run.clone(), sup_setup_tx, babel_change_tx).await;
     if run.load() {
         // make sure to stop supervisor gracefully
         // in case of abnormal server shutdown
@@ -51,6 +60,15 @@ async fn main() -> eyre::Result<()> {
         supervisor_handle.await?;
     }
     res
+}
+
+async fn load_config() -> eyre::Result<SupervisorConfig> {
+    tracing::info!(
+        "Loading supervisor configuration at {}",
+        babel::env::BABELSUP_CONFIG_PATH.to_string_lossy()
+    );
+    let toml_str = fs::read_to_string(babel::env::BABELSUP_CONFIG_PATH.as_path()).await?;
+    supervisor::load_config(&toml_str)
 }
 
 struct SysTimer;
@@ -69,13 +87,14 @@ impl supervisor::Timer for SysTimer {
 #[cfg(target_os = "linux")]
 async fn serve(
     mut run: RunFlag,
-    logs_rx: broadcast::Receiver<String>,
-    babel_change_tx: watch::Sender<Option<u32>>,
+    sup_setup_tx: supervisor::SupervisorSetupTx,
+    babel_change_tx: supervisor::BabelChangeTx,
 ) -> eyre::Result<()> {
     let babelsup_service = babel::babelsup_service::BabelSupService::new(
-        logs_rx,
+        sup_setup_tx,
         babel_change_tx,
         babel::env::BABEL_BIN_PATH.clone(),
+        babel::env::BABELSUP_CONFIG_PATH.clone(),
     );
     let listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_SUPERVISOR_PORT)
         .with_context(|| "failed to bind to vsock")?;
@@ -93,8 +112,8 @@ async fn serve(
 #[cfg(not(target_os = "linux"))]
 async fn serve(
     _run: RunFlag,
-    _logs_rx: broadcast::Receiver<String>,
-    _babel_change_tx: watch::Sender<Option<u32>>,
+    _sup_setup_tx: supervisor::SupervisorSetupTx,
+    _babel_change_tx: supervisor::BabelChangeTx,
 ) -> eyre::Result<()> {
     unimplemented!()
 }
