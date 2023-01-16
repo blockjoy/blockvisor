@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use babel::{babelsup_service, utils};
-use babel::{config, logging, run_flag::RunFlag, supervisor};
+use babel::{logging, run_flag::RunFlag, supervisor};
 use babel_api::config::SupervisorConfig;
 use eyre::{anyhow, Context};
 use std::time::{Duration, Instant};
@@ -17,27 +17,13 @@ const VSOCK_SUPERVISOR_PORT: u32 = 41;
 async fn main() -> eyre::Result<()> {
     logging::setup_logging()?;
 
-    let cfg = config::load(&babel::env::BABEL_CONFIG_PATH).await?;
-
-    let data_dir = &cfg.supervisor.data_directory_mount_point;
-    tracing::info!("Recursively creating data directory at {data_dir}");
-    DirBuilder::new().recursive(true).create(&data_dir).await?;
-    tracing::info!("Mounting data directory at {data_dir}");
-    // We assume that root drive will become /dev/vda, and data drive will become /dev/vdb inside VM
-    // However, this can be a wrong assumption ¯\_(ツ)_/¯:
-    // https://github.com/firecracker-microvm/firecracker-containerd/blob/main/docs/design-approaches.md#block-devices
-    let output = tokio::process::Command::new("mount")
-        .args([DATA_DRIVE_PATH, data_dir])
-        .output()
-        .await?;
-    tracing::debug!("Mounted data directory: {output:?}");
-
     let mut run = RunFlag::run_until_ctrlc();
 
     let (babel_change_tx, babel_change_rx) =
         watch::channel(utils::file_checksum(&babel::env::BABEL_BIN_PATH).await.ok());
     let (sup_setup_tx, sup_setup_rx) = oneshot::channel();
     let sup_setup_tx = if let Ok(cfg) = load_config().await {
+        mount_data_drive(&cfg.data_directory_mount_point).await?;
         sup_setup_tx
             .send(supervisor::SupervisorSetup::new(cfg))
             .map_err(|_| anyhow!("failed to setup supervisor"))?;
@@ -84,6 +70,31 @@ impl supervisor::Timer for SysTimer {
     }
 }
 
+struct ConfigObserver;
+
+#[async_trait]
+impl babelsup_service::SupervisorConfigObserver for ConfigObserver {
+    async fn supervisor_config_set(&self, cfg: &SupervisorConfig) -> eyre::Result<()> {
+        mount_data_drive(&cfg.data_directory_mount_point).await
+    }
+}
+
+async fn mount_data_drive(data_dir: &str) -> eyre::Result<()> {
+    tracing::info!("Recursively creating data directory at {data_dir}");
+    DirBuilder::new().recursive(true).create(&data_dir).await?;
+    tracing::info!("Mounting data directory at {data_dir}");
+    // We assume that root drive will become /dev/vda, and data drive will become /dev/vdb inside VM
+    // However, this can be a wrong assumption ¯\_(ツ)_/¯:
+    // https://github.com/firecracker-microvm/firecracker-containerd/blob/main/docs/design-approaches.md#block-devices
+    let output = tokio::process::Command::new("mount")
+        .args([DATA_DRIVE_PATH, data_dir])
+        .output()
+        .await
+        .with_context(|| "failed to mount data drive".to_string())?;
+    tracing::debug!("Mounted data directory: {output:?}");
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 async fn serve(
     mut run: RunFlag,
@@ -95,6 +106,7 @@ async fn serve(
         babel_change_tx,
         babel::env::BABEL_BIN_PATH.clone(),
         babel::env::BABELSUP_CONFIG_PATH.clone(),
+        ConfigObserver {},
     );
     let listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_SUPERVISOR_PORT)
         .with_context(|| "failed to bind to vsock")?;

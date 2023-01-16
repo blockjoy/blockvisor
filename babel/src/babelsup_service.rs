@@ -19,16 +19,24 @@ pub mod pb {
     tonic::include_proto!("blockjoy.babelsup.v1");
 }
 
-pub struct BabelSupService {
+#[async_trait]
+pub trait SupervisorConfigObserver {
+    async fn supervisor_config_set(&self, cfg: &SupervisorConfig) -> eyre::Result<()>;
+}
+
+pub struct BabelSupService<T: SupervisorConfigObserver> {
     logs_rx: Arc<Mutex<Option<broadcast::Receiver<String>>>>,
     sup_setup_tx: Arc<Mutex<supervisor::SupervisorSetupTx>>,
     babel_change_tx: supervisor::BabelChangeTx,
     babel_bin_path: PathBuf,
     supervisor_cfg_path: PathBuf,
+    supervisor_cfg_observer: T,
 }
 
 #[async_trait]
-impl pb::babel_sup_server::BabelSup for BabelSupService {
+impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::BabelSup
+    for BabelSupService<T>
+{
     type GetLogsStream =
         tokio_stream::Iter<std::vec::IntoIter<Result<pb::GetLogsResponse, Status>>>;
 
@@ -112,6 +120,10 @@ impl pb::babel_sup_server::BabelSup for BabelSupService {
                     err
                 ))
             })?;
+            self.supervisor_cfg_observer
+                .supervisor_config_set(&cfg)
+                .await
+                .map_err(|err| Status::internal(format!("{err}")))?;
             let setup = supervisor::SupervisorSetup::new(cfg);
             self.logs_rx
                 .lock()
@@ -129,12 +141,13 @@ impl pb::babel_sup_server::BabelSup for BabelSupService {
     }
 }
 
-impl BabelSupService {
+impl<T: SupervisorConfigObserver> BabelSupService<T> {
     pub fn new(
         sup_setup_tx: supervisor::SupervisorSetupTx,
         babel_change_tx: supervisor::BabelChangeTx,
         babel_bin_path: PathBuf,
         supervisor_cfg_path: PathBuf,
+        supervisor_cfg_observer: T,
     ) -> Self {
         Self {
             logs_rx: Arc::new(Mutex::new(None)),
@@ -142,6 +155,7 @@ impl BabelSupService {
             babel_change_tx,
             babel_bin_path,
             supervisor_cfg_path,
+            supervisor_cfg_observer,
         }
     }
 
@@ -203,6 +217,15 @@ mod tests {
     use tokio_stream::wrappers::UnixListenerStream;
     use tonic::transport::{Channel, Endpoint, Server, Uri};
 
+    struct DummyObserver;
+
+    #[async_trait]
+    impl SupervisorConfigObserver for DummyObserver {
+        async fn supervisor_config_set(&self, _cfg: &SupervisorConfig) -> eyre::Result<()> {
+            Ok(())
+        }
+    }
+
     async fn sup_server(
         babel_path: PathBuf,
         babelsup_cfg_path: PathBuf,
@@ -210,8 +233,13 @@ mod tests {
         babel_change_tx: supervisor::BabelChangeTx,
         uds_stream: UnixListenerStream,
     ) -> Result<()> {
-        let sup_service =
-            BabelSupService::new(sup_setup_tx, babel_change_tx, babel_path, babelsup_cfg_path);
+        let sup_service = BabelSupService::new(
+            sup_setup_tx,
+            babel_change_tx,
+            babel_path,
+            babelsup_cfg_path,
+            DummyObserver {},
+        );
         Server::builder()
             .max_concurrent_streams(1)
             .add_service(pb::babel_sup_server::BabelSupServer::new(sup_service))
@@ -341,6 +369,7 @@ mod tests {
             babel_change_tx,
             babel_bin_path.clone(),
             Default::default(),
+            DummyObserver {},
         );
 
         assert_eq!(
@@ -359,6 +388,7 @@ mod tests {
             babel_change_tx,
             babel_bin_path.clone(),
             Default::default(),
+            DummyObserver {},
         );
 
         assert_eq!(
