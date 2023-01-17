@@ -1,7 +1,6 @@
 use crate::config;
 use serde::{Deserialize, Serialize};
 use std::collections;
-use std::collections::HashMap;
 use strum_macros::Display;
 
 /// Each request that comes over the VSock to babel must be a piece of JSON that can be
@@ -34,9 +33,12 @@ pub enum BabelRequest {
         response: config::ShResponse,
     },
     /// Download key files from locations specified in `keys` section of Babel config.
-    DownloadKeys(HashMap<String, String>),
+    DownloadKeys(config::KeysConfig),
     /// Upload files into locations specified in `keys` section of Babel config.
-    UploadKeys((HashMap<String, String>, Vec<BlockchainKey>)),
+    UploadKeys {
+        config: config::KeysConfig,
+        keys: Vec<BlockchainKey>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

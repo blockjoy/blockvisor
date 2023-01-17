@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, collections::HashMap};
 
+pub type KeysConfig = HashMap<String, String>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Babel {
     pub nets: Vec<NetConfiguration>,
@@ -10,7 +12,7 @@ pub struct Babel {
     pub requirements: Requirements,
     ///Commands to start blockchain node
     pub supervisor: SupervisorConfig,
-    pub keys: Option<HashMap<String, String>>,
+    pub keys: Option<KeysConfig>,
     #[serde(
         deserialize_with = "deserialize_methods",
         serialize_with = "serialize_methods"

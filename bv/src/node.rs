@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
+use babel_api::config::KeysConfig;
 use babel_api::config::Method::{Jrpc, Rest, Sh};
 use babel_api::{BabelRequest, BabelResponse};
 use firec::config::JailerMode;
@@ -382,13 +383,7 @@ impl Node {
 
     /// Returns blockchain node keys.
     pub async fn download_keys(&mut self) -> Result<Vec<babel_api::BlockchainKey>> {
-        let cfg = self
-            .data
-            .babel_conf
-            .keys
-            .clone()
-            .ok_or_else(|| anyhow!("No `keys` section found in config"))?;
-        let request = babel_api::BabelRequest::DownloadKeys(cfg);
+        let request = babel_api::BabelRequest::DownloadKeys(self.get_keys_config()?);
         let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
         let keys = match resp {
             babel_api::BabelResponse::Keys(keys) => keys,
@@ -399,13 +394,10 @@ impl Node {
 
     /// Sets blockchain node keys.
     pub async fn upload_keys(&mut self, keys: Vec<babel_api::BlockchainKey>) -> Result<()> {
-        let cfg = self
-            .data
-            .babel_conf
-            .keys
-            .clone()
-            .ok_or_else(|| anyhow!("No `keys` section found in config"))?;
-        let request = babel_api::BabelRequest::UploadKeys((cfg, keys));
+        let request = babel_api::BabelRequest::UploadKeys {
+            config: self.get_keys_config()?,
+            keys,
+        };
         let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
         match resp {
             babel_api::BabelResponse::BlockchainResponse(babel_api::BlockchainResponse {
@@ -414,6 +406,14 @@ impl Node {
             e => bail!("Unexpected BabelResponse for `upload_keys`: `{e:?}`"),
         };
         Ok(())
+    }
+
+    fn get_keys_config(&mut self) -> Result<KeysConfig> {
+        self.data
+            .babel_conf
+            .keys
+            .clone()
+            .ok_or_else(|| anyhow!("No `keys` section found in config"))
     }
 
     /// Generates keys on node
@@ -427,6 +427,14 @@ impl Node {
         name: impl Display,
         params: HashMap<String, Vec<String>>,
     ) -> Result<BabelRequest> {
+        let get_api_host = |method: &str| -> Result<&String> {
+            self.data
+                .babel_conf
+                .config
+                .api_host
+                .as_ref()
+                .ok_or_else(|| anyhow!("o host specified for method `{method}"))
+        };
         Ok(
             match self
                 .data
@@ -439,16 +447,8 @@ impl Node {
                     method, response, ..
                 } => {
                     let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-                    let host = self
-                        .data
-                        .babel_conf
-                        .config
-                        .api_host
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("o host specified for method `{method}"))?
-                        .clone();
                     babel_api::BabelRequest::BlockchainJrpc {
-                        host,
+                        host: get_api_host(method)?.clone(),
                         method: utils::render(method, &params),
                         response: response.clone(),
                     }
@@ -456,13 +456,7 @@ impl Node {
                 Rest {
                     method, response, ..
                 } => {
-                    let host = self
-                        .data
-                        .babel_conf
-                        .config
-                        .api_host
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("o host specified for method `{method}"))?;
+                    let host = get_api_host(method)?;
 
                     let url = format!(
                         "{}/{}",

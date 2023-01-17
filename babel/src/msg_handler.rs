@@ -4,9 +4,9 @@ use crate::{error, Result};
 #[cfg(target_os = "linux")]
 use async_trait::async_trait;
 use babel_api::config;
+use babel_api::config::KeysConfig;
 use babel_api::*;
 use serde_json::json;
-use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tokio::fs::{self, DirBuilder, File};
@@ -77,17 +77,14 @@ impl MsgHandler {
                     .map(BlockchainResponse)?)
             }
             BabelRequest::DownloadKeys(cfg) => Ok(Keys(self.handle_download_keys(cfg).await?)),
-            BabelRequest::UploadKeys((cfg, keys)) => self
-                .handle_upload_keys(cfg, keys)
+            BabelRequest::UploadKeys { config, keys } => self
+                .handle_upload_keys(config, keys)
                 .await
                 .map(BlockchainResponse),
         }
     }
 
-    async fn handle_download_keys(
-        &self,
-        config: HashMap<String, String>,
-    ) -> Result<Vec<BlockchainKey>> {
+    async fn handle_download_keys(&self, config: KeysConfig) -> Result<Vec<BlockchainKey>> {
         let mut results = vec![];
 
         for (name, location) in config.iter() {
@@ -108,7 +105,7 @@ impl MsgHandler {
 
     async fn handle_upload_keys(
         &self,
-        config: HashMap<String, String>,
+        config: KeysConfig,
         keys: Vec<BlockchainKey>,
     ) -> Result<BlockchainResponse> {
         if keys.is_empty() {
@@ -291,16 +288,19 @@ mod tests {
 
         println!("upload bad keys");
         let err = msg_handler
-            .handle(BabelRequest::UploadKeys((cfg.clone(), vec![])))
+            .handle(BabelRequest::UploadKeys {
+                config: cfg.clone(),
+                keys: vec![],
+            })
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "Keys management error: No keys provided");
 
         println!("upload good keys");
         let output = msg_handler
-            .handle(BabelRequest::UploadKeys((
-                cfg.clone(),
-                vec![
+            .handle(BabelRequest::UploadKeys {
+                config: cfg.clone(),
+                keys: vec![
                     BlockchainKey {
                         name: "second".to_string(),
                         content: b"123".to_vec(),
@@ -310,7 +310,7 @@ mod tests {
                         content: b"abcd".to_vec(),
                     },
                 ],
-            )))
+            })
             .await
             .unwrap();
         assert_eq!(
@@ -358,13 +358,13 @@ mod tests {
 
         println!("upload unknown keys");
         let output = msg_handler
-            .handle(BabelRequest::UploadKeys((
-                cfg.clone(),
-                vec![BlockchainKey {
+            .handle(BabelRequest::UploadKeys {
+                config: cfg.clone(),
+                keys: vec![BlockchainKey {
                     name: "unknown".to_string(),
                     content: b"12345".to_vec(),
                 }],
-            )))
+            })
             .await
             .unwrap();
         assert_eq!(
