@@ -76,7 +76,9 @@ impl MsgHandler {
                     .await
                     .map(BlockchainResponse)?)
             }
-            BabelRequest::DownloadKeys(cfg) => Ok(Keys(self.handle_download_keys(cfg).await?)),
+            BabelRequest::DownloadKeys(config) => {
+                Ok(Keys(self.handle_download_keys(config).await?))
+            }
             BabelRequest::UploadKeys { config, keys } => self
                 .handle_upload_keys(config, keys)
                 .await
