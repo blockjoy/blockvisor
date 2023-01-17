@@ -1,5 +1,4 @@
 pub mod babelsup_service;
-pub mod config;
 pub mod env;
 pub mod error;
 pub mod log_buffer;

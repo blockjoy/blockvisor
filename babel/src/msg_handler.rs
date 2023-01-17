@@ -1,11 +1,12 @@
 #[cfg(target_os = "linux")]
 use crate::vsock::Handler;
-use crate::{error, utils, Result};
+use crate::{error, Result};
 #[cfg(target_os = "linux")]
 use async_trait::async_trait;
 use babel_api::config;
 use babel_api::*;
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tokio::fs::{self, DirBuilder, File};
@@ -15,7 +16,6 @@ const WILDCARD_KEY_NAME: &str = "*";
 
 pub struct MsgHandler {
     inner: reqwest::Client,
-    cfg: config::Babel,
 }
 
 impl std::ops::Deref for MsgHandler {
@@ -48,48 +48,46 @@ impl Handler for MsgHandler {
 }
 
 impl MsgHandler {
-    pub fn new(cfg: config::Babel, timeout: Duration) -> Result<Self> {
+    pub fn new(timeout: Duration) -> Result<Self> {
         let client = reqwest::Client::builder().timeout(timeout).build()?;
-        Ok(Self { inner: client, cfg })
+        Ok(Self { inner: client })
     }
 
     pub async fn handle(&self, req: BabelRequest) -> Result<BabelResponse> {
         use BabelResponse::*;
+        tracing::debug!("Handling babel request: `{req:?}`");
 
         match req {
-            BabelRequest::ListCapabilities => Ok(ListCapabilities(self.handle_list_caps())),
             BabelRequest::Ping => Ok(Pong),
-            BabelRequest::BlockchainCommand(cmd) => {
-                tracing::debug!("Handling BlockchainCommand: `{cmd:?}`");
-                self.handle_cmd(cmd).await.map(BlockchainResponse)
+            BabelRequest::BlockchainJrpc {
+                host,
+                method,
+                response,
+            } => Ok(self
+                .handle_jrpc(&host, &method, &response)
+                .await
+                .map(BlockchainResponse)?),
+            BabelRequest::BlockchainRest { url, response, .. } => Ok(self
+                .handle_rest(&url, &response)
+                .await
+                .map(BlockchainResponse)?),
+            BabelRequest::BlockchainSh { body, response, .. } => {
+                Ok(Self::handle_sh(&body, &response)
+                    .await
+                    .map(BlockchainResponse)?)
             }
-            BabelRequest::DownloadKeys => {
-                tracing::debug!("Downloading keys");
-                Ok(Keys(self.handle_download_keys().await?))
-            }
-            BabelRequest::UploadKeys(keys) => {
-                tracing::debug!("Uploading keys: `{keys:?}`");
-                self.handle_upload_keys(keys).await.map(BlockchainResponse)
-            }
+            BabelRequest::DownloadKeys(cfg) => Ok(Keys(self.handle_download_keys(cfg).await?)),
+            BabelRequest::UploadKeys((cfg, keys)) => self
+                .handle_upload_keys(cfg, keys)
+                .await
+                .map(BlockchainResponse),
         }
     }
 
-    /// List the capabilities that the current blockchain node supports.
-    fn handle_list_caps(&self) -> Vec<String> {
-        self.cfg
-            .methods
-            .keys()
-            .map(|method| method.to_string())
-            .collect()
-    }
-
-    async fn handle_download_keys(&self) -> Result<Vec<BlockchainKey>> {
-        let config = self
-            .cfg
-            .keys
-            .as_ref()
-            .ok_or_else(|| error::Error::keys("No `keys` section found in config"))?;
-
+    async fn handle_download_keys(
+        &self,
+        config: HashMap<String, String>,
+    ) -> Result<Vec<BlockchainKey>> {
         let mut results = vec![];
 
         for (name, location) in config.iter() {
@@ -108,16 +106,14 @@ impl MsgHandler {
         Ok(results)
     }
 
-    async fn handle_upload_keys(&self, keys: Vec<BlockchainKey>) -> Result<BlockchainResponse> {
+    async fn handle_upload_keys(
+        &self,
+        config: HashMap<String, String>,
+        keys: Vec<BlockchainKey>,
+    ) -> Result<BlockchainResponse> {
         if keys.is_empty() {
             return Err(error::Error::keys("No keys provided"));
         }
-
-        let config = self
-            .cfg
-            .keys
-            .as_ref()
-            .ok_or_else(|| error::Error::keys("No `keys` section found in config"))?;
 
         if !config.contains_key(WILDCARD_KEY_NAME) {
             for key in &keys {
@@ -166,43 +162,14 @@ impl MsgHandler {
         Ok(resp)
     }
 
-    async fn handle_cmd(&self, cmd: BlockchainCommand) -> Result<BlockchainResponse> {
-        use config::Method::*;
-
-        let method = self
-            .cfg
-            .methods
-            .get(&cmd.name)
-            .ok_or_else(|| crate::error::Error::unknown_method(cmd.name))?;
-        tracing::debug!("Chosen method is {method:?}");
-
-        match &method {
-            Jrpc {
-                method, response, ..
-            } => self.handle_jrpc(method, cmd.params, response).await,
-            Rest {
-                method, response, ..
-            } => self.handle_rest(method, cmd.params, response).await,
-            Sh { body, response, .. } => Self::handle_sh(body, cmd.params, response).await,
-        }
-    }
-
     async fn handle_jrpc(
         &self,
+        host: &str,
         method: &str,
-        params: BlockchainParams,
         resp_config: &config::JrpcResponse,
     ) -> Result<BlockchainResponse> {
-        let url = self
-            .cfg
-            .config
-            .api_host
-            .as_deref()
-            .ok_or_else(|| error::Error::no_host(method))?;
-        let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-        let method = utils::render(method, &params);
         let text: String = self
-            .post(url)
+            .post(host)
             .json(&json!({ "jsonrpc": "2.0", "id": 0, "method": method }))
             .send()
             .await?
@@ -221,23 +188,9 @@ impl MsgHandler {
     async fn handle_rest(
         &self,
         method: &str,
-        params: BlockchainParams,
         resp_config: &config::RestResponse,
     ) -> Result<BlockchainResponse> {
-        let host = self
-            .cfg
-            .config
-            .api_host
-            .as_ref()
-            .ok_or_else(|| error::Error::no_host(method))?;
-        let url = format!(
-            "{}/{}",
-            host.trim_end_matches('/'),
-            method.trim_start_matches('/')
-        );
-        let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-        let url = utils::render(&url, &params);
-        let text = self.post(url.as_str()).send().await?.text().await?;
+        let text = self.post(method).send().await?.text().await?;
         let value = match &resp_config.field {
             Some(field) => gjson::get(&text, field).to_string(),
             None => text,
@@ -247,21 +200,11 @@ impl MsgHandler {
 
     async fn handle_sh(
         command: &str,
-        params: BlockchainParams,
         response_config: &config::ShResponse,
     ) -> Result<BlockchainResponse> {
         use config::MethodResponseFormat::*;
 
-        let command = &mut command.to_string();
-
-        // For sh we need to sanitize each param, then join them.
-        let params = params
-            .into_iter()
-            .map(|(k, v)| Ok((k, utils::sanitize_param(&v)?)))
-            .collect::<Result<_>>()?;
-        let command = utils::render(command, &params);
-
-        let args = vec!["-c", &command];
+        let args = vec!["-c", command];
         let output = tokio::process::Command::new("sh")
             .args(args)
             .output()
@@ -291,12 +234,9 @@ impl MsgHandler {
 mod tests {
     use super::*;
     use assert_fs::TempDir;
-    use babel_api::config::{
-        Babel, Config, JrpcResponse, Method, MethodResponseFormat, Requirements, RestResponse,
-        ShResponse, SupervisorConfig,
-    };
+    use babel_api::config::{JrpcResponse, MethodResponseFormat, RestResponse, ShResponse};
     use httpmock::prelude::*;
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
 
     fn unwrap_blockchain(resp: BabelResponse) -> BlockchainResponse {
         if let BabelResponse::BlockchainResponse(inner) = resp {
@@ -316,88 +256,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_sh() {
-        let cfg = Babel {
-            export: None,
-            env: None,
-            config: Config {
-                min_babel_version: "0.1.0".to_string(),
-                node_version: "1.51.3".to_string(),
-                protocol: "helium".to_string(),
-                node_type: "".to_string(),
-                description: None,
-                api_host: None,
-                ports: vec![],
+        let msg_handler = MsgHandler::new(Duration::from_secs(10)).unwrap();
+
+        let json_cmd = BabelRequest::BlockchainSh {
+            body: "echo \\\"make a toast\\\"".to_string(),
+            response: ShResponse {
+                status: 102,
+                format: MethodResponseFormat::Json,
             },
-            requirements: Requirements {
-                vcpu_count: 1,
-                mem_size_mb: 1,
-                disk_size_gb: 1,
-            },
-            nets: vec![],
-            supervisor: SupervisorConfig::default(),
-            keys: None,
-            methods: BTreeMap::from([
-                (
-                    "raw".to_string(),
-                    Method::Sh {
-                        name: "raw".to_string(),
-                        body: "echo make a toast".to_string(),
-                        response: ShResponse {
-                            status: 101,
-                            format: MethodResponseFormat::Raw,
-                        },
-                    },
-                ),
-                (
-                    "json".to_string(),
-                    Method::Sh {
-                        name: "json".to_string(),
-                        body: "echo \\\"make a toast\\\"".to_string(),
-                        response: ShResponse {
-                            status: 102,
-                            format: MethodResponseFormat::Json,
-                        },
-                    },
-                ),
-            ]),
         };
-        let msg_handler = MsgHandler::new(cfg, Duration::from_secs(10)).unwrap();
-
-        let caps = msg_handler
-            .handle(BabelRequest::ListCapabilities)
-            .await
-            .unwrap();
-        match caps {
-            BabelResponse::ListCapabilities(caps) => {
-                assert_eq!(caps[0], "json");
-                assert_eq!(caps[1], "raw");
-            }
-            _ => panic!("expected ListCapabilities"),
-        };
-
-        let raw_cmd = BabelRequest::BlockchainCommand(BlockchainCommand {
-            name: "raw".to_string(),
-            params: HashMap::new(),
-        });
-        let output = msg_handler.handle(raw_cmd).await.unwrap();
-        assert_eq!(unwrap_blockchain(output).value, "make a toast\n");
-
-        let json_cmd = BabelRequest::BlockchainCommand(BlockchainCommand {
-            name: "json".to_string(),
-            params: HashMap::new(),
-        });
         let output = msg_handler.handle(json_cmd).await.unwrap();
         assert_eq!(unwrap_blockchain(output).value, "\"make a toast\"");
-
-        let unknown_cmd = BabelRequest::BlockchainCommand(BlockchainCommand {
-            name: "unknown".to_string(),
-            params: HashMap::new(),
-        });
-        let output = msg_handler.handle(unknown_cmd).await;
-        assert_eq!(
-            output.unwrap_err().to_string(),
-            "Method `unknown` not found"
-        );
     }
 
     #[tokio::test]
@@ -405,37 +274,16 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let tmp_dir_str = format!("{}", tmp_dir.to_string_lossy());
 
-        let cfg = Babel {
-            export: None,
-            env: None,
-            config: Config {
-                min_babel_version: "0.1.0".to_string(),
-                node_version: "1.51.3".to_string(),
-                protocol: "helium".to_string(),
-                node_type: "".to_string(),
-                description: None,
-                api_host: None,
-                ports: vec![],
-            },
-            requirements: Requirements {
-                vcpu_count: 1,
-                mem_size_mb: 1,
-                disk_size_gb: 1,
-            },
-            nets: vec![],
-            supervisor: SupervisorConfig::default(),
-            keys: Some(HashMap::from([
-                ("first".to_string(), format!("{tmp_dir_str}/first/key")),
-                ("second".to_string(), format!("{tmp_dir_str}/second/key")),
-                ("third".to_string(), format!("{tmp_dir_str}/third/key")),
-            ])),
-            methods: BTreeMap::new(),
-        };
-        let msg_handler = MsgHandler::new(cfg, Duration::from_secs(10)).unwrap();
+        let msg_handler = MsgHandler::new(Duration::from_secs(10)).unwrap();
+        let cfg = HashMap::from([
+            ("first".to_string(), format!("{tmp_dir_str}/first/key")),
+            ("second".to_string(), format!("{tmp_dir_str}/second/key")),
+            ("third".to_string(), format!("{tmp_dir_str}/third/key")),
+        ]);
 
         println!("no files uploaded yet");
         let output = msg_handler
-            .handle(BabelRequest::DownloadKeys)
+            .handle(BabelRequest::DownloadKeys(cfg.clone()))
             .await
             .unwrap();
         let keys = unwrap_keys(output);
@@ -443,34 +291,26 @@ mod tests {
 
         println!("upload bad keys");
         let err = msg_handler
-            .handle(BabelRequest::UploadKeys(vec![]))
+            .handle(BabelRequest::UploadKeys((cfg.clone(), vec![])))
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "Keys management error: No keys provided");
-        let err = msg_handler
-            .handle(BabelRequest::UploadKeys(vec![BlockchainKey {
-                name: "unknown".to_string(),
-                content: vec![],
-            }]))
-            .await
-            .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Keys management error: Key `unknown` not found in `keys` config"
-        );
 
         println!("upload good keys");
         let output = msg_handler
-            .handle(BabelRequest::UploadKeys(vec![
-                BlockchainKey {
-                    name: "second".to_string(),
-                    content: b"123".to_vec(),
-                },
-                BlockchainKey {
-                    name: "third".to_string(),
-                    content: b"abcd".to_vec(),
-                },
-            ]))
+            .handle(BabelRequest::UploadKeys((
+                cfg.clone(),
+                vec![
+                    BlockchainKey {
+                        name: "second".to_string(),
+                        content: b"123".to_vec(),
+                    },
+                    BlockchainKey {
+                        name: "third".to_string(),
+                        content: b"abcd".to_vec(),
+                    },
+                ],
+            )))
             .await
             .unwrap();
         assert_eq!(
@@ -483,7 +323,7 @@ mod tests {
 
         println!("download uploaded keys");
         let output = msg_handler
-            .handle(BabelRequest::DownloadKeys)
+            .handle(BabelRequest::DownloadKeys(cfg))
             .await
             .unwrap();
         let mut keys = unwrap_keys(output);
@@ -510,39 +350,21 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let tmp_dir_str = format!("{}", tmp_dir.to_string_lossy());
 
-        let cfg = Babel {
-            export: None,
-            env: None,
-            config: Config {
-                min_babel_version: "0.1.0".to_string(),
-                node_version: "1.51.3".to_string(),
-                protocol: "helium".to_string(),
-                node_type: "".to_string(),
-                description: None,
-                api_host: None,
-                ports: vec![],
-            },
-            requirements: Requirements {
-                vcpu_count: 1,
-                mem_size_mb: 1,
-                disk_size_gb: 1,
-            },
-            nets: vec![],
-            supervisor: SupervisorConfig::default(),
-            keys: Some(HashMap::from([(
-                WILDCARD_KEY_NAME.to_string(),
-                format!("{tmp_dir_str}/star/"),
-            )])),
-            methods: BTreeMap::new(),
-        };
-        let msg_handler = MsgHandler::new(cfg, Duration::from_secs(10)).unwrap();
+        let cfg = HashMap::from([(
+            WILDCARD_KEY_NAME.to_string(),
+            format!("{tmp_dir_str}/star/"),
+        )]);
+        let msg_handler = MsgHandler::new(Duration::from_secs(10)).unwrap();
 
         println!("upload unknown keys");
         let output = msg_handler
-            .handle(BabelRequest::UploadKeys(vec![BlockchainKey {
-                name: "unknown".to_string(),
-                content: b"12345".to_vec(),
-            }]))
+            .handle(BabelRequest::UploadKeys((
+                cfg.clone(),
+                vec![BlockchainKey {
+                    name: "unknown".to_string(),
+                    content: b"12345".to_vec(),
+                }],
+            )))
             .await
             .unwrap();
         assert_eq!(
@@ -552,7 +374,7 @@ mod tests {
 
         println!("files in star dir should not be downloading");
         let output = msg_handler
-            .handle(BabelRequest::DownloadKeys)
+            .handle(BabelRequest::DownloadKeys(cfg))
             .await
             .unwrap();
         let keys = unwrap_keys(output);
@@ -570,45 +392,15 @@ mod tests {
                 .json_body(json!({"result": [1, 2, 3]}));
         });
 
-        let cfg = Babel {
-            export: None,
-            env: None,
-            config: Config {
-                min_babel_version: "0.1.0".to_string(),
-                node_version: "1.51.3".to_string(),
-                protocol: "helium".to_string(),
-                node_type: "".to_string(),
-                description: None,
-                api_host: Some(format!("http://{}", server.address())),
-                ports: vec![],
+        let json_cmd = BabelRequest::BlockchainRest {
+            url: format!("http://{}/items", server.address()),
+            response: RestResponse {
+                status: 101,
+                field: Some("result".to_string()),
+                format: MethodResponseFormat::Json,
             },
-            requirements: Requirements {
-                vcpu_count: 1,
-                mem_size_mb: 1,
-                disk_size_gb: 1,
-            },
-            nets: vec![],
-            supervisor: SupervisorConfig::default(),
-            keys: None,
-            methods: BTreeMap::from([(
-                "json items".to_string(),
-                Method::Rest {
-                    name: "json items".to_string(),
-                    method: "items".to_string(),
-                    response: RestResponse {
-                        status: 101,
-                        field: Some("result".to_string()),
-                        format: MethodResponseFormat::Json,
-                    },
-                },
-            )]),
         };
-
-        let json_cmd = BabelRequest::BlockchainCommand(BlockchainCommand {
-            name: "json items".to_string(),
-            params: HashMap::new(),
-        });
-        let msg_handler = MsgHandler::new(cfg, Duration::from_secs(1)).unwrap();
+        let msg_handler = MsgHandler::new(Duration::from_secs(1)).unwrap();
         let output = msg_handler.handle(json_cmd).await.unwrap();
 
         mock.assert();
@@ -626,45 +418,15 @@ mod tests {
                 .json_body(json!({"result": [1, 2, 3]}));
         });
 
-        let cfg = Babel {
-            export: None,
-            env: None,
-            config: Config {
-                min_babel_version: "0.1.0".to_string(),
-                node_version: "1.51.3".to_string(),
-                protocol: "helium".to_string(),
-                node_type: "".to_string(),
-                description: None,
-                api_host: Some(format!("http://{}", server.address())),
-                ports: vec![],
+        let json_cmd = BabelRequest::BlockchainRest {
+            url: format!("http://{}/items", server.address()),
+            response: RestResponse {
+                status: 101,
+                field: None,
+                format: MethodResponseFormat::Json,
             },
-            requirements: Requirements {
-                vcpu_count: 1,
-                mem_size_mb: 1,
-                disk_size_gb: 1,
-            },
-            nets: vec![],
-            supervisor: SupervisorConfig::default(),
-            keys: None,
-            methods: BTreeMap::from([(
-                "json items".to_string(),
-                Method::Rest {
-                    name: "json items".to_string(),
-                    method: "items".to_string(),
-                    response: RestResponse {
-                        status: 101,
-                        field: None,
-                        format: MethodResponseFormat::Json,
-                    },
-                },
-            )]),
         };
-
-        let json_cmd = BabelRequest::BlockchainCommand(BlockchainCommand {
-            name: "json items".to_string(),
-            params: HashMap::new(),
-        });
-        let msg_handler = MsgHandler::new(cfg, Duration::from_secs(1)).unwrap();
+        let msg_handler = MsgHandler::new(Duration::from_secs(1)).unwrap();
         let output = msg_handler.handle(json_cmd).await.unwrap();
 
         mock.assert();
@@ -693,44 +455,15 @@ mod tests {
                 }));
         });
 
-        let cfg = Babel {
-            export: None,
-            env: None,
-            config: Config {
-                min_babel_version: "0.1.0".to_string(),
-                node_version: "1.51.3".to_string(),
-                protocol: "helium".to_string(),
-                node_type: "".to_string(),
-                description: None,
-                api_host: Some(format!("http://{}", server.address())),
-                ports: vec![],
+        let height_cmd = BabelRequest::BlockchainJrpc {
+            host: format!("http://{}", server.address()),
+            method: "info_get".to_string(),
+            response: JrpcResponse {
+                code: 101,
+                field: Some("result.info.height".to_string()),
             },
-            requirements: Requirements {
-                vcpu_count: 1,
-                mem_size_mb: 1,
-                disk_size_gb: 1,
-            },
-            nets: vec![],
-            supervisor: SupervisorConfig::default(),
-            keys: None,
-            methods: BTreeMap::from([(
-                "get height".to_string(),
-                Method::Jrpc {
-                    name: "get height".to_string(),
-                    method: "info_get".to_string(),
-                    response: JrpcResponse {
-                        code: 101,
-                        field: Some("result.info.height".to_string()),
-                    },
-                },
-            )]),
         };
-
-        let height_cmd = BabelRequest::BlockchainCommand(BlockchainCommand {
-            name: "get height".to_string(),
-            params: HashMap::new(),
-        });
-        let msg_handler = MsgHandler::new(cfg, Duration::from_secs(1)).unwrap();
+        let msg_handler = MsgHandler::new(Duration::from_secs(1)).unwrap();
         let output = msg_handler.handle(height_cmd).await.unwrap();
 
         mock.assert();

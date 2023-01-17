@@ -1,4 +1,5 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use babel_api::config::Method::{Jrpc, Rest, Sh};
 use babel_api::{BabelRequest, BabelResponse};
 use firec::config::JailerMode;
 use firec::Machine;
@@ -16,6 +17,7 @@ use crate::{
     node_connection::{babelsup_pb, NodeConnection},
     node_data::{NodeData, NodeImage, NodeStatus},
     services::cookbook::CookbookService,
+    utils,
     utils::{get_process_pid, run_cmd},
 };
 
@@ -323,26 +325,25 @@ impl Node {
     /// This function calls babel by sending a blockchain command using the specified method name.
     pub async fn call_method<T>(
         &mut self,
-        method: impl Display,
+        name: impl Display + Copy,
         params: HashMap<String, Vec<String>>,
     ) -> Result<T>
     where
         T: FromStr,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        let request = babel_api::BabelRequest::BlockchainCommand(babel_api::BlockchainCommand {
-            name: method.to_string(),
-            params,
-        });
-        debug!("Calling method: {method}");
-        let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
+        debug!("Calling method: {name}");
+        let resp: babel_api::BabelResponse = self
+            .node_conn
+            .babel_rpc(self.render_method(name, params)?)
+            .await?;
         let inner = match resp {
             babel_api::BabelResponse::BlockchainResponse(babel_api::BlockchainResponse {
                 value,
             }) => value
                 .parse()
-                .context(format!("Could not parse {method}: {value}"))?,
-            e => bail!("Unexpected BabelResponse for `{method}`: `{e:?}`"),
+                .context(format!("Could not parse {name} response: {value}"))?,
+            e => bail!("Unexpected BabelResponse for `{name}`: `{e:?}`"),
         };
         Ok(inner)
     }
@@ -381,7 +382,13 @@ impl Node {
 
     /// Returns blockchain node keys.
     pub async fn download_keys(&mut self) -> Result<Vec<babel_api::BlockchainKey>> {
-        let request = babel_api::BabelRequest::DownloadKeys;
+        let cfg = self
+            .data
+            .babel_conf
+            .keys
+            .clone()
+            .ok_or_else(|| anyhow!("No `keys` section found in config"))?;
+        let request = babel_api::BabelRequest::DownloadKeys(cfg);
         let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
         let keys = match resp {
             babel_api::BabelResponse::Keys(keys) => keys,
@@ -392,7 +399,13 @@ impl Node {
 
     /// Sets blockchain node keys.
     pub async fn upload_keys(&mut self, keys: Vec<babel_api::BlockchainKey>) -> Result<()> {
-        let request = babel_api::BabelRequest::UploadKeys(keys);
+        let cfg = self
+            .data
+            .babel_conf
+            .keys
+            .clone()
+            .ok_or_else(|| anyhow!("No `keys` section found in config"))?;
+        let request = babel_api::BabelRequest::UploadKeys((cfg, keys));
         let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
         match resp {
             babel_api::BabelResponse::BlockchainResponse(babel_api::BlockchainResponse {
@@ -407,5 +420,74 @@ impl Node {
     pub async fn generate_keys(&mut self) -> Result<String> {
         self.call_method(&babel_api::BabelMethod::GenerateKeys, HashMap::new())
             .await
+    }
+
+    fn render_method(
+        &self,
+        name: impl Display,
+        params: HashMap<String, Vec<String>>,
+    ) -> Result<BabelRequest> {
+        Ok(
+            match self
+                .data
+                .babel_conf
+                .methods
+                .get(&name.to_string())
+                .ok_or_else(|| anyhow!("method `{name}` not found"))?
+            {
+                Jrpc {
+                    method, response, ..
+                } => {
+                    let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
+                    let host = self
+                        .data
+                        .babel_conf
+                        .config
+                        .api_host
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("o host specified for method `{method}"))?
+                        .clone();
+                    babel_api::BabelRequest::BlockchainJrpc {
+                        host,
+                        method: utils::render(method, &params),
+                        response: response.clone(),
+                    }
+                }
+                Rest {
+                    method, response, ..
+                } => {
+                    let host = self
+                        .data
+                        .babel_conf
+                        .config
+                        .api_host
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("o host specified for method `{method}"))?;
+
+                    let url = format!(
+                        "{}/{}",
+                        host.trim_end_matches('/'),
+                        method.trim_start_matches('/')
+                    );
+
+                    let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
+                    babel_api::BabelRequest::BlockchainRest {
+                        url: utils::render(&url, &params),
+                        response: response.clone(),
+                    }
+                }
+                Sh { body, response, .. } => {
+                    // For sh we need to sanitize each param, then join them.
+                    let params = params
+                        .into_iter()
+                        .map(|(k, v)| Ok((k, utils::sanitize_param(&v)?)))
+                        .collect::<Result<_>>()?;
+                    babel_api::BabelRequest::BlockchainSh {
+                        body: utils::render(body, &params),
+                        response: response.clone(),
+                    }
+                }
+            },
+        )
     }
 }

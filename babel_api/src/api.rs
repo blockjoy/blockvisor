@@ -1,5 +1,7 @@
+use crate::config;
 use serde::{Deserialize, Serialize};
 use std::collections;
+use std::collections::HashMap;
 use strum_macros::Display;
 
 /// Each request that comes over the VSock to babel must be a piece of JSON that can be
@@ -8,16 +10,33 @@ use strum_macros::Display;
 pub enum BabelRequest {
     /// Returns `Pong`. Useful to check for the liveness of the node.
     Ping,
-    /// List the endpoints that are available for the current blockchain. These are extracted from
-    /// the config, and just sent back as strings for now.
-    ListCapabilities,
-    /// Send a request to the current blockchain. We can identify the way to do this from the
-    /// config and forward the provided parameters.
-    BlockchainCommand(BlockchainCommand),
+    /// Send a Jrpc request to the current blockchain.
+    BlockchainJrpc {
+        /// This is the host for the JSON rpc request.
+        host: String,
+        /// The name of the jRPC method that we are going to call into.
+        method: String,
+        /// This field is ignored.
+        response: config::JrpcResponse,
+    },
+    /// Send a Rest request to the current blockchain.
+    BlockchainRest {
+        /// This is the url of the rest endpoint.
+        url: String,
+        /// These are the configuration options for parsing the response.
+        response: config::RestResponse,
+    },
+    /// Send a Sh request to the current blockchain.
+    BlockchainSh {
+        /// These are the arguments to the sh command that is executed for this `Method`.
+        body: String,
+        /// These are the configuration options for parsing the response.
+        response: config::ShResponse,
+    },
     /// Download key files from locations specified in `keys` section of Babel config.
-    DownloadKeys,
+    DownloadKeys(HashMap<String, String>),
     /// Upload files into locations specified in `keys` section of Babel config.
-    UploadKeys(Vec<BlockchainKey>),
+    UploadKeys((HashMap<String, String>, Vec<BlockchainKey>)),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,7 +50,6 @@ pub type BlockchainParams = collections::HashMap<String, Vec<String>>;
 #[derive(Debug, Serialize, Deserialize)]
 pub enum BabelResponse {
     Pong,
-    ListCapabilities(Vec<String>),
     BlockchainResponse(BlockchainResponse),
     Keys(Vec<BlockchainKey>),
     Error(String),

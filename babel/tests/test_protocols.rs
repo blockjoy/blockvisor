@@ -18,21 +18,16 @@ pub async fn load(path: &Path) -> eyre::Result<Babel> {
     Ok(cfg)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[tokio::test]
+async fn test_load() {
+    use walkdir::WalkDir;
 
-    #[tokio::test]
-    async fn test_load() {
-        use walkdir::WalkDir;
-
-        for entry in WalkDir::new("protocols") {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_file() && path.extension().unwrap_or_default() == "toml" {
-                println!("loading: {path:?}");
-                load(path).await.unwrap();
-            }
+    for entry in WalkDir::new("protocols") {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.is_file() && path.extension().unwrap_or_default() == "toml" {
+            println!("loading: {path:?}");
+            load(path).await.unwrap();
         }
     }
 }
