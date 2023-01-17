@@ -263,7 +263,7 @@ fn test_bv_cmd_init_unknown_otp() {
         .env("BV_ROOT", tmp_dir.as_os_str())
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Record not found"));
+        .stderr(predicate::str::contains("Host provision not found: no rows returned by a query that expected to return at least one row"));
 }
 
 #[tokio::test]

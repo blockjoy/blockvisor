@@ -3,15 +3,18 @@ use std::{collections::BTreeMap, collections::HashMap};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Babel {
+    pub nets: Vec<NetConfiguration>,
     pub export: Option<Vec<String>>,
     pub env: Option<Env>,
     pub config: Config,
     pub requirements: Requirements,
-    pub nets: Vec<NetConfiguration>,
-    /// Commands to start blockchain node
+    ///Commands to start blockchain node
     pub supervisor: SupervisorConfig,
     pub keys: Option<HashMap<String, String>>,
-    #[serde(deserialize_with = "deserialize_methods")]
+    #[serde(
+        deserialize_with = "deserialize_methods",
+        serialize_with = "serialize_methods"
+    )]
     pub methods: BTreeMap<String, Method>,
 }
 
@@ -57,6 +60,14 @@ where
         .collect();
 
     Ok(map)
+}
+
+fn serialize_methods<S>(value: &BTreeMap<String, Method>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let vectorized: Vec<&Method> = value.iter().map(|(_, v)| v).collect();
+    vectorized.serialize(s)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

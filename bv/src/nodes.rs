@@ -531,6 +531,9 @@ fn render_entry_point_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use babel_api::config::{Method, MethodResponseFormat, Requirements, ShResponse};
+    use std::collections::BTreeMap;
+    use std::str::FromStr;
 
     #[test]
     fn test_render_entry_point_args() -> Result<()> {
@@ -578,6 +581,81 @@ mod tests {
         );
         node_props.get_mut("PARAM1").unwrap().push('@');
         assert!(render_entry_point_args(&entrypoints, &node_props).is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_smoke_node_data_serialization() -> Result<()> {
+        let babel_conf = Babel {
+            export: None,
+            env: None,
+            config: babel_api::config::Config {
+                min_babel_version: " ".to_string(),
+                node_version: "".to_string(),
+                protocol: "".to_string(),
+                node_type: "".to_string(),
+                description: None,
+                api_host: None,
+                ports: vec![],
+            },
+            requirements: Requirements {
+                vcpu_count: 0,
+                mem_size_mb: 0,
+                disk_size_gb: 0,
+            },
+            nets: vec![],
+            supervisor: Default::default(),
+            keys: None,
+            methods: BTreeMap::from([
+                (
+                    "raw".to_string(),
+                    Method::Sh {
+                        name: "raw".to_string(),
+                        body: "echo make a toast".to_string(),
+                        response: ShResponse {
+                            status: 101,
+                            format: MethodResponseFormat::Raw,
+                        },
+                    },
+                ),
+                (
+                    "json".to_string(),
+                    Method::Sh {
+                        name: "json".to_string(),
+                        body: "echo \\\"make a toast\\\"".to_string(),
+                        response: ShResponse {
+                            status: 102,
+                            format: MethodResponseFormat::Json,
+                        },
+                    },
+                ),
+            ]),
+        };
+
+        let node = NodeData {
+            id: Uuid::new_v4(),
+            name: "name".to_string(),
+            image: NodeImage {
+                protocol: "".to_string(),
+                node_type: "".to_string(),
+                node_version: "".to_string(),
+            },
+            expected_status: NodeStatus::Stopped,
+            network_interface: NetworkInterface {
+                name: "".to_string(),
+                ip: IpAddr::from_str("1.1.1.1")?,
+                gateway: IpAddr::from_str("1.1.1.1")?,
+            },
+            babel_conf,
+            self_update: false,
+            properties: HashMap::from([
+                ("raw".to_string(), "raw".to_string()),
+                ("json".to_string(), "json".to_string()),
+            ]),
+        };
+
+        let serialized = toml::to_string(&node)?;
+        let _deserialized: NodeData = toml::from_str(&serialized)?;
         Ok(())
     }
 }
