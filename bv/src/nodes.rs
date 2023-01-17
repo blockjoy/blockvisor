@@ -514,7 +514,7 @@ fn render_entry_point_args(
     if let Some((key, invalid_value)) = params.iter().find(|(_, value)| {
         !value
             .chars()
-            .all(|c| c.is_alphanumeric() || "_-,.".contains(c))
+            .all(|c| c.is_alphanumeric() || ":/_-,.".contains(c))
     }) {
         bail!("entry_point param '{key}' has invalid value '{invalid_value}'")
     }
@@ -555,7 +555,7 @@ mod tests {
             },
         ];
         let mut node_props = HashMap::from([
-            ("PARAM1".to_string(), "Value.1,-_Q".to_string()),
+            ("PARAM1".to_string(), "://Value.1,-_Q".to_string()),
             ("PARAM2".to_string(), "Value.2,-_Q".to_string()),
             ("PARAM3".to_string(), "!Invalid_but_not_used".to_string()),
         ]);
@@ -565,14 +565,14 @@ mod tests {
                     command: "cmd1".to_string(),
                     args: vec![
                         "none_parametrized_argument".to_string(),
-                        "first_parametrized_Value.1,-_Q_argument".to_string(),
-                        "second_parametrized_Value.1,-_Q_Value.2,-_Q_argument".to_string(),
+                        "first_parametrized_://Value.1,-_Q_argument".to_string(),
+                        "second_parametrized_://Value.1,-_Q_Value.2,-_Q_argument".to_string(),
                     ],
                 },
                 Entrypoint {
                     command: "cmd2".to_owned(),
                     args: vec![
-                        "Value.1,-_Q and Value.2,-_Q twice Value.1,-_Q".to_owned(),
+                        "://Value.1,-_Q and Value.2,-_Q twice ://Value.1,-_Q".to_owned(),
                         "none{a} or {{MISSING}}".to_owned(),
                     ],
                 }
