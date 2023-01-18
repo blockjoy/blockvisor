@@ -39,6 +39,7 @@ pub struct SelfUpdater<T: Sleeper> {
     check_interval: Option<Duration>,
     auth_token: String,
     bundles: BundleServiceClient<Channel>,
+    latest_downloaded_version: String,
     phantom: PhantomData<T>,
 }
 
@@ -59,33 +60,33 @@ impl<T: Sleeper> SelfUpdater<T> {
                     .connect_timeout(BUNDLES_CONNECT_TIMEOUT)
                     .connect_lazy(),
             ),
+            latest_downloaded_version: CURRENT_VERSION.to_string(),
             phantom: Default::default(),
         })
     }
 
     pub async fn run(mut self) {
         if let Some(check_interval) = self.check_interval {
-            while self.check_for_update().await {
+            loop {
+                self.check_for_update().await;
                 T::sleep(check_interval).await;
             }
         }
     }
 
-    async fn check_for_update(&mut self) -> bool {
+    async fn check_for_update(&mut self) {
         if let Ok(Some(latest_bundle)) = self.get_latest().await {
-            if let Ordering::Greater = utils::semver_cmp(&latest_bundle.version, CURRENT_VERSION) {
-                if !self
-                    .is_blacklisted(&latest_bundle.version)
-                    .await
-                    .unwrap_or(true)
+            let latest_version = latest_bundle.version.clone();
+            if let Ordering::Greater =
+                utils::semver_cmp(&latest_version, &self.latest_downloaded_version)
+            {
+                if !self.is_blacklisted(&latest_version).await.unwrap_or(true)
                     && self.download_and_install(latest_bundle).await.is_ok()
                 {
-                    // stop update checker
-                    return false;
+                    self.latest_downloaded_version = latest_version;
                 }
             }
         }
-        true
     }
 
     pub async fn get_latest(&mut self) -> Result<Option<cb_pb::BundleIdentifier>> {
@@ -218,6 +219,7 @@ mod tests {
                     check_interval: Some(Duration::from_secs(3)),
                     auth_token: "test_token".to_string(),
                     bundles: BundleServiceClient::new(test_channel(&tmp_root)),
+                    latest_downloaded_version: CURRENT_VERSION.to_string(),
                     phantom: Default::default(),
                 },
                 blacklist_path,
@@ -435,12 +437,14 @@ mod tests {
     async fn test_check_for_update() -> Result<()> {
         let mut test_env = TestEnv::new().await?;
         let ctrl_file_path = test_env.tmp_root.join("ctrl_file");
+        let bundle_version = "3.2.1".to_string();
         let bundle_id = BundleIdentifier {
-            version: "3.2.1".to_string(),
+            version: bundle_version.clone(),
         };
 
         // continue if no update installed
-        assert!(test_env.updater.check_for_update().await);
+        test_env.updater.check_for_update().await;
+        assert_eq!(CURRENT_VERSION, test_env.updater.latest_downloaded_version);
 
         let server = MockServer::start();
 
@@ -480,7 +484,8 @@ mod tests {
                 .body_from_file(&*test_env.tmp_root.join("bundle.tar.gz").to_string_lossy());
         });
 
-        assert!(!test_env.updater.check_for_update().await);
+        test_env.updater.check_for_update().await;
+        assert_eq!(bundle_version, test_env.updater.latest_downloaded_version);
 
         wait_for_ctrl_file(&ctrl_file_path).await;
         assert!(ctrl_file_path.exists());
@@ -511,7 +516,8 @@ mod tests {
             });
         let bundle_server = test_env.start_test_server(bundles_mock);
 
-        assert!(test_env.updater.check_for_update().await);
+        test_env.updater.check_for_update().await;
+        assert_eq!(CURRENT_VERSION, test_env.updater.latest_downloaded_version);
         bundle_server.assert().await;
         Ok(())
     }

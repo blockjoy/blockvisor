@@ -21,14 +21,12 @@ path = "src/bin/babelsup.rs"
 [dependencies]
 async-trait = "0.1.61"
 babel_api = {version = "*", path = "../babel_api"}
-base64 = "0.21.0"
 crc = "3.0.0"
 ctrlc = "3.2.4"
 eyre = "0.6.8"
 futures = "0.3.25"
 gjson = "0.8"
 lazy_static = "1.4.0"
-postcard = "1.0.2"
 prost = "0.11.6"
 prost-types = "0.11.6"
 reqwest = {version = "0.11.13", features = ["json", "rustls"], default-features = false}
