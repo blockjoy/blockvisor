@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use babel::babelsup_service::SupervisorSetup;
 use babel::{babelsup_service, utils};
 use babel::{logging, run_flag::RunFlag, supervisor};
 use babel_api::config::SupervisorConfig;
@@ -22,14 +23,16 @@ async fn main() -> eyre::Result<()> {
     let (babel_change_tx, babel_change_rx) =
         watch::channel(utils::file_checksum(&babel::env::BABEL_BIN_PATH).await.ok());
     let (sup_setup_tx, sup_setup_rx) = oneshot::channel();
-    let sup_setup_tx = if let Ok(cfg) = load_config().await {
+    let sup_setup = if let Ok(cfg) = load_config().await {
         mount_data_drive(&cfg.data_directory_mount_point).await?;
+        let setup = supervisor::SupervisorSetup::new(cfg);
+        let logs_rx = setup.log_buffer.subscribe();
         sup_setup_tx
-            .send(supervisor::SupervisorSetup::new(cfg))
+            .send(setup)
             .map_err(|_| anyhow!("failed to setup supervisor"))?;
-        None
+        SupervisorSetup::LogsRx(logs_rx)
     } else {
-        Some(sup_setup_tx)
+        SupervisorSetup::SetupTx(sup_setup_tx)
     };
 
     let supervisor_handle = tokio::spawn(supervisor::run::<SysTimer>(
@@ -38,7 +41,7 @@ async fn main() -> eyre::Result<()> {
         sup_setup_rx,
         babel_change_rx,
     ));
-    let res = serve(run.clone(), sup_setup_tx, babel_change_tx).await;
+    let res = serve(run.clone(), sup_setup, babel_change_tx).await;
     if run.load() {
         // make sure to stop supervisor gracefully
         // in case of abnormal server shutdown
@@ -98,11 +101,11 @@ async fn mount_data_drive(data_dir: &str) -> eyre::Result<()> {
 #[cfg(target_os = "linux")]
 async fn serve(
     mut run: RunFlag,
-    sup_setup_tx: supervisor::SupervisorSetupTx,
+    sup_setup: SupervisorSetup,
     babel_change_tx: supervisor::BabelChangeTx,
 ) -> eyre::Result<()> {
     let babelsup_service = babel::babelsup_service::BabelSupService::new(
-        sup_setup_tx,
+        sup_setup,
         babel_change_tx,
         babel::env::BABEL_BIN_PATH.clone(),
         babel::env::BABELSUP_CONFIG_PATH.clone(),

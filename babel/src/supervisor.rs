@@ -50,7 +50,7 @@ impl SupervisorSetup {
 pub type BabelChangeTx = watch::Sender<Option<u32>>;
 pub type BabelChangeRx = watch::Receiver<Option<u32>>;
 pub type SupervisorSetupRx = oneshot::Receiver<SupervisorSetup>;
-pub type SupervisorSetupTx = Option<oneshot::Sender<SupervisorSetup>>;
+pub type SupervisorSetupTx = oneshot::Sender<SupervisorSetup>;
 
 pub async fn run<T: Timer>(
     run: RunFlag,
@@ -295,7 +295,7 @@ mod tests {
         run: RunFlag,
         babel_change_tx: BabelChangeTx,
         babel_change_rx: BabelChangeRx,
-        sup_setup_tx: SupervisorSetupTx,
+        sup_setup_tx: Option<SupervisorSetupTx>,
         sup_setup_rx: SupervisorSetupRx,
     }
 

@@ -5,10 +5,10 @@ use crate::{supervisor, utils};
 use async_trait::async_trait;
 use babel_api::config::SupervisorConfig;
 use futures::StreamExt;
-use std::fs;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::{fs, mem};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{broadcast, Mutex};
@@ -19,14 +19,18 @@ pub mod pb {
     tonic::include_proto!("blockjoy.babelsup.v1");
 }
 
+pub enum SupervisorSetup {
+    LogsRx(broadcast::Receiver<String>),
+    SetupTx(supervisor::SupervisorSetupTx),
+}
+
 #[async_trait]
 pub trait SupervisorConfigObserver {
     async fn supervisor_config_set(&self, cfg: &SupervisorConfig) -> eyre::Result<()>;
 }
 
 pub struct BabelSupService<T: SupervisorConfigObserver> {
-    logs_rx: Arc<Mutex<Option<broadcast::Receiver<String>>>>,
-    sup_setup_tx: Arc<Mutex<supervisor::SupervisorSetupTx>>,
+    sup_setup: Arc<Mutex<SupervisorSetup>>,
     babel_change_tx: supervisor::BabelChangeTx,
     babel_bin_path: PathBuf,
     supervisor_cfg_path: PathBuf,
@@ -45,7 +49,7 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::
         _request: Request<pb::GetLogsRequest>,
     ) -> Result<Response<Self::GetLogsStream>, Status> {
         let mut logs = Vec::default();
-        if let Some(rx) = self.logs_rx.lock().await.deref_mut() {
+        if let SupervisorSetup::LogsRx(rx) = self.sup_setup.lock().await.deref_mut() {
             loop {
                 match rx.try_recv() {
                     Ok(log) => logs.push(Ok(pb::GetLogsResponse { log })),
@@ -106,8 +110,8 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::
         &self,
         request: Request<SetupSupervisorRequest>,
     ) -> Result<Response<SetupSupervisorResponse>, Status> {
-        let mut sup_setup_tx = self.sup_setup_tx.lock().await;
-        if sup_setup_tx.is_some() {
+        let mut sup_setup = self.sup_setup.lock().await;
+        if let SupervisorSetup::SetupTx(_) = sup_setup.deref() {
             let cfg_str = request.into_inner().config;
             let cfg: SupervisorConfig = supervisor::load_config(&cfg_str).map_err(|err| {
                 Status::invalid_argument(format!("invalid supervisor config: {err}"))
@@ -125,17 +129,16 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::
                 .await
                 .map_err(|err| Status::internal(format!("{err}")))?;
             let setup = supervisor::SupervisorSetup::new(cfg);
-            self.logs_rx
-                .lock()
-                .await
-                .deref_mut()
-                .replace(setup.log_buffer.subscribe());
-
-            sup_setup_tx
-                .take()
-                .unwrap()
-                .send(setup)
-                .map_err(|_| Status::internal("failed to setup supervisor"))?;
+            let logs_tx = SupervisorSetup::LogsRx(setup.log_buffer.subscribe());
+            if let SupervisorSetup::SetupTx(sup_setup_tx) =
+                mem::replace(sup_setup.deref_mut(), logs_tx)
+            {
+                sup_setup_tx
+                    .send(setup)
+                    .map_err(|_| Status::internal("failed to setup supervisor"))?;
+            } else {
+                panic!()
+            }
         }
         Ok(Response::new(pb::SetupSupervisorResponse {}))
     }
@@ -143,15 +146,14 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::
 
 impl<T: SupervisorConfigObserver> BabelSupService<T> {
     pub fn new(
-        sup_setup_tx: supervisor::SupervisorSetupTx,
+        sup_setup: SupervisorSetup,
         babel_change_tx: supervisor::BabelChangeTx,
         babel_bin_path: PathBuf,
         supervisor_cfg_path: PathBuf,
         supervisor_cfg_observer: T,
     ) -> Self {
         Self {
-            logs_rx: Arc::new(Mutex::new(None)),
-            sup_setup_tx: Arc::new(Mutex::new(sup_setup_tx)),
+            sup_setup: Arc::new(Mutex::new(sup_setup)),
             babel_change_tx,
             babel_bin_path,
             supervisor_cfg_path,
@@ -205,7 +207,7 @@ mod tests {
     use super::*;
     use crate::babelsup_service::pb::babel_sup_client::BabelSupClient;
     use crate::babelsup_service::pb::babel_sup_server::BabelSup;
-    use crate::supervisor::{BabelChangeRx, SupervisorSetupTx};
+    use crate::supervisor::BabelChangeRx;
     use assert_fs::TempDir;
     use babel_api::config::{Entrypoint, SupervisorConfig};
     use eyre::Result;
@@ -229,12 +231,12 @@ mod tests {
     async fn sup_server(
         babel_path: PathBuf,
         babelsup_cfg_path: PathBuf,
-        sup_setup_tx: SupervisorSetupTx,
+        sup_setup: SupervisorSetup,
         babel_change_tx: supervisor::BabelChangeTx,
         uds_stream: UnixListenerStream,
     ) -> Result<()> {
         let sup_service = BabelSupService::new(
-            sup_setup_tx,
+            sup_setup,
             babel_change_tx,
             babel_path,
             babelsup_cfg_path,
@@ -285,7 +287,7 @@ mod tests {
             sup_server(
                 babel_bin_path,
                 babelsup_config_path,
-                Some(sup_setup_tx),
+                SupervisorSetup::SetupTx(sup_setup_tx),
                 babel_change_tx,
                 uds_stream,
             )
@@ -365,7 +367,7 @@ mod tests {
 
         let (babel_change_tx, _) = watch::channel(None);
         let sup_service = BabelSupService::new(
-            Some(sup_setup_tx),
+            SupervisorSetup::SetupTx(sup_setup_tx),
             babel_change_tx,
             babel_bin_path.clone(),
             Default::default(),
@@ -384,7 +386,7 @@ mod tests {
         let (babel_change_tx, _) = watch::channel(Some(321));
         let (sup_setup_tx, _) = oneshot::channel();
         let sup_service = BabelSupService::new(
-            Some(sup_setup_tx),
+            SupervisorSetup::SetupTx(sup_setup_tx),
             babel_change_tx,
             babel_bin_path.clone(),
             Default::default(),
