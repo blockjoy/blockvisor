@@ -86,6 +86,7 @@ impl NodeConnection {
         &mut self,
         request: S,
     ) -> Result<D> {
+        let node_id = self.node_id;
         match &mut self.state {
             NodeConnectionState::Closed => {
                 bail!("Cannot change port to babel: node connection is closed")
@@ -94,17 +95,18 @@ impl NodeConnection {
             NodeConnectionState::BabelSup { .. } => {
                 debug!("Reconnecting to babel");
                 self.state = NodeConnectionState::Babel {
-                    stream: open_stream(self.node_id, BABEL_VSOCK_PORT, CONNECTION_SWITCH_TIMEOUT)
+                    stream: open_stream(node_id, BABEL_VSOCK_PORT, CONNECTION_SWITCH_TIMEOUT)
                         .await?,
                 }
             }
         }
         let stream = self.try_babel_stream_mut()?;
-        write_data(stream, request).await?;
+        let reconnect = || open_stream(node_id, BABEL_VSOCK_PORT, CONNECTION_SWITCH_TIMEOUT);
+        write_data(stream, request, reconnect).await?;
         read_data(stream).await
     }
 
-    /// This function gets gRPC client connected to babelsup. It reconnect to babelsup if necessary.
+    /// This function gets gRPC client connected to babelsup. It reconnects to babelsup if necessary.
     pub async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient<Channel>> {
         match &mut self.state {
             NodeConnectionState::Closed => {
@@ -143,6 +145,8 @@ impl NodeConnection {
     }
 }
 
+/// Returns a new connection to the specified node. The port is the VSOCK-port that is used to open
+/// the connection.
 async fn open_stream(node_id: uuid::Uuid, port: u32, max_delay: Duration) -> Result<UnixStream> {
     // We are going to connect to the central socket for this VM. Later we will specify which
     // port we want to talk to.
@@ -226,10 +230,16 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<()> {
 }
 
 /// Waits for the socket to become writable, then writes the data as json to the socket. The max
-/// time that is allowed to elapse  is `SOCKET_TIMEOUT`.
-async fn write_data(unix_stream: &mut UnixStream, data: impl serde::Serialize) -> Result<()> {
-    use std::io::ErrorKind::WouldBlock;
-
+/// time that is allowed to elapse  is `SOCKET_TIMEOUT`. The retry argument is a function that
+/// allows the connection to be restored. This function is called once, and it's return value is
+/// written to `unix_stream`. If writing still fails after than, an error is returned.
+async fn write_data<F, Fut>(unix_stream: &mut UnixStream, data: impl serde::Serialize, retry: F) -> Result<()>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<UnixStream>>,
+{
+    use std::io::ErrorKind::{WouldBlock, BrokenPipe};
+    let mut retry = Some(retry);
     let data = serde_json::to_string(&data)?;
     let write_data = async {
         loop {
@@ -239,8 +249,15 @@ async fn write_data(unix_stream: &mut UnixStream, data: impl serde::Serialize) -
             // is a false positive.
             match unix_stream.try_write(data.as_bytes()) {
                 Ok(_) => break,
+                // We skip blocking events
                 Err(e) if e.kind() == WouldBlock => continue,
-                Err(e) => bail!("Writing socket failed with `{e}`"),
+                // If we get a BrokenPipe error, it is possible that babelsup or babel has
+                // restarted, and we will try to reconnect once.
+                Err(e) if e.kind() == BrokenPipe => {
+                    let retry = retry.take().ok_or_else(|| e)?;
+                    *unix_stream = retry().await?;
+                },
+                Err(e) => bail!("Writing to socket failed with `{e}`"),
             }
         }
         Ok(())
@@ -268,7 +285,7 @@ async fn read_data<D: serde::de::DeserializeOwned>(unix_stream: &mut UnixStream)
                     return Ok(serde_json::from_str(s)?);
                 }
                 Err(e) if e.kind() == WouldBlock => continue,
-                Err(e) => bail!("Writing socket failed with `{e}`"),
+                Err(e) => bail!("Reading from socket failed with `{e}`"),
             }
         }
     };
