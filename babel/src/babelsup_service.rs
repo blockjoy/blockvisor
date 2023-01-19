@@ -1,6 +1,3 @@
-use crate::babelsup_service::pb::{
-    start_new_babel_request, SetupSupervisorRequest, SetupSupervisorResponse, StartNewBabelRequest,
-};
 use crate::{supervisor, utils};
 use async_trait::async_trait;
 use babel_api::config::SupervisorConfig;
@@ -13,11 +10,6 @@ use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{broadcast, Mutex};
 use tonic::{Request, Response, Status, Streaming};
-
-pub mod pb {
-    #![allow(clippy::derive_partial_eq_without_eq)]
-    tonic::include_proto!("blockjoy.babelsup.v1");
-}
 
 pub enum SupervisorSetup {
     LogsRx(broadcast::Receiver<String>),
@@ -37,22 +29,21 @@ pub struct BabelSupService<T: SupervisorConfigObserver> {
     supervisor_cfg_observer: T,
 }
 
-#[async_trait]
-impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::BabelSup
+#[tonic::async_trait]
+impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::api::babel_sup_server::BabelSup
     for BabelSupService<T>
 {
-    type GetLogsStream =
-        tokio_stream::Iter<std::vec::IntoIter<Result<pb::GetLogsResponse, Status>>>;
+    type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
 
     async fn get_logs(
         &self,
-        _request: Request<pb::GetLogsRequest>,
+        _request: Request<()>,
     ) -> Result<Response<Self::GetLogsStream>, Status> {
         let mut logs = Vec::default();
         if let SupervisorSetup::LogsRx(rx) = self.sup_setup.lock().await.deref_mut() {
             loop {
                 match rx.try_recv() {
-                    Ok(log) => logs.push(Ok(pb::GetLogsResponse { log })),
+                    Ok(log) => logs.push(Ok(log)),
                     Err(broadcast::error::TryRecvError::Lagged(_)) => {}
                     Err(_) => break,
                 }
@@ -64,26 +55,26 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::
 
     async fn check_babel(
         &self,
-        request: Request<pb::CheckBabelRequest>,
-    ) -> Result<Response<pb::CheckBabelResponse>, Status> {
-        let expected_checksum = request.into_inner().checksum;
+        request: Request<u32>,
+    ) -> Result<Response<babel_api::api::BabelStatus>, Status> {
+        let expected_checksum = request.into_inner();
         let babel_status = match *self.babel_change_tx.borrow() {
             Some(checksum) => {
                 if checksum == expected_checksum {
-                    pb::check_babel_response::BabelStatus::Ok
+                    babel_api::api::BabelStatus::Ok
                 } else {
-                    pb::check_babel_response::BabelStatus::ChecksumMismatch
+                    babel_api::api::BabelStatus::ChecksumMismatch
                 }
             }
-            None => pb::check_babel_response::BabelStatus::Missing,
-        } as i32;
-        Ok(Response::new(pb::CheckBabelResponse { babel_status }))
+            None => babel_api::api::BabelStatus::Missing,
+        };
+        Ok(Response::new(babel_status))
     }
 
     async fn start_new_babel(
         &self,
-        request: Request<Streaming<pb::StartNewBabelRequest>>,
-    ) -> Result<Response<pb::StartNewBabelResponse>, Status> {
+        request: Request<Streaming<babel_api::api::BabelBin>>,
+    ) -> Result<Response<()>, Status> {
         let mut stream = request.into_inner();
         let expected_checksum = self.save_babel_stream(&mut stream).await?;
 
@@ -97,7 +88,7 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::
             self.babel_change_tx.send_modify(|value| {
                 let _ = value.insert(checksum);
             });
-            Ok(Response::new(pb::StartNewBabelResponse {}))
+            Ok(Response::new(()))
         } else {
             Err(Status::internal(format!(
                 "received babel binary checksum ({checksum})\
@@ -108,13 +99,13 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::
 
     async fn setup_supervisor(
         &self,
-        request: Request<SetupSupervisorRequest>,
-    ) -> Result<Response<SetupSupervisorResponse>, Status> {
+        request: Request<babel_api::config::SupervisorConfig>,
+    ) -> Result<Response<()>, Status> {
         let mut sup_setup = self.sup_setup.lock().await;
         if let SupervisorSetup::SetupTx(_) = sup_setup.deref() {
-            let cfg_str = request.into_inner().config;
-            let cfg: SupervisorConfig = supervisor::load_config(&cfg_str).map_err(|err| {
-                Status::invalid_argument(format!("invalid supervisor config: {err}"))
+            let cfg = request.into_inner();
+            let cfg_str = serde_json::to_string(&cfg).map_err(|err| {
+                Status::internal(format!("failed to serialize supervisor config: {err}"))
             })?;
             let _ = fs::remove_file(&self.supervisor_cfg_path);
             fs::write(&self.supervisor_cfg_path, &cfg_str).map_err(|err| {
@@ -140,7 +131,7 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> pb::babel_sup_server::
                 panic!()
             }
         }
-        Ok(Response::new(pb::SetupSupervisorResponse {}))
+        Ok(Response::new(()))
     }
 }
 
@@ -163,7 +154,7 @@ impl<T: SupervisorConfigObserver> BabelSupService<T> {
 
     async fn save_babel_stream(
         &self,
-        stream: &mut Streaming<StartNewBabelRequest>,
+        stream: &mut Streaming<babel_api::api::BabelBin>,
     ) -> Result<u32, Status> {
         let _ = tokio::fs::remove_file(&self.babel_bin_path).await;
         let file = OpenOptions::new()
@@ -178,19 +169,16 @@ impl<T: SupervisorConfigObserver> BabelSupService<T> {
         let mut expected_checksum = None;
         while let Some(part) = stream.next().await {
             let part = part.map_err(|e| Status::internal(e.to_string()))?;
-            match part.babel_bin {
-                Some(start_new_babel_request::BabelBin::Bin(bin)) => {
+            match part {
+                babel_api::api::BabelBin::Bin(bin) => {
                     writer.write(&bin).await.map_err(|err| {
                         Status::internal(format!("failed to save babel binary: {err}"))
                     })?;
-                    Ok(())
                 }
-                Some(start_new_babel_request::BabelBin::Checksum(checksum)) => {
+                babel_api::api::BabelBin::Checksum(checksum) => {
                     expected_checksum = Some(checksum);
-                    Ok(())
                 }
-                _ => Err(Status::invalid_argument("incomplete babel_bin stream")),
-            }?
+            }
         }
         writer
             .flush()
@@ -205,10 +193,10 @@ impl<T: SupervisorConfigObserver> BabelSupService<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::babelsup_service::pb::babel_sup_client::BabelSupClient;
-    use crate::babelsup_service::pb::babel_sup_server::BabelSup;
     use crate::supervisor::BabelChangeRx;
     use assert_fs::TempDir;
+    use babel_api::api::babel_sup_client::BabelSupClient;
+    use babel_api::api::babel_sup_server::BabelSup;
     use babel_api::config::{Entrypoint, SupervisorConfig};
     use eyre::Result;
     use std::fs;
@@ -244,7 +232,9 @@ mod tests {
         );
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(pb::babel_sup_server::BabelSupServer::new(sup_service))
+            .add_service(babel_api::api::babel_sup_server::BabelSupServer::new(
+                sup_service,
+            ))
             .serve_with_incoming(uds_stream)
             .await?;
         Ok(())
@@ -308,21 +298,9 @@ mod tests {
         let mut test_env = setup_test_env()?;
 
         let incomplete_babel_bin = vec![
-            pb::StartNewBabelRequest {
-                babel_bin: Some(pb::start_new_babel_request::BabelBin::Bin(vec![
-                    1, 2, 3, 4, 6, 7, 8, 9, 10,
-                ])),
-            },
-            pb::StartNewBabelRequest {
-                babel_bin: Some(pb::start_new_babel_request::BabelBin::Bin(vec![
-                    11, 12, 13, 14, 16, 17, 18, 19, 20,
-                ])),
-            },
-            pb::StartNewBabelRequest {
-                babel_bin: Some(pb::start_new_babel_request::BabelBin::Bin(vec![
-                    21, 22, 23, 24, 26, 27, 28, 29, 30,
-                ])),
-            },
+            babel_api::api::BabelBin::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
+            babel_api::api::BabelBin::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
+            babel_api::api::BabelBin::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
         ];
 
         assert!(test_env
@@ -333,9 +311,7 @@ mod tests {
         assert!(!test_env.babel_change_rx.has_changed()?);
 
         let mut invalid_babel_bin = incomplete_babel_bin.clone();
-        invalid_babel_bin.push(pb::StartNewBabelRequest {
-            babel_bin: Some(pb::start_new_babel_request::BabelBin::Checksum(123)),
-        });
+        invalid_babel_bin.push(babel_api::api::BabelBin::Checksum(123));
         assert!(test_env
             .client
             .start_new_babel(tokio_stream::iter(invalid_babel_bin))
@@ -344,9 +320,7 @@ mod tests {
         assert!(!test_env.babel_change_rx.has_changed()?);
 
         let mut babel_bin = incomplete_babel_bin.clone();
-        babel_bin.push(pb::StartNewBabelRequest {
-            babel_bin: Some(pb::start_new_babel_request::BabelBin::Checksum(4135829304)),
-        });
+        babel_bin.push(babel_api::api::BabelBin::Checksum(4135829304));
         test_env
             .client
             .start_new_babel(tokio_stream::iter(babel_bin))
@@ -375,12 +349,11 @@ mod tests {
         );
 
         assert_eq!(
-            pb::check_babel_response::BabelStatus::Missing as i32,
+            babel_api::api::BabelStatus::Missing,
             sup_service
-                .check_babel(Request::new(pb::CheckBabelRequest { checksum: 123 }))
+                .check_babel(Request::new(123))
                 .await?
                 .into_inner()
-                .babel_status
         );
 
         let (babel_change_tx, _) = watch::channel(Some(321));
@@ -394,20 +367,18 @@ mod tests {
         );
 
         assert_eq!(
-            pb::check_babel_response::BabelStatus::ChecksumMismatch as i32,
+            babel_api::api::BabelStatus::ChecksumMismatch,
             sup_service
-                .check_babel(Request::new(pb::CheckBabelRequest { checksum: 123 }))
+                .check_babel(Request::new(123))
                 .await?
                 .into_inner()
-                .babel_status
         );
         assert_eq!(
-            pb::check_babel_response::BabelStatus::Ok as i32,
+            babel_api::api::BabelStatus::Ok,
             sup_service
-                .check_babel(Request::new(pb::CheckBabelRequest { checksum: 321 }))
+                .check_babel(Request::new(321))
                 .await?
                 .into_inner()
-                .babel_status
         );
         Ok(())
     }
@@ -416,31 +387,25 @@ mod tests {
     async fn test_logs() -> Result<()> {
         let mut test_env = setup_test_env()?;
 
-        let mut stream = test_env
-            .client
-            .get_logs(pb::GetLogsRequest {})
-            .await?
-            .into_inner();
+        let mut stream = test_env.client.get_logs(()).await?.into_inner();
 
         let mut logs = Vec::<String>::default();
         while let Some(Ok(log)) = stream.next().await {
-            logs.push(log.log);
+            logs.push(log);
         }
 
         assert_eq!(Vec::<String>::default(), logs);
 
         test_env
             .client
-            .setup_supervisor(pb::SetupSupervisorRequest {
-                config: toml::to_string(&SupervisorConfig {
-                    log_buffer_capacity_ln: 10,
-                    entry_point: vec![Entrypoint {
-                        command: "echo".to_owned(),
-                        args: vec![],
-                    }],
+            .setup_supervisor(SupervisorConfig {
+                log_buffer_capacity_ln: 10,
+                entry_point: vec![Entrypoint {
+                    command: "echo".to_owned(),
+                    args: vec![],
+                }],
 
-                    ..Default::default()
-                })?,
+                ..Default::default()
             })
             .await?;
         let logs_tx = test_env.sup_setup_rx.await?.log_buffer;
@@ -454,15 +419,11 @@ mod tests {
             .send("log3".to_string())
             .expect("failed to send log");
 
-        let mut stream = test_env
-            .client
-            .get_logs(pb::GetLogsRequest {})
-            .await?
-            .into_inner();
+        let mut stream = test_env.client.get_logs(()).await?.into_inner();
 
         let mut logs = Vec::<String>::default();
         while let Some(Ok(log)) = stream.next().await {
-            logs.push(log.log);
+            logs.push(log);
         }
 
         assert_eq!(vec!["log1", "log2", "log3"], logs);
@@ -473,15 +434,7 @@ mod tests {
     async fn test_setup_supervisor() -> Result<()> {
         let mut test_env = setup_test_env()?;
 
-        assert!(test_env
-            .client
-            .setup_supervisor(pb::SetupSupervisorRequest {
-                config: "invalid config".to_string(),
-            })
-            .await
-            .is_err());
-        assert!(test_env.sup_setup_rx.try_recv().is_err());
-        let config = toml::to_string(&SupervisorConfig {
+        let config = SupervisorConfig {
             log_buffer_capacity_ln: 10,
             entry_point: vec![Entrypoint {
                 command: "echo".to_owned(),
@@ -489,18 +442,13 @@ mod tests {
             }],
 
             ..Default::default()
-        })?;
-        test_env
-            .client
-            .setup_supervisor(pb::SetupSupervisorRequest {
-                config: config.clone(),
-            })
-            .await?;
-        assert_eq!(config, fs::read_to_string(test_env.babelsup_cfg_path)?);
+        };
+        test_env.client.setup_supervisor(config.clone()).await?;
         assert_eq!(
             config,
-            toml::to_string(&test_env.sup_setup_rx.try_recv()?.config)?
+            serde_json::from_str(&fs::read_to_string(test_env.babelsup_cfg_path)?)?
         );
+        assert_eq!(config, test_env.sup_setup_rx.try_recv()?.config);
         Ok(())
     }
 }

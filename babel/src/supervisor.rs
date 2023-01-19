@@ -26,8 +26,8 @@ pub trait Timer {
     async fn sleep(duration: Duration);
 }
 
-pub fn load_config(toml_str: &str) -> eyre::Result<SupervisorConfig> {
-    let cfg: SupervisorConfig = toml::from_str(toml_str)?;
+pub fn load_config(json_str: &str) -> eyre::Result<SupervisorConfig> {
+    let cfg: SupervisorConfig = serde_json::from_str(json_str)?;
     if cfg.entry_point.is_empty() {
         bail!("no entry point defined");
     }

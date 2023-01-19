@@ -320,8 +320,6 @@ dependencies = [
  "lazy_static",
  "mockall",
  "postcard",
- "prost",
- "prost-types",
  "reqwest",
  "serde",
  "serde_json",
@@ -334,7 +332,6 @@ dependencies = [
  "tokio-vsock",
  "toml",
  "tonic",
- "tonic-build",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -348,6 +345,8 @@ dependencies = [
  "serde",
  "serde_bytes",
  "strum_macros",
+ "tonic",
+ "tonic-rpc",
 ]
 
 [[package]]
@@ -371,6 +370,15 @@ dependencies = [
  "lalrpop",
  "lalrpop-util",
  "regex",
+]
+
+[[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -2982,15 +2990,43 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.8.4"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bf5e9b9c0f7e0a7c027dcfaba7b2c60816c7049171f679d99ee2ff65d0de8c4"
+checksum = "48c6fd7c2581e36d63388a9e04c350c21beb7a8b059580b2e93993c526899ddc"
 dependencies = [
  "prettyplease",
  "proc-macro2",
  "prost-build",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tonic-rpc"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe3466c319af1c82657180911d7b33ae9ae3f31e7fca4d52820fc1bdd3f96370"
+dependencies = [
+ "bincode",
+ "bytes",
+ "serde",
+ "tonic",
+ "tonic-build",
+ "tonic-rpc-macro",
+]
+
+[[package]]
+name = "tonic-rpc-macro"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8ef0e263a8a0cb3e27bb33637e911dd48f729c447698eaebe420d96589b5b3b"
+dependencies = [
+ "heck",
+ "itertools",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "tonic-build",
 ]
 
 [[package]]

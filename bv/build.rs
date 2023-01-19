@@ -37,11 +37,4 @@ fn main() {
         eprintln!("Building protos failed with:\n{e}");
         std::process::exit(1);
     }
-    if let Err(e) = tonic_build::configure()
-        .build_server(true)
-        .compile(&["babelsup.proto"], &["../babel_api/proto"])
-    {
-        eprintln!("Building babel_api protos failed with:\n{e}");
-        std::process::exit(1);
-    }
 }

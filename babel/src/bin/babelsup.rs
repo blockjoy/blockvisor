@@ -56,8 +56,8 @@ async fn load_config() -> eyre::Result<SupervisorConfig> {
         "Loading supervisor configuration at {}",
         babel::env::BABELSUP_CONFIG_PATH.to_string_lossy()
     );
-    let toml_str = fs::read_to_string(babel::env::BABELSUP_CONFIG_PATH.as_path()).await?;
-    supervisor::load_config(&toml_str)
+    let json_str = fs::read_to_string(babel::env::BABELSUP_CONFIG_PATH.as_path()).await?;
+    supervisor::load_config(&json_str)
 }
 
 struct SysTimer;
@@ -116,7 +116,7 @@ async fn serve(
 
     Server::builder()
         .max_concurrent_streams(2)
-        .add_service(babelsup_service::pb::babel_sup_server::BabelSupServer::new(
+        .add_service(babel_api::api::babel_sup_server::BabelSupServer::new(
             babelsup_service,
         ))
         .serve_with_incoming_shutdown(listener.incoming(), run.wait())

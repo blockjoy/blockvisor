@@ -60,7 +60,7 @@ tracing-subscriber = {version = "0.3.16", features = ["env-filter", "fmt", "std"
 uuid = {version = "1.2.2", features = ["serde", "v4"]}
 
 [build-dependencies]
-tonic-build = {version = "0.8.3", features = ["prost"]}
+tonic-build = {version = "0.8.2", features = ["prost"]}
 
 [dev-dependencies]
 assert_cmd = "2"

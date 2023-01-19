@@ -20,7 +20,7 @@ pub struct Babel {
     pub methods: BTreeMap<String, Method>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SupervisorConfig {
     /// Path to mount data drive to
     pub data_directory_mount_point: String,

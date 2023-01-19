@@ -14,8 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     env::*,
-    node_connection,
-    node_connection::{babelsup_pb, NodeConnection},
+    node_connection::NodeConnection,
     node_data::{NodeData, NodeImage, NodeStatus},
     services::cookbook::CookbookService,
     utils,
@@ -120,11 +119,10 @@ impl Node {
 
         self.machine.start().await?;
         self.node_conn = NodeConnection::try_open(self.id(), NODE_START_TIMEOUT).await?;
-        let config = toml::to_string(&self.data.babel_conf.supervisor)?;
         self.node_conn
             .babelsup_client()
             .await?
-            .setup_supervisor(babelsup_pb::SetupSupervisorRequest { config })
+            .setup_supervisor(self.data.babel_conf.supervisor.clone())
             .await?;
         let resp = self.node_conn.babel_rpc(BabelRequest::Ping).await;
         if !matches!(resp, Ok(BabelResponse::Pong)) {
@@ -370,13 +368,10 @@ impl Node {
     /// Returns the list of logs from blockchain entry_points.
     pub async fn get_logs(&mut self) -> Result<Vec<String>> {
         let client = self.node_conn.babelsup_client().await?;
-        let mut resp = client
-            .get_logs(node_connection::babelsup_pb::GetLogsRequest {})
-            .await?
-            .into_inner();
+        let mut resp = client.get_logs(()).await?.into_inner();
         let mut logs = Vec::<String>::default();
         while let Some(Ok(log)) = resp.next().await {
-            logs.push(log.log);
+            logs.push(log);
         }
         Ok(logs)
     }

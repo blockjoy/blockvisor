@@ -1,4 +1,6 @@
+use crate::{env::*, node::VSOCK_PATH};
 use anyhow::{anyhow, bail, ensure, Context, Result};
+use babel_api::api::babel_sup_client::BabelSupClient;
 use std::env;
 use std::time::Duration;
 use tokio::fs::File;
@@ -12,13 +14,6 @@ use tokio::{
 use tokio_stream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::{debug, error, info};
-
-use crate::node_connection::babelsup_pb::babel_sup_client::BabelSupClient;
-use crate::{env::*, node::VSOCK_PATH};
-
-pub mod babelsup_pb {
-    tonic::include_proto!("blockjoy.babelsup.v1");
-}
 
 pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
@@ -55,12 +50,8 @@ impl NodeConnection {
     pub async fn try_open(node_id: uuid::Uuid, max_delay: Duration) -> Result<Self> {
         let mut client = connect_babelsup(node_id, max_delay).await?;
         let (babel_bin, checksum) = load_babel_bin().await?;
-        let babel_status = client
-            .check_babel(babelsup_pb::CheckBabelRequest { checksum })
-            .await?
-            .into_inner()
-            .babel_status;
-        if babel_status != babelsup_pb::check_babel_response::BabelStatus::Ok as i32 {
+        let babel_status = client.check_babel(checksum).await?.into_inner();
+        if babel_status != babel_api::api::BabelStatus::Ok {
             info!("Invalid or missing Babel service on VM, installing new one");
             client
                 .start_new_babel(tokio_stream::iter(babel_bin))
@@ -282,7 +273,7 @@ async fn connect_babelsup(
     Ok(BabelSupClient::new(channel))
 }
 
-pub async fn load_babel_bin() -> Result<(Vec<babelsup_pb::StartNewBabelRequest>, u32)> {
+pub async fn load_babel_bin() -> Result<(Vec<babel_api::api::BabelBin>, u32)> {
     let babel_path =
         fs::canonicalize(env::current_exe().with_context(|| "failed to get current binary path")?)
             .await
@@ -300,23 +291,15 @@ pub async fn load_babel_bin() -> Result<(Vec<babelsup_pb::StartNewBabelRequest>,
     let mut buf = [0; 16384];
     let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
     let mut digest = crc.digest();
-    let mut babel_bin = Vec::<babelsup_pb::StartNewBabelRequest>::default();
+    let mut babel_bin = Vec::<babel_api::api::BabelBin>::default();
     while let Ok(size) = reader.read(&mut buf[..]).await {
         if size == 0 {
             break;
         }
         digest.update(&buf[0..size]);
-        babel_bin.push(babelsup_pb::StartNewBabelRequest {
-            babel_bin: Some(babelsup_pb::start_new_babel_request::BabelBin::Bin(
-                buf[0..size].to_vec(),
-            )),
-        });
+        babel_bin.push(babel_api::api::BabelBin::Bin(buf[0..size].to_vec()));
     }
     let checksum = digest.finalize();
-    babel_bin.push(babelsup_pb::StartNewBabelRequest {
-        babel_bin: Some(babelsup_pb::start_new_babel_request::BabelBin::Checksum(
-            checksum,
-        )),
-    });
+    babel_bin.push(babel_api::api::BabelBin::Checksum(checksum));
     Ok((babel_bin, checksum))
 }

@@ -1,7 +1,31 @@
 use crate::config;
+use crate::config::SupervisorConfig;
 use serde::{Deserialize, Serialize};
 use std::collections;
 use strum_macros::Display;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum BabelStatus {
+    Ok,
+    ChecksumMismatch,
+    Missing,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BabelBin {
+    Bin(Vec<u8>),
+    Checksum(u32),
+}
+
+#[tonic_rpc::tonic_rpc(bincode)]
+pub trait BabelSup {
+    #[server_streaming]
+    fn get_logs() -> String;
+    fn check_babel(checksum: u32) -> BabelStatus;
+    #[client_streaming]
+    fn start_new_babel(babel_bin: BabelBin);
+    fn setup_supervisor(config: SupervisorConfig);
+}
 
 /// Each request that comes over the VSock to babel must be a piece of JSON that can be
 /// deserialized into this struct.
