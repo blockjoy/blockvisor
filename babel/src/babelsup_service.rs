@@ -16,6 +16,7 @@ pub enum SupervisorSetup {
     SetupTx(supervisor::SupervisorSetupTx),
 }
 
+/// Trait that allows to inject custom actions performed on Supervisor config setup.
 #[async_trait]
 pub trait SupervisorConfigObserver {
     async fn supervisor_config_set(&self, cfg: &SupervisorConfig) -> eyre::Result<()>;
@@ -30,7 +31,7 @@ pub struct BabelSupService<T: SupervisorConfigObserver> {
 }
 
 #[tonic::async_trait]
-impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::api::babel_sup_server::BabelSup
+impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::babel_sup_server::BabelSup
     for BabelSupService<T>
 {
     type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
@@ -56,24 +57,24 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::api::babel_
     async fn check_babel(
         &self,
         request: Request<u32>,
-    ) -> Result<Response<babel_api::api::BabelStatus>, Status> {
+    ) -> Result<Response<babel_api::BabelStatus>, Status> {
         let expected_checksum = request.into_inner();
         let babel_status = match *self.babel_change_tx.borrow() {
             Some(checksum) => {
                 if checksum == expected_checksum {
-                    babel_api::api::BabelStatus::Ok
+                    babel_api::BabelStatus::Ok
                 } else {
-                    babel_api::api::BabelStatus::ChecksumMismatch
+                    babel_api::BabelStatus::ChecksumMismatch
                 }
             }
-            None => babel_api::api::BabelStatus::Missing,
+            None => babel_api::BabelStatus::Missing,
         };
         Ok(Response::new(babel_status))
     }
 
     async fn start_new_babel(
         &self,
-        request: Request<Streaming<babel_api::api::BabelBin>>,
+        request: Request<Streaming<babel_api::BabelBin>>,
     ) -> Result<Response<()>, Status> {
         let mut stream = request.into_inner();
         let expected_checksum = self.save_babel_stream(&mut stream).await?;
@@ -152,9 +153,10 @@ impl<T: SupervisorConfigObserver> BabelSupService<T> {
         }
     }
 
+    /// Write babel binary stream into the file.
     async fn save_babel_stream(
         &self,
-        stream: &mut Streaming<babel_api::api::BabelBin>,
+        stream: &mut Streaming<babel_api::BabelBin>,
     ) -> Result<u32, Status> {
         let _ = tokio::fs::remove_file(&self.babel_bin_path).await;
         let file = OpenOptions::new()
@@ -170,12 +172,12 @@ impl<T: SupervisorConfigObserver> BabelSupService<T> {
         while let Some(part) = stream.next().await {
             let part = part.map_err(|e| Status::internal(e.to_string()))?;
             match part {
-                babel_api::api::BabelBin::Bin(bin) => {
+                babel_api::BabelBin::Bin(bin) => {
                     writer.write(&bin).await.map_err(|err| {
                         Status::internal(format!("failed to save babel binary: {err}"))
                     })?;
                 }
-                babel_api::api::BabelBin::Checksum(checksum) => {
+                babel_api::BabelBin::Checksum(checksum) => {
                     expected_checksum = Some(checksum);
                 }
             }
@@ -195,8 +197,8 @@ mod tests {
     use super::*;
     use crate::supervisor::BabelChangeRx;
     use assert_fs::TempDir;
-    use babel_api::api::babel_sup_client::BabelSupClient;
-    use babel_api::api::babel_sup_server::BabelSup;
+    use babel_api::babel_sup_client::BabelSupClient;
+    use babel_api::babel_sup_server::BabelSup;
     use babel_api::config::{Entrypoint, SupervisorConfig};
     use eyre::Result;
     use std::fs;
@@ -232,7 +234,7 @@ mod tests {
         );
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(babel_api::api::babel_sup_server::BabelSupServer::new(
+            .add_service(babel_api::babel_sup_server::BabelSupServer::new(
                 sup_service,
             ))
             .serve_with_incoming(uds_stream)
@@ -298,9 +300,9 @@ mod tests {
         let mut test_env = setup_test_env()?;
 
         let incomplete_babel_bin = vec![
-            babel_api::api::BabelBin::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
-            babel_api::api::BabelBin::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
-            babel_api::api::BabelBin::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
+            babel_api::BabelBin::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
+            babel_api::BabelBin::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
+            babel_api::BabelBin::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
         ];
 
         assert!(test_env
@@ -311,7 +313,7 @@ mod tests {
         assert!(!test_env.babel_change_rx.has_changed()?);
 
         let mut invalid_babel_bin = incomplete_babel_bin.clone();
-        invalid_babel_bin.push(babel_api::api::BabelBin::Checksum(123));
+        invalid_babel_bin.push(babel_api::BabelBin::Checksum(123));
         assert!(test_env
             .client
             .start_new_babel(tokio_stream::iter(invalid_babel_bin))
@@ -320,7 +322,7 @@ mod tests {
         assert!(!test_env.babel_change_rx.has_changed()?);
 
         let mut babel_bin = incomplete_babel_bin.clone();
-        babel_bin.push(babel_api::api::BabelBin::Checksum(4135829304));
+        babel_bin.push(babel_api::BabelBin::Checksum(4135829304));
         test_env
             .client
             .start_new_babel(tokio_stream::iter(babel_bin))
@@ -349,7 +351,7 @@ mod tests {
         );
 
         assert_eq!(
-            babel_api::api::BabelStatus::Missing,
+            babel_api::BabelStatus::Missing,
             sup_service
                 .check_babel(Request::new(123))
                 .await?
@@ -367,14 +369,14 @@ mod tests {
         );
 
         assert_eq!(
-            babel_api::api::BabelStatus::ChecksumMismatch,
+            babel_api::BabelStatus::ChecksumMismatch,
             sup_service
                 .check_babel(Request::new(123))
                 .await?
                 .into_inner()
         );
         assert_eq!(
-            babel_api::api::BabelStatus::Ok,
+            babel_api::BabelStatus::Ok,
             sup_service
                 .check_babel(Request::new(321))
                 .await?

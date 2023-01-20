@@ -1,9 +1,8 @@
-use crate::Result;
 use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
 
-pub async fn file_checksum(path: &PathBuf) -> Result<u32> {
+pub async fn file_checksum(path: &PathBuf) -> eyre::Result<u32> {
     let file = File::open(path).await?;
     let mut reader = BufReader::new(file);
     let mut buf = [0; 16384];

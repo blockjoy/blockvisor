@@ -1,6 +1,7 @@
 #[cfg(target_os = "linux")]
-use babel::vsock;
-use babel::{logging, run_flag::RunFlag};
+use babel::{babel_service, logging, run_flag::RunFlag};
+use eyre::Context;
+use tonic::transport::Server;
 
 const VSOCK_HOST_CID: u32 = 3;
 const VSOCK_BABEL_PORT: u32 = 42;
@@ -10,20 +11,26 @@ async fn main() -> eyre::Result<()> {
     logging::setup_logging()?;
 
     let run = RunFlag::run_until_ctrlc();
-    serve(run, VSOCK_HOST_CID, VSOCK_BABEL_PORT).await?;
+    serve(run).await?;
 
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-async fn serve(run: RunFlag, cid: u32, port: u32) -> eyre::Result<()> {
-    use std::time::Duration;
+async fn serve(mut run: RunFlag) -> eyre::Result<()> {
+    let babel_service = babel_service::BabelService::new()?;
+    let listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_BABEL_PORT)
+        .with_context(|| "failed to bind to vsock")?;
 
-    let msg_handler = babel::msg_handler::MsgHandler::new(Duration::from_secs(10))?;
-    vsock::serve(run, cid, port, msg_handler).await
+    Server::builder()
+        .max_concurrent_streams(2)
+        .add_service(babel_api::babel_server::BabelServer::new(babel_service))
+        .serve_with_incoming_shutdown(listener.incoming(), run.wait())
+        .await?;
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
-async fn serve(_run: RunFlag, _cid: u32, _port: u32) -> eyre::Result<()> {
+async fn serve(_run: RunFlag) -> eyre::Result<()> {
     unimplemented!()
 }

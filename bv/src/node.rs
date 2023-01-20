@@ -1,7 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use babel_api::config::KeysConfig;
 use babel_api::config::Method::{Jrpc, Rest, Sh};
-use babel_api::{BabelRequest, BabelResponse};
 use firec::config::JailerMode;
 use firec::Machine;
 use futures_util::StreamExt;
@@ -124,10 +123,6 @@ impl Node {
             .await?
             .setup_supervisor(self.data.babel_conf.supervisor.clone())
             .await?;
-        let resp = self.node_conn.babel_rpc(BabelRequest::Ping).await;
-        if !matches!(resp, Ok(BabelResponse::Pong)) {
-            bail!("Babel Ping request did not respond with `Pong`, but `{resp:?}`")
-        }
 
         // We save the `running` status only after all of the previous steps have succeeded.
         self.data.expected_status = NodeStatus::Running;
@@ -332,19 +327,86 @@ impl Node {
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
         debug!("Calling method: {name}");
-        let resp: babel_api::BabelResponse = self
-            .node_conn
-            .babel_rpc(self.render_method(name, params)?)
-            .await?;
-        let inner = match resp {
-            babel_api::BabelResponse::BlockchainResponse(babel_api::BlockchainResponse {
-                value,
-            }) => value
-                .parse()
-                .context(format!("Could not parse {name} response: {value}"))?,
-            e => bail!("Unexpected BabelResponse for `{name}`: `{e:?}`"),
+        let get_api_host = |method: &str| -> Result<&String> {
+            self.data
+                .babel_conf
+                .config
+                .api_host
+                .as_ref()
+                .ok_or_else(|| anyhow!("No host specified for method `{method}"))
         };
-        Ok(inner)
+        Ok(
+            match self
+                .data
+                .babel_conf
+                .methods
+                .get(&name.to_string())
+                .ok_or_else(|| anyhow!("method `{name}` not found"))?
+            {
+                Jrpc {
+                    method, response, ..
+                } => {
+                    let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
+                    let value = self
+                        .node_conn
+                        .babel_client()
+                        .await?
+                        .blockchain_jrpc((
+                            get_api_host(method)?.clone(),
+                            utils::render(method, &params),
+                            response.clone(),
+                        ))
+                        .await?
+                        .into_inner()
+                        .value;
+                    value
+                        .parse()
+                        .context(format!("Could not parse {name} response: {value}"))?
+                }
+                Rest {
+                    method, response, ..
+                } => {
+                    let host = get_api_host(method)?;
+
+                    let url = format!(
+                        "{}/{}",
+                        host.trim_end_matches('/'),
+                        method.trim_start_matches('/')
+                    );
+
+                    let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
+                    let value = self
+                        .node_conn
+                        .babel_client()
+                        .await?
+                        .blockchain_rest((utils::render(&url, &params), response.clone()))
+                        .await?
+                        .into_inner()
+                        .value;
+                    value
+                        .parse()
+                        .context(format!("Could not parse {name} response: {value}"))?
+                }
+                Sh { body, response, .. } => {
+                    // For sh we need to sanitize each param, then join them.
+                    let params = params
+                        .into_iter()
+                        .map(|(k, v)| Ok((k, utils::sanitize_param(&v)?)))
+                        .collect::<Result<_>>()?;
+                    let value = self
+                        .node_conn
+                        .babel_client()
+                        .await?
+                        .blockchain_sh((utils::render(body, &params), response.clone()))
+                        .await?
+                        .into_inner()
+                        .value;
+                    value
+                        .parse()
+                        .context(format!("Could not parse {name} response: {value}"))?
+                }
+            },
+        )
     }
 
     /// Returns the methods that are supported by this blockchain. Calling any method on this
@@ -378,28 +440,25 @@ impl Node {
 
     /// Returns blockchain node keys.
     pub async fn download_keys(&mut self) -> Result<Vec<babel_api::BlockchainKey>> {
-        let request = babel_api::BabelRequest::DownloadKeys(self.get_keys_config()?);
-        let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
-        let keys = match resp {
-            babel_api::BabelResponse::Keys(keys) => keys,
-            e => bail!("Unexpected BabelResponse for `download_keys`: `{e:?}`"),
-        };
+        let config = self.get_keys_config()?;
+        let keys = self
+            .node_conn
+            .babel_client()
+            .await?
+            .download_keys(config)
+            .await?
+            .into_inner();
         Ok(keys)
     }
 
     /// Sets blockchain node keys.
     pub async fn upload_keys(&mut self, keys: Vec<babel_api::BlockchainKey>) -> Result<()> {
-        let request = babel_api::BabelRequest::UploadKeys {
-            config: self.get_keys_config()?,
-            keys,
-        };
-        let resp: babel_api::BabelResponse = self.node_conn.babel_rpc(request).await?;
-        match resp {
-            babel_api::BabelResponse::BlockchainResponse(babel_api::BlockchainResponse {
-                value,
-            }) => debug!("Upload keys: {value}"),
-            e => bail!("Unexpected BabelResponse for `upload_keys`: `{e:?}`"),
-        };
+        let config = self.get_keys_config()?;
+        self.node_conn
+            .babel_client()
+            .await?
+            .upload_keys((config, keys))
+            .await?;
         Ok(())
     }
 
@@ -415,68 +474,5 @@ impl Node {
     pub async fn generate_keys(&mut self) -> Result<String> {
         self.call_method(&babel_api::BabelMethod::GenerateKeys, HashMap::new())
             .await
-    }
-
-    fn render_method(
-        &self,
-        name: impl Display,
-        params: HashMap<String, Vec<String>>,
-    ) -> Result<BabelRequest> {
-        let get_api_host = |method: &str| -> Result<&String> {
-            self.data
-                .babel_conf
-                .config
-                .api_host
-                .as_ref()
-                .ok_or_else(|| anyhow!("o host specified for method `{method}"))
-        };
-        Ok(
-            match self
-                .data
-                .babel_conf
-                .methods
-                .get(&name.to_string())
-                .ok_or_else(|| anyhow!("method `{name}` not found"))?
-            {
-                Jrpc {
-                    method, response, ..
-                } => {
-                    let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-                    babel_api::BabelRequest::BlockchainJrpc {
-                        host: get_api_host(method)?.clone(),
-                        method: utils::render(method, &params),
-                        response: response.clone(),
-                    }
-                }
-                Rest {
-                    method, response, ..
-                } => {
-                    let host = get_api_host(method)?;
-
-                    let url = format!(
-                        "{}/{}",
-                        host.trim_end_matches('/'),
-                        method.trim_start_matches('/')
-                    );
-
-                    let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-                    babel_api::BabelRequest::BlockchainRest {
-                        url: utils::render(&url, &params),
-                        response: response.clone(),
-                    }
-                }
-                Sh { body, response, .. } => {
-                    // For sh we need to sanitize each param, then join them.
-                    let params = params
-                        .into_iter()
-                        .map(|(k, v)| Ok((k, utils::sanitize_param(&v)?)))
-                        .collect::<Result<_>>()?;
-                    babel_api::BabelRequest::BlockchainSh {
-                        body: utils::render(body, &params),
-                        response: response.clone(),
-                    }
-                }
-            },
-        )
     }
 }

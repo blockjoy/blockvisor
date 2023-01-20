@@ -116,7 +116,7 @@ async fn serve(
 
     Server::builder()
         .max_concurrent_streams(2)
-        .add_service(babel_api::api::babel_sup_server::BabelSupServer::new(
+        .add_service(babel_api::babel_sup_server::BabelSupServer::new(
             babelsup_service,
         ))
         .serve_with_incoming_shutdown(listener.incoming(), run.wait())

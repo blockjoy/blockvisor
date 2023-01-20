@@ -1,6 +1,7 @@
 use crate::{env::*, node::VSOCK_PATH};
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use babel_api::api::babel_sup_client::BabelSupClient;
+use babel_api::babel_client::BabelClient;
+use babel_api::babel_sup_client::BabelSupClient;
 use std::env;
 use std::time::Duration;
 use tokio::fs::File;
@@ -14,6 +15,7 @@ use tokio::{
 use tokio_stream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::{debug, error, info};
+use uuid::Uuid;
 
 pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
@@ -26,8 +28,8 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Debug)]
 pub enum NodeConnectionState {
     Closed,
-    Babel { stream: UnixStream },
-    BabelSup { client: BabelSupClient<Channel> },
+    Babel(BabelClient<Channel>),
+    BabelSup(BabelSupClient<Channel>),
 }
 
 #[derive(Debug)]
@@ -48,10 +50,10 @@ impl NodeConnection {
     /// It also initializes that connection by sending the opening message. Therefore, if this
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.
     pub async fn try_open(node_id: uuid::Uuid, max_delay: Duration) -> Result<Self> {
-        let mut client = connect_babelsup(node_id, max_delay).await?;
+        let mut client = connect_babelsup(node_id, max_delay).await;
         let (babel_bin, checksum) = load_babel_bin().await?;
         let babel_status = client.check_babel(checksum).await?.into_inner();
-        if babel_status != babel_api::api::BabelStatus::Ok {
+        if babel_status != babel_api::BabelStatus::Ok {
             info!("Invalid or missing Babel service on VM, installing new one");
             client
                 .start_new_babel(tokio_stream::iter(babel_bin))
@@ -59,17 +61,12 @@ impl NodeConnection {
         }
         Ok(Self {
             node_id,
-            state: NodeConnectionState::BabelSup { client },
+            state: NodeConnectionState::BabelSup(client),
         })
     }
 
-    /// This function combines the capabilities from `write_data` and `read_data` to allow you to
-    /// send some request and then obtain a response back.
-    /// It reconnect to babel if necessary.
-    pub async fn babel_rpc<S: serde::ser::Serialize, D: serde::de::DeserializeOwned>(
-        &mut self,
-        request: S,
-    ) -> Result<D> {
+    /// This function gets gRPC client connected to babel. It reconnect to babelsup if necessary.
+    pub async fn babel_client(&mut self) -> Result<&mut BabelClient<Channel>> {
         match &mut self.state {
             NodeConnectionState::Closed => {
                 bail!("Cannot change port to babel: node connection is closed")
@@ -77,15 +74,16 @@ impl NodeConnection {
             NodeConnectionState::Babel { .. } => {}
             NodeConnectionState::BabelSup { .. } => {
                 debug!("Reconnecting to babel");
-                self.state = NodeConnectionState::Babel {
-                    stream: open_stream(self.node_id, BABEL_VSOCK_PORT, CONNECTION_SWITCH_TIMEOUT)
-                        .await?,
-                }
+                self.state = NodeConnectionState::Babel(BabelClient::new(
+                    create_channel(self.node_id, BABEL_VSOCK_PORT, CONNECTION_SWITCH_TIMEOUT).await,
+                ));
             }
+        };
+        if let NodeConnectionState::Babel(client) = &mut self.state {
+            Ok(client)
+        } else {
+            unreachable!()
         }
-        let stream = self.try_babel_stream_mut()?;
-        write_data(stream, request).await?;
-        read_data(stream).await
     }
 
     /// This function gets gRPC client connected to babelsup. It reconnect to babelsup if necessary.
@@ -94,37 +92,24 @@ impl NodeConnection {
             NodeConnectionState::Closed => {
                 bail!("Cannot change port to babelsup: node connection is closed")
             }
-            NodeConnectionState::Babel { stream } => {
-                stream.shutdown().await?;
+            NodeConnectionState::Babel { .. } => {
                 debug!("Reconnecting to babelsup");
-                self.state = NodeConnectionState::BabelSup {
-                    client: connect_babelsup(self.node_id, CONNECTION_SWITCH_TIMEOUT).await?,
-                };
+                self.state = NodeConnectionState::BabelSup(
+                    connect_babelsup(self.node_id, CONNECTION_SWITCH_TIMEOUT).await,
+                );
             }
             NodeConnectionState::BabelSup { .. } => {}
         };
-        self.try_babelsup_client_mut()
-    }
-
-    /// Tries to return the babel unix stream, and if there isn't one, returns an error message.
-    fn try_babel_stream_mut(&mut self) -> Result<&mut UnixStream> {
-        match &mut self.state {
-            NodeConnectionState::Babel { stream } => Ok(stream),
-            _ => Err(anyhow!(
-                "Tried to get babel connection stream while there isn't one"
-            )),
+        if let NodeConnectionState::BabelSup(client) = &mut self.state {
+            Ok(client)
+        } else {
+            unreachable!()
         }
     }
+}
 
-    /// Tries to return the babelsup client, and if there isn't one, returns an error message.
-    fn try_babelsup_client_mut(&mut self) -> Result<&mut BabelSupClient<Channel>> {
-        match &mut self.state {
-            NodeConnectionState::BabelSup { client } => Ok(client),
-            _ => Err(anyhow!(
-                "Tried to get babelsup client while there isn't one"
-            )),
-        }
-    }
+async fn connect_babelsup(node_id: Uuid, max_delay: Duration) -> BabelSupClient<Channel> {
+    BabelSupClient::new(create_channel(node_id, BABEL_SUP_VSOCK_PORT, max_delay).await)
 }
 
 async fn open_stream(node_id: uuid::Uuid, port: u32, max_delay: Duration) -> Result<UnixStream> {
@@ -209,71 +194,17 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<()> {
     Ok(())
 }
 
-/// Waits for the socket to become writable, then writes the data as json to the socket. The max
-/// time that is allowed to elapse  is `SOCKET_TIMEOUT`.
-async fn write_data(unix_stream: &mut UnixStream, data: impl serde::Serialize) -> Result<()> {
-    use std::io::ErrorKind::WouldBlock;
-
-    let data = serde_json::to_string(&data)?;
-    let write_data = async {
-        loop {
-            // Wait for the socket to become ready to write to.
-            unix_stream.writable().await?;
-            // Try to write data, this may still fail with `WouldBlock` if the readiness event
-            // is a false positive.
-            match unix_stream.try_write(data.as_bytes()) {
-                Ok(_) => break,
-                Err(e) if e.kind() == WouldBlock => continue,
-                Err(e) => bail!("Writing socket failed with `{e}`"),
-            }
-        }
-        Ok(())
-    };
-    timeout(SOCKET_TIMEOUT, write_data).await?
-}
-
-/// Waits for the socket to become readable, then reads data from it. The max time that is
-/// allowed to elapse (per read) is `SOCKET_TIMEOUT`. When data is sent over the vsock, this
-/// data is parsed as json and returned as the requested type.
-async fn read_data<D: serde::de::DeserializeOwned>(unix_stream: &mut UnixStream) -> Result<D> {
-    use std::io::ErrorKind::WouldBlock;
-    let read_data = async {
-        loop {
-            // Wait for the socket to become ready to read from.
-            unix_stream.readable().await?;
-            let mut data = vec![0; 16384];
-
-            // Try to read data, this may still fail with `WouldBlock`
-            // if the readiness event is a false positive.
-            match unix_stream.try_read(&mut data) {
-                Ok(n) => {
-                    data.resize(n, 0);
-                    let s = std::str::from_utf8(&data)?;
-                    return Ok(serde_json::from_str(s)?);
-                }
-                Err(e) if e.kind() == WouldBlock => continue,
-                Err(e) => bail!("Writing socket failed with `{e}`"),
-            }
-        }
-    };
-    timeout(SOCKET_TIMEOUT, read_data).await?
-}
-
-async fn connect_babelsup(
-    node_id: uuid::Uuid,
-    max_delay: Duration,
-) -> Result<BabelSupClient<Channel>> {
-    let channel = Endpoint::try_from("http://[::]:50052")
+async fn create_channel(node_id: uuid::Uuid, vsock_port: u32, max_delay: Duration) -> Channel {
+    Endpoint::try_from("http://[::]:50052")
         .unwrap()
         .timeout(GRPC_REQUEST_TIMEOUT)
         .connect_timeout(GRPC_CONNECT_TIMEOUT)
         .connect_with_connector_lazy(tower::service_fn(move |_: Uri| async move {
-            open_stream(node_id, BABEL_SUP_VSOCK_PORT, max_delay).await
-        }));
-    Ok(BabelSupClient::new(channel))
+            open_stream(node_id, vsock_port, max_delay).await
+        }))
 }
 
-pub async fn load_babel_bin() -> Result<(Vec<babel_api::api::BabelBin>, u32)> {
+pub async fn load_babel_bin() -> Result<(Vec<babel_api::BabelBin>, u32)> {
     let babel_path =
         fs::canonicalize(env::current_exe().with_context(|| "failed to get current binary path")?)
             .await
@@ -291,15 +222,15 @@ pub async fn load_babel_bin() -> Result<(Vec<babel_api::api::BabelBin>, u32)> {
     let mut buf = [0; 16384];
     let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
     let mut digest = crc.digest();
-    let mut babel_bin = Vec::<babel_api::api::BabelBin>::default();
+    let mut babel_bin = Vec::<babel_api::BabelBin>::default();
     while let Ok(size) = reader.read(&mut buf[..]).await {
         if size == 0 {
             break;
         }
         digest.update(&buf[0..size]);
-        babel_bin.push(babel_api::api::BabelBin::Bin(buf[0..size].to_vec()));
+        babel_bin.push(babel_api::BabelBin::Bin(buf[0..size].to_vec()));
     }
     let checksum = digest.finalize();
-    babel_bin.push(babel_api::api::BabelBin::Checksum(checksum));
+    babel_bin.push(babel_api::BabelBin::Checksum(checksum));
     Ok((babel_bin, checksum))
 }
