@@ -13,10 +13,10 @@ use crate::utils;
 pub fn render(
     template: &str,
     params: &HashMap<impl Display, impl Display>,
-    values: &toml::Value,
+    config: &toml::Value,
 ) -> String {
-    let template = dbg!(render_params(template, params));
-    dbg!(render_config(&template, values))
+    let template = render_params(template, params);
+    render_config(&template, config)
 }
 
 /// Phase 1 of the rendering process entails taking the parameters that were specified by the user,
@@ -31,38 +31,38 @@ fn render_params(template: &str, params: &HashMap<impl Display, impl Display>) -
     res
 }
 
-/// For phase 2 of our two step renderer we will go looking for "holes" in the template that are of
-/// the form `babelref:'some.dot.delimited.path'`. These are then replaced with the values as
-/// specfied in `values`. For example, if `values` looks like this:
+/// For phase 2 of our two step renderer we will go looking for "babel_refs" in the template that
+/// are of the form `babelref:'some.dot.delimited.path'`. These are then replaced with the values
+/// as specfied in `config`. For example, if `config` looks like this:
 /// ```rs
-/// let values = toml::toml!(
+/// let config = toml::toml!(
 /// [network]
 /// ip = "192.168.1.10^100"
 /// );
 /// ```
 /// Then a template like `curl babelref:'network.ip'` will be rendered as `curl 192.168.1.10^100`.
-fn render_config(template: &str, values: &toml::Value) -> String {
+fn render_config(template: &str, config: &toml::Value) -> String {
     const DELIM_START: &str = "babelref:'";
     const DELIM_END: &str = "'";
     const PLACEHOLDER: &str = "<NO SUCH VALUE>";
 
-    fn next_hole(template: &str) -> Option<(usize, &str)> {
+    fn next_babel_ref(template: &str) -> Option<(usize, &str)> {
         let start_idx = template.find(DELIM_START)? + DELIM_START.len();
         let end_idx = start_idx + template[start_idx..].find(DELIM_END)?;
         Some((end_idx, &template[start_idx..end_idx]))
     }
 
-    // First we find the "holes" that are in the template.
-    let mut holes = vec![];
+    // First we find the "babel_refs" that are in the template.
+    let mut babel_refs = vec![];
     let mut cur = 0;
-    while let Some((offset, hole)) = next_hole(&template[cur..]) {
-        holes.push(hole);
+    while let Some((offset, babel_ref)) = next_babel_ref(&template[cur..]) {
+        babel_refs.push(babel_ref);
         cur += offset;
     }
-    // Now we replace each hole in template with the value retrieved from `values`.
-    holes.iter().fold(template.to_string(), |acc, elem| {
+    // Now we replace each babel_ref in template with the value retrieved from `config`.
+    babel_refs.iter().fold(template.to_string(), |acc, elem| {
         let hole = format!("{DELIM_START}{elem}{DELIM_END}");
-        let value = utils::get_config_value_by_path(values, elem)
+        let value = utils::get_config_value_by_path(config, elem)
             .unwrap_or_else(|| PLACEHOLDER.to_string());
         acc.replace(&hole, &value)
     })

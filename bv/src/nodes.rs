@@ -541,10 +541,10 @@ mod tests {
 
     #[test]
     fn test_render_entry_point_args() -> Result<()> {
-        let conf = dbg!(toml::toml!(
+        let conf = toml::toml!(
         [aa]
         bb = "cc"
-        ));
+        );
         let entrypoints = vec![
             Entrypoint {
                 command: "cmd1".to_string(),
@@ -552,7 +552,7 @@ mod tests {
                     "none_parametrized_argument".to_string(),
                     "first_parametrized_{{PARAM1}}_argument".to_string(),
                     "second_parametrized_{{PARAM1}}_{{PARAM2}}_argument".to_string(),
-                    "third_parammy_babelref:'aa.bb'_argument".to_string(),
+                    "third_parammy_babelref:'aa.{{PARAM_BB}}'_argument".to_string(),
                 ],
             },
             Entrypoint {
@@ -567,6 +567,7 @@ mod tests {
             ("PARAM1".to_string(), "://Value.1,-_Q".to_string()),
             ("PARAM2".to_string(), "Value.2,-_Q".to_string()),
             ("PARAM3".to_string(), "!Invalid_but_not_used".to_string()),
+            ("PARAM_BB".to_string(), "bb".to_string()),
         ]);
         assert_eq!(
             vec![
@@ -587,7 +588,7 @@ mod tests {
                     ],
                 }
             ],
-            render_entry_point_args(dbg!(&entrypoints), &node_props, &conf)?
+            render_entry_point_args(&entrypoints, &node_props, &conf)?
         );
         node_props.get_mut("PARAM1").unwrap().push('@');
         render_entry_point_args(&entrypoints, &node_props, &conf).unwrap_err();
