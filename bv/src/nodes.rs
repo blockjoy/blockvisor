@@ -589,9 +589,7 @@ mod tests {
         let babel_conf = Babel {
             export: None,
             env: None,
-            config: babel_api::config::Config {
-                ..Default::default()
-            },
+            config: utils::tests::default_config(),
             requirements: Requirements {
                 vcpu_count: 0,
                 mem_size_mb: 0,

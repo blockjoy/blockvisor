@@ -77,7 +77,7 @@ pub struct Env {
     pub path_append: String,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// A semver version of the babel program, indicating the minimum version of the babel
     /// program that a config file is compatible with.
