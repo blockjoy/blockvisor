@@ -1,4 +1,4 @@
-nets = []
+nets = {}
 
 [env]
 path_append = "/blockjoy/bin/"

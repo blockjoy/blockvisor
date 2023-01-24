@@ -590,20 +590,14 @@ mod tests {
             export: None,
             env: None,
             config: babel_api::config::Config {
-                min_babel_version: " ".to_string(),
-                node_version: "".to_string(),
-                protocol: "".to_string(),
-                node_type: "".to_string(),
-                description: None,
-                api_host: None,
-                ports: vec![],
+                ..Default::default()
             },
             requirements: Requirements {
                 vcpu_count: 0,
                 mem_size_mb: 0,
                 disk_size_gb: 0,
             },
-            nets: vec![],
+            nets: Default::default(),
             supervisor: Default::default(),
             keys: None,
             methods: BTreeMap::from([

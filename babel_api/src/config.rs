@@ -5,7 +5,7 @@ pub type KeysConfig = HashMap<String, String>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Babel {
-    pub nets: Vec<NetConfiguration>,
+    pub nets: HashMap<String, NetConfiguration>,
     pub export: Option<Vec<String>>,
     pub env: Option<Env>,
     pub config: Config,
@@ -77,7 +77,7 @@ pub struct Env {
     pub path_append: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// A semver version of the babel program, indicating the minimum version of the babel
     /// program that a config file is compatible with.
@@ -118,10 +118,10 @@ pub enum NetType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NetConfiguration {
-    pub name: String,
     pub url: String,
     pub net_type: NetType,
-    pub meta: Option<HashMap<String, String>>,
+    #[serde(flatten)]
+    pub meta: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
