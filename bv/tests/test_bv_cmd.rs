@@ -78,7 +78,7 @@ fn create_node(image: &str) -> String {
         .unwrap()
         .to_string()
 }
-
+//// =========== HOST INTEGRATION: bv cli host only
 #[test]
 #[serial]
 #[cfg(target_os = "linux")]
@@ -270,6 +270,7 @@ async fn test_bv_cmd_node_recovery() {
     bv_run(&["node", "delete", vm_id], "Deleted node");
 }
 
+//// =========== E2E: bv cli host + backend (otp)
 #[test]
 #[serial]
 #[cfg(target_os = "linux")]
@@ -292,6 +293,7 @@ fn test_bv_cmd_init_unknown_otp() {
         .stderr(predicate::str::contains("Host provision not found: no rows returned by a query that expected to return at least one row"));
 }
 
+//// =========== E2E: bv cli host + ui api + backend (otp)
 #[tokio::test]
 #[serial]
 #[cfg(target_os = "linux")]
@@ -398,7 +400,7 @@ async fn test_bv_cmd_init_localhost() {
     println!("host provision: {provision:?}");
     let otp = get_first_message(provision.meta);
 
-    println!("bv init");
+    println!("bvup");
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
     let url = "http://localhost:8080";
     let registry = "http://localhost:50051";
@@ -539,6 +541,66 @@ async fn test_bv_cmd_init_localhost() {
         .failure();
 }
 
+#[tokio::test]
+#[serial]
+#[cfg(target_os = "linux")]
+async fn test_bv_cmd_grpc_stub_init_reset() {
+    use std::path::Path;
+    use stub_server::StubHostsServer;
+
+    let server = StubHostsServer {};
+
+    let server_future = async {
+        Server::builder()
+            .max_concurrent_streams(1)
+            .add_service(pb::hosts_server::HostsServer::new(server))
+            .serve("0.0.0.0:8082".to_socket_addrs().unwrap().next().unwrap())
+            .await
+            .unwrap()
+    };
+
+    tokio::spawn(server_future);
+    sleep(Duration::from_secs(5)).await;
+
+    tokio::task::spawn_blocking(move || {
+        let tmp_dir = TempDir::new().unwrap();
+        let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
+        let url = "http://localhost:8082";
+        let otp = "AWESOME";
+        let config_path = format!("{}/etc/blockvisor.toml", tmp_dir.to_string_lossy());
+
+        println!("bvup");
+        Command::cargo_bin("bvup")
+            .unwrap()
+            .args([otp, "--skip-download"])
+            .args(["--ifa", ifa])
+            .args(["--api", url])
+            .args(["--keys", url])
+            .args(["--registry", url])
+            .env("BV_ROOT", tmp_dir.as_os_str())
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(
+                "Provision and init blockvisor configuration",
+            ));
+
+        assert!(Path::new(&config_path).exists());
+
+        println!("bv reset");
+        Command::cargo_bin("bv")
+            .unwrap()
+            .args(["reset", "--yes"])
+            .env("BV_ROOT", tmp_dir.as_os_str())
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Deleting host"));
+
+        assert!(!Path::new(&config_path).exists());
+    })
+    .await
+    .unwrap();
+}
+
 #[cfg(target_os = "linux")]
 fn get_first_message(meta: Option<ui_pb::ResponseMeta>) -> String {
     meta.unwrap().messages.first().unwrap().clone()
@@ -559,6 +621,7 @@ fn with_auth<T>(inner: T, auth_token: &str, refresh_token: &str) -> Request<T> {
     request
 }
 
+//// =========== HOST+COOKBOOK INTEGRATION: bv cli host + cookbook
 #[tokio::test]
 #[serial]
 #[cfg(target_os = "linux")]
@@ -584,6 +647,7 @@ async fn test_bv_cmd_cookbook_download() {
     assert!(Path::new(&folder.join("babel.toml")).exists());
 }
 
+//// =========== HOST+BACKEND INTEGRATION: bv cli host + backend (cmds)
 #[tokio::test]
 #[serial]
 #[cfg(target_os = "linux")]
@@ -931,64 +995,4 @@ fn success_command_update(command_id: &str) -> pb::InfoUpdate {
             exit_code: Some(0),
         })),
     }
-}
-
-#[tokio::test]
-#[serial]
-#[cfg(target_os = "linux")]
-async fn test_bv_cmd_grpc_stub_init_reset() {
-    use std::path::Path;
-    use stub_server::StubHostsServer;
-
-    let server = StubHostsServer {};
-
-    let server_future = async {
-        Server::builder()
-            .max_concurrent_streams(1)
-            .add_service(pb::hosts_server::HostsServer::new(server))
-            .serve("0.0.0.0:8082".to_socket_addrs().unwrap().next().unwrap())
-            .await
-            .unwrap()
-    };
-
-    tokio::spawn(server_future);
-    sleep(Duration::from_secs(5)).await;
-
-    tokio::task::spawn_blocking(move || {
-        let tmp_dir = TempDir::new().unwrap();
-        let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
-        let url = "http://localhost:8082";
-        let otp = "AWESOME";
-        let config_path = format!("{}/etc/blockvisor.toml", tmp_dir.to_string_lossy());
-
-        println!("bv init");
-        Command::cargo_bin("bvup")
-            .unwrap()
-            .args([otp, "--skip-download"])
-            .args(["--ifa", ifa])
-            .args(["--api", url])
-            .args(["--keys", url])
-            .args(["--registry", url])
-            .env("BV_ROOT", tmp_dir.as_os_str())
-            .assert()
-            .success()
-            .stdout(predicate::str::contains(
-                "Provision and init blockvisor configuration",
-            ));
-
-        assert!(Path::new(&config_path).exists());
-
-        println!("bv reset");
-        Command::cargo_bin("bv")
-            .unwrap()
-            .args(["reset", "--yes"])
-            .env("BV_ROOT", tmp_dir.as_os_str())
-            .assert()
-            .success()
-            .stdout(predicate::str::contains("Deleting host"));
-
-        assert!(!Path::new(&config_path).exists());
-    })
-    .await
-    .unwrap();
 }
