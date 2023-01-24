@@ -5,6 +5,8 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::fmt::Display;
 
+use crate::utils;
+
 /// Two phase renderer that first takes template parameters specified by the user and applies them,
 /// and then takes the template parameters specified by the babel config and applies them. These
 /// two passes are split out into two 'phases' and are ran successively.
@@ -13,8 +15,8 @@ pub fn render(
     params: &HashMap<impl Display, impl Display>,
     values: &toml::Value,
 ) -> String {
-    let template = render_params(template, params);
-    render_config(&template, values)
+    let template = dbg!(render_params(template, params));
+    dbg!(render_config(&template, values))
 }
 
 /// Phase 1 of the rendering process entails taking the parameters that were specified by the user,
@@ -60,32 +62,10 @@ fn render_config(template: &str, values: &toml::Value) -> String {
     // Now we replace each hole in template with the value retrieved from `values`.
     holes.iter().fold(template.to_string(), |acc, elem| {
         let hole = format!("{DELIM_START}{elem}{DELIM_END}");
-        let value = walk(values, elem.split('.'))
-            .map(|v| v.to_string())
+        let value = utils::get_config_value_by_path(values, elem)
             .unwrap_or_else(|| PLACEHOLDER.to_string());
         acc.replace(&hole, &value)
     })
-}
-
-/// Walks down a toml tree represented by a `toml::Value`. The path that is walked is specified by
-/// the `path` argument.
-///
-/// ```rs
-/// let path = "some.seg.ment.list".split('.');
-/// let val: toml::Value = toml::toml!(
-/// [some]
-/// [some.seg]
-/// [some.seg.ment]
-/// list = "all the way down here."
-/// );
-/// assert_eq!("all the way down here.", walk(&val, path).unwrap().as_str().unwrap());
-/// "#
-/// ```
-fn walk<'a>(value: &toml::Value, mut path: impl Iterator<Item = &'a str>) -> Option<&toml::Value> {
-    match path.next() {
-        Some(seg) => walk(value.get(seg)?, path),
-        None => Some(value),
-    }
 }
 
 /// Allowing people to substitute arbitrary data into sh-commands is unsafe. We therefore run
@@ -157,21 +137,9 @@ pub mod tests {
         [some.seg.ment]
         list = "all the way down here."
         );
-        assert_eq!("curl \"all the way down here.\"", render_config(template, &val),);
-    }
-
-    #[test]
-    fn test_walk() {
-        let path = "some.seg.ment.list".split('.');
-        let val: toml::Value = toml::toml!(
-        [some]
-        [some.seg]
-        [some.seg.ment]
-        list = "all the way down here."
-        );
         assert_eq!(
-            "all the way down here.",
-            walk(&val, path).unwrap().as_str().unwrap()
+            "curl \"all the way down here.\"",
+            render_config(template, &val),
         );
     }
 

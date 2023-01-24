@@ -23,7 +23,7 @@ data_directory_mount_point = "/blockjoy/miner/data"
 
     [[supervisor.entry_point]]
     command = "/usr/bin/lighthouse"
-    args = ["--datadir", "/blockjoy/lighthouse", "vc", "--network", "{{NETWORK}}", "--http", "--suggested-fee-recipient", "{{ETH_WALLET}}", "--beacon-nodes", "{{BEACON_NODES_CSV}}"]
+    args = ["--datadir", "/blockjoy/lighthouse", "vc", "--network", "{{NETWORK}}", "--http", "--suggested-fee-recipient", "{{ETH_WALLET}}", "--beacon-nodes", "babelref:'nets.{{NETWORK}}.beacon_nodes_csv'"]
 
 [keys]
 "*" = "/opt/secrets"
@@ -85,20 +85,17 @@ test /blockjoy/.init && \
     status = 200
     format = "raw"
 
-[[nets]]
-name = "mainnet"
+[nets.mainnet]
 net_type = "main"
 url = "https://rpc.ankr.com/eth"
-# meta = {}
+beacon_nodes_csv = "http://beacon01.mainnet.eth.blockjoy.com,http://beacon02.mainnet.eth.blockjoy.com"
 
-[[nets]]
-name = "sepolia"
+[nets.sepolia]
 net_type = "test"
 url = "https://rpc.sepolia.dev"
-#meta = {}
+beacon_nodes_csv = "http://beacon01.sepolia.eth.blockjoy.com,http://beacon02.sepolia.eth.blockjoy.com"
 
-[[nets]] # will be depreciated
-name = "goerli"
+[nets.goerli] # will be depreciated
 net_type = "test"
 url = "https://goerli.prylabs.net"
-#meta = {}
+beacon_nodes_csv = "http://beacon01.goerli.eth.blockjoy.com,http://beacon02.goerli.eth.blockjoy.com"

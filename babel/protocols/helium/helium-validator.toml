@@ -227,14 +227,10 @@ body = "echo 'noop for helium'"
     status = 200
     format = "raw"
 
-[[nets]]
-name = "mainnet"
+[nets.mainnet]
 net_type = "main"
 url = "https://rpc.ankr.com/eth"
-#meta = {}
 
-[[nets]]
-name = "testnet"
+[nets.testnet]
 net_type = "test"
 url = "https://testnet-api.helium.wtf/v1/"
-#meta = {}

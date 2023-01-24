@@ -524,7 +524,7 @@ fn render_entry_point_args(
     let mut entry_points = entry_points.to_vec();
     for item in &mut entry_points {
         for arg in &mut item.args {
-            *arg = render::render(arg.as_str(), &params, conf);
+            *arg = render::render(arg, &params, conf);
         }
     }
     Ok(entry_points)
@@ -532,6 +532,8 @@ fn render_entry_point_args(
 
 #[cfg(test)]
 mod tests {
+    use crate::utils;
+
     use super::*;
     use babel_api::config::{Method, MethodResponseFormat, Requirements, ShResponse};
     use std::collections::BTreeMap;
@@ -539,10 +541,10 @@ mod tests {
 
     #[test]
     fn test_render_entry_point_args() -> Result<()> {
-        let conf = toml::toml!(
+        let conf = dbg!(toml::toml!(
         [aa]
         bb = "cc"
-        );
+        ));
         let entrypoints = vec![
             Entrypoint {
                 command: "cmd1".to_string(),
@@ -574,7 +576,6 @@ mod tests {
                         "none_parametrized_argument".to_string(),
                         "first_parametrized_://Value.1,-_Q_argument".to_string(),
                         "second_parametrized_://Value.1,-_Q_Value.2,-_Q_argument".to_string(),
-                        "second_parametrized_://Value.1,-_Q_Value.2,-_Q_argument".to_string(),
                         "third_parammy_cc_argument".to_string(),
                     ],
                 },
@@ -586,7 +587,7 @@ mod tests {
                     ],
                 }
             ],
-            render_entry_point_args(&entrypoints, &node_props, &conf)?
+            render_entry_point_args(dbg!(&entrypoints), &node_props, &conf)?
         );
         node_props.get_mut("PARAM1").unwrap().push('@');
         render_entry_point_args(&entrypoints, &node_props, &conf).unwrap_err();
@@ -598,21 +599,13 @@ mod tests {
         let babel_conf = Babel {
             export: None,
             env: None,
-            config: babel_api::config::Config {
-                min_babel_version: " ".to_string(),
-                node_version: "".to_string(),
-                protocol: "".to_string(),
-                node_type: "".to_string(),
-                description: None,
-                api_host: None,
-                ports: vec![],
-            },
+            config: utils::tests::default_config(),
             requirements: Requirements {
                 vcpu_count: 0,
                 mem_size_mb: 0,
                 disk_size_gb: 0,
             },
-            nets: vec![],
+            nets: Default::default(),
             supervisor: Default::default(),
             keys: None,
             methods: BTreeMap::from([
