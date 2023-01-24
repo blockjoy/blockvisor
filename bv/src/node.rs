@@ -335,7 +335,7 @@ impl Node {
                 .as_ref()
                 .ok_or_else(|| anyhow!("No host specified for method `{method}"))
         };
-        let conf = self.conf_value();
+        let conf = toml::Value::try_from(&self.data.babel_conf)?;
         let resp = match self
             .data
             .babel_conf
@@ -407,13 +407,6 @@ impl Node {
             }
         };
         Ok(resp)
-    }
-
-    pub fn conf_value(&self) -> toml::Value {
-        // Unwrap is safe here because we retrieved this config by parsing a toml file in the first
-        // place. The without custom Serialize impls the derived Serialize impl for Config may only
-        // fail "if T contains a map with non-string keys", which we do not have.
-        toml::Value::try_from(&self.data.babel_conf).unwrap()
     }
 
     /// Returns the methods that are supported by this blockchain. Calling any method on this
