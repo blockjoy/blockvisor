@@ -438,6 +438,7 @@ async fn test_bv_cmd_init_localhost() {
             ip_gateway: None,
             self_update: Some(false),
             network: Some("".to_string()),
+            blockchain_name: Some("aetherium".to_string()),
         }),
     };
     let node: ui_pb::CreateNodeResponse = node_client

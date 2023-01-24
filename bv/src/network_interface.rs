@@ -25,7 +25,7 @@ impl NetworkInterface {
         // Set bridge as the interface's master.
         if let Err(e) = run_cmd("ip", ["link", "set", &name, "master", BRIDGE_IFACE])
             // Start the interface.
-            .and_then(|_| async { run_cmd("ip", ["link", "set", &name, "up"]).await })
+            .and_then(|_| run_cmd("ip", ["link", "set", &name, "up"]))
             .await
         {
             // Clean up the interface if we failed to set it up completely.

@@ -15,8 +15,8 @@ use crate::{
     env::*,
     node_connection::NodeConnection,
     node_data::{NodeData, NodeImage, NodeStatus},
+    render,
     services::cookbook::CookbookService,
-    utils,
     utils::{get_process_pid, run_cmd},
 };
 
@@ -335,78 +335,85 @@ impl Node {
                 .as_ref()
                 .ok_or_else(|| anyhow!("No host specified for method `{method}"))
         };
-        Ok(
-            match self
-                .data
-                .babel_conf
-                .methods
-                .get(&name.to_string())
-                .ok_or_else(|| anyhow!("method `{name}` not found"))?
-            {
-                Jrpc {
-                    method, response, ..
-                } => {
-                    let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-                    let value = self
-                        .node_conn
-                        .babel_client()
-                        .await?
-                        .blockchain_jrpc((
-                            get_api_host(method)?.clone(),
-                            utils::render(method, &params),
-                            response.clone(),
-                        ))
-                        .await?
-                        .into_inner()
-                        .value;
-                    value
-                        .parse()
-                        .context(format!("Could not parse {name} response: {value}"))?
-                }
-                Rest {
-                    method, response, ..
-                } => {
-                    let host = get_api_host(method)?;
+        let conf = self.conf_value();
+        let resp = match self
+            .data
+            .babel_conf
+            .methods
+            .get(&name.to_string())
+            .ok_or_else(|| anyhow!("method `{name}` not found"))?
+        {
+            Jrpc {
+                method, response, ..
+            } => {
+                let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
+                let value = self
+                    .node_conn
+                    .babel_client()
+                    .await?
+                    .blockchain_jrpc((
+                        get_api_host(method)?.clone(),
+                        render::render(method, &params, &conf),
+                        response.clone(),
+                    ))
+                    .await?
+                    .into_inner()
+                    .value;
+                value
+                    .parse()
+                    .context(format!("Could not parse {name} response: {value}"))?
+            }
+            Rest {
+                method, response, ..
+            } => {
+                let host = get_api_host(method)?;
 
-                    let url = format!(
-                        "{}/{}",
-                        host.trim_end_matches('/'),
-                        method.trim_start_matches('/')
-                    );
+                let url = format!(
+                    "{}/{}",
+                    host.trim_end_matches('/'),
+                    method.trim_start_matches('/')
+                );
 
-                    let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-                    let value = self
-                        .node_conn
-                        .babel_client()
-                        .await?
-                        .blockchain_rest((utils::render(&url, &params), response.clone()))
-                        .await?
-                        .into_inner()
-                        .value;
-                    value
-                        .parse()
-                        .context(format!("Could not parse {name} response: {value}"))?
-                }
-                Sh { body, response, .. } => {
-                    // For sh we need to sanitize each param, then join them.
-                    let params = params
-                        .into_iter()
-                        .map(|(k, v)| Ok((k, utils::sanitize_param(&v)?)))
-                        .collect::<Result<_>>()?;
-                    let value = self
-                        .node_conn
-                        .babel_client()
-                        .await?
-                        .blockchain_sh((utils::render(body, &params), response.clone()))
-                        .await?
-                        .into_inner()
-                        .value;
-                    value
-                        .parse()
-                        .context(format!("Could not parse {name} response: {value}"))?
-                }
-            },
-        )
+                let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
+                let value = self
+                    .node_conn
+                    .babel_client()
+                    .await?
+                    .blockchain_rest((render::render(&url, &params, &conf), response.clone()))
+                    .await?
+                    .into_inner()
+                    .value;
+                value
+                    .parse()
+                    .context(format!("Could not parse {name} response: {value}"))?
+            }
+            Sh { body, response, .. } => {
+                // For sh we need to sanitize each param, then join them.
+                let params = params
+                    .into_iter()
+                    .map(|(k, v)| Ok((k, render::sanitize_param(&v)?)))
+                    .collect::<Result<_>>()?;
+                let value = self
+                    .node_conn
+                    .babel_client()
+                    .await?
+                    .blockchain_sh((render::render(body, &params, &conf), response.clone()))
+                    .await?
+                    .into_inner()
+                    .value;
+                value
+                    .parse()
+                    .context(format!("Could not parse {name} response: {value}"))?
+            }
+        };
+        Ok(resp)
+    }
+
+    pub fn conf_value(&self) -> toml::Value {
+        // Unwrap is safe here because we retrieved this config by parsing a toml file in the first
+        // place. The without custom Serialize impls the derived Serialize impl for Config may only
+        // fail "if T contains a map with non-string keys", which we do not have.
+        toml::Value::try_from(&self.data.babel_conf).unwrap()
     }
 
     /// Returns the methods that are supported by this blockchain. Calling any method on this

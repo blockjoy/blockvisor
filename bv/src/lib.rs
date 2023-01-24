@@ -11,6 +11,7 @@ pub mod node_data;
 pub mod node_metrics;
 pub mod nodes;
 pub mod pretty_table;
+pub mod render;
 pub mod self_updater;
 pub mod server;
 pub mod services;
