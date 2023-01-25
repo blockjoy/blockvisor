@@ -1,6 +1,7 @@
 use babel::{babel_service, logging, run_flag::RunFlag};
 use eyre::Context;
 use tonic::transport::Server;
+use tracing::info;
 
 const VSOCK_HOST_CID: u32 = 3;
 const VSOCK_BABEL_PORT: u32 = 42;
@@ -8,6 +9,11 @@ const VSOCK_BABEL_PORT: u32 = 42;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     logging::setup_logging()?;
+    info!(
+        "Starting {} {} ...",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
 
     let run = RunFlag::run_until_ctrlc();
     serve(run).await?;

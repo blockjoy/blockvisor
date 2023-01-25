@@ -51,6 +51,8 @@ impl NodeConnection {
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.
     pub async fn try_open(node_id: uuid::Uuid, max_delay: Duration) -> Result<Self> {
         let mut client = connect_babelsup(node_id, max_delay).await;
+        let babelsup_version = client.get_version(()).await?.into_inner();
+        info!("Connected to babelsup {babelsup_version}");
         let (babel_bin, checksum) = load_babel_bin().await?;
         let babel_status = client.check_babel(checksum).await?.into_inner();
         if babel_status != babel_api::BabelStatus::Ok {

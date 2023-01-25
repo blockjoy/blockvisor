@@ -28,7 +28,11 @@ const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 #[tokio::main]
 async fn main() -> Result<()> {
     setup_logging()?;
-    info!("Starting...");
+    info!(
+        "Starting {} {} ...",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
 
     let config = Config::load().await.context("failed to load host config")?;
     let nodes = if Nodes::exists() {

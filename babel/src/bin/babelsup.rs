@@ -9,6 +9,7 @@ use tokio::fs;
 use tokio::fs::DirBuilder;
 use tokio::sync::{oneshot, watch};
 use tonic::transport::Server;
+use tracing::info;
 
 const DATA_DRIVE_PATH: &str = "/dev/vdb";
 const VSOCK_HOST_CID: u32 = 3;
@@ -17,6 +18,11 @@ const VSOCK_SUPERVISOR_PORT: u32 = 41;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     logging::setup_logging()?;
+    info!(
+        "Starting {} {} ...",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
 
     let mut run = RunFlag::run_until_ctrlc();
 
