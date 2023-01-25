@@ -438,7 +438,10 @@ async fn test_bv_cmd_init_localhost() {
             groups: vec![],
             version: Some("0.0.1".to_string()),
             ip: None,
-            r#type: Some(json!({"id": 3, "properties": []}).to_string()), // validator
+            r#type: Some(
+                json!({"id": 3, "properties": [{"name": "HELIUM_PARAM","label":"label","description":"description","ui_type":"unknown","disabled":false,"required":true,"value": "anything"}]})
+                    .to_string(),
+            ), // validator
             address: None,
             wallet_address: None,
             block_height: None,
@@ -617,7 +620,10 @@ async fn test_bv_cmd_grpc_commands() {
                     ip: "216.18.214.195".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
-                    properties: Default::default(),
+                    properties: vec![pb::Parameter {
+                        name: "HELIUM_PARAM".to_string(),
+                        value: "anything".to_string(),
+                    }],
                 })),
             })),
         },
@@ -640,7 +646,10 @@ async fn test_bv_cmd_grpc_commands() {
                     ip: "216.18.214.195".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
-                    properties: Default::default(),
+                    properties: vec![pb::Parameter {
+                        name: "HELIUM_PARAM".to_string(),
+                        value: "anything".to_string(),
+                    }],
                 })),
             })),
         },
@@ -663,7 +672,10 @@ async fn test_bv_cmd_grpc_commands() {
                     ip: "216.18.214.195".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
-                    properties: Default::default(),
+                    properties: vec![pb::Parameter {
+                        name: "HELIUM_PARAM".to_string(),
+                        value: "anything".to_string(),
+                    }],
                 })),
             })),
         },

@@ -29,8 +29,8 @@ fn render_params(template: &str, params: &HashMap<impl Display, impl Display>) -
         res = res.replace(&placeholder, &value.to_string());
     }
     fn find_placeholder(value: &str) -> Option<&str> {
-        let start_idx = value.find(r#"{{"#)?;
-        let end_idx = start_idx + value[start_idx..].find(r#"}}"#)? + 2;
+        let start_idx = value.find("{{")?;
+        let end_idx = start_idx + value[start_idx..].find("}}")? + 2;
         Some(&value[start_idx..end_idx])
     }
     if let Some(placeholder) = find_placeholder(&res) {
@@ -132,8 +132,8 @@ pub mod tests {
         assert_eq!(render("{{PAR1}} bla")?, "val1 bla");
         assert_eq!(render("{{PAR2}} waa")?, "val2 waa");
         assert_eq!(render("{{PAR3}} kra")?, "val3 val4 kra");
-        assert!(render("{{par1}} woo").is_err());
-        assert!(render("{{pAr2}} koo").is_err());
+        render("{{par1}} woo").unwrap_err();
+        render("{{pAr2}} koo").unwrap_err();
         assert_eq!(render("{{PAR3}} doo")?, "val3 val4 doo");
         Ok(())
     }
