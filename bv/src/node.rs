@@ -353,7 +353,7 @@ impl Node {
                     .await?
                     .blockchain_jrpc((
                         get_api_host(method)?.clone(),
-                        render::render(method, &params, &conf),
+                        render::render(method, &params, &conf)?,
                         response.clone(),
                     ))
                     .await?
@@ -379,7 +379,7 @@ impl Node {
                     .node_conn
                     .babel_client()
                     .await?
-                    .blockchain_rest((render::render(&url, &params, &conf), response.clone()))
+                    .blockchain_rest((render::render(&url, &params, &conf)?, response.clone()))
                     .await?
                     .into_inner()
                     .value;
@@ -391,13 +391,20 @@ impl Node {
                 // For sh we need to sanitize each param, then join them.
                 let params = params
                     .into_iter()
-                    .map(|(k, v)| Ok((k, render::sanitize_param(&v)?)))
+                    .map(|(k, v)| {
+                        Ok((
+                            k,
+                            render::sanitize_param(&v).with_context(|| {
+                                format!("method '{name}' called with invalid params '{v:?}'")
+                            })?,
+                        ))
+                    })
                     .collect::<Result<_>>()?;
                 let value = self
                     .node_conn
                     .babel_client()
                     .await?
-                    .blockchain_sh((render::render(body, &params, &conf), response.clone()))
+                    .blockchain_sh((render::render(body, &params, &conf)?, response.clone()))
                     .await?
                     .into_inner()
                     .value;

@@ -524,7 +524,7 @@ fn render_entry_point_args(
     let mut entry_points = entry_points.to_vec();
     for item in &mut entry_points {
         for arg in &mut item.args {
-            *arg = render::render(arg, &params, conf);
+            *arg = render::render(arg, &params, conf)?;
         }
     }
     Ok(entry_points)
@@ -559,11 +559,11 @@ mod tests {
                 command: "cmd2".to_owned(),
                 args: vec![
                     "{{PARAM1}} and {{PARAM2}} twice {{PARAM1}}".to_owned(),
-                    "none{a} or {{MISSING}}".to_owned(),
+                    "none{a}".to_owned(),
                 ],
             },
         ];
-        let mut node_props = HashMap::from([
+        let node_props = HashMap::from([
             ("PARAM1".to_string(), "://Value.1,-_Q".to_string()),
             ("PARAM2".to_string(), "Value.2,-_Q".to_string()),
             ("PARAM3".to_string(), "!Invalid_but_not_used".to_string()),
@@ -584,14 +584,21 @@ mod tests {
                     command: "cmd2".to_owned(),
                     args: vec![
                         "://Value.1,-_Q and Value.2,-_Q twice ://Value.1,-_Q".to_owned(),
-                        "none{a} or {{MISSING}}".to_owned(),
+                        "none{a}".to_owned(),
                     ],
                 }
             ],
             render_entry_point_args(&entrypoints, &node_props, &conf)?
         );
-        node_props.get_mut("PARAM1").unwrap().push('@');
-        render_entry_point_args(&entrypoints, &node_props, &conf).unwrap_err();
+
+        let mut invalid_props = node_props.clone();
+        invalid_props.get_mut("PARAM1").unwrap().push('@');
+        render_entry_point_args(&entrypoints, &invalid_props, &conf).unwrap_err();
+
+        let mut missing_props = node_props.clone();
+        missing_props.remove("PARAM1");
+        render_entry_point_args(&entrypoints, &missing_props, &conf).unwrap_err();
+
         Ok(())
     }
 

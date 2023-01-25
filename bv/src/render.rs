@@ -1,7 +1,7 @@
 //! This file contains the functions that we use for rendering (mostly sh) commands that are sent to
 //! the nodes.
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
 use std::fmt::Display;
 
@@ -14,21 +14,29 @@ pub fn render(
     template: &str,
     params: &HashMap<impl Display, impl Display>,
     config: &toml::Value,
-) -> String {
-    let template = render_params(template, params);
+) -> Result<String> {
+    let template = render_params(template, params)?;
     render_config(&template, config)
 }
 
 /// Phase 1 of the rendering process entails taking the parameters that were specified by the user,
 /// uppercasing and `{{ }}`-delimiting them, and replacing those values in the template.
-fn render_params(template: &str, params: &HashMap<impl Display, impl Display>) -> String {
+fn render_params(template: &str, params: &HashMap<impl Display, impl Display>) -> Result<String> {
     let mut res = template.to_string();
     for (key, value) in params {
         // This formats a parameter like `url` as `{{URL}}`
         let placeholder = format!("{{{{{}}}}}", key.to_string().to_uppercase());
         res = res.replace(&placeholder, &value.to_string());
     }
-    res
+    fn find_placeholder(value: &str) -> Option<&str> {
+        let start_idx = value.find(r#"{{"#)?;
+        let end_idx = start_idx + value[start_idx..].find(r#"}}"#)? + 2;
+        Some(&value[start_idx..end_idx])
+    }
+    if let Some(placeholder) = find_placeholder(&res) {
+        bail!("parameter {placeholder} is missing")
+    }
+    Ok(res)
 }
 
 /// For phase 2 of our two step renderer we will go looking for "babel_refs" in the template that
@@ -41,10 +49,9 @@ fn render_params(template: &str, params: &HashMap<impl Display, impl Display>) -
 /// );
 /// ```
 /// Then a template like `curl babelref:'network.ip'` will be rendered as `curl 192.168.1.10^100`.
-fn render_config(template: &str, config: &toml::Value) -> String {
+fn render_config(template: &str, config: &toml::Value) -> Result<String> {
     const DELIM_START: &str = "babelref:'";
     const DELIM_END: &str = "'";
-    const PLACEHOLDER: &str = "<NO SUCH VALUE>";
 
     fn next_babel_ref(template: &str) -> Option<(usize, &str)> {
         let start_idx = template.find(DELIM_START)? + DELIM_START.len();
@@ -60,12 +67,14 @@ fn render_config(template: &str, config: &toml::Value) -> String {
         cur += offset;
     }
     // Now we replace each babel_ref in template with the value retrieved from `config`.
-    babel_refs.iter().fold(template.to_string(), |acc, elem| {
-        let hole = format!("{DELIM_START}{elem}{DELIM_END}");
+    let mut rendered = template.to_string();
+    for elem in babel_refs {
+        let babel_ref = format!("{DELIM_START}{elem}{DELIM_END}");
         let value = utils::get_config_value_by_path(config, elem)
-            .unwrap_or_else(|| PLACEHOLDER.to_string());
-        acc.replace(&hole, &value)
-    })
+            .ok_or_else(|| anyhow!("referenced value {babel_ref} not found in babel"))?;
+        rendered = rendered.replace(&babel_ref, &value)
+    }
+    Ok(rendered)
 }
 
 /// Allowing people to substitute arbitrary data into sh-commands is unsafe. We therefore run
@@ -110,7 +119,7 @@ pub mod tests {
     use super::*;
 
     #[test]
-    fn test_render_params() {
+    fn test_render_params() -> Result<()> {
         let s = |s: &str| s.to_string(); // to make the test less verbose
         let par1 = s("val1");
         let par2 = s("val2");
@@ -120,16 +129,17 @@ pub mod tests {
             .collect();
         let render = |template| render_params(template, &params);
 
-        assert_eq!(render("{{PAR1}} bla"), "val1 bla");
-        assert_eq!(render("{{PAR2}} waa"), "val2 waa");
-        assert_eq!(render("{{PAR3}} kra"), "val3 val4 kra");
-        assert_eq!(render("{{par1}} woo"), "{{par1}} woo");
-        assert_eq!(render("{{pAr2}} koo"), "{{pAr2}} koo");
-        assert_eq!(render("{{PAR3}} doo"), "val3 val4 doo");
+        assert_eq!(render("{{PAR1}} bla")?, "val1 bla");
+        assert_eq!(render("{{PAR2}} waa")?, "val2 waa");
+        assert_eq!(render("{{PAR3}} kra")?, "val3 val4 kra");
+        assert!(render("{{par1}} woo").is_err());
+        assert!(render("{{pAr2}} koo").is_err());
+        assert_eq!(render("{{PAR3}} doo")?, "val3 val4 doo");
+        Ok(())
     }
 
     #[test]
-    fn test_render_config() {
+    fn test_render_config() -> Result<()> {
         let template = "curl \"babelref:'some.seg.ment.list'\"";
         let val: toml::Value = toml::toml!(
         [some]
@@ -139,8 +149,9 @@ pub mod tests {
         );
         assert_eq!(
             "curl \"all the way down here.\"",
-            render_config(template, &val),
+            render_config(template, &val)?,
         );
+        Ok(())
     }
 
     #[test]

@@ -58,6 +58,8 @@ fn create_node(image: &str) -> String {
         "node",
         "create",
         image,
+        "--props",
+        r#"{"HELIUM_PARAM":"anything"}"#,
         "--gateway",
         "216.18.214.193",
         "--ip",
@@ -154,7 +156,7 @@ fn test_bv_cmd_logs() {
     println!("get logs");
     bv_run(
         &["node", "logs", vm_id],
-        "Helium entry_point not configured, but parametrized with {{HELIUM_PARAM}}!",
+        "Helium entry_point not configured, but parametrized with anything!",
     );
 
     println!("stop started node");
