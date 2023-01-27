@@ -315,16 +315,17 @@ impl Node {
     }
 
     pub async fn application_status(&mut self) -> Result<String> {
-        self.call_method(babel_api::BabelMethod::ApplicationStatus, HashMap::new()).await
+        self.call_method(babel_api::BabelMethod::ApplicationStatus, HashMap::new())
+            .await
     }
 
     pub async fn sync_status(&mut self) -> Result<String> {
-        self.call_method(babel_api::BabelMethod::SyncStatus, HashMap::new()).await
+        self.call_method(babel_api::BabelMethod::SyncStatus, HashMap::new())
+            .await
     }
 
     pub async fn init(&mut self, params: HashMap<String, Vec<String>>) -> Result<String> {
-        self.call_method(babel_api::BabelMethod::Init, params)
-            .await
+        self.call_method(babel_api::BabelMethod::Init, params).await
     }
 
     /// This function calls babel by sending a blockchain command using the specified method name.
