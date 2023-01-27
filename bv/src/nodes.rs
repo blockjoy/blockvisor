@@ -207,14 +207,7 @@ impl Nodes {
 
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
 
-        let node_keys = node
-            .data
-            .properties
-            .iter()
-            .map(|(k, v)| (k.clone(), v.as_bytes().into()));
-
-        let params = Self::prep_init_params(secret_keys, node_keys)?;
-        node.init(params).await?;
+        node.init(secret_keys).await?;
         Ok(())
     }
 
@@ -246,17 +239,6 @@ impl Nodes {
             .get_mut(&id)
             .ok_or_else(|| anyhow!("No node exists with id `{id}`"))?;
         node.update(name, self_update, properties).await
-    }
-
-    fn prep_init_params(
-        secret_keys: HashMap<String, Vec<u8>>,
-        node_keys: impl Iterator<Item = (String, Vec<u8>)>,
-    ) -> Result<HashMap<String, Vec<String>>> {
-        let mut res: HashMap<String, Vec<String>> = HashMap::new();
-        for (k, v) in secret_keys.into_iter().chain(node_keys) {
-            res.entry(k).or_default().push(String::from_utf8(v)?);
-        }
-        Ok(res)
     }
 
     #[instrument(skip(self))]

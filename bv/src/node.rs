@@ -330,7 +330,31 @@ impl Node {
             .await
     }
 
-    pub async fn init(&mut self, params: HashMap<String, Vec<String>>) -> Result<String> {
+    pub async fn init(&mut self, secret_keys: HashMap<String, Vec<u8>>) -> Result<String> {
+        let init_arg = match self
+            .data
+            .babel_conf
+            .methods
+            .get(&babel_api::BabelMethod::Init.to_string())
+        {
+            Some(Sh { body, .. }) => body,
+            Some(Jrpc { method, .. }) => method,
+            Some(Rest { method, .. }) => method,
+            _ => "",
+        };
+
+        let node_keys = self
+            .data
+            .properties
+            .iter()
+            .filter(|(k, _)| init_arg.contains(&format!("{{{{{}}}}}", k.to_uppercase())))
+            .map(|(k, v)| (k.clone(), v.as_bytes().into()));
+
+        let mut params: HashMap<String, Vec<String>> = HashMap::new();
+        for (k, v) in secret_keys.into_iter().chain(node_keys) {
+            params.entry(k).or_default().push(String::from_utf8(v)?);
+        }
+
         self.call_method(&babel_api::BabelMethod::Init, params)
             .await
     }
