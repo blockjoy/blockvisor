@@ -62,21 +62,21 @@ fn service_status_update(
     command_id: String,
 ) -> Option<pb::InfoUpdate> {
     match status {
-        bv_pb::ServiceStatus::UndefinedServiceStatus => create_info_update(
+        bv_pb::ServiceStatus::UndefinedServiceStatus => Some(create_info_update(
             command_id,
-            STATUS_ERROR,
+            Some(STATUS_ERROR),
             Some("service not ready, try again later".to_string()),
-        ),
-        bv_pb::ServiceStatus::Updating => create_info_update(
+        )),
+        bv_pb::ServiceStatus::Updating => Some(create_info_update(
             command_id,
-            STATUS_ERROR,
+            Some(STATUS_ERROR),
             Some("pending update, try again later".to_string()),
-        ),
-        bv_pb::ServiceStatus::Broken => create_info_update(
+        )),
+        bv_pb::ServiceStatus::Broken => Some(create_info_update(
             command_id,
-            STATUS_ERROR,
+            Some(STATUS_ERROR),
             Some("service is broken, call support".to_string()),
-        ),
+        )),
         bv_pb::ServiceStatus::Ok => None,
     }
 }
@@ -99,27 +99,41 @@ pub async fn process_commands_stream(
         info!("Received command: {received:?}");
         let received = received?;
 
-        let update = match received.r#type {
+        let maybe_update = match received.r#type {
             Some(pb::command::Type::Node(node_command)) => {
                 let command_id = node_command.api_command_id.clone();
-                let update = service_status_update(get_bv_status().await, command_id.clone());
-                if update.is_none() {
+                // check for bv health status
+                let maybe_service_update =
+                    service_status_update(get_bv_status().await, command_id.clone());
+                if maybe_service_update.is_none() {
+                    // ack the command
+                    let ack = create_info_update(command_id.clone(), None, None);
+                    updates_tx.send(ack)?;
+                    // process the command
                     match process_node_command(nodes.clone(), node_command).await {
                         Err(error) => {
                             error!("Error processing command: {error}");
-                            create_info_update(command_id, STATUS_ERROR, Some(error.to_string()))
+                            Some(create_info_update(
+                                command_id,
+                                Some(STATUS_ERROR),
+                                Some(error.to_string()),
+                            ))
                         }
-                        Ok(()) => create_info_update(command_id, STATUS_OK, None),
+                        Ok(()) => Some(create_info_update(command_id, Some(STATUS_OK), None)),
                     }
                 } else {
-                    update
+                    maybe_service_update
                 }
             }
             Some(pb::command::Type::Host(host_command)) => {
                 let msg = "Command type `Host` not supported".to_string();
                 error!("Error processing command: {msg}");
                 let command_id = host_command.api_command_id;
-                create_info_update(command_id, STATUS_ERROR, Some(msg))
+                Some(create_info_update(
+                    command_id,
+                    Some(STATUS_ERROR),
+                    Some(msg),
+                ))
             }
             None => {
                 let msg = "Command type is `None`".to_string();
@@ -128,7 +142,8 @@ pub async fn process_commands_stream(
             }
         };
 
-        if let Some(update) = update {
+        // send command results
+        if let Some(update) = maybe_update {
             updates_tx.send(update)?;
         }
     }
@@ -136,18 +151,24 @@ pub async fn process_commands_stream(
     Ok(())
 }
 
+/// Create `InfoUpdate` struct for informing API that we do something with the command we have received.
+///
+/// Update will be interpreted as 'ack' (aka command is received and in progress of execution)
+/// if we set exit_code to None.
+///
+/// Update will be interpreted as 'final result' if we set exit_code to Some(value).
 fn create_info_update(
     command_id: String,
-    code: i32,
-    msg: Option<String>,
-) -> Option<pb::InfoUpdate> {
-    Some(pb::InfoUpdate {
+    exit_code: Option<i32>,
+    response: Option<String>,
+) -> pb::InfoUpdate {
+    pb::InfoUpdate {
         info: Some(pb::info_update::Info::Command(pb::CommandInfo {
             id: command_id,
-            response: msg,
-            exit_code: Some(code),
+            response,
+            exit_code,
         })),
-    })
+    }
 }
 
 async fn process_node_command(
@@ -198,24 +219,11 @@ async fn process_node_command(
                 self_update,
                 properties,
             }) => {
-                let mut nodes = nodes.write().await;
-                let node = nodes
-                    .nodes
-                    .get_mut(&node_id)
-                    .ok_or_else(|| anyhow!("No node exists with id `{node_id}`"))?;
-
-                // If the fields we receive are populated, we update the node data.
-                if let Some(name) = name {
-                    node.data.name = name;
-                }
-                if let Some(self_update) = self_update {
-                    node.data.self_update = self_update;
-                }
-                if !properties.is_empty() {
-                    node.data.properties =
-                        properties.into_iter().map(|p| (p.name, p.value)).collect();
-                }
-                node.data.save().await?;
+                nodes
+                    .write()
+                    .await
+                    .update(node_id, name, self_update, properties)
+                    .await?;
             }
             Command::InfoGet(_) => unimplemented!(),
             Command::Generic(_) => unimplemented!(),

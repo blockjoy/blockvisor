@@ -82,13 +82,13 @@ async fn main() -> Result<()> {
                     match node.expected_status {
                         NodeStatus::Running => {
                             info!("Recovery: starting node with ID `{id}`");
-                            if let Err(e) = nodes.write().await.start(node.id).await {
+                            if let Err(e) = nodes.write().await.force_start(node.id).await {
                                 error!("Recovery: starting node with ID `{id}` failed: {e}");
                             }
                         }
                         NodeStatus::Stopped => {
                             info!("Recovery: stopping node with ID `{id}`");
-                            if let Err(e) = nodes.write().await.stop(node.id).await {
+                            if let Err(e) = nodes.write().await.force_stop(node.id).await {
                                 error!("Recovery: stopping node with ID `{id}` failed: {e}",);
                             }
                         }

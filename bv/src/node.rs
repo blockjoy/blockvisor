@@ -11,6 +11,7 @@ use tokio::{fs::DirBuilder, time::sleep};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
+use crate::services::api::pb::Parameter;
 use crate::{
     env::*,
     node_connection::NodeConnection,
@@ -187,8 +188,23 @@ impl Node {
         self.data.delete().await
     }
 
-    pub async fn set_self_update(&mut self, self_update: bool) -> Result<()> {
-        self.data.self_update = self_update;
+    pub async fn update(
+        &mut self,
+        name: Option<String>,
+        self_update: Option<bool>,
+        properties: Vec<Parameter>,
+    ) -> Result<()> {
+        // If the fields we receive are populated, we update the node data.
+        if let Some(name) = name {
+            self.data.name = name;
+        }
+        if let Some(self_update) = self_update {
+            self.data.self_update = self_update;
+        }
+        if !properties.is_empty() {
+            // TODO change API to send Option<Vec<Parameter>> to allow setting empty properties
+            self.data.properties = properties.into_iter().map(|p| (p.name, p.value)).collect();
+        }
         self.data.save().await
     }
 
@@ -324,7 +340,31 @@ impl Node {
             .await
     }
 
-    pub async fn init(&mut self, params: HashMap<String, Vec<String>>) -> Result<String> {
+    pub async fn init(&mut self, secret_keys: HashMap<String, Vec<u8>>) -> Result<String> {
+        let init_arg = match self
+            .data
+            .babel_conf
+            .methods
+            .get(&babel_api::BabelMethod::Init.to_string())
+        {
+            Some(Sh { body, .. }) => body,
+            Some(Jrpc { method, .. }) => method,
+            Some(Rest { method, .. }) => method,
+            _ => "",
+        };
+
+        let node_keys = self
+            .data
+            .properties
+            .iter()
+            .filter(|(k, _)| init_arg.contains(&format!("{{{{{}}}}}", k.to_uppercase())))
+            .map(|(k, v)| (k.clone(), v.as_bytes().into()));
+
+        let mut params: HashMap<String, Vec<String>> = HashMap::new();
+        for (k, v) in secret_keys.into_iter().chain(node_keys) {
+            params.entry(k).or_default().push(String::from_utf8(v)?);
+        }
+
         self.call_method(babel_api::BabelMethod::Init, params).await
     }
 

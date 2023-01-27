@@ -24,7 +24,7 @@ jobs:
           override: true
       - name: Setup packages
         run: >
-          sudo apt install protobuf-compiler
+          sudo apt install -y build-essential pkg-config libssl-dev cmake tmux musl-tools pigz
       - name: Test
         run: >
           cargo test -p babel

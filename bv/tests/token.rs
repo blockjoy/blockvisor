@@ -28,6 +28,7 @@ pub struct RegistrationClaim {
     pub exp: i64,
     pub token_type: String,
     pub role: String,
+    pub email: String,
 }
 
 impl Claim for AuthClaim {}
@@ -47,12 +48,13 @@ impl TokenGenerator {
         Self::encode(&claim, &secret).unwrap()
     }
 
-    pub fn create_register(id: uuid::Uuid, secret: String) -> String {
+    pub fn create_register(id: uuid::Uuid, secret: String, email: String) -> String {
         let claim = RegistrationClaim {
             id,
             exp: 1768022101,
             token_type: "registration_confirmation".to_string(),
             role: "user".to_string(),
+            email,
         };
 
         match Self::encode(&claim, &secret) {
@@ -61,7 +63,7 @@ impl TokenGenerator {
         }
     }
 
-    pub fn create_auth(id: uuid::Uuid, secret: String, org_id: String) -> String {
+    pub fn create_auth(id: uuid::Uuid, secret: String, org_id: String, email: String) -> String {
         let claim = AuthClaim {
             id,
             exp: 1768022101,
@@ -70,6 +72,7 @@ impl TokenGenerator {
             data: Some(HashMap::from([
                 ("org_id".to_string(), org_id),
                 ("org_role".to_string(), "owner".to_string()),
+                ("email".to_string(), email),
             ])),
         };
 

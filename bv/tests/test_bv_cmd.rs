@@ -332,7 +332,8 @@ async fn test_bv_cmd_init_localhost() {
         meta: Some(ui_pb::RequestMeta::default()),
     };
     let refresh_token = token::TokenGenerator::create_refresh(id, "23942390".to_string());
-    let register_token = token::TokenGenerator::create_register(id, "23ß357320".to_string());
+    let register_token =
+        token::TokenGenerator::create_register(id, "23ß357320".to_string(), email.to_string());
     client
         .confirm(with_auth(confirm_user, &register_token, &refresh_token))
         .await
@@ -352,7 +353,12 @@ async fn test_bv_cmd_init_localhost() {
     let login_data = login_auth.data.unwrap();
     let org_id = login_data.get("org_id").unwrap();
 
-    let auth_token = token::TokenGenerator::create_auth(id, "1245456".to_string(), org_id.clone());
+    let auth_token = token::TokenGenerator::create_auth(
+        id,
+        "1245456".to_string(),
+        org_id.clone(),
+        email.to_string(),
+    );
 
     println!("create host provision");
     let mut client = ui_pb::host_provision_service_client::HostProvisionServiceClient::connect(url)
@@ -747,7 +753,7 @@ async fn test_bv_cmd_grpc_commands() {
                     image: Some(pb::ContainerImage {
                         protocol: "helium".to_string(),
                         node_type: "validator".to_string(),
-                        node_version: "0.0.2".to_string(),
+                        node_version: "0.0.3".to_string(),
                         status: 1, // Development
                     }),
                 })),
@@ -825,33 +831,37 @@ async fn test_bv_cmd_grpc_commands() {
 
     println!("got updates: {updates:?}");
     let expected_updates = vec![
+        ack_command_update(&command_id),
         node_update(&node_id, pb::node_info::ContainerStatus::Creating),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
         success_command_update(&command_id),
-        error_command_update(&command_id, format!("Node with id `{node_id}` exists")),
+        ack_command_update(&command_id),
+        success_command_update(&command_id),
+        ack_command_update(&command_id),
         error_command_update(&command_id, format!("Node with name `{node_name}` exists")),
-        node_update(&node_id, pb::node_info::ContainerStatus::Stopping),
-        node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
+        ack_command_update(&command_id),
         success_command_update(&command_id),
+        ack_command_update(&command_id),
         node_update(&node_id, pb::node_info::ContainerStatus::Starting),
         node_update(&node_id, pb::node_info::ContainerStatus::Running),
         success_command_update(&command_id),
-        node_update(&node_id, pb::node_info::ContainerStatus::Starting),
-        node_update(&node_id, pb::node_info::ContainerStatus::Running),
+        ack_command_update(&command_id),
         success_command_update(&command_id),
+        ack_command_update(&command_id),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopping),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
         success_command_update(&command_id),
+        ack_command_update(&command_id),
+        node_update(&node_id, pb::node_info::ContainerStatus::Starting),
+        node_update(&node_id, pb::node_info::ContainerStatus::Running),
+        success_command_update(&command_id),
+        ack_command_update(&command_id),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopping),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
         node_update(&node_id, pb::node_info::ContainerStatus::Starting),
         node_update(&node_id, pb::node_info::ContainerStatus::Running),
         success_command_update(&command_id),
-        node_update(&node_id, pb::node_info::ContainerStatus::Stopping),
-        node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
-        node_update(&node_id, pb::node_info::ContainerStatus::Starting),
-        node_update(&node_id, pb::node_info::ContainerStatus::Running),
-        success_command_update(&command_id),
+        ack_command_update(&command_id),
         node_update(&node_id, pb::node_info::ContainerStatus::Upgrading),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopping),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
@@ -859,16 +869,18 @@ async fn test_bv_cmd_grpc_commands() {
         node_update(&node_id, pb::node_info::ContainerStatus::Running),
         node_update(&node_id, pb::node_info::ContainerStatus::Upgraded),
         success_command_update(&command_id),
+        ack_command_update(&command_id),
         node_update(&node_id, pb::node_info::ContainerStatus::Deleting),
         node_update(&node_id, pb::node_info::ContainerStatus::Deleted),
         success_command_update(&command_id),
     ];
+    let expected_count = expected_updates.len();
 
     for (actual, expected) in updates.into_iter().zip(expected_updates) {
         assert_eq!(actual.unwrap(), expected);
     }
 
-    assert_eq!(updates_count, 37);
+    assert_eq!(updates_count, expected_count);
 }
 
 #[cfg(target_os = "linux")]
@@ -889,6 +901,17 @@ fn error_command_update(command_id: &str, message: String) -> pb::InfoUpdate {
             id: command_id.to_string(),
             response: Some(message),
             exit_code: Some(1),
+        })),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ack_command_update(command_id: &str) -> pb::InfoUpdate {
+    pb::InfoUpdate {
+        info: Some(pb::info_update::Info::Command(pb::CommandInfo {
+            id: command_id.to_string(),
+            response: None,
+            exit_code: None,
         })),
     }
 }

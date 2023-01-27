@@ -27,13 +27,28 @@ jobs:
           profile: minimal
           target: x86_64-unknown-linux-musl
           override: true
+      - name: Setup packages
+        run: >
+          sudo apt -y install build-essential pkg-config libssl-dev cmake tmux musl-tools pigz awscli
 
       - name: Build
         run: >
           make build
       - name: Reinstall
-        run: >
+        run: |
           make reinstall
+          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
+            aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
+            babel/protocols/helium/helium-validator.toml \
+            s3://cookbook-dev/chains/helium/validator/0.0.1/babel.toml
+          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
+            aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
+            babel/protocols/helium/helium-validator.toml \
+            s3://cookbook-dev/chains/helium/validator/0.0.2/babel.toml
+          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
+            aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
+            babel/protocols/helium/helium-validator.toml \
+            s3://cookbook-dev/chains/helium/validator/0.0.3/babel.toml
 
       - name: Install doctl
         uses: digitalocean/action-doctl@v2
