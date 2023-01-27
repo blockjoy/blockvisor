@@ -25,6 +25,8 @@ pub struct Metric {
     pub block_age: Option<u64>,
     pub staking_status: Option<i32>,
     pub consensus: Option<bool>,
+    pub application_status: Option<String>,
+    pub sync_status: Option<String>,
 }
 
 /// Given a list of nodes, returns for each node their metric. It does this concurrently for each
@@ -48,6 +50,8 @@ pub async fn collect_metric(node: &mut node::Node) -> (NodeId, Metric) {
         block_age: timeout(node.block_age()).await.ok(),
         staking_status: timeout(node.stake_status()).await.ok(),
         consensus: timeout(node.consensus()).await.ok(),
+        application_status: timeout(node.application_status()).await.ok(),
+        sync_status: timeout(node.sync_status()).await.ok(),
     };
     (node.id(), metric)
 }
@@ -69,17 +73,43 @@ where
     }
 }
 
+/// Here is how we convert the metrics we aggregated to their representation that we use over gRPC.
+/// Note that even though this may fail, i.e. the application_status or sync_status may not be
+/// something we can make sense of, we still provide an infallible `From` implementation (not
+/// `TryFrom`). This is because if the node goes to the sad place, it may start sending malformed
+/// responses (think instead of block_height: 3 it will send block_height: aaaaaaaaaaaa). Even when
+/// this is the case we still want to send as many metrics to the api as possible, so after duly
+/// logging them, we ignore these failures.
 impl From<Metrics> for pb::NodeMetricsRequest {
     fn from(metrics: Metrics) -> Self {
+        use crate::services::api::pb::node_info::{ApplicationStatus, SyncStatus};
+
         let metrics = metrics
             .0
             .into_iter()
             .map(|(k, v)| {
+                let application_status = v.application_status
+                    .map(|s| s.to_lowercase())
+                    .and_then(|s| {
+                        ApplicationStatus::from_str_name(&s)
+                            .ok_or_else(|| warn!("Could not parse `{s}` as application status"))
+                            .ok()
+                    });
+                let sync_status = v.sync_status
+                    .map(|s| s.to_lowercase())
+                    .and_then(|s| {
+                        SyncStatus::from_str_name(&s)
+                            .ok_or_else(|| warn!("Could not parse `{s}` as sync status"))
+                            .ok()
+                    });
+
                 let metrics = pb::NodeMetrics {
                     height: v.height,
                     block_age: v.block_age,
                     staking_status: v.staking_status,
                     consensus: v.consensus,
+                    application_status: application_status.map(Into::into),
+                    sync_status: sync_status.map(Into::into),
                 };
                 (k.to_string(), metrics)
             })

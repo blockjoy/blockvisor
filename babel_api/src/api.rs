@@ -13,6 +13,8 @@ pub enum BabelMethod {
     GenerateKeys,
     Height,
     Name,
+    ApplicationStatus,
+    SyncStatus,
 }
 
 #[tonic_rpc::tonic_rpc(bincode)]
