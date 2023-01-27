@@ -19,7 +19,7 @@ use crate::{
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     render,
     services::{
-        api::{pb, pb::node_info::ContainerStatus},
+        api::{pb, pb::node_info::ContainerStatus, pb::Parameter},
         cookbook::CookbookService,
         keyfiles::KeyService,
     },
@@ -65,7 +65,8 @@ impl Nodes {
         properties: NodeProperties,
     ) -> Result<()> {
         if self.nodes.contains_key(&id) {
-            bail!("Node with id `{id}` exists");
+            warn!("Node with id `{id}` exists");
+            return Ok(());
         }
 
         if self.node_ids.contains_key(&name) {
@@ -109,37 +110,45 @@ impl Nodes {
 
     #[instrument(skip(self))]
     pub async fn upgrade(&mut self, id: Uuid, image: NodeImage) -> Result<()> {
-        let babel = self.fetch_image_data(&image).await?;
-        check_babel_version(&babel.config.min_babel_version)?;
-
-        let _ = self.send_container_status(&id, ContainerStatus::Upgrading);
-
-        let need_to_restart = self.status(id).await? == NodeStatus::Running;
-        self.stop(id).await?;
-        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
-
-        if image.protocol != node.data.image.protocol {
-            bail!("Cannot upgrade protocol to `{}`", image.protocol);
-        }
-        if image.node_type != node.data.image.node_type {
-            bail!("Cannot upgrade node type to `{}`", image.node_type);
-        }
-        if node.data.babel_conf.requirements.vcpu_count != babel.requirements.vcpu_count
-            || node.data.babel_conf.requirements.mem_size_mb != babel.requirements.mem_size_mb
-            || node.data.babel_conf.requirements.disk_size_gb != babel.requirements.disk_size_gb
+        if image
+            != self
+                .nodes
+                .get(&id)
+                .ok_or_else(|| id_not_found(id))?
+                .data
+                .image
         {
-            bail!("Cannot upgrade node requirements");
+            let babel = self.fetch_image_data(&image).await?;
+            check_babel_version(&babel.config.min_babel_version)?;
+
+            let _ = self.send_container_status(&id, ContainerStatus::Upgrading);
+
+            let need_to_restart = self.status(id).await? == NodeStatus::Running;
+            self.stop(id).await?;
+            let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
+
+            if image.protocol != node.data.image.protocol {
+                bail!("Cannot upgrade protocol to `{}`", image.protocol);
+            }
+            if image.node_type != node.data.image.node_type {
+                bail!("Cannot upgrade node type to `{}`", image.node_type);
+            }
+            if node.data.babel_conf.requirements.vcpu_count != babel.requirements.vcpu_count
+                || node.data.babel_conf.requirements.mem_size_mb != babel.requirements.mem_size_mb
+                || node.data.babel_conf.requirements.disk_size_gb != babel.requirements.disk_size_gb
+            {
+                bail!("Cannot upgrade node requirements");
+            }
+
+            node.upgrade(&image).await?;
+            debug!("Node upgraded");
+
+            if need_to_restart {
+                self.start(id).await?;
+            }
+
+            let _ = self.send_container_status(&id, ContainerStatus::Upgraded);
         }
-
-        node.upgrade(&image).await?;
-        debug!("Node upgraded");
-
-        if need_to_restart {
-            self.start(id).await?;
-        }
-
-        let _ = self.send_container_status(&id, ContainerStatus::Upgraded);
-
         Ok(())
     }
 
@@ -166,23 +175,22 @@ impl Nodes {
 
     #[instrument(skip(self))]
     pub async fn delete(&mut self, id: Uuid) -> Result<()> {
-        let node = self.nodes.remove(&id).ok_or_else(|| id_not_found(id))?;
-        self.node_ids.remove(&node.data.name);
+        if let Some(node) = self.nodes.remove(&id) {
+            self.node_ids.remove(&node.data.name);
 
-        let _ = self.send_container_status(&id, ContainerStatus::Deleting);
+            let _ = self.send_container_status(&id, ContainerStatus::Deleting);
 
-        node.delete().await?;
-        debug!("Node deleted");
+            node.delete().await?;
+            debug!("Node deleted");
 
-        let _ = self.send_container_status(&id, ContainerStatus::Deleted);
-
+            let _ = self.send_container_status(&id, ContainerStatus::Deleted);
+        }
         Ok(())
     }
 
     #[instrument(skip(self))]
-    pub async fn start(&mut self, id: Uuid) -> Result<()> {
+    pub async fn force_start(&mut self, id: Uuid) -> Result<()> {
         let _ = self.send_container_status(&id, ContainerStatus::Starting);
-
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
         node.start().await?;
         debug!("Node started");
@@ -207,8 +215,37 @@ impl Nodes {
 
         let params = Self::prep_init_params(secret_keys, node_keys)?;
         node.init(params).await?;
-
         Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub async fn start(&mut self, id: Uuid) -> Result<()> {
+        if NodeStatus::Running
+            != self
+                .nodes
+                .get(&id)
+                .ok_or_else(|| id_not_found(id))?
+                .expected_status()
+        {
+            self.force_start(id).await
+        } else {
+            Ok(())
+        }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn update(
+        &mut self,
+        id: Uuid,
+        name: Option<String>,
+        self_update: Option<bool>,
+        properties: Vec<Parameter>,
+    ) -> Result<()> {
+        let node = self
+            .nodes
+            .get_mut(&id)
+            .ok_or_else(|| anyhow!("No node exists with id `{id}`"))?;
+        node.update(name, self_update, properties).await
     }
 
     fn prep_init_params(
@@ -223,16 +260,29 @@ impl Nodes {
     }
 
     #[instrument(skip(self))]
-    pub async fn stop(&mut self, id: Uuid) -> Result<()> {
+    pub async fn force_stop(&mut self, id: Uuid) -> Result<()> {
         let _ = self.send_container_status(&id, ContainerStatus::Stopping);
-
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
         node.stop().await?;
         debug!("Node stopped");
 
         let _ = self.send_container_status(&id, ContainerStatus::Stopped);
-
         Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub async fn stop(&mut self, id: Uuid) -> Result<()> {
+        if NodeStatus::Stopped
+            != self
+                .nodes
+                .get(&id)
+                .ok_or_else(|| id_not_found(id))?
+                .expected_status()
+        {
+            self.force_stop(id).await
+        } else {
+            Ok(())
+        }
     }
 
     #[instrument(skip(self))]

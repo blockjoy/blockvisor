@@ -27,7 +27,7 @@ impl fmt::Display for NodeStatus {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct NodeImage {
     pub protocol: String,
     pub node_type: String,

@@ -219,24 +219,11 @@ async fn process_node_command(
                 self_update,
                 properties,
             }) => {
-                let mut nodes = nodes.write().await;
-                let node = nodes
-                    .nodes
-                    .get_mut(&node_id)
-                    .ok_or_else(|| anyhow!("No node exists with id `{node_id}`"))?;
-
-                // If the fields we receive are populated, we update the node data.
-                if let Some(name) = name {
-                    node.data.name = name;
-                }
-                if let Some(self_update) = self_update {
-                    node.data.self_update = self_update;
-                }
-                if !properties.is_empty() {
-                    node.data.properties =
-                        properties.into_iter().map(|p| (p.name, p.value)).collect();
-                }
-                node.data.save().await?;
+                nodes
+                    .write()
+                    .await
+                    .update(node_id, name, self_update, properties)
+                    .await?;
             }
             Command::InfoGet(_) => unimplemented!(),
             Command::Generic(_) => unimplemented!(),

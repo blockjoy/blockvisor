@@ -11,6 +11,7 @@ use tokio::{fs::DirBuilder, time::sleep};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
+use crate::services::api::pb::Parameter;
 use crate::{
     env::*,
     node_connection::NodeConnection,
@@ -187,8 +188,23 @@ impl Node {
         self.data.delete().await
     }
 
-    pub async fn set_self_update(&mut self, self_update: bool) -> Result<()> {
-        self.data.self_update = self_update;
+    pub async fn update(
+        &mut self,
+        name: Option<String>,
+        self_update: Option<bool>,
+        properties: Vec<Parameter>,
+    ) -> Result<()> {
+        // If the fields we receive are populated, we update the node data.
+        if let Some(name) = name {
+            self.data.name = name;
+        }
+        if let Some(self_update) = self_update {
+            self.data.self_update = self_update;
+        }
+        if !properties.is_empty() {
+            // TODO change API to send Option<Vec<Parameter>> to allow setting empty properties
+            self.data.properties = properties.into_iter().map(|p| (p.name, p.value)).collect();
+        }
         self.data.save().await
     }
 

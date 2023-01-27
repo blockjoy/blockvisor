@@ -747,7 +747,7 @@ async fn test_bv_cmd_grpc_commands() {
                     image: Some(pb::ContainerImage {
                         protocol: "helium".to_string(),
                         node_type: "validator".to_string(),
-                        node_version: "0.0.2".to_string(),
+                        node_version: "0.0.3".to_string(),
                         status: 1, // Development
                     }),
                 })),
@@ -830,28 +830,22 @@ async fn test_bv_cmd_grpc_commands() {
         node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
         success_command_update(&command_id),
         ack_command_update(&command_id),
-        error_command_update(&command_id, format!("Node with id `{node_id}` exists")),
+        success_command_update(&command_id),
         ack_command_update(&command_id),
         error_command_update(&command_id, format!("Node with name `{node_name}` exists")),
         ack_command_update(&command_id),
-        node_update(&node_id, pb::node_info::ContainerStatus::Stopping),
-        node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
         success_command_update(&command_id),
         ack_command_update(&command_id),
         node_update(&node_id, pb::node_info::ContainerStatus::Starting),
         node_update(&node_id, pb::node_info::ContainerStatus::Running),
         success_command_update(&command_id),
         ack_command_update(&command_id),
-        node_update(&node_id, pb::node_info::ContainerStatus::Starting),
-        node_update(&node_id, pb::node_info::ContainerStatus::Running),
         success_command_update(&command_id),
         ack_command_update(&command_id),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopping),
         node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
         success_command_update(&command_id),
         ack_command_update(&command_id),
-        node_update(&node_id, pb::node_info::ContainerStatus::Stopping),
-        node_update(&node_id, pb::node_info::ContainerStatus::Stopped),
         node_update(&node_id, pb::node_info::ContainerStatus::Starting),
         node_update(&node_id, pb::node_info::ContainerStatus::Running),
         success_command_update(&command_id),
@@ -874,12 +868,13 @@ async fn test_bv_cmd_grpc_commands() {
         node_update(&node_id, pb::node_info::ContainerStatus::Deleted),
         success_command_update(&command_id),
     ];
+    let expected_count = expected_updates.len();
 
     for (actual, expected) in updates.into_iter().zip(expected_updates) {
         assert_eq!(actual.unwrap(), expected);
     }
 
-    assert_eq!(updates_count, 48);
+    assert_eq!(updates_count, expected_count);
 }
 
 #[cfg(target_os = "linux")]
