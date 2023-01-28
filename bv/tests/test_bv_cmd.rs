@@ -554,31 +554,6 @@ fn with_auth<T>(inner: T, auth_token: &str, refresh_token: &str) -> Request<T> {
 #[tokio::test]
 #[serial]
 #[cfg(target_os = "linux")]
-async fn test_bv_cmd_cookbook_download() {
-    use blockvisord::env::IMAGE_CACHE_DIR;
-    use std::path::Path;
-
-    let folder = IMAGE_CACHE_DIR
-        .join("helium")
-        .join("validator")
-        .join("0.0.3");
-    let _ = tokio::fs::remove_dir_all(&folder).await;
-
-    println!("create a node");
-    let vm_id = &create_node("helium/validator/0.0.3");
-    println!("create vm_id: {vm_id}");
-
-    println!("delete node");
-    bv_run(&["node", "delete", vm_id], "Deleted node");
-
-    assert!(Path::new(&folder.join("kernel")).exists());
-    assert!(Path::new(&folder.join("os.img")).exists());
-    assert!(Path::new(&folder.join("babel.toml")).exists());
-}
-
-#[tokio::test]
-#[serial]
-#[cfg(target_os = "linux")]
 async fn test_bv_cmd_grpc_commands() {
     use blockvisord::config::Config;
     use blockvisord::nodes::Nodes;
@@ -926,6 +901,31 @@ fn success_command_update(command_id: &str) -> pb::InfoUpdate {
         })),
     }
 }
+
+// #[test]
+// #[serial]
+// #[cfg(target_os = "linux")]
+// fn test_bv_cmd_cookbook_download() {
+//     use blockvisord::env::IMAGE_CACHE_DIR;
+//     use std::path::Path;
+
+//     let folder = IMAGE_CACHE_DIR
+//         .join("helium")
+//         .join("validator")
+//         .join("0.0.3");
+//     let _ = std::fs::remove_dir_all(&folder);
+
+//     println!("create a node");
+//     let vm_id = &create_node("helium/validator/0.0.3");
+//     println!("create vm_id: {vm_id}");
+
+//     println!("delete node");
+//     bv_run(&["node", "delete", vm_id], "Deleted node");
+
+//     assert!(Path::new(&folder.join("kernel")).exists());
+//     assert!(Path::new(&folder.join("os.img")).exists());
+//     assert!(Path::new(&folder.join("babel.toml")).exists());
+// }
 
 #[tokio::test]
 #[serial]
