@@ -29,5 +29,7 @@ jobs:
         run: >
           cargo install cargo-release
       - name: Cargo Release
-        run: >
+        run: |
+          git config user.email "ci@blockjoy.com"
+          git config user.name "CI"
           cargo release --execute --no-confirm ${{ inputs.bump_level }}
