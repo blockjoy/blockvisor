@@ -3,7 +3,7 @@
 The service that runs on the host systems and is responisble for provisioning and managing one or more blockchains on a single server.
 
 ## How to release a new version
-
+Manually trigger GH release action or: 
 1. Make sure you have `cargo-release` installed (`cargo install cargo-release`)
 2. Run `cargo release --execute <release|patch|minor|major|alpha|beta|rc>` passing proper bump level according to [cargo-release](https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md#bump-level) docs 
 3. CI `publish` workflow will then build a bundle and create a new GH release

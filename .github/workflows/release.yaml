@@ -1,0 +1,33 @@
+name: Release BV
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_level:
+        description: 'Bump Level (see [cargo-release](https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md#bump-level))'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - release
+          - patch
+          - minor
+          - major
+          - alpha
+          - beta
+          - rc
+
+jobs:
+  linux:
+    name: BV release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Install cargo-release
+        run: >
+          cargo install cargo-release
+      - name: Cargo Release
+        run: >
+          cargo release --execute --no-confirm ${{ inputs.bump_level }}
