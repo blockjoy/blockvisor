@@ -46,13 +46,6 @@ babelsup: build-release
 	ln -sr /tmp/babelsup/etc/systemd/system/babelsup.service /tmp/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service
 	tar -C /tmp -czvf /tmp/babelsup.tar.gz babelsup
 
-tag: CARGO_VERSION = $(shell grep '^version' Cargo.toml | sed "s/ //g" | cut -d = -f 2 | sed "s/\"//g")
-tag: GIT_VERSION = $(shell git describe --tags)
-tag:
-	@if [ "${CARGO_VERSION}" = "${GIT_VERSION}" ]; then echo "Version ${CARGO_VERSION} already tagged!"; \
-	else git tag -a ${CARGO_VERSION} -m "Set version ${CARGO_VERSION}"; git push origin ${CARGO_VERSION}; \
-	fi
-
 install: bundle
 	rm -rf /opt/blockvisor
 	/tmp/bundle/installer

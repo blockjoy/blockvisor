@@ -4,8 +4,8 @@ The service that runs on the host systems and is responisble for provisioning an
 
 ## How to release a new version
 
-1. Update version in workspace
-2. Run `make tag` to create a version tag
+1. Make sure you have `cargo-release` installed (`cargo install cargo-release`)
+2. Run `cargo release --execute <release|patch|minor|major|alpha|beta|rc>` passing proper bump level according to [cargo-release](https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md#bump-level) docs 
 3. CI `publish` workflow will then build a bundle and create a new GH release
 
 ## Host Setup
