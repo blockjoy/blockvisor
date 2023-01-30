@@ -57,12 +57,10 @@ async fn main() -> Result<()> {
     let token = api::AuthToken(config.token.to_owned());
     let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
     let external_api_client_future = async {
-        let channel = wait_for_channel(&endpoint).await;
-
-        info!("Creating gRPC client...");
-        let mut client = api::CommandsClient::with_auth(channel, token.clone());
-
         loop {
+            let channel = wait_for_channel(&endpoint).await;
+            info!("Creating gRPC client...");
+            let mut client = api::CommandsClient::with_auth(channel, token.clone());
             if let Err(e) =
                 api::process_commands_stream(&mut client, nodes.clone(), updates_tx.clone()).await
             {
