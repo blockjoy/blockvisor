@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       bump_level:
-        description: 'Bump Level (see [cargo-release](https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md#bump-level))'
+        description: 'Bump Level (see https://github.com/crate-ci/cargo-release/blob/master/docs/reference.md#bump-level)'
         required: true
         default: 'patch'
         type: choice
@@ -20,17 +20,17 @@ on:
 jobs:
   linux:
     name: BV release
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: recursive
           fetch-depth: 0
-      - name: Install cargo-release
-        run: >
-          cargo install cargo-release
-      - name: Cargo Release
+      - name: Setup environment
         run: |
-          git config user.email "ci@blockjoy.com"
+          cargo install cargo-release
+          git config user.email "engineering@blockjoy.com"
           git config user.name "CI"
+      - name: Cargo Release
+        run: >
           cargo release --execute --no-confirm ${{ inputs.bump_level }}
