@@ -41,7 +41,8 @@ async fn main() -> eyre::Result<()> {
         SupervisorSetup::SetupTx(sup_setup_tx)
     };
 
-    let supervisor_handle = tokio::spawn(supervisor::run::<SysTimer>(
+    let supervisor_handle = tokio::spawn(supervisor::run(
+        SysTimer,
         run.clone(),
         babel::env::BABEL_BIN_PATH.clone(),
         sup_setup_rx,
@@ -70,11 +71,11 @@ struct SysTimer;
 
 #[async_trait]
 impl supervisor::Timer for SysTimer {
-    fn now() -> Instant {
+    fn now(&self) -> Instant {
         Instant::now()
     }
 
-    async fn sleep(duration: Duration) {
+    async fn sleep(&self, duration: Duration) {
         tokio::time::sleep(duration).await
     }
 }
@@ -115,7 +116,7 @@ async fn serve(
         babel_change_tx,
         babel::env::BABEL_BIN_PATH.clone(),
         babel::env::BABELSUP_CONFIG_PATH.clone(),
-        ConfigObserver {},
+        ConfigObserver,
     );
     let listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_SUPERVISOR_PORT)
         .with_context(|| "failed to bind to vsock")?;

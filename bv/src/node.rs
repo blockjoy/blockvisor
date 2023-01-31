@@ -66,8 +66,8 @@ impl Node {
 
     /// Returns node previously created on this host.
     #[instrument(skip(data))]
-    pub async fn connect(data: NodeData) -> Result<Self> {
-        info!("Connecting to node with data: {data:?}");
+    pub async fn attach(data: NodeData) -> Result<Self> {
+        info!("Attaching to node with data: {data:?}");
         let config = Node::create_config(&data).await?;
         let cmd = data.id.to_string();
         let (pid, node_conn) = match get_process_pid(FC_BIN_NAME, &cmd) {

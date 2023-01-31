@@ -8,7 +8,6 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::env;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::fs;
@@ -23,14 +22,14 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct SysTimer;
 #[async_trait]
 impl Sleeper for SysTimer {
-    async fn sleep(duration: Duration) {
+    async fn sleep(&self, duration: Duration) {
         sleep(duration).await
     }
 }
 
 #[async_trait]
 pub trait Sleeper {
-    async fn sleep(duration: Duration);
+    async fn sleep(&self, duration: Duration);
 }
 
 #[async_trait]
@@ -62,10 +61,10 @@ pub struct SelfUpdater<T: Sleeper, C: BundleConnector> {
     auth_token: String,
     bundles: C,
     latest_downloaded_version: String,
-    phantom: PhantomData<T>,
+    sleeper: T,
 }
 
-pub fn new<T: Sleeper>(cfg: &Config) -> Result<SelfUpdater<T, DefaultConnector>> {
+pub fn new<T: Sleeper>(sleeper: T, cfg: &Config) -> Result<SelfUpdater<T, DefaultConnector>> {
     let download_path = crate::env::VARS_DIR.join("downloads");
     std::fs::create_dir_all(&download_path)?;
     Ok(SelfUpdater {
@@ -79,7 +78,7 @@ pub fn new<T: Sleeper>(cfg: &Config) -> Result<SelfUpdater<T, DefaultConnector>>
             blockjoy_registry_url: cfg.blockjoy_registry_url.clone(),
         },
         latest_downloaded_version: CURRENT_VERSION.to_string(),
-        phantom: Default::default(),
+        sleeper,
     })
 }
 
@@ -88,7 +87,7 @@ impl<T: Sleeper, C: BundleConnector> SelfUpdater<T, C> {
         if let Some(check_interval) = self.check_interval {
             loop {
                 self.check_for_update().await;
-                T::sleep(check_interval).await;
+                self.sleeper.sleep(check_interval).await;
             }
         }
     }
@@ -215,7 +214,7 @@ mod tests {
 
         #[async_trait]
         impl Sleeper for TestSleeper {
-            async fn sleep(duration: Duration);
+            async fn sleep(&self, duration: Duration);
         }
     }
 
@@ -248,7 +247,7 @@ mod tests {
             let blacklist_path = tmp_root.join(installer::BLACKLIST);
 
             Ok(Self {
-                updater: SelfUpdater::<MockTestSleeper, TestConnector> {
+                updater: SelfUpdater {
                     blacklist_path: blacklist_path.clone(),
                     download_path,
                     check_interval: Some(Duration::from_secs(3)),
@@ -257,7 +256,7 @@ mod tests {
                         tmp_root: tmp_root.clone(),
                     },
                     latest_downloaded_version: CURRENT_VERSION.to_string(),
-                    phantom: Default::default(),
+                    sleeper: MockTestSleeper::new(),
                 },
                 blacklist_path,
                 tmp_root,

@@ -9,10 +9,10 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 struct SysTimer;
 
 impl installer::Timer for SysTimer {
-    fn now() -> Instant {
+    fn now(&self) -> Instant {
         Instant::now()
     }
-    fn sleep(duration: Duration) {
+    fn sleep(&self, duration: Duration) {
         sleep(duration)
     }
 }
@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
         .with(tracing_journald::layer()?)
         .init();
 
-    let res = Installer::<SysTimer>::default().run().await;
+    let res = Installer::new(SysTimer).run().await;
     if let Err(err) = res {
         error!("{err}");
         Err(err)

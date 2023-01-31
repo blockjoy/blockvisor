@@ -400,7 +400,7 @@ impl Nodes {
                 continue;
             }
             match NodeData::load(&path)
-                .and_then(|data| async { Node::connect(data).await })
+                .and_then(|data| async { Node::attach(data).await })
                 .await
             {
                 Ok(node) => {

@@ -46,7 +46,6 @@ assert_fs = "1"
 httpmock = "0.6.7"
 mockall = "0.11.3"
 postcard = {version = "1.0.2", features = ["alloc"]}
-serial_test = "1"
 tokio-stream = {version = "0.1.11", features = ["net"]}
 tokio-util = {version = "0.7.4", features = ["io"]}
 tower = "0.4.13"

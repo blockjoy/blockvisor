@@ -234,7 +234,7 @@ mod tests {
             babel_change_tx,
             babel_path,
             babelsup_cfg_path,
-            DummyObserver {},
+            DummyObserver,
         );
         Server::builder()
             .max_concurrent_streams(1)
@@ -350,7 +350,7 @@ mod tests {
             babel_change_tx,
             babel_bin_path.clone(),
             Default::default(),
-            DummyObserver {},
+            DummyObserver,
         );
 
         assert_eq!(
@@ -368,7 +368,7 @@ mod tests {
             babel_change_tx,
             babel_bin_path.clone(),
             Default::default(),
-            DummyObserver {},
+            DummyObserver,
         );
 
         assert_eq!(
