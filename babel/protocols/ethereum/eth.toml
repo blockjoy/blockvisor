@@ -22,8 +22,11 @@ log_buffer_capacity_ln = 1000
 data_directory_mount_point = "/blockjoy/data"
 
     [[supervisor.entry_point]]
-    command = "if [ ! -f  '/blockjoy/.init' ]; then exit 1; else  /usr/bin/lighthouse;fi"
-    args = ["--datadir", "/blockjoy/data/lighthouse", "vc", "--network", "{{NETWORK}}", "--http", "--suggested-fee-recipient", "{{FEE-RECIPIENT}}", "--beacon-nodes", "babelref:'nets.{{NETWORK}}.beacon_nodes_csv'"]
+    name = "lighthouse"
+    body = """
+    test -f /blockjoy/.init && \
+    /usr/bin/lighthouse --datadir /blockjoy/data/lighthouse vc --network {{NETWORK}} --http --suggested-fee-recipient {{FEE-RECIPIENT}} --beacon-nodes babelref:'nets.{{NETWORK}}.beacon_nodes_csv'
+    """
 
 [keys]
 "*" = "/opt/secrets"
@@ -74,7 +77,7 @@ transport = "sh"
 body = """
 ! test -f /blockjoy/.init && \
     echo {{VOTING-PWD}} > /blockjoy/secret && \
-    lighthouse --network {{NETWORK}} --datadir /blockjoy/data/lighthouse account validator import --directory /opt/secrets --reuse-password --password-file /blockjoy/secret && \
+    lighthouse --network {{NETWORK}} --datadir /blockjoy/lighthouse account validator import --directory /opt/secrets --reuse-password --password-file /blockjoy/secret && \
     touch /blockjoy/.init
 """
 

@@ -35,8 +35,8 @@ pub struct SupervisorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Entrypoint {
-    pub command: String,
-    pub args: Vec<String>,
+    pub name: String,
+    pub body: String,
 }
 
 impl Default for SupervisorConfig {

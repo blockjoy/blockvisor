@@ -517,7 +517,7 @@ fn render_entry_point_args(
     let args = entry_points
         .iter()
         .fold(String::new(), |mut args, entrypoint| {
-            args.push_str(&entrypoint.args.join(""));
+            args.push_str(&entrypoint.body);
             args
         });
     let params: HashMap<&String, &String> = params
@@ -536,9 +536,7 @@ fn render_entry_point_args(
 
     let mut entry_points = entry_points.to_vec();
     for item in &mut entry_points {
-        for arg in &mut item.args {
-            *arg = render::render(arg, &params, conf)?;
-        }
+        item.body = render::render(&item.body, &params, conf)?;
     }
     Ok(entry_points)
 }
@@ -560,20 +558,12 @@ mod tests {
         );
         let entrypoints = vec![
             Entrypoint {
-                command: "cmd1".to_string(),
-                args: vec![
-                    "none_parametrized_argument".to_string(),
-                    "first_parametrized_{{PARAM1}}_argument".to_string(),
-                    "second_parametrized_{{PARAM1}}_{{PARAM2}}_argument".to_string(),
-                    "third_parammy_babelref:'aa.{{PARAM_BB}}'_argument".to_string(),
-                ],
+                name: "cmd1".to_string(),
+                body:"first_parametrized_{{PARAM1}}_argument second_parametrized_{{PARAM1}}_{{PARAM2}}_argument third_parammy_babelref:'aa.{{PARAM_BB}}'_argument".to_string(),
             },
             Entrypoint {
-                command: "cmd2".to_owned(),
-                args: vec![
-                    "{{PARAM1}} and {{PARAM2}} twice {{PARAM1}}".to_owned(),
-                    "none{a}".to_owned(),
-                ],
+                name: "cmd2".to_owned(),
+                body: "{{PARAM1}} and {{PARAM2}} twice {{PARAM1}} and none{a}".to_owned(),
             },
         ];
         let node_props = HashMap::from([
@@ -585,20 +575,12 @@ mod tests {
         assert_eq!(
             vec![
                 Entrypoint {
-                    command: "cmd1".to_string(),
-                    args: vec![
-                        "none_parametrized_argument".to_string(),
-                        "first_parametrized_://Value.1,-_Q_argument".to_string(),
-                        "second_parametrized_://Value.1,-_Q_Value.2,-_Q_argument".to_string(),
-                        "third_parammy_cc_argument".to_string(),
-                    ],
+                    name: "cmd1".to_string(),
+                    body:"first_parametrized_://Value.1,-_Q_argument second_parametrized_://Value.1,-_Q_Value.2,-_Q_argument third_parammy_cc_argument".to_string(),
                 },
                 Entrypoint {
-                    command: "cmd2".to_owned(),
-                    args: vec![
-                        "://Value.1,-_Q and Value.2,-_Q twice ://Value.1,-_Q".to_owned(),
-                        "none{a}".to_owned(),
-                    ],
+                    name: "cmd2".to_owned(),
+                    body: "://Value.1,-_Q and Value.2,-_Q twice ://Value.1,-_Q and none{a}".to_owned(),
                 }
             ],
             render_entry_point_args(&entrypoints, &node_props, &conf)?

@@ -120,13 +120,9 @@ impl<T: Timer> Supervisor<T> {
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
-        kill_remnants(
-            &self.babel_path.to_string_lossy().to_string(),
-            &Default::default(),
-            ps,
-        );
+        kill_remnants(&self.babel_path.to_string_lossy(), &[], ps);
         for entry_point in &self.config.entry_point {
-            kill_remnants(&entry_point.command, &entry_point.args, ps);
+            kill_remnants("sh", &["-c", &entry_point.body], ps);
         }
     }
 
@@ -163,9 +159,9 @@ impl<T: Timer> Supervisor<T> {
     }
 
     async fn run_entrypoint(&self, entrypoint: &Entrypoint) {
-        let entry_name = format!("{} {}", entrypoint.command, entrypoint.args.join(" "));
-        let mut cmd = Command::new(&entrypoint.command);
-        cmd.args(&entrypoint.args)
+        let entry_name = &entrypoint.name;
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", &entrypoint.body])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut run = self.run.clone();
@@ -175,7 +171,7 @@ impl<T: Timer> Supervisor<T> {
             if let Ok(mut child) = cmd.spawn() {
                 info!("Spawned entrypoint '{entry_name}'");
                 self.log_buffer
-                    .attach(&entry_name, child.stdout.take(), child.stderr.take());
+                    .attach(entry_name, child.stdout.take(), child.stderr.take());
                 tokio::select!(
                     _ = child.wait() => {
                         warn!("Entrypoint stopped unexpected '{entry_name}'");
@@ -194,7 +190,7 @@ impl<T: Timer> Supervisor<T> {
     }
 }
 
-fn kill_remnants(cmd: &String, args: &Vec<String>, ps: &HashMap<Pid, Process>) {
+fn kill_remnants(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
     let remnants: Vec<_> = ps
         .iter()
         .filter(|(_, process)| {
@@ -202,10 +198,10 @@ fn kill_remnants(cmd: &String, args: &Vec<String>, ps: &HashMap<Pid, Process>) {
             if let Some(proc_cmd) = proc_call.first() {
                 if proc_cmd == "/bin/sh" {
                     // if first element is shell call, just ignore it and treat second as cmd, rest are arguments
-                    proc_call.len() > 1 && cmd == &proc_call[1] && args == &proc_call[2..].to_vec()
+                    proc_call.len() > 1 && cmd == proc_call[1] && args == proc_call[2..].to_vec()
                 } else {
                     // first element is cmd, rest are arguments
-                    cmd == proc_cmd && args == &proc_call[1..].to_vec()
+                    cmd == proc_cmd && args == proc_call[1..].to_vec()
                 }
             } else {
                 false
@@ -361,8 +357,8 @@ mod tests {
             backoff_base_ms: 10,
             log_buffer_capacity_ln: 10,
             entry_point: vec![Entrypoint {
-                command: "echo".to_owned(),
-                args: vec!["test".to_owned()],
+                name: "echo".to_owned(),
+                body: "echo test".to_owned(),
             }],
             ..Default::default()
         }
@@ -447,16 +443,16 @@ mod tests {
             backoff_base_ms: 10,
             entry_point: vec![
                 Entrypoint {
-                    command: "sleep".to_owned(),
-                    args: vec!["infinity".to_owned()],
+                    name: "sleep".to_owned(),
+                    body: "sleep infinity".to_owned(),
                 },
                 Entrypoint {
-                    command: "sleep".to_owned(),
-                    args: vec!["infinity".to_owned()],
+                    name: "sleep".to_owned(),
+                    body: "sleep infinity".to_owned(),
                 },
                 Entrypoint {
-                    command: "touch".to_owned(),
-                    args: vec![file_path.to_str().unwrap().to_string()],
+                    name: "touch".to_owned(),
+                    body: format!("touch {}", file_path.to_str().unwrap()),
                 },
             ],
             ..Default::default()
@@ -500,8 +496,8 @@ mod tests {
             backoff_timeout_ms: 600,
             backoff_base_ms: 10,
             entry_point: vec![Entrypoint {
-                command: "sleep".to_owned(),
-                args: vec!["infinity".to_owned()],
+                name: "sleep".to_owned(),
+                body: "sleep infinity".to_owned(),
             }],
             ..Default::default()
         };
@@ -638,11 +634,7 @@ mod tests {
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
-        kill_remnants(
-            &test_env.babel_path.to_string_lossy().to_string(),
-            &["a".to_string(), "b".to_string(), "c".to_string()].to_vec(),
-            ps,
-        );
+        kill_remnants(&test_env.babel_path.to_string_lossy(), &["a", "b", "c"], ps);
         child.kill().await.unwrap_err();
         Ok(())
     }

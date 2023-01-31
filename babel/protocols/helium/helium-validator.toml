@@ -22,8 +22,8 @@ log_buffer_capacity_ln = 1000
 data_directory_mount_point = "/blockjoy/miner/data"
 
     [[supervisor.entry_point]]
-    command = "echo"
-    args = ["Helium entry_point not configured, but parametrized with {{HELIUM_PARAM}}!"]
+    name = "echo"
+    body = "echo \"Helium entry_point not configured, but parametrized with {{HELIUM_PARAM}}!\""
 
 [keys] # this is just an example
 first = "/opt/secrets/first.key"

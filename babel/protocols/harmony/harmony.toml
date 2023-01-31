@@ -25,8 +25,8 @@ log_buffer_capacity_ln = 1000
 data_directory_mount_point = "/blockjoy/miner/data"
 
     [[supervisor.entry_point]]
-    command = "todo"
-    args = []
+    name = "todo"
+    body = ""
 
 [[methods]]
 name = "height"

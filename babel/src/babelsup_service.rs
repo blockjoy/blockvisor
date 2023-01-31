@@ -407,8 +407,8 @@ mod tests {
             .setup_supervisor(SupervisorConfig {
                 log_buffer_capacity_ln: 10,
                 entry_point: vec![Entrypoint {
-                    command: "echo".to_owned(),
-                    args: vec![],
+                    name: "echo".to_owned(),
+                    body: "echo".to_owned(),
                 }],
 
                 ..Default::default()
@@ -443,8 +443,8 @@ mod tests {
         let config = SupervisorConfig {
             log_buffer_capacity_ln: 10,
             entry_point: vec![Entrypoint {
-                command: "echo".to_owned(),
-                args: vec![],
+                name: "echo".to_owned(),
+                body: "echo".to_owned(),
             }],
 
             ..Default::default()
