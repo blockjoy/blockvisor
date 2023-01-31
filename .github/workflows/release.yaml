@@ -34,3 +34,4 @@ jobs:
       - name: Cargo Release
         run: >
           cargo release --execute --no-confirm ${{ inputs.bump_level }}
+      - uses: ./.github/workflows/publish.yaml
