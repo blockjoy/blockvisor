@@ -58,9 +58,9 @@ async fn main() -> Result<()> {
     let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
     let external_api_client_future = async {
         loop {
-            let channel = wait_for_channel(&endpoint).await;
             info!("Creating gRPC client...");
-            let mut client = api::CommandsClient::with_auth(channel, token.clone());
+            let mut client =
+                api::CommandsClient::with_auth(wait_for_channel(&endpoint).await, token.clone());
             if let Err(e) =
                 api::process_commands_stream(&mut client, nodes.clone(), updates_tx.clone()).await
             {
@@ -143,14 +143,14 @@ async fn wait_for_channel(endpoint: &Endpoint) -> Channel {
 /// query their metrics, then send them to blockvisor-api.
 async fn node_metrics(nodes: Arc<RwLock<Nodes>>, endpoint: &Endpoint, token: api::AuthToken) {
     let mut timer = tokio::time::interval(node_metrics::COLLECT_INTERVAL);
-    let channel = wait_for_channel(endpoint).await;
-    let mut client = api::MetricsClient::with_auth(channel, token);
     loop {
         timer.tick().await;
         let mut lock = nodes.write().await;
         let metrics = blockvisord::node_metrics::collect_metrics(lock.nodes.values_mut()).await;
         // Drop the lock as early as possible.
         drop(lock);
+        let mut client =
+            api::MetricsClient::with_auth(wait_for_channel(endpoint).await, token.clone());
         let metrics: pb::NodeMetricsRequest = metrics.into();
         if let Err(e) = client.node(metrics).await {
             error!("Could not send node metrics! `{e}`");
@@ -160,12 +160,12 @@ async fn node_metrics(nodes: Arc<RwLock<Nodes>>, endpoint: &Endpoint, token: api
 
 async fn host_metrics(host_id: String, endpoint: &Endpoint, token: api::AuthToken) {
     let mut timer = tokio::time::interval(hosts::COLLECT_INTERVAL);
-    let channel = wait_for_channel(endpoint).await;
-    let mut client = api::MetricsClient::with_auth(channel, token);
     loop {
         timer.tick().await;
         match blockvisord::hosts::get_host_metrics() {
             Ok(metrics) => {
+                let mut client =
+                    api::MetricsClient::with_auth(wait_for_channel(endpoint).await, token.clone());
                 let metrics = pb::HostMetricsRequest::new(host_id.clone(), metrics);
                 if let Err(e) = client.host(metrics).await {
                     error!("Could not send host metrics! `{e}`");
