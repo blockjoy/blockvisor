@@ -59,7 +59,7 @@ fn create_node(image: &str) -> String {
         "create",
         image,
         "--props",
-        r#"{"HELIUM_PARAM":"anything"}"#,
+        r#"{"TESTING_PARAM":"anything"}"#,
         "--gateway",
         "216.18.214.193",
         "--ip",
@@ -114,7 +114,7 @@ fn test_bv_host_metrics() {
 #[serial]
 #[cfg(target_os = "linux")]
 fn test_bv_chain_list() {
-    bv_run(&["chain", "list", "helium", "validator"], "");
+    bv_run(&["chain", "list", "testing", "validator"], "");
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn test_bv_cmd_node_start_and_stop_all() {
     println!("create {NODES_COUNT} nodes");
     let mut nodes: Vec<String> = Default::default();
     for _ in 0..NODES_COUNT {
-        nodes.push(create_node("helium/validator/0.0.1"));
+        nodes.push(create_node("testing/validator/0.0.1"));
     }
 
     println!("start all created nodes");
@@ -154,7 +154,7 @@ fn test_bv_cmd_node_start_and_stop_all() {
 #[cfg(target_os = "linux")]
 fn test_bv_cmd_logs() {
     println!("create a node");
-    let vm_id = &create_node("helium/validator/0.0.1");
+    let vm_id = &create_node("testing/validator/0.0.1");
     println!("create vm_id: {vm_id}");
 
     println!("start node");
@@ -163,7 +163,7 @@ fn test_bv_cmd_logs() {
     println!("get logs");
     bv_run(
         &["node", "logs", vm_id],
-        "Helium entry_point not configured, but parametrized with anything!",
+        "Testing entry_point not configured, but parametrized with anything!",
     );
 
     println!("stop started node");
@@ -175,7 +175,7 @@ fn test_bv_cmd_logs() {
 #[cfg(target_os = "linux")]
 async fn test_bv_cmd_node_lifecycle() {
     println!("create a node");
-    let vm_id = &create_node("helium/validator/0.0.1");
+    let vm_id = &create_node("testing/validator/0.0.1");
     println!("create vm_id: {vm_id}");
 
     println!("stop stopped node");
@@ -207,7 +207,7 @@ async fn test_bv_cmd_node_lifecycle() {
 
     println!("upgrade running node");
     bv_run(
-        &["node", "upgrade", vm_id, "helium/validator/0.0.2"],
+        &["node", "upgrade", vm_id, "testing/validator/0.0.2"],
         "Upgraded node",
     );
 
@@ -231,7 +231,7 @@ async fn test_bv_cmd_node_recovery() {
     use blockvisord::{node::FC_BIN_NAME, utils};
 
     println!("create a node");
-    let vm_id = &create_node("helium/validator/0.0.1");
+    let vm_id = &create_node("testing/validator/0.0.1");
     println!("create vm_id: {vm_id}");
 
     println!("start stopped node");
@@ -449,7 +449,7 @@ async fn test_bv_cmd_init_localhost() {
             version: Some("0.0.1".to_string()),
             ip: None,
             r#type: Some(
-                json!({"id": 3, "properties": [{"name": "HELIUM_PARAM","label":"label","description":"description","ui_type":"unknown","disabled":false,"required":true,"value": "anything"}]})
+                json!({"id": 3, "properties": [{"name": "TESTING_PARAM","label":"label","description":"description","ui_type":"unknown","disabled":false,"required":true,"value": "anything"}]})
                     .to_string(),
             ), // validator
             address: None,
@@ -559,13 +559,13 @@ async fn test_bv_cmd_cookbook_download() {
     use std::path::Path;
 
     let folder = IMAGE_CACHE_DIR
-        .join("helium")
+        .join("testing")
         .join("validator")
         .join("0.0.3");
     let _ = tokio::fs::remove_dir_all(&folder).await;
 
     println!("create a node");
-    let vm_id = &create_node("helium/validator/0.0.3");
+    let vm_id = &create_node("testing/validator/0.0.3");
     println!("create vm_id: {vm_id}");
 
     println!("delete node");
@@ -620,18 +620,18 @@ async fn test_bv_cmd_grpc_commands() {
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: node_name.clone(),
                     image: Some(pb::ContainerImage {
-                        protocol: "helium".to_string(),
+                        protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
                         node_version: "0.0.2".to_string(),
                         status: 1, // Development
                     }),
-                    blockchain: "helium".to_string(),
+                    blockchain: "testing".to_string(),
                     r#type: json!({"id": 3, "properties": []}).to_string(),
                     ip: "216.18.214.195".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
                     properties: vec![pb::Parameter {
-                        name: "HELIUM_PARAM".to_string(),
+                        name: "TESTING_PARAM".to_string(),
                         value: "anything".to_string(),
                     }],
                 })),
@@ -646,18 +646,18 @@ async fn test_bv_cmd_grpc_commands() {
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: "some-new-name".to_string(),
                     image: Some(pb::ContainerImage {
-                        protocol: "helium".to_string(),
+                        protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
                         node_version: "0.0.2".to_string(),
                         status: 1, // Development
                     }),
-                    blockchain: "helium".to_string(),
+                    blockchain: "testing".to_string(),
                     r#type: json!({"id": 3, "properties": []}).to_string(),
                     ip: "216.18.214.195".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
                     properties: vec![pb::Parameter {
-                        name: "HELIUM_PARAM".to_string(),
+                        name: "TESTING_PARAM".to_string(),
                         value: "anything".to_string(),
                     }],
                 })),
@@ -672,18 +672,18 @@ async fn test_bv_cmd_grpc_commands() {
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: node_name.clone(),
                     image: Some(pb::ContainerImage {
-                        protocol: "helium".to_string(),
+                        protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
                         node_version: "0.0.2".to_string(),
                         status: 1, // Development
                     }),
-                    blockchain: "helium".to_string(),
+                    blockchain: "testing".to_string(),
                     r#type: json!({"id": 3, "properties": []}).to_string(),
                     ip: "216.18.214.195".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
                     properties: vec![pb::Parameter {
-                        name: "HELIUM_PARAM".to_string(),
+                        name: "TESTING_PARAM".to_string(),
                         value: "anything".to_string(),
                     }],
                 })),
@@ -751,7 +751,7 @@ async fn test_bv_cmd_grpc_commands() {
                 created_at: None,
                 command: Some(pb::node_command::Command::Upgrade(pb::NodeUpgrade {
                     image: Some(pb::ContainerImage {
-                        protocol: "helium".to_string(),
+                        protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
                         node_version: "0.0.3".to_string(),
                         status: 1, // Development

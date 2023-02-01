@@ -1,0 +1,131 @@
+[env]
+path_append = "/blockjoy/bin/"
+
+[config]
+protocol = "testing"
+node_type = "validator"
+node_version = "1.15.9"
+min_babel_version = "0.0.1"
+description = "testing blockchain validator"
+api_host = "http://localhost:4467/"
+ports = [4467]
+
+[requirements]
+vcpu_count = 1
+mem_size_mb = 2048
+disk_size_gb = 1
+
+[supervisor]
+backoff_timeout_ms = 60000
+backoff_base_ms = 10000
+log_buffer_capacity_ln = 1000
+data_directory_mount_point = "/blockjoy/miner/data"
+
+    [[supervisor.entry_point]]
+    name = "echo"
+    body = "echo \"Testing entry_point not configured, but parametrized with {{TESTING_PARAM}}!\""
+
+[keys] # this is just an example
+first = "/opt/secrets/first.key"
+second = "/opt/secrets/second.key"
+"*" = "/tmp"
+
+[[methods]]
+name = "height"
+transport = "jrpc"
+method = "info_height"
+
+    [methods.response]
+    code = 200
+    field = "result.height"
+
+[[methods]]
+name = "address"
+transport = "jrpc"
+method = "peer_addr"
+
+    [methods.response]
+    code = 200
+    field = "result.peer_addr"
+
+[[methods]]
+name = "name"
+transport = "jrpc"
+method = "info_name"
+
+    [methods.response]
+    code = 200
+    field = "result.name"
+
+[[methods]]
+name = "consensus"
+transport = "jrpc"
+method = "info_in_consensus"
+
+    [methods.response]
+    code = 200
+    field = "result.in_consensus"
+
+[[methods]]
+name = "block_age"
+transport = "jrpc"
+method = "info_block_age"
+
+    [methods.response]
+    code = 200
+    field = "result.block_age"
+
+[[methods]]
+name = "info"
+transport = "jrpc"
+method = "info_summary"
+
+    [methods.response]
+    code = 200
+    field = "result"
+
+[[methods]]
+name = "genesis"
+transport = "sh"
+body = "/usr/bin/curl -s {{GENESIS_BLOCK_URL}} -o /h && /usr/local/bin/miner genesis load /h"
+
+    [methods.response]
+    # something?
+    status = 0
+    format = "raw"
+
+[[methods]]
+name = "version"
+transport = "sh"
+body = "miner versions | tail -n +2 | awk '{print $2}'"
+
+    [methods.response]
+    # something?
+    status = 0
+    format = "raw"
+
+[[methods]]
+name = "generate_keys"
+transport = "sh"
+body = "mkdir -p /opt/secrets && echo first > /opt/secrets/first.key && echo second > /opt/secrets/second.key"
+
+    [methods.response]
+    status = 0
+    format = "raw"
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = "echo 'noop for testing'"
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[nets.mainnet]
+net_type = "main"
+url = "https://rpc.ankr.com/eth"
+
+[nets.testnet]
+net_type = "test"
+url = "https://testnet-api.helium.wtf/v1/"
