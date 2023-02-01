@@ -39,15 +39,15 @@ jobs:
           make reinstall
           AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
             aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
-            babel/protocols/helium/helium-validator.toml \
+            babel/protocols/helium/helium.toml \
             s3://cookbook-dev/chains/helium/validator/0.0.1/babel.toml
           AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
             aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
-            babel/protocols/helium/helium-validator.toml \
+            babel/protocols/helium/helium.toml \
             s3://cookbook-dev/chains/helium/validator/0.0.2/babel.toml
           AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
             aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
-            babel/protocols/helium/helium-validator.toml \
+            babel/protocols/helium/helium.toml \
             s3://cookbook-dev/chains/helium/validator/0.0.3/babel.toml
 
       - name: Install doctl

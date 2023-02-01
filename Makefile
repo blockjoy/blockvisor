@@ -62,7 +62,7 @@ install: bundle
 	done
 	for babel_conf in $$(find /var/lib/blockvisor/images/ -name "*.toml"); do \
 		echo $$babel_conf; \
-		cp -f babel/protocols/helium/helium-validator.toml $$babel_conf; \
+		cp -f babel/protocols/helium/helium.toml $$babel_conf; \
 	done
 
 reinstall:

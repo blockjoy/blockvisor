@@ -82,16 +82,24 @@ fn render_config(template: &str, config: &toml::Value) -> Result<String> {
 /// restrictive than needed; it just filters out each character that is not a number or a
 /// string or absolutely needed to form a url or json file.
 pub fn sanitize_param(param: &[String]) -> Result<String> {
-    let res = param
-        .iter()
+    let res = if param.len() == 1 {
         // We escape each individual argument
-        .map(|p| p.chars().map(escape_char).collect::<Result<String>>())
-        // Now join the iterator of Strings into a single String, using `" "` as a seperator.
-        // This means our final string looks like `" arg 1" "arg 2" "arg 3"`, and that makes it
-        // ready to be subsituted into the sh command.
-        .try_fold("".to_string(), |acc, elem| {
-            elem.map(|elem| acc + " \"" + &elem + "\"")
-        })?;
+        param[0]
+            .chars()
+            .map(escape_char)
+            .collect::<Result<String>>()
+    } else {
+        param
+            .iter()
+            // We escape each individual argument
+            .map(|p| p.chars().map(escape_char).collect::<Result<String>>())
+            // Now join the iterator of Strings into a single String, using `" "` as a seperator.
+            // This means our final string looks like `"arg 1" "arg 2" "arg 3"`, and that makes it
+            // ready to be subsituted into the sh command.
+            .try_fold("".to_string(), |acc, elem| {
+                elem.map(|elem| acc + " \"" + &elem + "\"")
+            })
+    }?;
     Ok(res)
 }
 
@@ -171,6 +179,10 @@ pub mod tests {
         ];
         let sanitized2 = sanitize_param(&params2).unwrap();
         assert_eq!(sanitized2, r#" "some\n" "test/" "strings\"""#);
+
+        let params3 = ["single param".to_string()];
+        let sanitized3 = sanitize_param(&params3).unwrap();
+        assert_eq!(sanitized3, "single param");
 
         sanitize_param(&[r#"{"crypto":{"kdf":{"function":"scrypt","params":{"dklen":32,"n":262144,"r":8,"p":1,"salt":"f36fe9215c3576941742cd295935f678df4d2b3697b62c0f52b43b21b540d2d0"},"message":""},"checksum":{"function":"sha256","params":{},"message":"a686c26f070ebdcd848d6445685a287d9ba557acdf94551ad9199fe3f4335ca9"},"cipher":{"function":"aes-128-ctr","params":{"iv":"e41ee5ea6099bb2b98d4dad8d08301b3"},"message":"37f6ab34a7e484a5b1cf9907d6464b8f89852f3914baff93f1dd2fcf54352986"}},"description":"","pubkey":"a7d3b17b67320381d10fa111c71eee89a728f36d8fbfcd294807fe8b8d27d6a95ee5cdc0bf05d6b2a4f9ac08699747e9","path":"m/12381/3600/0/0/0","uuid":"2f89ee56-b65a-4142-9df0-abb42addccd4","version":4}"#.to_string()]).unwrap();
     }

@@ -1,0 +1,4 @@
+[toolchain]
+channel = "1.66.1"
+components = [ "cargo", "rustfmt", "clippy", "rust-std", "rustc" ]
+targets = [ "x86_64-unknown-linux-musl" ]
