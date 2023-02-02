@@ -1,7 +1,6 @@
 use crate::api::pb;
 use anyhow::{Context, Result};
 use blockvisord::nodes::CommonData;
-use blockvisord::self_updater::SelfUpdater;
 use blockvisord::{
     config::Config,
     hosts,
@@ -105,7 +104,7 @@ async fn main() -> Result<()> {
     let node_updates_future = node_updates(nodes.clone());
     let node_metrics_future = node_metrics(nodes.clone(), &endpoint, token.clone());
     let host_metrics_future = host_metrics(config.id.clone(), &endpoint, token.clone());
-    let self_updater = SelfUpdater::<self_updater::SysTimer>::new(&config)?;
+    let self_updater = self_updater::new::<self_updater::SysTimer>(&config)?;
 
     let _ = tokio::join!(
         internal_api_server_future,

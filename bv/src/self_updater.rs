@@ -33,38 +33,57 @@ pub trait Sleeper {
     async fn sleep(duration: Duration);
 }
 
-pub struct SelfUpdater<T: Sleeper> {
+#[async_trait]
+pub trait BundleConnector {
+    async fn connect(&self) -> Result<BundleServiceClient<Channel>>;
+}
+
+pub struct DefaultConnector {
+    blockjoy_registry_url: String,
+}
+
+#[async_trait]
+impl BundleConnector for DefaultConnector {
+    async fn connect(&self) -> Result<BundleServiceClient<Channel>> {
+        Ok(BundleServiceClient::new(
+            Channel::from_shared(self.blockjoy_registry_url.clone())?
+                .timeout(BUNDLES_REQ_TIMEOUT)
+                .connect_timeout(BUNDLES_CONNECT_TIMEOUT)
+                .connect()
+                .await?,
+        ))
+    }
+}
+
+pub struct SelfUpdater<T: Sleeper, C: BundleConnector> {
     blacklist_path: PathBuf,
     download_path: PathBuf,
     check_interval: Option<Duration>,
     auth_token: String,
-    bundles: BundleServiceClient<Channel>,
+    bundles: C,
     latest_downloaded_version: String,
     phantom: PhantomData<T>,
 }
 
-impl<T: Sleeper> SelfUpdater<T> {
-    pub fn new(cfg: &Config) -> Result<Self> {
-        let download_path = crate::env::VARS_DIR.join("downloads");
-        std::fs::create_dir_all(&download_path)?;
-        Ok(Self {
-            blacklist_path: crate::env::ROOT_DIR
-                .join(installer::INSTALL_PATH)
-                .join(installer::BLACKLIST),
-            download_path,
-            check_interval: cfg.update_check_interval_secs.map(Duration::from_secs),
-            auth_token: cfg.token.to_string(),
-            bundles: BundleServiceClient::new(
-                Channel::from_shared(cfg.blockjoy_registry_url.clone())?
-                    .timeout(BUNDLES_REQ_TIMEOUT)
-                    .connect_timeout(BUNDLES_CONNECT_TIMEOUT)
-                    .connect_lazy(),
-            ),
-            latest_downloaded_version: CURRENT_VERSION.to_string(),
-            phantom: Default::default(),
-        })
-    }
+pub fn new<T: Sleeper>(cfg: &Config) -> Result<SelfUpdater<T, DefaultConnector>> {
+    let download_path = crate::env::VARS_DIR.join("downloads");
+    std::fs::create_dir_all(&download_path)?;
+    Ok(SelfUpdater {
+        blacklist_path: crate::env::ROOT_DIR
+            .join(installer::INSTALL_PATH)
+            .join(installer::BLACKLIST),
+        download_path,
+        check_interval: cfg.update_check_interval_secs.map(Duration::from_secs),
+        auth_token: cfg.token.to_string(),
+        bundles: DefaultConnector {
+            blockjoy_registry_url: cfg.blockjoy_registry_url.clone(),
+        },
+        latest_downloaded_version: CURRENT_VERSION.to_string(),
+        phantom: Default::default(),
+    })
+}
 
+impl<T: Sleeper, C: BundleConnector> SelfUpdater<T, C> {
     pub async fn run(mut self) {
         if let Some(check_interval) = self.check_interval {
             loop {
@@ -92,6 +111,8 @@ impl<T: Sleeper> SelfUpdater<T> {
     pub async fn get_latest(&mut self) -> Result<Option<cb_pb::BundleIdentifier>> {
         let mut resp = self
             .bundles
+            .connect()
+            .await?
             .list_bundle_versions(with_auth(
                 cb_pb::BundleVersionsRequest {
                     status: cb_pb::StatusName::Development.into(),
@@ -116,6 +137,8 @@ impl<T: Sleeper> SelfUpdater<T> {
     pub async fn download_and_install(&mut self, bundle: BundleIdentifier) -> Result<()> {
         let archive = self
             .bundles
+            .connect()
+            .await?
             .retrieve(with_auth(bundle, &self.auth_token))
             .await?
             .into_inner();
@@ -195,11 +218,22 @@ mod tests {
         }
     }
 
+    struct TestConnector {
+        tmp_root: PathBuf,
+    }
+
+    #[async_trait]
+    impl BundleConnector for TestConnector {
+        async fn connect(&self) -> Result<BundleServiceClient<Channel>> {
+            Ok(BundleServiceClient::new(test_channel(&self.tmp_root)))
+        }
+    }
+
     /// Common staff to setup for all tests like sut (self updater in that case),
     /// path to root dir used in test, instance of AsyncPanicChecker to make sure that all panics
     /// from other threads will be propagated.
     struct TestEnv {
-        updater: SelfUpdater<MockTestSleeper>,
+        updater: SelfUpdater<MockTestSleeper, TestConnector>,
         blacklist_path: PathBuf,
         tmp_root: PathBuf,
         _async_panic_checker: utils::tests::AsyncPanicChecker,
@@ -213,12 +247,14 @@ mod tests {
             let blacklist_path = tmp_root.join(installer::BLACKLIST);
 
             Ok(Self {
-                updater: SelfUpdater::<MockTestSleeper> {
+                updater: SelfUpdater::<MockTestSleeper, TestConnector> {
                     blacklist_path: blacklist_path.clone(),
                     download_path,
                     check_interval: Some(Duration::from_secs(3)),
                     auth_token: "test_token".to_string(),
-                    bundles: BundleServiceClient::new(test_channel(&tmp_root)),
+                    bundles: TestConnector {
+                        tmp_root: tmp_root.clone(),
+                    },
                     latest_downloaded_version: CURRENT_VERSION.to_string(),
                     phantom: Default::default(),
                 },

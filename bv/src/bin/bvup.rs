@@ -107,7 +107,7 @@ async fn main() -> Result<()> {
             Some(value) => value,
         };
 
-        let mut updater = self_updater::SelfUpdater::<self_updater::SysTimer>::new(&api_config)?;
+        let mut updater = self_updater::new::<self_updater::SysTimer>(&api_config)?;
         let bundle_id = updater
             .get_latest()
             .await?
