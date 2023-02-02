@@ -819,7 +819,7 @@ async fn test_bv_cmd_grpc_commands() {
         _ = server_future => {},
         _ = client_future => {},
         _ = sleep(Duration::from_secs(240)) => {},
-    };
+    }
 
     println!("check received updates");
     let updates: Vec<_> = ReceiverStream::new(updates_rx)

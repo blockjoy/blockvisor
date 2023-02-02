@@ -77,7 +77,7 @@ impl Nodes {
         check_babel_version(&babel_conf.config.min_babel_version)?;
         let conf = toml::Value::try_from(&babel_conf)?;
         babel_conf.supervisor.entry_point =
-            render_entry_point_args(&babel_conf.supervisor.entry_point, &properties, &conf)?;
+            render_entry_points(babel_conf.supervisor.entry_point, &properties, &conf)?;
 
         let _ = self.send_container_status(&id, ContainerStatus::Creating);
 
@@ -512,35 +512,17 @@ pub fn check_babel_version(min_babel_version: &str) -> Result<()> {
     Ok(())
 }
 
-fn render_entry_point_args(
-    entry_points: &[Entrypoint],
+fn render_entry_points(
+    mut entry_points: Vec<Entrypoint>,
     params: &NodeProperties,
     conf: &toml::Value,
 ) -> Result<Vec<Entrypoint>> {
-    // join all entrypoints arguments
-    let args = entry_points
+    let params = params
         .iter()
-        .fold(String::new(), |mut args, entrypoint| {
-            args.push_str(&entrypoint.body);
-            args
-        });
-    let params: HashMap<&String, &String> = params
-        .iter()
-        // leave only properties that are used in entrypoints args
-        .filter(|(key, _)| args.contains(&format!("{{{{{}}}}}", key.to_uppercase())))
+        .map(|(k, v)| (k.clone(), vec![v.clone()]))
         .collect();
-    // validate params values and fail early
-    if let Some((key, invalid_value)) = params.iter().find(|(_, value)| {
-        !value
-            .chars()
-            .all(|c| c.is_alphanumeric() || ":/_-,.".contains(c))
-    }) {
-        bail!("entry_point param '{key}' has invalid value '{invalid_value}'")
-    }
-
-    let mut entry_points = entry_points.to_vec();
     for item in &mut entry_points {
-        item.body = render::render(&item.body, &params, conf)?;
+        item.body = render::render_with(&item.body, &params, conf, render::render_sh_param)?;
     }
     Ok(entry_points)
 }
@@ -580,23 +562,23 @@ mod tests {
             vec![
                 Entrypoint {
                     name: "cmd1".to_string(),
-                    body:"first_parametrized_://Value.1,-_Q_argument second_parametrized_://Value.1,-_Q_Value.2,-_Q_argument third_parammy_cc_argument".to_string(),
+                    body: r#"first_parametrized_"://Value.1,-_Q"_argument second_parametrized_"://Value.1,-_Q"_"Value.2,-_Q"_argument third_parammy_cc_argument"#.to_string(),
                 },
                 Entrypoint {
                     name: "cmd2".to_owned(),
-                    body: "://Value.1,-_Q and Value.2,-_Q twice ://Value.1,-_Q and none{a}".to_owned(),
+                    body: r#""://Value.1,-_Q" and "Value.2,-_Q" twice "://Value.1,-_Q" and none{a}"#.to_owned(),
                 }
             ],
-            render_entry_point_args(&entrypoints, &node_props, &conf)?
+            render_entry_points(entrypoints.clone(), &node_props, &conf)?
         );
 
         let mut invalid_props = node_props.clone();
         invalid_props.get_mut("PARAM1").unwrap().push('@');
-        render_entry_point_args(&entrypoints, &invalid_props, &conf).unwrap_err();
+        render_entry_points(entrypoints.clone(), &invalid_props, &conf).unwrap_err();
 
-        let mut missing_props = node_props.clone();
+        let mut missing_props = node_props;
         missing_props.remove("PARAM1");
-        render_entry_point_args(&entrypoints, &missing_props, &conf).unwrap_err();
+        render_entry_points(entrypoints, &missing_props, &conf).unwrap_err();
 
         Ok(())
     }

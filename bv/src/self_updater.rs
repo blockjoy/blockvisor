@@ -173,6 +173,7 @@ mod tests {
     use httpmock::MockServer;
     use mockall::*;
     use std::ffi::OsStr;
+    use std::path::Path;
     use tokio::io::AsyncWriteExt;
     use tonic::Response;
 
@@ -281,7 +282,7 @@ mod tests {
                 .create(true)
                 .open(&self.blacklist_path)
                 .await?;
-            file.write_all(format!("{version}").as_bytes()).await?;
+            file.write_all(version.as_bytes()).await?;
             Ok(())
         }
 
@@ -315,7 +316,7 @@ mod tests {
         }
     }
 
-    async fn wait_for_ctrl_file(ctrl_file_path: &PathBuf) {
+    async fn wait_for_ctrl_file(ctrl_file_path: &Path) {
         tokio::time::timeout(Duration::from_millis(500), async {
             while !ctrl_file_path.exists() {
                 tokio::time::sleep(Duration::from_millis(10)).await;

@@ -538,7 +538,7 @@ mod tests {
                 writeln!(installer, "#!/bin/sh")?;
                 writeln!(installer, "sleep infinity")?;
             }
-            tokio::process::Command::new(&self.installer.paths.current.join(INSTALLER_BIN))
+            tokio::process::Command::new(self.installer.paths.current.join(INSTALLER_BIN))
                 .spawn()?;
             Ok(())
         }
@@ -629,7 +629,7 @@ mod tests {
             Ok(Response::new(reply))
         });
         let now_ctx = MockTestTimer::now_context();
-        now_ctx.expect().returning(move || Instant::now());
+        now_ctx.expect().returning(Instant::now);
         let server = test_env.start_test_server(bv_mock);
         let mut client = BlockvisorClient::new(test_channel(&test_env.tmp_root));
         while client
@@ -728,7 +728,7 @@ mod tests {
             .move_bundle_to_install_path(bundle_path.join("installer"))
             .unwrap_err();
 
-        fs::create_dir_all(&bundle_path.join("some_dir/with_subdir"))?;
+        fs::create_dir_all(bundle_path.join("some_dir/with_subdir"))?;
         touch_file(&bundle_path.join("installer"))?;
         touch_file(&bundle_path.join("some_file"))?;
         touch_file(&bundle_path.join("some_dir/sub_file"))?;
@@ -840,7 +840,7 @@ mod tests {
                 .create(true)
                 .write(true)
                 .mode(0o770)
-                .open(&test_env.installer.paths.backup.join(INSTALLER_BIN))?;
+                .open(test_env.installer.paths.backup.join(INSTALLER_BIN))?;
             writeln!(backup_installer, "#!/bin/sh")?;
             writeln!(
                 backup_installer,
@@ -873,7 +873,7 @@ mod tests {
         test_env.installer.cleanup()?;
 
         touch_file(&test_env.installer.paths.install_path.join("some_file"))?;
-        fs::create_dir_all(&test_env.installer.paths.install_path.join("some_dir"))?;
+        fs::create_dir_all(test_env.installer.paths.install_path.join("some_dir"))?;
         touch_file(
             &test_env
                 .installer
@@ -883,12 +883,12 @@ mod tests {
                 .join("another_file"),
         )?;
         std::os::unix::fs::symlink(
-            &test_env.installer.paths.install_path.join("some_dir"),
-            &test_env.installer.paths.install_path.join("dir_link"),
+            test_env.installer.paths.install_path.join("some_dir"),
+            test_env.installer.paths.install_path.join("dir_link"),
         )?;
         std::os::unix::fs::symlink(
-            &test_env.installer.paths.install_path.join("some_file"),
-            &test_env.installer.paths.install_path.join("file_link"),
+            test_env.installer.paths.install_path.join("some_file"),
+            test_env.installer.paths.install_path.join("file_link"),
         )?;
         fs::create_dir_all(&test_env.installer.paths.this_version)?;
         std::os::unix::fs::symlink(

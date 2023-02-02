@@ -1,47 +1,60 @@
 //! This file contains the functions that we use for rendering (mostly sh) commands that are sent to
 //! the nodes.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::collections::HashMap;
-use std::fmt::Display;
 
 use crate::utils;
 
-/// Two phase renderer that first takes template parameters specified by the user and applies them,
-/// and then takes the template parameters specified by the babel config and applies them. These
-/// two passes are split out into two 'phases' and are ran successively.
-pub fn render(
+/// Two phase rendering that first resolve babelrefs an then takes template parameters specified and applies them.
+pub fn render_with(
     template: &str,
-    params: &HashMap<impl Display, impl Display>,
+    params: &HashMap<String, Vec<String>>,
     config: &toml::Value,
+    render_param: impl FnMut(&Vec<String>) -> Result<String>,
 ) -> Result<String> {
-    let template = render_params(template, params)?;
-    render_config(&template, config)
+    let template = resolve_babelrefs(template, config, params)?;
+    render_params(&template, params, render_param)
 }
 
-/// Phase 1 of the rendering process entails taking the parameters that were specified by the user,
-/// uppercasing and `{{ }}`-delimiting them, and replacing those values in the template.
-fn render_params(template: &str, params: &HashMap<impl Display, impl Display>) -> Result<String> {
-    let mut res = template.to_string();
-    for (key, value) in params {
-        // This formats a parameter like `url` as `{{URL}}`
-        let placeholder = format!("{{{{{}}}}}", key.to_string().to_uppercase());
-        res = res.replace(&placeholder, &value.to_string());
+/// Replace all placeholders enclosed by `{{ }}` with value that were specified in `params`,
+/// first applying `render_param` function on it.
+/// Parameter names are case insensitive.
+fn render_params(
+    template: &str,
+    params: &HashMap<String, Vec<String>>,
+    mut render_param: impl FnMut(&Vec<String>) -> Result<String>,
+) -> Result<String> {
+    const DELIM_START: &str = "{{";
+    const DELIM_END: &str = "}}";
+    // First we find the placeholders that are in the template.
+    let placeholders = find_unique_placeholders(template, DELIM_START, DELIM_END);
+    let mut rendered = template.to_string();
+    for key in placeholders {
+        if let Some(value) = params
+            .iter()
+            .find(|(k, _)| k.to_uppercase() == key.to_uppercase())
+            .map(|(_, v)| v)
+        {
+            let placeholder = format!("{DELIM_START}{key}{DELIM_END}");
+            rendered = rendered.replace(
+                &placeholder,
+                &render_param(value)
+                    .with_context(|| format!("Parameter {key} has invalid value: {value:?}"))?,
+            );
+        } else {
+            bail!("parameter {key} is missing")
+        }
     }
-    fn find_placeholder(value: &str) -> Option<&str> {
-        let start_idx = value.find("{{")?;
-        let end_idx = start_idx + value[start_idx..].find("}}")? + 2;
-        Some(&value[start_idx..end_idx])
-    }
-    if let Some(placeholder) = find_placeholder(&res) {
-        bail!("parameter {placeholder} is missing")
-    }
-    Ok(res)
+    Ok(rendered)
 }
 
-/// For phase 2 of our two step renderer we will go looking for "babel_refs" in the template that
-/// are of the form `babelref:'some.dot.delimited.path'`. These are then replaced with the values
-/// as specfied in `config`. For example, if `config` looks like this:
+/// Resolve babel.toml internal references.
+/// First looking for "babel_refs" in the template that are of the form
+/// `babelref:'some.dot.delimited.{{MAYBE_PARAMETRIZED}}.path'`.
+/// Then it validate and render parameters (if any) according to provided `params`.
+/// Finally these are then replaced with the values as specfied in `config`.
+/// For example, if `config` looks like this:
 /// ```rs
 /// let config = toml::toml!(
 /// [network]
@@ -49,63 +62,75 @@ fn render_params(template: &str, params: &HashMap<impl Display, impl Display>) -
 /// );
 /// ```
 /// Then a template like `curl babelref:'network.ip'` will be rendered as `curl 192.168.1.10^100`.
-fn render_config(template: &str, config: &toml::Value) -> Result<String> {
+fn resolve_babelrefs(
+    template: &str,
+    config: &toml::Value,
+    params: &HashMap<String, Vec<String>>,
+) -> Result<String> {
     const DELIM_START: &str = "babelref:'";
     const DELIM_END: &str = "'";
-
-    fn next_babel_ref(template: &str) -> Option<(usize, &str)> {
-        let start_idx = template.find(DELIM_START)? + DELIM_START.len();
-        let end_idx = start_idx + template[start_idx..].find(DELIM_END)?;
-        Some((end_idx, &template[start_idx..end_idx]))
-    }
-
     // First we find the "babel_refs" that are in the template.
-    let mut babel_refs = vec![];
-    let mut cur = 0;
-    while let Some((offset, babel_ref)) = next_babel_ref(&template[cur..]) {
-        babel_refs.push(babel_ref);
-        cur += offset;
-    }
+    let babel_refs = find_unique_placeholders(template, DELIM_START, DELIM_END);
     // Now we replace each babel_ref in template with the value retrieved from `config`.
     let mut rendered = template.to_string();
-    for elem in babel_refs {
-        let babel_ref = format!("{DELIM_START}{elem}{DELIM_END}");
-        let value = utils::get_config_value_by_path(config, elem)
+    for babel_ref in babel_refs {
+        let placeholder = format!("{DELIM_START}{babel_ref}{DELIM_END}");
+        let babel_ref = render_params(babel_ref, params, render_babelref_param)
+            .with_context(|| "failed to render babelref parameter")?;
+        let value = utils::get_config_value_by_path(config, &babel_ref)
             .ok_or_else(|| anyhow!("referenced value {babel_ref} not found in babel"))?;
-        rendered = rendered.replace(&babel_ref, &value)
+        rendered = rendered.replace(&placeholder, &value)
     }
     Ok(rendered)
+}
+
+/// Find all placeholders enclosed by `delim_start` and `delim_end` in given `template`.
+fn find_unique_placeholders<'a>(
+    template: &'a str,
+    delim_start: &str,
+    delim_end: &str,
+) -> Vec<&'a str> {
+    let next_placeholder = |template: &'a str| -> Option<(usize, &'a str)> {
+        let start_idx = template.find(delim_start)? + delim_start.len();
+        let end_idx = start_idx + template[start_idx..].find(delim_end)?;
+        Some((end_idx, &template[start_idx..end_idx]))
+    };
+
+    let mut placeholders = vec![];
+    let mut cur = 0;
+    while let Some((offset, placeholder)) = next_placeholder(&template[cur..]) {
+        placeholders.push(placeholder);
+        cur += offset;
+    }
+    placeholders.sort();
+    placeholders.dedup();
+    placeholders
 }
 
 /// Allowing people to substitute arbitrary data into sh-commands is unsafe. We therefore run
 /// this function over each value before we substitute it. This function is deliberately more
 /// restrictive than needed; it just filters out each character that is not a number or a
 /// string or absolutely needed to form a url or json file.
-pub fn sanitize_param(param: &[String]) -> Result<String> {
-    let res = if param.len() == 1 {
+pub fn render_sh_param(param: &Vec<String>) -> Result<String> {
+    let mut items = Vec::default();
+    for item in param {
         // We escape each individual argument
-        param[0]
-            .chars()
-            .map(escape_char)
-            .collect::<Result<String>>()
-    } else {
-        param
-            .iter()
-            // We escape each individual argument
-            .map(|p| p.chars().map(escape_char).collect::<Result<String>>())
-            // Now join the iterator of Strings into a single String, using `" "` as a seperator.
-            // This means our final string looks like `"arg 1" "arg 2" "arg 3"`, and that makes it
-            // ready to be subsituted into the sh command.
-            .try_fold("".to_string(), |acc, elem| {
-                elem.map(|elem| acc + " \"" + &elem + "\"")
-            })
-    }?;
-    Ok(res)
+        items.push(format!(
+            "\"{}\"",
+            item.chars()
+                .map(escape_sh_char)
+                .collect::<Result<String>>()?
+        ));
+    }
+    // Now join the iterator of Strings into a single String, using `" "` as a seperator.
+    // This means our final string looks like `"arg 1" "arg 2" "arg 3"`, and that makes it
+    // ready to be subsituted into the sh command.
+    Ok(items.join(" "))
 }
 
 /// If the character is allowed, escapes a character into something we can use for a
 /// bash-substitution.
-fn escape_char(c: char) -> Result<String> {
+fn escape_sh_char(c: char) -> Result<String> {
     match c {
         // Explicit disallowance of ', since that is the delimiter we use in `render_config`.
         '\'' => anyhow::bail!("Very unsafe subsitution >:( {c}"),
@@ -116,9 +141,25 @@ fn escape_char(c: char) -> Result<String> {
         // Newlines must be esacped
         '\n' => Ok("\\n".to_string()),
         // These are the special characters we allow that do not need esacping.
-        '/' | ':' | '{' | '}' | ',' | '-' | ' ' => Ok(c.to_string()),
+        '/' | ':' | '{' | '}' | ',' | '-' | '_' | '.' | ' ' => Ok(c.to_string()),
         // If none of these cases match, we return an error.
-        c => anyhow::bail!("Unsafe subsitution: {c}"),
+        c => anyhow::bail!("Shell unsafe character detected: {c}"),
+    }
+}
+
+fn render_babelref_param(value: &Vec<String>) -> Result<String> {
+    if value.len() > 1 {
+        bail!("multi value not allowed in babelref")
+    }
+    match value.first() {
+        Some(value)
+            if value
+                .chars()
+                .all(|c| c.is_alphanumeric() || "_-.".contains(c)) =>
+        {
+            Ok(value.clone())
+        }
+        _ => bail!("parameter value not allowed: '{value:?}"),
     }
 }
 
@@ -126,29 +167,47 @@ fn escape_char(c: char) -> Result<String> {
 pub mod tests {
     use super::*;
 
+    /// to make the test less verbose
+    fn s(s: &str) -> String {
+        s.to_string()
+    }
+
     #[test]
     fn test_render_params() -> Result<()> {
-        let s = |s: &str| s.to_string(); // to make the test less verbose
         let par1 = s("val1");
         let par2 = s("val2");
-        let par3 = s("val3 val4");
-        let params = [(s("par1"), par1), (s("pAr2"), par2), (s("PAR3"), par3)]
-            .into_iter()
-            .collect();
-        let render = |template| render_params(template, &params);
+        let par3a = s("val3 val4");
+        let par3b = s("val5");
+        let params = [
+            (s("par1"), vec![par1]),
+            (s("pAr2"), vec![par2]),
+            (s("PAR3"), vec![par3a, par3b]),
+        ]
+        .into_iter()
+        .collect();
+        let render = |template| render_params(template, &params, |v| Ok(v.join(".")));
 
         assert_eq!(render("{{PAR1}} bla")?, "val1 bla");
         assert_eq!(render("{{PAR2}} waa")?, "val2 waa");
-        assert_eq!(render("{{PAR3}} kra")?, "val3 val4 kra");
-        render("{{par1}} woo").unwrap_err();
-        render("{{pAr2}} koo").unwrap_err();
-        assert_eq!(render("{{PAR3}} doo")?, "val3 val4 doo");
+        assert_eq!(render("{{PAR3}} kra")?, "val3 val4.val5 kra");
+        assert_eq!(render("{{par1}} bla")?, "val1 bla");
+        assert_eq!(render("{{pAr2}} waa")?, "val2 waa");
+        assert_eq!(render("{{PAR3}} doo")?, "val3 val4.val5 doo");
+        render("{{missing}} doo").unwrap_err();
         Ok(())
     }
 
     #[test]
     fn test_render_config() -> Result<()> {
-        let template = "curl \"babelref:'some.seg.ment.list'\"";
+        let params = [
+            (s("par1"), vec![s("seg.ment")]),
+            (s("par2"), vec![s("in/valid")]),
+            (s("par3"), vec![]),
+            (s("PAR4"), vec![s("to"), s("many")]),
+        ]
+        .into_iter()
+        .collect();
+
         let val: toml::Value = toml::toml!(
         [some]
         [some.seg]
@@ -157,33 +216,31 @@ pub mod tests {
         );
         assert_eq!(
             "curl \"all the way down here.\"",
-            render_config(template, &val)?,
+            resolve_babelrefs("curl \"babelref:'some.{{PAR1}}.list'\"", &val, &params)?,
         );
+        resolve_babelrefs("curl \"babelref:'some.{{PAR2}}.ment.list'\"", &val, &params)
+            .unwrap_err();
+        resolve_babelrefs("curl \"babelref:'some.{{PAR3}}.ment.list'\"", &val, &params)
+            .unwrap_err();
+        resolve_babelrefs("curl \"babelref:'some.{{PAR4}}.ment.list'\"", &val, &params)
+            .unwrap_err();
         Ok(())
     }
 
     #[test]
     fn test_sanitize_param() {
-        let params1 = [
-            "some".to_string(),
-            "test".to_string(),
-            "strings".to_string(),
-        ];
-        let sanitized1 = sanitize_param(&params1).unwrap();
-        assert_eq!(sanitized1, r#" "some" "test" "strings""#);
+        let params1 = vec![s("some"), s("test"), s("strings")];
+        let sanitized1 = render_sh_param(&params1).unwrap();
+        assert_eq!(sanitized1, r#""some" "test" "strings""#);
 
-        let params2 = [
-            "some\n".to_string(),
-            "test/".to_string(),
-            "strings\"".to_string(),
-        ];
-        let sanitized2 = sanitize_param(&params2).unwrap();
-        assert_eq!(sanitized2, r#" "some\n" "test/" "strings\"""#);
+        let params2 = vec![s("some\n"), s("test/"), s("strings\"")];
+        let sanitized2 = render_sh_param(&params2).unwrap();
+        assert_eq!(sanitized2, r#""some\n" "test/" "strings\"""#);
 
-        let params3 = ["single param".to_string()];
-        let sanitized3 = sanitize_param(&params3).unwrap();
-        assert_eq!(sanitized3, "single param");
+        let params3 = vec![s("single param")];
+        let sanitized3 = render_sh_param(&params3).unwrap();
+        assert_eq!(sanitized3, r#""single param""#);
 
-        sanitize_param(&[r#"{"crypto":{"kdf":{"function":"scrypt","params":{"dklen":32,"n":262144,"r":8,"p":1,"salt":"f36fe9215c3576941742cd295935f678df4d2b3697b62c0f52b43b21b540d2d0"},"message":""},"checksum":{"function":"sha256","params":{},"message":"a686c26f070ebdcd848d6445685a287d9ba557acdf94551ad9199fe3f4335ca9"},"cipher":{"function":"aes-128-ctr","params":{"iv":"e41ee5ea6099bb2b98d4dad8d08301b3"},"message":"37f6ab34a7e484a5b1cf9907d6464b8f89852f3914baff93f1dd2fcf54352986"}},"description":"","pubkey":"a7d3b17b67320381d10fa111c71eee89a728f36d8fbfcd294807fe8b8d27d6a95ee5cdc0bf05d6b2a4f9ac08699747e9","path":"m/12381/3600/0/0/0","uuid":"2f89ee56-b65a-4142-9df0-abb42addccd4","version":4}"#.to_string()]).unwrap();
+        render_sh_param(&vec![s(r#"{"crypto":{"kdf":{"function":"scrypt","params":{"dklen":32,"n":262144,"r":8,"p":1,"salt":"f36fe9215c3576941742cd295935f678df4d2b3697b62c0f52b43b21b540d2d0"},"message":""},"checksum":{"function":"sha256","params":{},"message":"a686c26f070ebdcd848d6445685a287d9ba557acdf94551ad9199fe3f4335ca9"},"cipher":{"function":"aes-128-ctr","params":{"iv":"e41ee5ea6099bb2b98d4dad8d08301b3"},"message":"37f6ab34a7e484a5b1cf9907d6464b8f89852f3914baff93f1dd2fcf54352986"}},"description":"","pubkey":"a7d3b17b67320381d10fa111c71eee89a728f36d8fbfcd294807fe8b8d27d6a95ee5cdc0bf05d6b2a4f9ac08699747e9","path":"m/12381/3600/0/0/0","uuid":"2f89ee56-b65a-4142-9df0-abb42addccd4","version":4}"#)]).unwrap();
     }
 }

@@ -38,20 +38,6 @@ impl pb::hosts_server::Hosts for StubHostsServer {
         }
     }
 
-    async fn delete(
-        &self,
-        request: Request<pb::DeleteHostRequest>,
-    ) -> Result<Response<pb::DeleteHostResponse>, Status> {
-        let host = request.into_inner();
-
-        let reply = pb::DeleteHostResponse {
-            messages: vec![],
-            origin_request_id: host.request_id,
-        };
-
-        Ok(Response::new(reply))
-    }
-
     async fn info_update(
         &self,
         request: Request<pb::HostInfoUpdateRequest>,
@@ -59,6 +45,20 @@ impl pb::hosts_server::Hosts for StubHostsServer {
         let host = request.into_inner();
 
         let reply = pb::HostInfoUpdateResponse {
+            messages: vec![],
+            origin_request_id: host.request_id,
+        };
+
+        Ok(Response::new(reply))
+    }
+
+    async fn delete(
+        &self,
+        request: Request<pb::DeleteHostRequest>,
+    ) -> Result<Response<pb::DeleteHostResponse>, Status> {
+        let host = request.into_inner();
+
+        let reply = pb::DeleteHostResponse {
             messages: vec![],
             origin_request_id: host.request_id,
         };

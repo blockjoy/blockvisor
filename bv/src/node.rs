@@ -388,6 +388,7 @@ impl Node {
                 .as_ref()
                 .ok_or_else(|| anyhow!("No host specified for method `{method}"))
         };
+        let join_params = |v: &Vec<String>| Ok(v.join(","));
         let conf = toml::Value::try_from(&self.data.babel_conf)?;
         let resp = match self
             .data
@@ -399,11 +400,10 @@ impl Node {
             Jrpc {
                 method, response, ..
             } => {
-                let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
                 let babel_client = self.node_conn.babel_client().await?;
                 let value = with_retry!(babel_client.blockchain_jrpc((
                     get_api_host(method)?.clone(),
-                    render::render(method, &params, &conf)?,
+                    render::render_with(method, &params, &conf, join_params)?,
                     response.clone(),
                 )))?
                 .into_inner()
@@ -423,10 +423,11 @@ impl Node {
                     method.trim_start_matches('/')
                 );
 
-                let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
                 let babel_client = self.node_conn.babel_client().await?;
-                let value = with_retry!(babel_client
-                    .blockchain_rest((render::render(&url, &params, &conf)?, response.clone())))?
+                let value = with_retry!(babel_client.blockchain_rest((
+                    render::render_with(&url, &params, &conf, join_params)?,
+                    response.clone(),
+                )))?
                 .into_inner()
                 .value;
                 value
@@ -434,21 +435,11 @@ impl Node {
                     .context(format!("Could not parse {name} response: {value}"))?
             }
             Sh { body, response, .. } => {
-                // For sh we need to sanitize each param, then join them.
-                let params = params
-                    .into_iter()
-                    .map(|(k, v)| {
-                        Ok((
-                            k,
-                            render::sanitize_param(&v).with_context(|| {
-                                format!("method '{name}' called with invalid params '{v:?}'")
-                            })?,
-                        ))
-                    })
-                    .collect::<Result<_>>()?;
                 let babel_client = self.node_conn.babel_client().await?;
-                let value = with_retry!(babel_client
-                    .blockchain_sh((render::render(body, &params, &conf)?, response.clone())))?
+                let value = with_retry!(babel_client.blockchain_sh((
+                    render::render_with(body, &params, &conf, render::render_sh_param)?,
+                    response.clone(),
+                )))?
                 .into_inner()
                 .value;
                 value
