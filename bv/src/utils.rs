@@ -3,10 +3,13 @@ use semver::Version;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::path::PathBuf;
+use std::time::Duration;
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::time::sleep;
+use tracing::log::warn;
 use tracing::{debug, info};
 
 /// Runs the specified command and returns error on failure.
@@ -90,9 +93,33 @@ impl Archive {
     }
 }
 
+const DOWNLOAD_RETRY_MAX: u32 = 3;
+const DOWNLOAD_BACKOFF_BASE_SEC: u64 = 3;
+
+pub async fn download_archive_with_retry(url: &str, path: PathBuf) -> Result<Archive> {
+    let mut retry_count = 0;
+    while let Err(err) = download_file(url, &path).await {
+        if retry_count < DOWNLOAD_RETRY_MAX {
+            retry_count += 1;
+            let backoff = DOWNLOAD_BACKOFF_BASE_SEC * 2u64.pow(retry_count);
+            warn!("download failed for {url} with {err}; {retry_count} retry after {backoff}s");
+            sleep(Duration::from_secs(backoff)).await;
+        } else {
+            bail!("download failed for {url} with {err}; retries exceeded");
+        }
+    }
+    Ok(Archive(path))
+}
+
 pub async fn download_archive(url: &str, path: PathBuf) -> Result<Archive> {
+    download_file(url, &path).await?;
+    Ok(Archive(path))
+}
+
+async fn download_file(url: &str, path: &PathBuf) -> Result<()> {
     debug!("Downloading url...");
-    let mut file = fs::File::create(&path).await?;
+    let _ = fs::remove_file(path).await;
+    let mut file = fs::File::create(path).await?;
 
     let mut resp = reqwest::get(url).await?;
 
@@ -103,7 +130,7 @@ pub async fn download_archive(url: &str, path: PathBuf) -> Result<Archive> {
     file.flush().await?;
     debug!("Done downloading");
 
-    Ok(Archive(path))
+    Ok(())
 }
 
 pub fn semver_cmp(a: &str, b: &str) -> Ordering {
