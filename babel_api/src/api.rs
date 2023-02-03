@@ -81,7 +81,7 @@ pub struct BlockchainResponse {
     pub value: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockchainKey {
     pub name: String,
     #[serde(with = "serde_bytes")]

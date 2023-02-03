@@ -417,7 +417,7 @@ impl Nodes {
                     this.nodes.insert(node.data.id, node);
                 }
                 Err(e) => {
-                    warn!(
+                    error!(
                         "Failed to connect to node from file `{}`: {}",
                         path.display(),
                         e

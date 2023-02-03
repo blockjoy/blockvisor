@@ -12,6 +12,30 @@ use tokio::time::sleep;
 use tracing::log::warn;
 use tracing::{debug, info};
 
+#[macro_export]
+macro_rules! with_retry {
+    ($fun:expr) => {{
+        const RPC_RETRY_MAX: u32 = 5;
+        const RPC_BACKOFF_BASE_MSEC: u64 = 300;
+        let mut retry_count = 0;
+        loop {
+            match $fun.await {
+                Ok(res) => break Ok(res),
+                Err(err) => {
+                    if retry_count < RPC_RETRY_MAX {
+                        retry_count += 1;
+                        let backoff = RPC_BACKOFF_BASE_MSEC * 2u64.pow(retry_count);
+                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                        continue;
+                    } else {
+                        break Err(err);
+                    }
+                }
+            }
+        }
+    }};
+}
+
 /// Runs the specified command and returns error on failure.
 pub async fn run_cmd<I, S>(cmd: &str, args: I) -> Result<()>
 where
@@ -263,8 +287,7 @@ pub mod tests {
 
     pub fn test_channel(tmp_root: &Path) -> Channel {
         let socket_path = tmp_root.join("test_socket");
-        Endpoint::try_from("http://[::]:50052")
-            .unwrap()
+        Endpoint::from_static("http://[::]:50052")
             .timeout(Duration::from_secs(1))
             .connect_timeout(Duration::from_secs(1))
             .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {

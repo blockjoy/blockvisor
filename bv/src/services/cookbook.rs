@@ -2,7 +2,7 @@ use crate::{
     node::{KERNEL_FILE, ROOT_FS_FILE},
     node_data::NodeImage,
     services::api::with_auth,
-    utils,
+    utils, with_retry,
 };
 use anyhow::{Context, Result};
 use babel_api::config::Babel;
@@ -48,11 +48,10 @@ impl CookbookService {
             status: cb_pb::StatusName::Development.into(),
         };
 
-        let resp = self
+        let resp = with_retry!(self
             .client
-            .list_babel_versions(with_auth(req, &self.token))
-            .await?
-            .into_inner();
+            .list_babel_versions(with_auth(req.clone(), &self.token)))?
+        .into_inner();
 
         let mut versions: Vec<String> = resp
             .identifiers
@@ -68,12 +67,10 @@ impl CookbookService {
     #[instrument(skip(self))]
     pub async fn download_babel_config(&mut self, image: &NodeImage) -> Result<()> {
         info!("Downloading config...");
-        let req = image.clone().into();
-        let babel: cb_pb::Configuration = self
+        let babel: cb_pb::Configuration = with_retry!(self
             .client
-            .retrieve_configuration(with_auth(req, &self.token))
-            .await?
-            .into_inner();
+            .retrieve_configuration(with_auth(image.clone().into(), &self.token)))?
+        .into_inner();
 
         let folder = Self::get_image_download_folder_path(image);
         DirBuilder::new().recursive(true).create(&folder).await?;
@@ -88,12 +85,10 @@ impl CookbookService {
     #[instrument(skip(self))]
     pub async fn download_image(&mut self, image: &NodeImage) -> Result<()> {
         info!("Downloading image...");
-        let req = image.clone().into();
-        let archive: cb_pb::ArchiveLocation = self
+        let archive: cb_pb::ArchiveLocation = with_retry!(self
             .client
-            .retrieve_image(with_auth(req, &self.token))
-            .await?
-            .into_inner();
+            .retrieve_image(with_auth(image.clone().into(), &self.token)))?
+        .into_inner();
 
         let folder = Self::get_image_download_folder_path(image);
         DirBuilder::new().recursive(true).create(&folder).await?;
@@ -113,12 +108,10 @@ impl CookbookService {
     #[instrument(skip(self))]
     pub async fn download_kernel(&mut self, image: &NodeImage) -> Result<()> {
         info!("Downloading kernel...");
-        let req = image.clone().into();
-        let archive: cb_pb::ArchiveLocation = self
+        let archive: cb_pb::ArchiveLocation = with_retry!(self
             .client
-            .retrieve_kernel(with_auth(req, &self.token))
-            .await?
-            .into_inner();
+            .retrieve_kernel(with_auth(image.clone().into(), &self.token)))?
+        .into_inner();
 
         let folder = Self::get_image_download_folder_path(image);
         DirBuilder::new().recursive(true).create(&folder).await?;

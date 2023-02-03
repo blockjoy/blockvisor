@@ -248,8 +248,7 @@ mod tests {
 
     fn test_client(tmp_root: &Path) -> Result<BabelSupClient<Channel>> {
         let socket_path = tmp_root.join("test_socket");
-        let channel = Endpoint::try_from("http://[::]:50052")
-            .unwrap()
+        let channel = Endpoint::from_static("http://[::]:50052")
             .timeout(Duration::from_secs(1))
             .connect_timeout(Duration::from_secs(1))
             .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {

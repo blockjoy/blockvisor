@@ -1,4 +1,4 @@
-use crate::{env::*, node::VSOCK_PATH};
+use crate::{env::*, node::VSOCK_PATH, with_retry};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use babel_api::babel_client::BabelClient;
 use babel_api::babel_sup_client::BabelSupClient;
@@ -51,15 +51,13 @@ impl NodeConnection {
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.
     pub async fn try_open(node_id: uuid::Uuid, max_delay: Duration) -> Result<Self> {
         let mut client = connect_babelsup(node_id, max_delay).await;
-        let babelsup_version = client.get_version(()).await?.into_inner();
+        let babelsup_version = with_retry!(client.get_version(()))?.into_inner();
         info!("Connected to babelsup {babelsup_version}");
         let (babel_bin, checksum) = load_babel_bin().await?;
-        let babel_status = client.check_babel(checksum).await?.into_inner();
+        let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
         if babel_status != babel_api::BabelStatus::Ok {
             info!("Invalid or missing Babel service on VM, installing new one");
-            client
-                .start_new_babel(tokio_stream::iter(babel_bin))
-                .await?;
+            with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
         }
         Ok(Self {
             node_id,
@@ -197,8 +195,7 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<()> {
 }
 
 async fn create_channel(node_id: uuid::Uuid, vsock_port: u32, max_delay: Duration) -> Channel {
-    Endpoint::try_from("http://[::]:50052")
-        .unwrap()
+    Endpoint::from_static("http://[::]:50052")
         .timeout(GRPC_REQUEST_TIMEOUT)
         .connect_timeout(GRPC_CONNECT_TIMEOUT)
         .connect_with_connector_lazy(tower::service_fn(move |_: Uri| async move {

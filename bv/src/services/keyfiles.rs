@@ -3,6 +3,7 @@ use tonic::transport::Channel;
 use uuid::Uuid;
 
 use crate::services::api::{pb, with_auth};
+use crate::with_retry;
 
 pub struct KeyService {
     token: String,
@@ -25,11 +26,7 @@ impl KeyService {
             request_id: Some(Uuid::new_v4().to_string()),
             node_id: node_id.to_string(),
         };
-        let resp = self
-            .client
-            .get(with_auth(req, &self.token))
-            .await?
-            .into_inner();
+        let resp = with_retry!(self.client.get(with_auth(req.clone(), &self.token)))?.into_inner();
 
         Ok(resp.key_files)
     }
@@ -40,7 +37,7 @@ impl KeyService {
             node_id: node_id.to_string(),
             key_files: keys,
         };
-        self.client.save(with_auth(req, &self.token)).await?;
+        with_retry!(self.client.save(with_auth(req.clone(), &self.token)))?;
 
         Ok(())
     }

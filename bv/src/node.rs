@@ -19,6 +19,7 @@ use crate::{
     render,
     services::cookbook::CookbookService,
     utils::{get_process_pid, run_cmd},
+    with_retry,
 };
 
 const NODE_START_TIMEOUT: Duration = Duration::from_secs(60);
@@ -71,6 +72,7 @@ impl Node {
                 // Since this is the startup phase it doesn't make sense to wait a long time
                 // for the nodes to come online. For that reason we restrict the allowed delay
                 // further down.
+                // TODO Set node status to FAILING instead of returning error.
                 let node_conn = NodeConnection::try_open(data.id, NODE_RECONNECT_TIMEOUT).await?;
                 debug!("Established babel connection");
                 (firec::MachineState::RUNNING { pid }, node_conn)
@@ -119,11 +121,8 @@ impl Node {
 
         self.machine.start().await?;
         self.node_conn = NodeConnection::try_open(self.id(), NODE_START_TIMEOUT).await?;
-        self.node_conn
-            .babelsup_client()
-            .await?
-            .setup_supervisor(self.data.babel_conf.supervisor.clone())
-            .await?;
+        let babelsup_client = self.node_conn.babelsup_client().await?;
+        with_retry!(babelsup_client.setup_supervisor(self.data.babel_conf.supervisor.clone()))?;
 
         // TODO: sadly this is still requiered for reasons we do not yet understand
         sleep(Duration::from_secs(10)).await;
@@ -399,18 +398,14 @@ impl Node {
                 method, response, ..
             } => {
                 let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-                let value = self
-                    .node_conn
-                    .babel_client()
-                    .await?
-                    .blockchain_jrpc((
-                        get_api_host(method)?.clone(),
-                        render::render(method, &params, &conf)?,
-                        response.clone(),
-                    ))
-                    .await?
-                    .into_inner()
-                    .value;
+                let babel_client = self.node_conn.babel_client().await?;
+                let value = with_retry!(babel_client.blockchain_jrpc((
+                    get_api_host(method)?.clone(),
+                    render::render(method, &params, &conf)?,
+                    response.clone(),
+                )))?
+                .into_inner()
+                .value;
                 value
                     .parse()
                     .context(format!("Could not parse {name} response: {value}"))?
@@ -427,14 +422,11 @@ impl Node {
                 );
 
                 let params = params.into_iter().map(|(k, v)| (k, v.join(","))).collect();
-                let value = self
-                    .node_conn
-                    .babel_client()
-                    .await?
-                    .blockchain_rest((render::render(&url, &params, &conf)?, response.clone()))
-                    .await?
-                    .into_inner()
-                    .value;
+                let babel_client = self.node_conn.babel_client().await?;
+                let value = with_retry!(babel_client
+                    .blockchain_rest((render::render(&url, &params, &conf)?, response.clone())))?
+                .into_inner()
+                .value;
                 value
                     .parse()
                     .context(format!("Could not parse {name} response: {value}"))?
@@ -452,14 +444,11 @@ impl Node {
                         ))
                     })
                     .collect::<Result<_>>()?;
-                let value = self
-                    .node_conn
-                    .babel_client()
-                    .await?
-                    .blockchain_sh((render::render(body, &params, &conf)?, response.clone()))
-                    .await?
-                    .into_inner()
-                    .value;
+                let babel_client = self.node_conn.babel_client().await?;
+                let value = with_retry!(babel_client
+                    .blockchain_sh((render::render(body, &params, &conf)?, response.clone())))?
+                .into_inner()
+                .value;
                 value
                     .parse()
                     .context(format!("Could not parse {name} response: {value}"))?
@@ -489,7 +478,7 @@ impl Node {
     /// Returns the list of logs from blockchain entry_points.
     pub async fn get_logs(&mut self) -> Result<Vec<String>> {
         let client = self.node_conn.babelsup_client().await?;
-        let mut resp = client.get_logs(()).await?.into_inner();
+        let mut resp = with_retry!(client.get_logs(()))?.into_inner();
         let mut logs = Vec::<String>::default();
         while let Some(Ok(log)) = resp.next().await {
             logs.push(log);
@@ -500,24 +489,16 @@ impl Node {
     /// Returns blockchain node keys.
     pub async fn download_keys(&mut self) -> Result<Vec<babel_api::BlockchainKey>> {
         let config = self.get_keys_config()?;
-        let keys = self
-            .node_conn
-            .babel_client()
-            .await?
-            .download_keys(config)
-            .await?
-            .into_inner();
+        let babel_client = self.node_conn.babel_client().await?;
+        let keys = with_retry!(babel_client.download_keys(config.clone()))?.into_inner();
         Ok(keys)
     }
 
     /// Sets blockchain node keys.
     pub async fn upload_keys(&mut self, keys: Vec<babel_api::BlockchainKey>) -> Result<()> {
         let config = self.get_keys_config()?;
-        self.node_conn
-            .babel_client()
-            .await?
-            .upload_keys((config, keys))
-            .await?;
+        let babel_client = self.node_conn.babel_client().await?;
+        with_retry!(babel_client.upload_keys((config.clone(), keys.clone())))?;
         Ok(())
     }
 

@@ -1,6 +1,7 @@
 use crate::server::bv_pb::blockvisor_client::BlockvisorClient;
 use crate::server::{bv_pb, BLOCKVISOR_SERVICE_URL};
 use crate::utils::{get_process_pid, run_cmd};
+use crate::with_retry;
 use anyhow::{bail, ensure, Context, Error, Result};
 use std::io::Write;
 use std::marker::PhantomData;
@@ -239,10 +240,9 @@ impl<T: Timer> Installer<T> {
             duration > PREPARE_FOR_UPDATE_TIMEOUT
         };
         loop {
-            match self
+            match with_retry!(self
                 .bv_client
-                .start_update(bv_pb::StartUpdateRequest::default())
-                .await
+                .start_update(bv_pb::StartUpdateRequest::default()))
             {
                 Ok(resp) => {
                     let status = resp.into_inner().status;
@@ -314,7 +314,7 @@ impl<T: Timer> Installer<T> {
             duration > HEALTH_CHECK_TIMEOUT
         };
         loop {
-            match self.bv_client.health(bv_pb::HealthRequest::default()).await {
+            match with_retry!(self.bv_client.health(bv_pb::HealthRequest::default())) {
                 Ok(resp) => {
                     let status = resp.into_inner().status;
                     if status == bv_pb::ServiceStatus::Ok as i32 {
