@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
 use tokio::{
     sync::RwLock,
-    time::{sleep, Duration},
+    time::{sleep, sleep_until, Duration, Instant},
 };
 use tonic::transport::{Channel, Endpoint, Server};
 use tracing::{error, info, warn};
@@ -136,7 +136,7 @@ async fn wait_for_channel(endpoint: &Endpoint) -> Channel {
             Ok(channel) => return channel,
             Err(e) => {
                 error!("Error connecting to endpoint: {:?}", e);
-                sleep(RECONNECT_INTERVAL).await;
+                sleep_until(Instant::now() + RECONNECT_INTERVAL).await;
             }
         }
     }
