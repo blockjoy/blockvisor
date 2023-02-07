@@ -4,6 +4,7 @@ use babel_api::config::Method::{Jrpc, Rest, Sh};
 use firec::config::JailerMode;
 use firec::Machine;
 use futures_util::StreamExt;
+use std::collections::hash_map::Entry;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::{collections::HashMap, path::Path, str::FromStr, time::Duration};
@@ -342,31 +343,32 @@ impl Node {
     }
 
     pub async fn init(&mut self, secret_keys: HashMap<String, Vec<u8>>) -> Result<String> {
-        let init_arg = match self
-            .data
-            .babel_conf
-            .methods
-            .get(&babel_api::BabelMethod::Init.to_string())
-        {
-            Some(Sh { body, .. }) => body,
-            Some(Jrpc { method, .. }) => method,
-            Some(Rest { method, .. }) => method,
-            _ => "",
-        };
-
-        let node_keys = self
+        let mut node_keys = self
             .data
             .properties
             .iter()
-            .filter(|(k, _)| init_arg.contains(&format!("{{{{{}}}}}", k.to_uppercase())))
-            .map(|(k, v)| (k.clone(), v.as_bytes().into()));
+            .map(|(k, v)| (k.clone(), vec![v.clone()]))
+            .collect::<HashMap<_, _>>();
 
-        let mut params: HashMap<String, Vec<String>> = HashMap::new();
-        for (k, v) in secret_keys.into_iter().chain(node_keys) {
-            params.entry(k).or_default().push(String::from_utf8(v)?);
+        for (k, v) in secret_keys.into_iter() {
+            match node_keys.entry(k) {
+                Entry::Occupied(entry) => {
+                    // Parameter KEY that comes form backend or possibly from user can not be the same
+                    // as KEY from node_keys map. That could lead to undefined behaviour or even
+                    // security issue. User provided value could be (unintentionally) joined with
+                    // node_keys value into a single parameter and used in not desirable place.
+                    // Since user has no way to define KEYs it must be treated as internal error
+                    // (that shall never happen, but ...).
+                    bail!("Secret keys KEY collides with params KEY: {}", entry.key())
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(vec![String::from_utf8(v)?]);
+                }
+            }
         }
 
-        self.call_method(babel_api::BabelMethod::Init, params).await
+        self.call_method(babel_api::BabelMethod::Init, node_keys)
+            .await
     }
 
     /// This function calls babel by sending a blockchain command using the specified method name.
