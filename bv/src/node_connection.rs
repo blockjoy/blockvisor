@@ -46,6 +46,10 @@ impl NodeConnection {
         }
     }
 
+    pub fn is_closed(&self) -> bool {
+        matches!(self.state, NodeConnectionState::Closed)
+    }
+
     /// Tries to open a new connection to the VM. Note that this fails if the VM hasn't started yet.
     /// It also initializes that connection by sending the opening message. Therefore, if this
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.

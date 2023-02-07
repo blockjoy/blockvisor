@@ -8,8 +8,6 @@ use tokio::fs;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::node::FC_BIN_NAME;
-use crate::utils::get_process_pid;
 use crate::{env::REGISTRY_CONFIG_DIR, network_interface::NetworkInterface};
 
 pub type NodeProperties = HashMap<String, String>;
@@ -81,18 +79,5 @@ impl NodeData {
     fn file_path(&self) -> PathBuf {
         let filename = format!("{}.toml", self.id);
         REGISTRY_CONFIG_DIR.join(filename)
-    }
-
-    pub fn status(&self) -> NodeStatus {
-        let cmd = self.id.to_string();
-        let actual_status = match get_process_pid(FC_BIN_NAME, &cmd) {
-            Ok(_) => NodeStatus::Running,
-            Err(_) => NodeStatus::Stopped,
-        };
-        if actual_status == self.expected_status {
-            actual_status
-        } else {
-            NodeStatus::Failed
-        }
     }
 }

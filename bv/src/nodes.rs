@@ -79,7 +79,7 @@ impl Nodes {
         babel_conf.supervisor.entry_point =
             render_entry_points(babel_conf.supervisor.entry_point, &properties, &conf)?;
 
-        let _ = self.send_container_status(&id, ContainerStatus::Creating);
+        let _ = self.send_container_status(id, ContainerStatus::Creating);
 
         self.data.machine_index += 1;
         let ip = ip.parse()?;
@@ -103,7 +103,7 @@ impl Nodes {
         self.node_ids.insert(name, id);
         debug!("Node with id `{}` created", id);
 
-        let _ = self.send_container_status(&id, ContainerStatus::Stopped);
+        let _ = self.send_container_status(id, ContainerStatus::Stopped);
 
         Ok(())
     }
@@ -121,7 +121,7 @@ impl Nodes {
             let babel = self.fetch_image_data(&image).await?;
             check_babel_version(&babel.config.min_babel_version)?;
 
-            let _ = self.send_container_status(&id, ContainerStatus::Upgrading);
+            let _ = self.send_container_status(id, ContainerStatus::Upgrading);
 
             let need_to_restart = self.status(id).await? == NodeStatus::Running;
             self.stop(id).await?;
@@ -147,7 +147,7 @@ impl Nodes {
                 self.start(id).await?;
             }
 
-            let _ = self.send_container_status(&id, ContainerStatus::Upgraded);
+            let _ = self.send_container_status(id, ContainerStatus::Upgraded);
         }
         Ok(())
     }
@@ -185,14 +185,14 @@ impl Nodes {
 
     #[instrument(skip(self))]
     pub async fn force_start(&mut self, id: Uuid) -> Result<()> {
-        let _ = self.send_container_status(&id, ContainerStatus::Starting);
+        let _ = self.send_container_status(id, ContainerStatus::Starting);
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
         node.start().await?;
         debug!("Node started");
 
-        let _ = self.send_container_status(&id, ContainerStatus::Running);
+        let _ = self.send_container_status(id, ContainerStatus::Running);
 
-        let secret_keys = match self.exchange_keys(&id).await {
+        let secret_keys = match self.exchange_keys(id).await {
             Ok(secret_keys) => secret_keys,
             Err(e) => {
                 error!("Failed to retrieve keys when starting node: `{e}`");
@@ -238,12 +238,12 @@ impl Nodes {
 
     #[instrument(skip(self))]
     pub async fn force_stop(&mut self, id: Uuid) -> Result<()> {
-        let _ = self.send_container_status(&id, ContainerStatus::Stopping);
+        let _ = self.send_container_status(id, ContainerStatus::Stopping);
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
         node.stop().await?;
         debug!("Node stopped");
 
-        let _ = self.send_container_status(&id, ContainerStatus::Stopped);
+        let _ = self.send_container_status(id, ContainerStatus::Stopped);
         Ok(())
     }
 
@@ -263,10 +263,10 @@ impl Nodes {
     }
 
     #[instrument(skip(self))]
-    pub async fn list(&self) -> Vec<NodeData> {
+    pub async fn list(&self) -> Vec<&Node> {
         debug!("Listing {} nodes", self.nodes.len());
 
-        self.nodes.values().map(|n| n.data.clone()).collect()
+        self.nodes.values().collect()
     }
 
     #[instrument(skip(self))]
@@ -288,8 +288,8 @@ impl Nodes {
 
     /// Synchronizes the keys in the key server with the keys available locally. Returns a
     /// refreshed set of all keys.
-    pub async fn exchange_keys(&mut self, id: &Uuid) -> Result<HashMap<String, Vec<u8>>> {
-        let node = self.nodes.get_mut(id).ok_or_else(|| id_not_found(*id))?;
+    pub async fn exchange_keys(&mut self, id: Uuid) -> Result<HashMap<String, Vec<u8>>> {
+        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
 
         let mut key_service =
             KeyService::connect(&self.api_config.blockjoy_keys_url, &self.api_config.token).await?;
@@ -394,8 +394,6 @@ impl Nodes {
             .await
             .context("failed to read nodes registry entry")?
         {
-            // blockvisord should not bail on problems with individual node files.
-            // It should log warnings though.
             let path = entry.path();
             if path == *REGISTRY_CONFIG_FILE {
                 // Skip the common data file.
@@ -410,11 +408,9 @@ impl Nodes {
                     this.nodes.insert(node.data.id, node);
                 }
                 Err(e) => {
-                    error!(
-                        "Failed to connect to node from file `{}`: {}",
-                        path.display(),
-                        e
-                    );
+                    // blockvisord should not bail on problems with individual node files.
+                    // It should log error though.
+                    error!("Failed to load node from file `{}`: {}", path.display(), e);
                 }
             };
         }
@@ -441,7 +437,7 @@ impl Nodes {
     }
 
     // Notify API that container is 'Running' or 'Stopped', etc
-    pub fn send_container_status(&self, id: &Uuid, status: ContainerStatus) -> Result<()> {
+    pub fn send_container_status(&self, id: Uuid, status: ContainerStatus) -> Result<()> {
         let update = pb::NodeInfo {
             id: id.to_string(),
             container_status: Some(status.into()),

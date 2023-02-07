@@ -866,8 +866,6 @@ async fn test_bv_cmd_grpc_commands() {
         node_update(&node_id, pb::node_info::ContainerStatus::Upgraded),
         success_command_update(&command_id),
         ack_command_update(&command_id),
-        node_update(&node_id, pb::node_info::ContainerStatus::Deleting),
-        node_update(&node_id, pb::node_info::ContainerStatus::Deleted),
         success_command_update(&command_id),
     ];
     let expected_count = expected_updates.len();

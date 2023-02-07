@@ -192,7 +192,8 @@ impl bv_pb::blockvisor_server::Blockvisor for BlockvisorServer {
         _request: Request<bv_pb::GetNodesRequest>,
     ) -> Result<Response<bv_pb::GetNodesResponse>, Status> {
         status_check().await?;
-        let list = self.nodes.read().await.list().await;
+        let nodes = self.nodes.read().await;
+        let list = nodes.list().await;
         let mut nodes = vec![];
         for node in list {
             let status = match node.status() {
@@ -200,14 +201,14 @@ impl bv_pb::blockvisor_server::Blockvisor for BlockvisorServer {
                 NodeStatus::Stopped => bv_pb::NodeStatus::Stopped,
                 NodeStatus::Failed => bv_pb::NodeStatus::Failed,
             };
-            let image: bv_pb::NodeImage = node.image.into();
+            let image: bv_pb::NodeImage = node.data.image.clone().into();
             let n = bv_pb::Node {
-                id: node.id.to_string(),
-                name: node.name,
+                id: node.data.id.to_string(),
+                name: node.data.name.clone(),
                 image: Some(image),
                 status: status.into(),
-                ip: node.network_interface.ip.to_string(),
-                gateway: node.network_interface.gateway.to_string(),
+                ip: node.data.network_interface.ip.to_string(),
+                gateway: node.data.network_interface.gateway.to_string(),
             };
             nodes.push(n);
         }

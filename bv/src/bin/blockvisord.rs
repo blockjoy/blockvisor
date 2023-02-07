@@ -73,24 +73,31 @@ async fn main() -> Result<()> {
 
     let nodes_recovery_future = async {
         loop {
-            let list = nodes.read().await.list().await;
+            let list: Vec<_> = nodes
+                .read()
+                .await
+                .list()
+                .await
+                .iter()
+                .map(|node| (node.data.clone(), node.status()))
+                .collect();
 
-            for node in list {
-                let id = &node.id;
-                if node.status() == NodeStatus::Failed {
-                    match node.expected_status {
+            for (node_data, node_status) in list {
+                let id = node_data.id;
+                if node_status == NodeStatus::Failed {
+                    match node_data.expected_status {
                         NodeStatus::Running => {
                             info!("Recovery: starting node with ID `{id}`");
-                            if let Err(e) = node.network_interface.remaster().await {
+                            if let Err(e) = node_data.network_interface.remaster().await {
                                 error!("Recovery: remastering network for node with ID `{id}` failed: {e}");
                             }
-                            if let Err(e) = nodes.write().await.force_start(node.id).await {
+                            if let Err(e) = nodes.write().await.force_start(id).await {
                                 error!("Recovery: starting node with ID `{id}` failed: {e}");
                             }
                         }
                         NodeStatus::Stopped => {
                             info!("Recovery: stopping node with ID `{id}`");
-                            if let Err(e) = nodes.write().await.force_stop(node.id).await {
+                            if let Err(e) = nodes.write().await.force_stop(id).await {
                                 error!("Recovery: stopping node with ID `{id}` failed: {e}",);
                             }
                         }

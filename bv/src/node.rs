@@ -70,22 +70,26 @@ impl Node {
         info!("Connecting to node with data: {data:?}");
         let config = Node::create_config(&data).await?;
         let cmd = data.id.to_string();
-        let (state, node_conn) = match get_process_pid(FC_BIN_NAME, &cmd) {
+        let (pid, node_conn) = match get_process_pid(FC_BIN_NAME, &cmd) {
             Ok(pid) => {
                 // Since this is the startup phase it doesn't make sense to wait a long time
                 // for the nodes to come online. For that reason we restrict the allowed delay
                 // further down.
-                // TODO Set node status to FAILING instead of returning error.
-                let node_conn = NodeConnection::try_open(data.id, NODE_RECONNECT_TIMEOUT).await?;
-                debug!("Established babel connection");
-                (firec::MachineState::RUNNING { pid }, node_conn)
+                debug!("connecting to babel ...");
+                let node_conn = NodeConnection::try_open(data.id, NODE_RECONNECT_TIMEOUT)
+                    .await
+                    .unwrap_or_else(|err| {
+                        warn!(
+                            "failed to reestablished babel connection to running node {}: {}",
+                            data.id, err
+                        );
+                        NodeConnection::closed(data.id)
+                    });
+                (Some(pid), node_conn)
             }
-            Err(_) => (
-                firec::MachineState::SHUTOFF,
-                NodeConnection::closed(data.id),
-            ),
+            Err(_) => (None, NodeConnection::closed(data.id)),
         };
-        let machine = Machine::connect(config, state).await;
+        let machine = Machine::connect(config, pid).await;
         Ok(Self {
             data,
             machine,
@@ -122,7 +126,9 @@ impl Node {
             return Ok(());
         }
 
-        self.machine.start().await?;
+        if self.machine.state() == firec::MachineState::SHUTOFF {
+            self.machine.start().await?;
+        }
         self.node_conn = NodeConnection::try_open(self.id(), NODE_START_TIMEOUT).await?;
         let babelsup_client = self.node_conn.babelsup_client().await?;
         with_retry!(babelsup_client.setup_supervisor(self.data.babel_conf.supervisor.clone()))?;
@@ -137,7 +143,20 @@ impl Node {
 
     /// Returns the actual status of the node.
     pub fn status(&self) -> NodeStatus {
-        self.data.status()
+        let actual_status = match self.machine.state() {
+            firec::MachineState::RUNNING => NodeStatus::Running,
+            firec::MachineState::SHUTOFF => NodeStatus::Stopped,
+        };
+        if actual_status == self.data.expected_status {
+            if actual_status == NodeStatus::Running && self.node_conn.is_closed() {
+                // node is running, but babel connection is broken for some reason
+                NodeStatus::Failed
+            } else {
+                actual_status
+            }
+        } else {
+            NodeStatus::Failed
+        }
     }
 
     /// Returns the expected status of the node.
@@ -150,7 +169,7 @@ impl Node {
     pub async fn stop(&mut self) -> Result<()> {
         match self.machine.state() {
             firec::MachineState::SHUTOFF => {}
-            firec::MachineState::RUNNING { .. } => {
+            firec::MachineState::RUNNING => {
                 if let Err(err) = self.machine.shutdown().await {
                     warn!("Graceful shutdown failed: {err}");
 
@@ -164,15 +183,15 @@ impl Node {
         let start = std::time::Instant::now();
         let elapsed = || std::time::Instant::now() - start;
         loop {
-            match get_process_pid(FC_BIN_NAME, &self.data.id.to_string()) {
-                Ok(_) if elapsed() < NODE_STOP_TIMEOUT => {
+            match self.machine.state() {
+                firec::MachineState::RUNNING if elapsed() < NODE_STOP_TIMEOUT => {
                     debug!("Firecracker process not shutdown yet, will retry");
                     sleep(NODE_STOPPED_CHECK_INTERVAL).await;
                 }
-                Ok(_) => {
+                firec::MachineState::RUNNING => {
                     bail!("Firecracker shutdown timeout");
                 }
-                Err(_) => break,
+                firec::MachineState::SHUTOFF => break,
             }
         }
 

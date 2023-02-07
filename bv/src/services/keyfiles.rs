@@ -21,7 +21,7 @@ impl KeyService {
         })
     }
 
-    pub async fn download_keys(&mut self, node_id: &Uuid) -> Result<Vec<pb::Keyfile>> {
+    pub async fn download_keys(&mut self, node_id: Uuid) -> Result<Vec<pb::Keyfile>> {
         let req = pb::KeyFilesGetRequest {
             request_id: Some(Uuid::new_v4().to_string()),
             node_id: node_id.to_string(),
@@ -31,7 +31,7 @@ impl KeyService {
         Ok(resp.key_files)
     }
 
-    pub async fn upload_keys(&mut self, node_id: &Uuid, keys: Vec<pb::Keyfile>) -> Result<()> {
+    pub async fn upload_keys(&mut self, node_id: Uuid, keys: Vec<pb::Keyfile>) -> Result<()> {
         let req = pb::KeyFilesSaveRequest {
             request_id: Some(Uuid::new_v4().to_string()),
             node_id: node_id.to_string(),
