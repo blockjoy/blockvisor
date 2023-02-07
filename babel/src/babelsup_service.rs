@@ -104,7 +104,7 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::babel_sup_s
 
     async fn setup_supervisor(
         &self,
-        request: Request<babel_api::config::SupervisorConfig>,
+        request: Request<SupervisorConfig>,
     ) -> Result<Response<()>, Status> {
         let mut sup_setup = self.sup_setup.lock().await;
         if let SupervisorSetup::SetupTx(_) = sup_setup.deref() {
@@ -217,7 +217,7 @@ mod tests {
 
     #[async_trait]
     impl SupervisorConfigObserver for DummyObserver {
-        async fn supervisor_config_set(&self, _cfg: &SupervisorConfig) -> eyre::Result<()> {
+        async fn supervisor_config_set(&self, _cfg: &SupervisorConfig) -> Result<()> {
             Ok(())
         }
     }

@@ -23,15 +23,13 @@ lazy_static::lazy_static! {
 
 async fn status_check() -> Result<(), Status> {
     match get_bv_status().await {
-        bv_pb::ServiceStatus::UndefinedServiceStatus => Err(tonic::Status::unavailable(
-            "service not ready, try again later",
-        )),
-        bv_pb::ServiceStatus::Updating => Err(tonic::Status::unavailable(
-            "pending update, try again later",
-        )),
-        bv_pb::ServiceStatus::Broken => {
-            Err(tonic::Status::internal("service is broken, call support"))
+        bv_pb::ServiceStatus::UndefinedServiceStatus => {
+            Err(Status::unavailable("service not ready, try again later"))
         }
+        bv_pb::ServiceStatus::Updating => {
+            Err(Status::unavailable("pending update, try again later"))
+        }
+        bv_pb::ServiceStatus::Broken => Err(Status::internal("service is broken, call support")),
         bv_pb::ServiceStatus::Ok => Ok(()),
     }
 }

@@ -58,7 +58,7 @@ async fn main() -> eyre::Result<()> {
 }
 
 async fn load_config() -> eyre::Result<SupervisorConfig> {
-    tracing::info!(
+    info!(
         "Loading supervisor configuration at {}",
         babel::env::BABELSUP_CONFIG_PATH.to_string_lossy()
     );
@@ -89,9 +89,9 @@ impl babelsup_service::SupervisorConfigObserver for ConfigObserver {
 }
 
 async fn mount_data_drive(data_dir: &str) -> eyre::Result<()> {
-    tracing::info!("Recursively creating data directory at {data_dir}");
+    info!("Recursively creating data directory at {data_dir}");
     DirBuilder::new().recursive(true).create(&data_dir).await?;
-    tracing::info!("Mounting data directory at {data_dir}");
+    info!("Mounting data directory at {data_dir}");
     // We assume that root drive will become /dev/vda, and data drive will become /dev/vdb inside VM
     // However, this can be a wrong assumption ¯\_(ツ)_/¯:
     // https://github.com/firecracker-microvm/firecracker-containerd/blob/main/docs/design-approaches.md#block-devices
@@ -110,7 +110,7 @@ async fn serve(
     sup_setup: SupervisorSetup,
     babel_change_tx: supervisor::BabelChangeTx,
 ) -> eyre::Result<()> {
-    let babelsup_service = babel::babelsup_service::BabelSupService::new(
+    let babelsup_service = babelsup_service::BabelSupService::new(
         sup_setup,
         babel_change_tx,
         babel::env::BABEL_BIN_PATH.clone(),

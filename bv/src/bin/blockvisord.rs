@@ -183,7 +183,7 @@ async fn node_metrics(nodes: Arc<RwLock<Nodes>>, endpoint: &Endpoint, token: api
     loop {
         timer.tick().await;
         let mut lock = nodes.write().await;
-        let metrics = blockvisord::node_metrics::collect_metrics(lock.nodes.values_mut()).await;
+        let metrics = node_metrics::collect_metrics(lock.nodes.values_mut()).await;
         // Drop the lock as early as possible.
         drop(lock);
         let mut client =
@@ -199,7 +199,7 @@ async fn host_metrics(host_id: String, endpoint: &Endpoint, token: api::AuthToke
     let mut timer = tokio::time::interval(hosts::COLLECT_INTERVAL);
     loop {
         timer.tick().await;
-        match blockvisord::hosts::get_host_metrics() {
+        match hosts::get_host_metrics() {
             Ok(metrics) => {
                 let mut client =
                     api::MetricsClient::with_auth(wait_for_channel(endpoint).await, token.clone());

@@ -193,7 +193,7 @@ impl NodeClient {
             .nodes)
     }
 
-    async fn list_capabilities(&mut self, node_id: uuid::Uuid) -> Result<String> {
+    async fn list_capabilities(&mut self, node_id: Uuid) -> Result<String> {
         let req = bv_pb::ListCapabilitiesRequest {
             node_id: node_id.to_string(),
         };

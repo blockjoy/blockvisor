@@ -50,7 +50,7 @@ impl babel_api::babel_server::Babel for BabelService {
 
     async fn upload_keys(
         &self,
-        request: Request<(babel_api::config::KeysConfig, Vec<babel_api::BlockchainKey>)>,
+        request: Request<(babel_api::config::KeysConfig, Vec<BlockchainKey>)>,
     ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
         let (config, keys) = request.into_inner();
         if keys.is_empty() {

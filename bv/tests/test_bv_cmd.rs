@@ -54,7 +54,7 @@ fn create_node(image: &str) -> String {
     use std::str;
 
     let mut cmd = Command::cargo_bin("bv").unwrap();
-    let cmd = cmd.args(&[
+    let cmd = cmd.args([
         "node",
         "create",
         image,
@@ -269,11 +269,11 @@ fn test_bv_cmd_init_unknown_otp() {
     let url = "http://localhost:8080";
 
     let mut cmd = Command::cargo_bin("bvup").unwrap();
-    cmd.args(&[otp, "--skip-download"])
-        .args(&["--ifa", ifa])
-        .args(&["--api", url])
-        .args(&["--keys", url])
-        .args(&["--registry", url])
+    cmd.args([otp, "--skip-download"])
+        .args(["--ifa", ifa])
+        .args(["--api", url])
+        .args(["--keys", url])
+        .args(["--registry", url])
         .env("BV_ROOT", tmp_dir.as_os_str())
         .assert()
         .failure()
@@ -321,7 +321,7 @@ async fn test_bv_cmd_init_localhost() {
     println!("user created: {user:?}");
     assert_eq!(user.meta.as_ref().unwrap().origin_request_id, request_id);
     let user_id = get_first_message(user.meta);
-    let id = uuid::Uuid::parse_str(&user_id).unwrap();
+    let id = Uuid::parse_str(&user_id).unwrap();
 
     println!("confirm user");
     let mut client =
@@ -393,11 +393,11 @@ async fn test_bv_cmd_init_localhost() {
 
     Command::cargo_bin("bvup")
         .unwrap()
-        .args(&[&otp, "--skip-download"])
-        .args(&["--ifa", ifa])
-        .args(&["--api", url])
-        .args(&["--keys", url])
-        .args(&["--registry", registry])
+        .args([&otp, "--skip-download"])
+        .args(["--ifa", ifa])
+        .args(["--api", url])
+        .args(["--keys", url])
+        .args(["--registry", registry])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -406,7 +406,7 @@ async fn test_bv_cmd_init_localhost() {
 
     println!("read host id");
     let config_path = "/etc/blockvisor.toml";
-    let config = std::fs::read_to_string(config_path).unwrap();
+    let config = fs::read_to_string(config_path).unwrap();
     let config: Config = toml::from_str(&config).unwrap();
     let host_id = config.id;
     println!("got host id: {host_id}");
@@ -521,7 +521,7 @@ async fn test_bv_cmd_init_localhost() {
 
     println!("check node is deleted");
     let mut cmd = Command::cargo_bin("bv").unwrap();
-    cmd.args(&["node", "status", &node_id])
+    cmd.args(["node", "status", &node_id])
         .env("NO_COLOR", "1")
         .assert()
         .failure();
@@ -537,15 +537,11 @@ fn with_auth<T>(inner: T, auth_token: &str, refresh_token: &str) -> Request<T> {
     let mut request = Request::new(inner);
     request.metadata_mut().insert(
         "authorization",
-        format!("Bearer {}", auth_token.to_string())
-            .parse()
-            .unwrap(),
+        format!("Bearer {}", auth_token).parse().unwrap(),
     );
     request.metadata_mut().insert(
         "cookie",
-        format!("refresh={}", refresh_token.to_string())
-            .parse()
-            .unwrap(),
+        format!("refresh={}", refresh_token).parse().unwrap(),
     );
     println!("{:?}", request.metadata());
     request
@@ -607,7 +603,7 @@ async fn test_bv_cmd_grpc_commands() {
     .unwrap();
     println!("delete existing node, if any");
     let mut cmd = Command::cargo_bin("bv").unwrap();
-    cmd.args(&["node", "delete", &node_name]).assert();
+    cmd.args(["node", "delete", &node_name]).assert();
 
     println!("preparing server");
     let commands = vec![
@@ -948,7 +944,7 @@ async fn test_bv_cmd_grpc_stub_init_reset() {
     tokio::spawn(server_future);
     sleep(Duration::from_secs(5)).await;
 
-    let _ = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let tmp_dir = TempDir::new().unwrap();
         let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
         let url = "http://localhost:8082";
@@ -958,11 +954,11 @@ async fn test_bv_cmd_grpc_stub_init_reset() {
         println!("bv init");
         Command::cargo_bin("bvup")
             .unwrap()
-            .args(&[otp, "--skip-download"])
-            .args(&["--ifa", ifa])
-            .args(&["--api", url])
-            .args(&["--keys", url])
-            .args(&["--registry", url])
+            .args([otp, "--skip-download"])
+            .args(["--ifa", ifa])
+            .args(["--api", url])
+            .args(["--keys", url])
+            .args(["--registry", url])
             .env("BV_ROOT", tmp_dir.as_os_str())
             .assert()
             .success()
@@ -970,18 +966,18 @@ async fn test_bv_cmd_grpc_stub_init_reset() {
                 "Provision and init blockvisor configuration",
             ));
 
-        assert_eq!(Path::new(&config_path).exists(), true);
+        assert!(Path::new(&config_path).exists());
 
         println!("bv reset");
         Command::cargo_bin("bv")
             .unwrap()
-            .args(&["reset", "--yes"])
+            .args(["reset", "--yes"])
             .env("BV_ROOT", tmp_dir.as_os_str())
             .assert()
             .success()
             .stdout(predicate::str::contains("Deleting host"));
 
-        assert_eq!(Path::new(&config_path).exists(), false);
+        assert!(!Path::new(&config_path).exists());
     })
     .await
     .unwrap();

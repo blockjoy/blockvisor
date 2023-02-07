@@ -133,7 +133,7 @@ pub fn render_sh_param(param: &Vec<String>) -> Result<String> {
 fn escape_sh_char(c: char) -> Result<String> {
     match c {
         // Explicit disallowance of ', since that is the delimiter we use in `render_config`.
-        '\'' => anyhow::bail!("Very unsafe subsitution >:( {c}"),
+        '\'' => bail!("Very unsafe subsitution >:( {c}"),
         // Alphanumerics do not need escaping.
         _ if c.is_alphanumeric() => Ok(c.to_string()),
         // Quotes need to be escaped.
@@ -143,7 +143,7 @@ fn escape_sh_char(c: char) -> Result<String> {
         // These are the special characters we allow that do not need esacping.
         '/' | ':' | '{' | '}' | ',' | '-' | '_' | '.' | ' ' => Ok(c.to_string()),
         // If none of these cases match, we return an error.
-        c => anyhow::bail!("Shell unsafe character detected: {c}"),
+        c => bail!("Shell unsafe character detected: {c}"),
     }
 }
 

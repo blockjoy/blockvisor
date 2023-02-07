@@ -108,7 +108,7 @@ impl<T: Sleeper, C: BundleConnector> SelfUpdater<T, C> {
         }
     }
 
-    pub async fn get_latest(&mut self) -> Result<Option<cb_pb::BundleIdentifier>> {
+    pub async fn get_latest(&mut self) -> Result<Option<BundleIdentifier>> {
         let mut resp = self
             .bundles
             .connect()
@@ -319,7 +319,7 @@ mod tests {
     async fn wait_for_ctrl_file(ctrl_file_path: &Path) {
         tokio::time::timeout(Duration::from_millis(500), async {
             while !ctrl_file_path.exists() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                sleep(Duration::from_millis(10)).await;
             }
         })
         .await
@@ -353,11 +353,11 @@ mod tests {
             .returning(move |_| {
                 let reply = cb_pb::BundleVersionsResponse {
                     identifiers: vec![
-                        cb_pb::BundleIdentifier {
+                        BundleIdentifier {
                             version: "1.2.3".to_string(),
                         },
                         expected_bundle_id.clone(),
-                        cb_pb::BundleIdentifier {
+                        BundleIdentifier {
                             version: "0.1.2".to_string(),
                         },
                     ],
