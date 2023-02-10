@@ -16,6 +16,7 @@ use serial_test::serial;
 use std::{env, fs};
 #[cfg(target_os = "linux")]
 use std::{net::ToSocketAddrs, sync::Arc};
+use sysinfo::{Pid, PidExt, ProcessExt, ProcessRefreshKind, System, SystemExt};
 #[cfg(target_os = "linux")]
 use tokio::sync::{mpsc, Mutex, RwLock};
 #[cfg(target_os = "linux")]
@@ -241,10 +242,21 @@ async fn test_bv_cmd_node_recovery() {
     bv_run(&["node", "status", vm_id], "Running");
 
     let process_id = utils::get_process_pid(FC_BIN_NAME, vm_id).unwrap();
-    println!("impolitelly kill node with process id {process_id}");
+    println!("impolitely kill node with process id {process_id}");
     utils::run_cmd("kill", ["-9", &process_id.to_string()])
         .await
         .unwrap();
+    // wait until process is actually killed
+    let is_process_running = |pid| {
+        let mut sys = System::new();
+        sys.refresh_process_specifics(Pid::from_u32(pid), ProcessRefreshKind::new())
+            .then(|| sys.process(Pid::from_u32(pid)).map(|proc| proc.status()))
+            .flatten()
+            .map_or(false, |status| status != sysinfo::ProcessStatus::Zombie)
+    };
+    while is_process_running(process_id) {
+        sleep(Duration::from_millis(10)).await;
+    }
 
     println!("list running node before recovery");
     bv_run(&["node", "status", vm_id], "Failed");

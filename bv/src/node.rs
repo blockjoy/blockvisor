@@ -133,9 +133,6 @@ impl Node {
         let babelsup_client = self.node_conn.babelsup_client().await?;
         with_retry!(babelsup_client.setup_supervisor(self.data.babel_conf.supervisor.clone()))?;
 
-        // TODO: sadly this is still requiered for reasons we do not yet understand
-        sleep(Duration::from_secs(10)).await;
-
         // We save the `running` status only after all of the previous steps have succeeded.
         self.data.expected_status = NodeStatus::Running;
         self.data.save().await
