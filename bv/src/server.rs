@@ -2,6 +2,8 @@ pub mod bv_pb {
     tonic::include_proto!("blockjoy.blockvisor.v1");
 }
 
+use crate::node::Node;
+use crate::pal::{NetInterface, Pal};
 use crate::{
     get_bv_status,
     node_data::{NodeImage, NodeStatus},
@@ -9,6 +11,7 @@ use crate::{
     nodes::Nodes,
     set_bv_status,
 };
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::{fmt, str::FromStr};
 use tokio::sync::RwLock;
@@ -34,11 +37,11 @@ async fn status_check() -> Result<(), Status> {
     }
 }
 
-pub struct BlockvisorServer {
-    pub nodes: Arc<RwLock<Nodes>>,
+pub struct BlockvisorServer<P: Pal + Debug> {
+    pub nodes: Arc<RwLock<Nodes<P>>>,
 }
 
-impl BlockvisorServer {
+impl<P: Pal + Debug> BlockvisorServer<P> {
     pub async fn is_running() -> bool {
         Endpoint::connect(&BLOCKVISOR_SERVICE_ENDPOINT)
             .await
@@ -47,7 +50,11 @@ impl BlockvisorServer {
 }
 
 #[tonic::async_trait]
-impl bv_pb::blockvisor_server::Blockvisor for BlockvisorServer {
+impl<P> bv_pb::blockvisor_server::Blockvisor for BlockvisorServer<P>
+where
+    P: Pal + Debug + Send + Sync + 'static,
+    <P as Pal>::NetInterface: Send + Sync + 'static,
+{
     async fn health(
         &self,
         _request: Request<bv_pb::HealthRequest>,
@@ -193,7 +200,7 @@ impl bv_pb::blockvisor_server::Blockvisor for BlockvisorServer {
     ) -> Result<Response<bv_pb::GetNodesResponse>, Status> {
         status_check().await?;
         let nodes = self.nodes.read().await;
-        let list = nodes.list().await;
+        let list: Vec<&Node<P>> = nodes.list().await;
         let mut nodes = vec![];
         for node in list {
             let status = match node.status() {
@@ -207,8 +214,8 @@ impl bv_pb::blockvisor_server::Blockvisor for BlockvisorServer {
                 name: node.data.name.clone(),
                 image: Some(image),
                 status: status.into(),
-                ip: node.data.network_interface.ip.to_string(),
-                gateway: node.data.network_interface.gateway.to_string(),
+                ip: node.data.network_interface.ip().to_string(),
+                gateway: node.data.network_interface.gateway().to_string(),
             };
             nodes.push(n);
         }

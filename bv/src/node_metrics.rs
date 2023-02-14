@@ -2,8 +2,10 @@
 
 use crate::node;
 use crate::node_data::NodeStatus;
+use crate::pal::Pal;
 use crate::services::api::pb;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use tracing::warn;
 
 /// The interval by which we collect metrics from each of the nodes.
@@ -34,7 +36,9 @@ pub struct Metric {
 /// be efficient, but since we are dealing with a virtual socket the latency is very low, in the
 /// hundres of nanoseconds. Furthermore, we require unique access to the node to query a metric, so
 /// sequentially is easier to program.
-pub async fn collect_metrics(nodes: impl Iterator<Item = &mut node::Node>) -> Metrics {
+pub async fn collect_metrics<P: Pal + Debug + 'static>(
+    nodes: impl Iterator<Item = &mut node::Node<P>>,
+) -> Metrics {
     let metrics_fut: Vec<_> = nodes
         .filter(|n| n.status() == NodeStatus::Running)
         .map(collect_metric)
@@ -44,7 +48,7 @@ pub async fn collect_metrics(nodes: impl Iterator<Item = &mut node::Node>) -> Me
 }
 
 /// Returns the metric for a single node.
-pub async fn collect_metric(node: &mut node::Node) -> (NodeId, Metric) {
+pub async fn collect_metric<P: Pal + Debug>(node: &mut node::Node<P>) -> (NodeId, Metric) {
     use babel_api::BabelMethod;
 
     let capabilities = node.capabilities();

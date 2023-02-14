@@ -1,6 +1,6 @@
 use crate::api::pb;
 use anyhow::{Context, Result};
-use blockvisord::nodes::CommonData;
+use blockvisord::pal::{LinuxPlatform, NetInterface};
 use blockvisord::{
     config::Config,
     hosts,
@@ -36,11 +36,10 @@ async fn main() -> Result<()> {
     );
 
     let config = Config::load().await.context("failed to load host config")?;
-    let nodes = if Nodes::exists() {
-        Nodes::load(config.clone()).await?
+    let nodes = if Nodes::<LinuxPlatform>::exists() {
+        Nodes::load(LinuxPlatform, config.clone()).await?
     } else {
-        let nodes_data = CommonData { machine_index: 0 };
-        let nodes = Nodes::new(config.clone(), nodes_data);
+        let nodes = Nodes::new(LinuxPlatform, config.clone());
         nodes.save().await?;
         nodes
     };
@@ -130,7 +129,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn create_server(url: String, server: BlockvisorServer) -> Result<()> {
+async fn create_server(url: String, server: BlockvisorServer<LinuxPlatform>) -> Result<()> {
     Server::builder()
         .max_concurrent_streams(1)
         .add_service(bv_pb::blockvisor_server::BlockvisorServer::new(server))
@@ -153,7 +152,7 @@ async fn wait_for_channel(endpoint: &Endpoint) -> Channel {
 }
 
 /// This task runs periodically to send important info about nodes to API.
-async fn node_updates(nodes: Arc<RwLock<Nodes>>) {
+async fn node_updates(nodes: Arc<RwLock<Nodes<LinuxPlatform>>>) {
     let mut timer = tokio::time::interval(INFO_UPDATE_INTERVAL);
     let mut known_addresses: HashMap<String, String> = HashMap::new();
     loop {
@@ -188,7 +187,11 @@ async fn node_updates(nodes: Arc<RwLock<Nodes>>) {
 
 /// This task runs every minute to aggregate metrics from every node. It will call into the nodes
 /// query their metrics, then send them to blockvisor-api.
-async fn node_metrics(nodes: Arc<RwLock<Nodes>>, endpoint: &Endpoint, token: api::AuthToken) {
+async fn node_metrics(
+    nodes: Arc<RwLock<Nodes<LinuxPlatform>>>,
+    endpoint: &Endpoint,
+    token: api::AuthToken,
+) {
     let mut timer = tokio::time::interval(node_metrics::COLLECT_INTERVAL);
     loop {
         timer.tick().await;

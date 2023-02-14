@@ -6,12 +6,14 @@ use firec::Machine;
 use futures_util::StreamExt;
 use std::collections::hash_map::Entry;
 use std::ffi::OsStr;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::{collections::HashMap, path::Path, str::FromStr, time::Duration};
-use tokio::{fs::DirBuilder, time::sleep};
+use tokio::fs::DirBuilder;
+use tokio::time::Instant;
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
+use crate::pal::{NetInterface, Pal};
 use crate::services::api::pb::Parameter;
 use crate::{
     env::*,
@@ -29,8 +31,8 @@ const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
-pub struct Node {
-    pub data: NodeData,
+pub struct Node<P: Pal> {
+    pub data: NodeData<<P as Pal>::NetInterface>,
     machine: Machine<'static>,
     node_conn: NodeConnection,
 }
@@ -45,14 +47,14 @@ pub const VSOCK_PATH: &str = "/vsock.socket";
 const VSOCK_GUEST_CID: u32 = 3;
 const MAX_KERNEL_ARGS_LEN: usize = 1024;
 
-impl Node {
+impl<P: Pal> Node<P> {
     /// Creates a new node according to specs.
     #[instrument(skip(data))]
-    pub async fn create(data: NodeData) -> Result<Self> {
+    pub async fn create(data: NodeData<<P as Pal>::NetInterface>) -> Result<Node<P>> {
         info!("Creating node with data: {data:?}");
         let node_id = data.id;
-        let config = Node::create_config(&data).await?;
-        Node::create_data_image(&node_id, data.babel_conf.requirements.disk_size_gb).await?;
+        let config = Node::<P>::create_config(&data).await?;
+        Node::<P>::create_data_image(&node_id, data.babel_conf.requirements.disk_size_gb).await?;
         let machine = Machine::create(config).await?;
 
         data.save().await?;
@@ -66,9 +68,9 @@ impl Node {
 
     /// Returns node previously created on this host.
     #[instrument(skip(data))]
-    pub async fn attach(data: NodeData) -> Result<Self> {
+    pub async fn attach(data: NodeData<<P as Pal>::NetInterface>) -> Result<Node<P>> {
         info!("Attaching to node with data: {data:?}");
-        let config = Node::create_config(&data).await?;
+        let config = Node::<P>::create_config(&data).await?;
         let cmd = data.id.to_string();
         let (pid, node_conn) = match get_process_pid(FC_BIN_NAME, &cmd) {
             Ok(pid) => {
@@ -109,7 +111,7 @@ impl Node {
             bail!("Node should be stopped before running upgrade");
         }
 
-        Node::copy_os_image(&self.data.id, image).await?;
+        Node::<P>::copy_os_image(&self.data.id, image).await?;
 
         self.data.image = image.clone();
         self.data.save().await
@@ -177,13 +179,13 @@ impl Node {
             }
         }
 
-        let start = std::time::Instant::now();
-        let elapsed = || std::time::Instant::now() - start;
+        let start = Instant::now();
+        let elapsed = || Instant::now() - start;
         loop {
             match self.machine.state() {
                 firec::MachineState::RUNNING if elapsed() < NODE_STOP_TIMEOUT => {
                     debug!("Firecracker process not shutdown yet, will retry");
-                    sleep(NODE_STOPPED_CHECK_INTERVAL).await;
+                    tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
                 }
                 firec::MachineState::RUNNING => {
                     bail!("Firecracker shutdown timeout");
@@ -262,17 +264,20 @@ impl Node {
         Ok(())
     }
 
-    async fn create_config(data: &NodeData) -> Result<firec::config::Config<'static>> {
+    async fn create_config(
+        data: &NodeData<<P as Pal>::NetInterface>,
+    ) -> Result<firec::config::Config<'static>> {
         let kernel_args = format!(
             "console=ttyS0 reboot=k panic=1 pci=off random.trust_cpu=on \
             ip={}::{}:255.255.255.240::eth0:on",
-            data.network_interface.ip, data.network_interface.gateway,
+            data.network_interface.ip(),
+            data.network_interface.gateway(),
         );
         if kernel_args.len() > MAX_KERNEL_ARGS_LEN {
             bail!("to long kernel_args {kernel_args}")
         }
         let iface =
-            firec::config::network::Interface::new(data.network_interface.name.clone(), "eth0");
+            firec::config::network::Interface::new(data.network_interface.name().clone(), "eth0");
         let root_fs_path =
             CookbookService::get_image_download_folder_path(&data.image).join(ROOT_FS_FILE);
         let kernel_path =

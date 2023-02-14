@@ -3,6 +3,7 @@ use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
     config::Config,
     hosts::{get_host_info, get_host_metrics},
+    pal,
     pretty_table::{PrettyTable, PrettyTableRow},
     server::{
         bv_pb::blockvisor_client::BlockvisorClient,
@@ -71,7 +72,7 @@ async fn main() -> Result<()> {
                 bail!("Host is not registered, please run `bvup` first");
             }
 
-            if BlockvisorServer::is_running().await {
+            if BlockvisorServer::<pal::LinuxPlatform>::is_running().await {
                 println!("Service already running");
                 return Ok(());
             }
@@ -90,7 +91,7 @@ async fn main() -> Result<()> {
                 bail!("Host is not registered, please run `bvup` first");
             }
 
-            if BlockvisorServer::is_running().await {
+            if BlockvisorServer::<pal::LinuxPlatform>::is_running().await {
                 println!("Service running");
             } else {
                 println!("Service stopped");

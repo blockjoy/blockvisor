@@ -1,14 +1,17 @@
 use anyhow::{Context, Result};
 use babel_api::config::Babel;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{env::REGISTRY_CONFIG_DIR, network_interface::NetworkInterface};
+use crate::env::REGISTRY_CONFIG_DIR;
+use crate::pal::NetInterface;
 
 pub type NodeProperties = HashMap<String, String>;
 
@@ -33,7 +36,7 @@ pub struct NodeImage {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct NodeData {
+pub struct NodeData<N> {
     pub id: Uuid,
     pub name: String,
     pub expected_status: NodeStatus,
@@ -42,13 +45,13 @@ pub struct NodeData {
     #[serde(default)]
     pub self_update: bool,
     pub image: NodeImage,
-    pub network_interface: NetworkInterface,
+    pub network_interface: N,
     pub babel_conf: Babel,
     #[serde(default)]
     pub properties: NodeProperties,
 }
 
-impl NodeData {
+impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
     pub async fn load(path: &Path) -> Result<Self> {
         info!("Reading nodes config file: {}", path.display());
         fs::read_to_string(&path)

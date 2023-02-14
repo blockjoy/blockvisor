@@ -2,6 +2,7 @@
 use assert_cmd::Command;
 #[cfg(target_os = "linux")]
 use assert_fs::TempDir;
+use blockvisord::pal::LinuxPlatform;
 #[cfg(target_os = "linux")]
 use blockvisord::services::api::{self, pb};
 #[cfg(target_os = "linux")]
@@ -871,7 +872,8 @@ async fn test_bv_cmd_grpc_commands() {
         blockjoy_registry_url: "http://localhost:50051".to_string(),
         update_check_interval_secs: None,
     };
-    let nodes = Nodes::load(config.clone()).await.unwrap();
+
+    let nodes = Nodes::load(LinuxPlatform, config.clone()).await.unwrap();
     let updates_tx = nodes.get_updates_sender().await.unwrap().clone();
     let nodes = Arc::new(RwLock::new(nodes));
 

@@ -1,12 +1,14 @@
 use crate::get_bv_status;
 use crate::node_data::NodeImage;
 use crate::nodes::Nodes;
+use crate::pal::Pal;
 use crate::server::bv_pb;
 use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use pb::command_flow_client::CommandFlowClient;
 use pb::metrics_service_client::MetricsServiceClient;
 use pb::node_command::Command;
+use std::fmt::Debug;
 use std::{str::FromStr, sync::Arc};
 use tokio::sync::{broadcast::Sender, RwLock};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
@@ -81,9 +83,9 @@ fn service_status_update(
     }
 }
 
-pub async fn process_commands_stream(
+pub async fn process_commands_stream<P: Pal + Debug>(
     client: &mut CommandsClient,
-    nodes: Arc<RwLock<Nodes>>,
+    nodes: Arc<RwLock<Nodes<P>>>,
     updates_tx: Sender<pb::InfoUpdate>,
 ) -> Result<()> {
     info!("Processing pending commands");
@@ -177,8 +179,8 @@ fn create_info_update(
     }
 }
 
-async fn process_node_command(
-    nodes: Arc<RwLock<Nodes>>,
+async fn process_node_command<P: Pal + Debug>(
+    nodes: Arc<RwLock<Nodes<P>>>,
     node_command: pb::NodeCommand,
 ) -> Result<()> {
     let node_id = Uuid::from_str(&node_command.id)?;

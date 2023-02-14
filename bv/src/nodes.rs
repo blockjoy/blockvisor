@@ -3,6 +3,7 @@ use babel_api::config::{Babel, Entrypoint};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::net::IpAddr;
 use std::path::Path;
 use tokio::fs::{self, read_dir};
@@ -11,10 +12,10 @@ use tokio::sync::OnceCell;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+use crate::pal::Pal;
 use crate::{
     config::Config,
     env::{REGISTRY_CONFIG_DIR, REGISTRY_CONFIG_FILE},
-    network_interface::NetworkInterface,
     node::Node,
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     render,
@@ -40,12 +41,13 @@ pub enum ServiceStatus {
 }
 
 #[derive(Debug)]
-pub struct Nodes {
+pub struct Nodes<P: Pal + Debug> {
     pub api_config: Config,
-    pub nodes: HashMap<Uuid, Node>,
+    pub nodes: HashMap<Uuid, Node<P>>,
     pub node_ids: HashMap<String, Uuid>,
     data: CommonData,
     tx: OnceCell<Sender<pb::InfoUpdate>>,
+    pal: P,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -53,7 +55,7 @@ pub struct CommonData {
     pub machine_index: u32,
 }
 
-impl Nodes {
+impl<P: Pal + Debug> Nodes<P> {
     #[instrument(skip(self))]
     pub async fn create(
         &mut self,
@@ -86,7 +88,7 @@ impl Nodes {
         let gateway = gateway.parse()?;
         let network_interface = self.create_network_interface(ip, gateway).await?;
 
-        let node = NodeData {
+        let node_data = NodeData {
             id,
             name: name.clone(),
             image,
@@ -98,7 +100,7 @@ impl Nodes {
         };
         self.save().await?;
 
-        let node = Node::create(node).await?;
+        let node = Node::create(node_data).await?;
         self.nodes.insert(id, node);
         self.node_ids.insert(name, id);
         debug!("Node with id `{}` created", id);
@@ -263,7 +265,7 @@ impl Nodes {
     }
 
     #[instrument(skip(self))]
-    pub async fn list(&self) -> Vec<&Node> {
+    pub async fn list(&self) -> Vec<&Node<P>> {
         debug!("Listing {} nodes", self.nodes.len());
 
         self.nodes.values().collect()
@@ -360,17 +362,18 @@ impl Nodes {
         Ok(all_keys)
     }
 
-    pub fn new(api_config: Config, nodes_data: CommonData) -> Self {
+    pub fn new(pal: P, api_config: Config) -> Self {
         Self {
             api_config,
-            data: nodes_data,
+            data: CommonData { machine_index: 0 },
             nodes: HashMap::new(),
             node_ids: HashMap::new(),
             tx: OnceCell::new(),
+            pal,
         }
     }
 
-    pub async fn load(api_config: Config) -> Result<Nodes> {
+    pub async fn load(pal: P, api_config: Config) -> Result<Self> {
         // First load the common data file.
         info!(
             "Reading nodes common config file: {}",
@@ -379,13 +382,14 @@ impl Nodes {
         let config = fs::read_to_string(&*REGISTRY_CONFIG_FILE)
             .await
             .context("failed to read nodes registry")?;
-        let nodes_data = toml::from_str(&config).context("failed to parse nodes registry")?;
+        let data = toml::from_str(&config).context("failed to parse nodes registry")?;
         // Now the individual node data files.
         info!(
             "Reading nodes config dir: {}",
             REGISTRY_CONFIG_DIR.display()
         );
-        let mut this = Nodes::new(api_config, nodes_data);
+        let mut nodes = HashMap::new();
+        let mut node_ids = HashMap::new();
         let mut dir = read_dir(&*REGISTRY_CONFIG_DIR)
             .await
             .context("failed to read nodes registry dir")?;
@@ -404,8 +408,8 @@ impl Nodes {
                 .await
             {
                 Ok(node) => {
-                    this.node_ids.insert(node.data.name.clone(), node.id());
-                    this.nodes.insert(node.data.id, node);
+                    node_ids.insert(node.data.name.clone(), node.id());
+                    nodes.insert(node.data.id, node);
                 }
                 Err(e) => {
                     // blockvisord should not bail on problems with individual node files.
@@ -415,7 +419,14 @@ impl Nodes {
             };
         }
 
-        Ok(this)
+        Ok(Self {
+            api_config,
+            data,
+            nodes,
+            node_ids,
+            tx: OnceCell::new(),
+            pal,
+        })
     }
 
     pub async fn save(&self) -> Result<()> {
@@ -471,10 +482,12 @@ impl Nodes {
         &mut self,
         ip: IpAddr,
         gateway: IpAddr,
-    ) -> Result<NetworkInterface> {
+    ) -> Result<<P as Pal>::NetInterface> {
         self.data.machine_index += 1;
 
-        let iface = NetworkInterface::create(format!("bv{}", self.data.machine_index), ip, gateway)
+        let iface = self
+            .pal
+            .create_net_interface(format!("bv{}", self.data.machine_index), ip, gateway)
             .await
             .context(format!(
                 "failed to create VM bridge bv{}",
@@ -520,7 +533,7 @@ fn render_entry_points(
 
 #[cfg(test)]
 mod tests {
-    use crate::utils;
+    use crate::{pal, utils};
 
     use super::*;
     use babel_api::config::{Method, MethodResponseFormat, Requirements, ShResponse};
@@ -623,7 +636,7 @@ mod tests {
                 node_version: "".to_string(),
             },
             expected_status: NodeStatus::Stopped,
-            network_interface: NetworkInterface {
+            network_interface: pal::LinuxNetInterface {
                 name: "".to_string(),
                 ip: IpAddr::from_str("1.1.1.1")?,
                 gateway: IpAddr::from_str("1.1.1.1")?,
@@ -637,7 +650,7 @@ mod tests {
         };
 
         let serialized = toml::to_string(&node)?;
-        let _deserialized: NodeData = toml::from_str(&serialized)?;
+        let _deserialized: NodeData<pal::LinuxNetInterface> = toml::from_str(&serialized)?;
         Ok(())
     }
 }
