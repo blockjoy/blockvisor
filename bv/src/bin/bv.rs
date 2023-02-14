@@ -1,17 +1,18 @@
 use anyhow::{bail, Result};
+use blockvisord::config::CONFIG_PATH;
+use blockvisord::linux_platform::bv_root;
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
     config::Config,
     hosts::{get_host_info, get_host_metrics},
-    pal,
+    linux_platform::LinuxPlatform,
     pretty_table::{PrettyTable, PrettyTableRow},
     server::{
         bv_pb::blockvisor_client::BlockvisorClient,
         bv_pb::{self, BlockchainRequestParams, Node, Parameter},
         BlockvisorServer, BLOCKVISOR_SERVICE_URL,
     },
-    services::api::pb,
-    services::cookbook::CookbookService,
+    services::{api::pb, cookbook::CookbookService},
     utils::run_cmd,
 };
 use clap::Parser;
@@ -52,7 +53,7 @@ async fn main() -> Result<()> {
                         .await?;
                 }
 
-                let config = Config::load().await?;
+                let config = Config::load(&bv_root()).await?;
                 let url = config.blockjoy_api_url;
                 let host_id = config.id;
 
@@ -64,15 +65,15 @@ async fn main() -> Result<()> {
                 println!("Deleting host `{host_id}` from API `{url}`");
                 client.delete(delete).await?;
 
-                Config::remove().await?;
+                Config::remove(&bv_root()).await?;
             }
         }
         Command::Start(_) => {
-            if !Config::exists() {
+            if !bv_root().join(CONFIG_PATH).exists() {
                 bail!("Host is not registered, please run `bvup` first");
             }
 
-            if BlockvisorServer::<pal::LinuxPlatform>::is_running().await {
+            if BlockvisorServer::<LinuxPlatform>::is_running().await {
                 println!("Service already running");
                 return Ok(());
             }
@@ -87,11 +88,11 @@ async fn main() -> Result<()> {
             println!("blockvisor service stopped successfully");
         }
         Command::Status(_) => {
-            if !Config::exists() {
+            if !bv_root().join(CONFIG_PATH).exists() {
                 bail!("Host is not registered, please run `bvup` first");
             }
 
-            if BlockvisorServer::<pal::LinuxPlatform>::is_running().await {
+            if BlockvisorServer::<LinuxPlatform>::is_running().await {
                 println!("Service running");
             } else {
                 println!("Service stopped");
@@ -151,7 +152,7 @@ async fn process_host_command(command: HostCommand) -> Result<()> {
 
 #[allow(unreachable_code)]
 async fn process_chain_command(command: ChainCommand) -> Result<()> {
-    let config = Config::load().await?;
+    let config = Config::load(&bv_root()).await?;
 
     match command {
         ChainCommand::List {
@@ -160,7 +161,8 @@ async fn process_chain_command(command: ChainCommand) -> Result<()> {
             number,
         } => {
             let mut cookbook_service =
-                CookbookService::connect(&config.blockjoy_registry_url, &config.token).await?;
+                CookbookService::connect(bv_root(), &config.blockjoy_registry_url, &config.token)
+                    .await?;
             let mut versions = cookbook_service.list_versions(&protocol, &r#type).await?;
 
             versions.truncate(number);

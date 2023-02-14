@@ -4,7 +4,7 @@ use crate::utils::{get_process_pid, run_cmd};
 use crate::with_retry;
 use anyhow::{bail, ensure, Context, Error, Result};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 use std::{env, fs};
@@ -58,10 +58,10 @@ pub struct Installer<T: Timer> {
 }
 
 impl<T: Timer> Installer<T> {
-    pub fn new(timer: T) -> Self {
+    pub fn new(timer: T, bv_root: &Path) -> Self {
         Self::internal_new(
             timer,
-            crate::env::ROOT_DIR.clone(),
+            bv_root,
             Channel::from_static(BLOCKVISOR_SERVICE_URL)
                 .timeout(BV_REQ_TIMEOUT)
                 .connect_timeout(BV_CONNECT_TIMEOUT)
@@ -96,8 +96,8 @@ impl<T: Timer> Installer<T> {
         }
     }
 
-    fn internal_new(timer: T, root: PathBuf, bv_channel: Channel) -> Self {
-        let install_path = root.join(INSTALL_PATH);
+    fn internal_new(timer: T, bv_root: &Path, bv_channel: Channel) -> Self {
+        let install_path = bv_root.join(INSTALL_PATH);
         let current = install_path.join(CURRENT_LINK);
         let this_version = install_path.join(THIS_VERSION);
         let backup = install_path.join(BACKUP_LINK);
@@ -105,8 +105,8 @@ impl<T: Timer> Installer<T> {
 
         Self {
             paths: InstallerPaths {
-                system_services: root.join(SYSTEM_SERVICES),
-                system_bin: root.join(SYSTEM_BIN),
+                system_services: bv_root.join(SYSTEM_SERVICES),
+                system_bin: bv_root.join(SYSTEM_BIN),
                 install_path,
                 current,
                 this_version,
@@ -519,7 +519,7 @@ mod tests {
         }
 
         fn build_installer(&self, timer: MockTestTimer) -> Installer<MockTestTimer> {
-            Installer::internal_new(timer, self.tmp_root.clone(), test_channel(&self.tmp_root))
+            Installer::internal_new(timer, &self.tmp_root, test_channel(&self.tmp_root))
         }
 
         fn start_dummy_installer(&self) -> Result<()> {

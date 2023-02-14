@@ -5,17 +5,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::net::IpAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::fs::{self, read_dir};
 use tokio::sync::broadcast::{self, Sender};
 use tokio::sync::OnceCell;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+use crate::node::REGISTRY_CONFIG_DIR;
 use crate::pal::Pal;
 use crate::{
     config::Config,
-    env::{REGISTRY_CONFIG_DIR, REGISTRY_CONFIG_FILE},
     node::Node,
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     render,
@@ -24,7 +25,10 @@ use crate::{
         cookbook::CookbookService,
         keyfiles::KeyService,
     },
+    BV_VAR_PATH,
 };
+
+const REGISTRY_CONFIG_FILENAME: &str = "nodes.toml";
 
 fn id_not_found(id: Uuid) -> anyhow::Error {
     anyhow!("Node with id `{}` not found", id)
@@ -32,6 +36,13 @@ fn id_not_found(id: Uuid) -> anyhow::Error {
 
 fn name_not_found(name: &str) -> anyhow::Error {
     anyhow!("Node with name `{}` not found", name)
+}
+
+fn build_registry_filename(bv_root: &Path) -> PathBuf {
+    bv_root
+        .join(BV_VAR_PATH)
+        .join(REGISTRY_CONFIG_DIR)
+        .join(REGISTRY_CONFIG_FILENAME)
 }
 
 #[derive(Clone, Debug)]
@@ -47,7 +58,7 @@ pub struct Nodes<P: Pal + Debug> {
     pub node_ids: HashMap<String, Uuid>,
     data: CommonData,
     tx: OnceCell<Sender<pb::InfoUpdate>>,
-    pal: P,
+    pal: Arc<P>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -100,7 +111,7 @@ impl<P: Pal + Debug> Nodes<P> {
         };
         self.save().await?;
 
-        let node = Node::create(node_data).await?;
+        let node = Node::create(self.pal.clone(), node_data).await?;
         self.nodes.insert(id, node);
         self.node_ids.insert(name, id);
         debug!("Node with id `{}` created", id);
@@ -156,11 +167,12 @@ impl<P: Pal + Debug> Nodes<P> {
 
     #[instrument(skip(self))]
     async fn fetch_image_data(&mut self, image: &NodeImage) -> Result<Babel> {
-        if !CookbookService::is_image_cache_valid(image)
+        if !CookbookService::is_image_cache_valid(self.pal.bv_root(), image)
             .await
             .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
         {
             let mut cookbook_service = CookbookService::connect(
+                self.pal.bv_root().to_path_buf(),
                 &self.api_config.blockjoy_registry_url,
                 &self.api_config.token,
             )
@@ -171,7 +183,7 @@ impl<P: Pal + Debug> Nodes<P> {
             cookbook_service.download_kernel(image).await?;
         }
 
-        let babel = CookbookService::get_babel_config(image).await?;
+        let babel = CookbookService::get_babel_config(self.pal.bv_root(), image).await?;
         Ok(babel)
     }
 
@@ -369,28 +381,29 @@ impl<P: Pal + Debug> Nodes<P> {
             nodes: HashMap::new(),
             node_ids: HashMap::new(),
             tx: OnceCell::new(),
-            pal,
+            pal: Arc::new(pal),
         }
     }
 
     pub async fn load(pal: P, api_config: Config) -> Result<Self> {
+        let pal = Arc::new(pal);
+        let registry_path = build_registry_filename(pal.bv_root());
         // First load the common data file.
         info!(
             "Reading nodes common config file: {}",
-            REGISTRY_CONFIG_FILE.display()
+            registry_path.display()
         );
-        let config = fs::read_to_string(&*REGISTRY_CONFIG_FILE)
+        let config = fs::read_to_string(&registry_path)
             .await
             .context("failed to read nodes registry")?;
         let data = toml::from_str(&config).context("failed to parse nodes registry")?;
+
+        let registry_dir = pal.bv_root().join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR);
         // Now the individual node data files.
-        info!(
-            "Reading nodes config dir: {}",
-            REGISTRY_CONFIG_DIR.display()
-        );
+        info!("Reading nodes config dir: {}", registry_dir.display());
         let mut nodes = HashMap::new();
         let mut node_ids = HashMap::new();
-        let mut dir = read_dir(&*REGISTRY_CONFIG_DIR)
+        let mut dir = read_dir(registry_dir)
             .await
             .context("failed to read nodes registry dir")?;
         while let Some(entry) = dir
@@ -399,12 +412,12 @@ impl<P: Pal + Debug> Nodes<P> {
             .context("failed to read nodes registry entry")?
         {
             let path = entry.path();
-            if path == *REGISTRY_CONFIG_FILE {
+            if path == registry_path {
                 // Skip the common data file.
                 continue;
             }
             match NodeData::load(&path)
-                .and_then(|data| async { Node::attach(data).await })
+                .and_then(|data| async { Node::attach(pal.clone(), data).await })
                 .await
             {
                 Ok(node) => {
@@ -430,21 +443,28 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     pub async fn save(&self) -> Result<()> {
+        let registry_path = build_registry_filename(self.pal.bv_root());
         // We only save the common data file. The individual node data files save themselves.
         info!(
             "Writing nodes common config file: {}",
-            REGISTRY_CONFIG_FILE.display()
+            registry_path.display()
         );
         let config = toml::Value::try_from(&self.data)?;
         let config = toml::to_string(&config)?;
-        fs::create_dir_all(REGISTRY_CONFIG_DIR.as_path()).await?;
-        fs::write(&*REGISTRY_CONFIG_FILE, &*config).await?;
+        fs::create_dir_all(
+            self.pal
+                .bv_root()
+                .join(BV_VAR_PATH)
+                .join(REGISTRY_CONFIG_DIR),
+        )
+        .await?;
+        fs::write(&*registry_path, &*config).await?;
 
         Ok(())
     }
 
-    pub fn exists() -> bool {
-        Path::new(&*REGISTRY_CONFIG_FILE).exists()
+    pub fn exists(bv_root: &Path) -> bool {
+        build_registry_filename(bv_root).exists()
     }
 
     // Notify API that container is 'Running' or 'Stopped', etc
@@ -533,7 +553,7 @@ fn render_entry_points(
 
 #[cfg(test)]
 mod tests {
-    use crate::{pal, utils};
+    use crate::{linux_platform, utils};
 
     use super::*;
     use babel_api::config::{Method, MethodResponseFormat, Requirements, ShResponse};
@@ -636,7 +656,7 @@ mod tests {
                 node_version: "".to_string(),
             },
             expected_status: NodeStatus::Stopped,
-            network_interface: pal::LinuxNetInterface {
+            network_interface: linux_platform::LinuxNetInterface {
                 name: "".to_string(),
                 ip: IpAddr::from_str("1.1.1.1")?,
                 gateway: IpAddr::from_str("1.1.1.1")?,
@@ -650,7 +670,8 @@ mod tests {
         };
 
         let serialized = toml::to_string(&node)?;
-        let _deserialized: NodeData<pal::LinuxNetInterface> = toml::from_str(&serialized)?;
+        let _deserialized: NodeData<linux_platform::LinuxNetInterface> =
+            toml::from_str(&serialized)?;
         Ok(())
     }
 }

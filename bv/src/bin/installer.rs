@@ -1,6 +1,7 @@
 use anyhow::Result;
 use blockvisord::installer;
 use blockvisord::installer::Installer;
+use blockvisord::linux_platform::bv_root;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tracing::error;
@@ -25,7 +26,7 @@ async fn main() -> Result<()> {
         .with(tracing_journald::layer()?)
         .init();
 
-    let res = Installer::new(SysTimer).run().await;
+    let res = Installer::new(SysTimer, &bv_root()).run().await;
     if let Err(err) = res {
         error!("{err}");
         Err(err)

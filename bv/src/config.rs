@@ -4,7 +4,7 @@ use std::path::Path;
 use tokio::fs::{self, DirBuilder};
 use tracing::info;
 
-use crate::env::HOST_CONFIG_FILE;
+pub const CONFIG_PATH: &str = "etc/blockvisor.toml";
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Config {
@@ -23,30 +23,29 @@ pub struct Config {
 }
 
 impl Config {
-    pub async fn load() -> Result<Config> {
-        info!("Reading host config: {}", HOST_CONFIG_FILE.display());
-        let config = fs::read_to_string(&*HOST_CONFIG_FILE).await?;
+    pub async fn load(bv_root: &Path) -> Result<Config> {
+        let path = bv_root.join(CONFIG_PATH);
+        info!("Reading host config: {}", path.display());
+        let config = fs::read_to_string(path).await?;
         Ok(toml::from_str(&config)?)
     }
 
-    pub async fn save(&self) -> Result<()> {
-        let parent = HOST_CONFIG_FILE.parent().unwrap();
+    pub async fn save(&self, bv_root: &Path) -> Result<()> {
+        let path = bv_root.join(CONFIG_PATH);
+        let parent = path.parent().unwrap();
         info!("Ensuring config dir is present: {}", parent.display());
         DirBuilder::new().recursive(true).create(parent).await?;
-        info!("Writing host config: {}", HOST_CONFIG_FILE.display());
+        info!("Writing host config: {}", path.display());
         let config = toml::Value::try_from(self)?;
         let config = toml::to_string(&config)?;
-        fs::write(&*HOST_CONFIG_FILE, &*config).await?;
+        fs::write(path, &*config).await?;
         Ok(())
     }
 
-    pub async fn remove() -> Result<()> {
-        info!("Removing host config: {}", HOST_CONFIG_FILE.display());
-        fs::remove_file(&*HOST_CONFIG_FILE).await?;
+    pub async fn remove(bv_root: &Path) -> Result<()> {
+        let path = bv_root.join(CONFIG_PATH);
+        info!("Removing host config: {}", path.display());
+        fs::remove_file(path).await?;
         Ok(())
-    }
-
-    pub fn exists() -> bool {
-        Path::new(&*HOST_CONFIG_FILE).exists()
     }
 }

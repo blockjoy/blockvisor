@@ -1,8 +1,10 @@
+extern crate core;
+
 pub mod cli;
 pub mod config;
-pub mod env;
 pub mod hosts;
 pub mod installer;
+pub mod linux_platform;
 pub mod logging;
 pub mod node;
 pub mod node_connection;
@@ -19,6 +21,8 @@ pub mod utils;
 
 use crate::server::bv_pb;
 use tokio::sync::RwLock;
+
+pub const BV_VAR_PATH: &str = "var/lib/blockvisor";
 
 lazy_static::lazy_static! {
     pub static ref BV_STATUS: RwLock<server::bv_pb::ServiceStatus> = RwLock::new(server::bv_pb::ServiceStatus::UndefinedServiceStatus);

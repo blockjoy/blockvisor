@@ -2,11 +2,11 @@ use crate::{
     node::{KERNEL_FILE, ROOT_FS_FILE},
     node_data::NodeImage,
     services::api::with_auth,
-    utils, with_retry,
+    utils, with_retry, BV_VAR_PATH,
 };
 use anyhow::{Context, Result};
 use babel_api::config::Babel;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs::{self, DirBuilder, File};
 use tokio::io::AsyncWriteExt;
 use tonic::transport::Channel;
@@ -24,10 +24,11 @@ const BABEL_CONFIG_NAME: &str = "babel.toml";
 pub struct CookbookService {
     token: String,
     client: cb_pb::cook_book_service_client::CookBookServiceClient<Channel>,
+    bv_root: PathBuf,
 }
 
 impl CookbookService {
-    pub async fn connect(url: &str, token: &str) -> Result<Self> {
+    pub async fn connect(bv_root: PathBuf, url: &str, token: &str) -> Result<Self> {
         let client =
             cb_pb::cook_book_service_client::CookBookServiceClient::connect(url.to_string())
                 .await
@@ -36,6 +37,7 @@ impl CookbookService {
         Ok(Self {
             token: token.to_string(),
             client,
+            bv_root,
         })
     }
 
@@ -72,7 +74,7 @@ impl CookbookService {
             .retrieve_configuration(with_auth(image.clone().into(), &self.token)))?
         .into_inner();
 
-        let folder = Self::get_image_download_folder_path(image);
+        let folder = Self::get_image_download_folder_path(&self.bv_root, image);
         DirBuilder::new().recursive(true).create(&folder).await?;
         let path = folder.join(BABEL_CONFIG_NAME);
         let mut f = File::create(path).await?;
@@ -90,7 +92,7 @@ impl CookbookService {
             .retrieve_image(with_auth(image.clone().into(), &self.token)))?
         .into_inner();
 
-        let folder = Self::get_image_download_folder_path(image);
+        let folder = Self::get_image_download_folder_path(&self.bv_root, image);
         DirBuilder::new().recursive(true).create(&folder).await?;
         let path = folder.join(ROOT_FS_FILE);
         let gz = folder.join(BABEL_ARCHIVE_IMAGE_NAME);
@@ -113,7 +115,7 @@ impl CookbookService {
             .retrieve_kernel(with_auth(image.clone().into(), &self.token)))?
         .into_inner();
 
-        let folder = Self::get_image_download_folder_path(image);
+        let folder = Self::get_image_download_folder_path(&self.bv_root, image);
         DirBuilder::new().recursive(true).create(&folder).await?;
         let gz = folder.join(KERNEL_ARCHIVE_NAME);
         utils::download_archive_with_retry(&archive.url, gz)
@@ -126,25 +128,27 @@ impl CookbookService {
     }
 
     #[instrument]
-    pub async fn get_babel_config(image: &NodeImage) -> Result<Babel> {
+    pub async fn get_babel_config(bv_root: &Path, image: &NodeImage) -> Result<Babel> {
         info!("Reading babel config...");
 
-        let folder = Self::get_image_download_folder_path(image);
+        let folder = Self::get_image_download_folder_path(bv_root, image);
         let path = folder.join(BABEL_CONFIG_NAME);
         let config = fs::read_to_string(path).await?;
 
         Ok(toml::from_str(&config)?)
     }
 
-    pub fn get_image_download_folder_path(image: &NodeImage) -> PathBuf {
-        crate::env::IMAGE_CACHE_DIR
+    pub fn get_image_download_folder_path(bv_root: &Path, image: &NodeImage) -> PathBuf {
+        bv_root
+            .join(BV_VAR_PATH)
+            .join("images")
             .join(&image.protocol)
             .join(&image.node_type)
             .join(&image.node_version)
     }
 
-    pub async fn is_image_cache_valid(image: &NodeImage) -> Result<bool> {
-        let folder = CookbookService::get_image_download_folder_path(image);
+    pub async fn is_image_cache_valid(bv_root: &Path, image: &NodeImage) -> Result<bool> {
+        let folder = CookbookService::get_image_download_folder_path(bv_root, image);
 
         let root = folder.join(ROOT_FS_FILE);
         let kernel = folder.join(KERNEL_FILE);

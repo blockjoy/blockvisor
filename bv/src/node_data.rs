@@ -10,7 +10,6 @@ use tokio::fs;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::env::REGISTRY_CONFIG_DIR;
 use crate::pal::NetInterface;
 
 pub type NodeProperties = HashMap<String, String>;
@@ -60,8 +59,8 @@ impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
             .with_context(|| format!("Failed to read node file `{}`", path.display()))
     }
 
-    pub async fn save(&self) -> Result<()> {
-        let path = self.file_path();
+    pub async fn save(&self, registry_config_dir: &Path) -> Result<()> {
+        let path = self.file_path(registry_config_dir);
         info!("Writing node config: {}", path.display());
         let config = toml::to_string(self)?;
         fs::write(&path, &*config).await?;
@@ -69,18 +68,18 @@ impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
         Ok(())
     }
 
-    pub async fn delete(self) -> Result<()> {
-        let path = self.file_path();
+    pub async fn delete(self, registry_config_dir: &Path) -> Result<()> {
+        let path = self.file_path(registry_config_dir);
         info!("Deleting node config: {}", path.display());
-        fs::remove_file(&*path)
+        fs::remove_file(&path)
             .await
             .with_context(|| format!("Failed to delete node file `{}`", path.display()))?;
 
         self.network_interface.delete().await
     }
 
-    fn file_path(&self) -> PathBuf {
+    fn file_path(&self, registry_config_dir: &Path) -> PathBuf {
         let filename = format!("{}.toml", self.id);
-        REGISTRY_CONFIG_DIR.join(filename)
+        registry_config_dir.join(filename)
     }
 }

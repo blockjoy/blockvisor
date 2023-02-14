@@ -4,6 +4,7 @@ use babel::{babelsup_service, utils};
 use babel::{logging, run_flag::RunFlag, supervisor};
 use babel_api::config::SupervisorConfig;
 use eyre::{anyhow, Context};
+use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::fs::DirBuilder;
@@ -11,6 +12,10 @@ use tokio::sync::{oneshot, watch};
 use tonic::transport::Server;
 use tracing::info;
 
+lazy_static::lazy_static! {
+    static ref BABELSUP_CONFIG_PATH: &'static Path = Path::new("/etc/babelsup.conf");
+    static ref BABEL_BIN_PATH: &'static Path = Path::new("/usr/bin/babel");
+}
 const DATA_DRIVE_PATH: &str = "/dev/vdb";
 const VSOCK_HOST_CID: u32 = 3;
 const VSOCK_SUPERVISOR_PORT: u32 = 41;
@@ -27,7 +32,7 @@ async fn main() -> eyre::Result<()> {
     let mut run = RunFlag::run_until_ctrlc();
 
     let (babel_change_tx, babel_change_rx) =
-        watch::channel(utils::file_checksum(&babel::env::BABEL_BIN_PATH).await.ok());
+        watch::channel(utils::file_checksum(&BABEL_BIN_PATH).await.ok());
     let (sup_setup_tx, sup_setup_rx) = oneshot::channel();
     let sup_setup = if let Ok(cfg) = load_config().await {
         mount_data_drive(&cfg.data_directory_mount_point).await?;
@@ -44,7 +49,7 @@ async fn main() -> eyre::Result<()> {
     let supervisor_handle = tokio::spawn(supervisor::run(
         SysTimer,
         run.clone(),
-        babel::env::BABEL_BIN_PATH.clone(),
+        BABEL_BIN_PATH.to_path_buf(),
         sup_setup_rx,
         babel_change_rx,
     ));
@@ -61,9 +66,9 @@ async fn main() -> eyre::Result<()> {
 async fn load_config() -> eyre::Result<SupervisorConfig> {
     info!(
         "Loading supervisor configuration at {}",
-        babel::env::BABELSUP_CONFIG_PATH.to_string_lossy()
+        BABELSUP_CONFIG_PATH.to_string_lossy()
     );
-    let json_str = fs::read_to_string(babel::env::BABELSUP_CONFIG_PATH.as_path()).await?;
+    let json_str = fs::read_to_string(&*BABELSUP_CONFIG_PATH).await?;
     supervisor::load_config(&json_str)
 }
 
@@ -114,8 +119,8 @@ async fn serve(
     let babelsup_service = babelsup_service::BabelSupService::new(
         sup_setup,
         babel_change_tx,
-        babel::env::BABEL_BIN_PATH.clone(),
-        babel::env::BABELSUP_CONFIG_PATH.clone(),
+        BABEL_BIN_PATH.to_path_buf(),
+        BABELSUP_CONFIG_PATH.to_path_buf(),
         ConfigObserver,
     );
     let listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_SUPERVISOR_PORT)

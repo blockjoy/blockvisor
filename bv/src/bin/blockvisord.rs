@@ -1,6 +1,8 @@
 use crate::api::pb;
 use anyhow::{Context, Result};
-use blockvisord::pal::{LinuxPlatform, NetInterface};
+use blockvisord::config::CONFIG_PATH;
+use blockvisord::linux_platform::LinuxPlatform;
+use blockvisord::pal::{NetInterface, Pal};
 use blockvisord::{
     config::Config,
     hosts,
@@ -35,11 +37,18 @@ async fn main() -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let config = Config::load().await.context("failed to load host config")?;
-    let nodes = if Nodes::<LinuxPlatform>::exists() {
-        Nodes::load(LinuxPlatform, config.clone()).await?
+    let pal = LinuxPlatform::new()?;
+    let bv_root = pal.bv_root().to_path_buf();
+    let config = Config::load(&bv_root).await.with_context(|| {
+        format!(
+            "failed to load host config from {}",
+            bv_root.join(CONFIG_PATH).display()
+        )
+    })?;
+    let nodes = if Nodes::<LinuxPlatform>::exists(&bv_root) {
+        Nodes::load(pal, config.clone()).await?
     } else {
-        let nodes = Nodes::new(LinuxPlatform, config.clone());
+        let nodes = Nodes::new(pal, config.clone());
         nodes.save().await?;
         nodes
     };
@@ -113,7 +122,7 @@ async fn main() -> Result<()> {
     let node_updates_future = node_updates(nodes.clone());
     let node_metrics_future = node_metrics(nodes.clone(), &endpoint, token.clone());
     let host_metrics_future = host_metrics(config.id.clone(), &endpoint, token.clone());
-    let self_updater = self_updater::new(self_updater::SysTimer, &config)?;
+    let self_updater = self_updater::new(self_updater::SysTimer, &bv_root, &config)?;
 
     let _ = tokio::join!(
         internal_api_server_future,

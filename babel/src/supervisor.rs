@@ -271,6 +271,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Instant;
+    use sysinfo::{PidExt, ProcessRefreshKind};
     use tokio::sync::broadcast;
     use tokio::time::Duration;
 
@@ -623,14 +624,27 @@ mod tests {
         let test_env = setup_test_env()?;
         let mut cmd = Command::new(&test_env.babel_path);
         cmd.args(["a", "b", "c"]);
-        let mut child = cmd.spawn()?;
+        let child = cmd.spawn()?;
+        let pid = child.id().unwrap();
         let test_run = test_env.run.clone();
         wait_for_babel(test_run.clone(), test_env.ctrl_file.clone());
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
         kill_remnants(&test_env.babel_path.to_string_lossy(), &["a", "b", "c"], ps);
-        child.kill().await.unwrap_err();
+        let is_process_running = |pid| {
+            let mut sys = System::new();
+            sys.refresh_process_specifics(Pid::from_u32(pid), ProcessRefreshKind::new())
+                .then(|| sys.process(Pid::from_u32(pid)).map(|proc| proc.status()))
+                .flatten()
+                .map_or(false, |status| status != sysinfo::ProcessStatus::Zombie)
+        };
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while is_process_running(pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
         Ok(())
     }
 }

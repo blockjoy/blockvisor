@@ -7,6 +7,8 @@ use futures_util::StreamExt;
 use std::collections::hash_map::Entry;
 use std::ffi::OsStr;
 use std::fmt::{Debug, Display};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::{collections::HashMap, path::Path, str::FromStr, time::Duration};
 use tokio::fs::DirBuilder;
 use tokio::time::Instant;
@@ -16,61 +18,87 @@ use uuid::Uuid;
 use crate::pal::{NetInterface, Pal};
 use crate::services::api::pb::Parameter;
 use crate::{
-    env::*,
     node_connection::NodeConnection,
     node_data::{NodeData, NodeImage, NodeStatus},
     render,
     services::cookbook::CookbookService,
     utils::{get_process_pid, run_cmd},
-    with_retry,
+    with_retry, BV_VAR_PATH,
 };
 
 const NODE_START_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+pub const REGISTRY_CONFIG_DIR: &str = "nodes";
+pub const FC_BIN_NAME: &str = "firecracker";
+const DATA_IMG_FILENAME: &str = "data.img";
+const FC_BIN_PATH: &str = "usr/bin/firecracker";
+const FC_SOCKET_PATH: &str = "/firecracker.socket";
+pub const ROOT_FS_FILE: &str = "os.img";
+pub const KERNEL_FILE: &str = "kernel";
+const DATA_FILE: &str = "data.img";
+pub const VSOCK_PATH: &str = "vsock.socket";
+const VSOCK_GUEST_CID: u32 = 3;
+const MAX_KERNEL_ARGS_LEN: usize = 1024;
 
 #[derive(Debug)]
 pub struct Node<P: Pal> {
     pub data: NodeData<<P as Pal>::NetInterface>,
     machine: Machine<'static>,
     node_conn: NodeConnection,
+    paths: Paths,
+    pal: Arc<P>,
 }
 
-pub const FC_BIN_NAME: &str = "firecracker";
-const FC_BIN_PATH: &str = "/usr/bin/firecracker";
-const FC_SOCKET_PATH: &str = "/firecracker.socket";
-pub const ROOT_FS_FILE: &str = "os.img";
-pub const KERNEL_FILE: &str = "kernel";
-const DATA_FILE: &str = "data.img";
-pub const VSOCK_PATH: &str = "/vsock.socket";
-const VSOCK_GUEST_CID: u32 = 3;
-const MAX_KERNEL_ARGS_LEN: usize = 1024;
+#[derive(Debug)]
+struct Paths {
+    bv_root: PathBuf,
+    chroot: PathBuf,
+    registry: PathBuf,
+    data: PathBuf,
+}
 
-impl<P: Pal> Node<P> {
+impl Paths {
+    fn build(bv_root: &Path) -> Self {
+        Self {
+            bv_root: bv_root.to_path_buf(),
+            chroot: bv_root.join(BV_VAR_PATH),
+            registry: bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR),
+            data: bv_root.join(BV_VAR_PATH).join(DATA_IMG_FILENAME),
+        }
+    }
+}
+
+impl<P: Pal + Debug> Node<P> {
     /// Creates a new node according to specs.
     #[instrument(skip(data))]
-    pub async fn create(data: NodeData<<P as Pal>::NetInterface>) -> Result<Node<P>> {
+    pub async fn create(pal: Arc<P>, data: NodeData<<P as Pal>::NetInterface>) -> Result<Node<P>> {
         info!("Creating node with data: {data:?}");
         let node_id = data.id;
-        let config = Node::<P>::create_config(&data).await?;
-        Node::<P>::create_data_image(&node_id, data.babel_conf.requirements.disk_size_gb).await?;
+        let paths = Paths::build(pal.bv_root());
+        let config = Node::<P>::create_config(&paths, &data).await?;
+        Node::<P>::create_data_image(&paths, &node_id, data.babel_conf.requirements.disk_size_gb)
+            .await?;
         let machine = Machine::create(config).await?;
 
-        data.save().await?;
+        data.save(&paths.registry).await?;
 
         Ok(Self {
             data,
             machine,
-            node_conn: NodeConnection::closed(node_id),
+            node_conn: NodeConnection::closed(&paths.chroot, node_id),
+            paths,
+            pal,
         })
     }
 
     /// Returns node previously created on this host.
     #[instrument(skip(data))]
-    pub async fn attach(data: NodeData<<P as Pal>::NetInterface>) -> Result<Node<P>> {
+    pub async fn attach(pal: Arc<P>, data: NodeData<<P as Pal>::NetInterface>) -> Result<Node<P>> {
         info!("Attaching to node with data: {data:?}");
-        let config = Node::<P>::create_config(&data).await?;
+        let paths = Paths::build(pal.bv_root());
+        let config = Node::<P>::create_config(&paths, &data).await?;
         let cmd = data.id.to_string();
         let (pid, node_conn) = match get_process_pid(FC_BIN_NAME, &cmd) {
             Ok(pid) => {
@@ -78,24 +106,31 @@ impl<P: Pal> Node<P> {
                 // for the nodes to come online. For that reason we restrict the allowed delay
                 // further down.
                 debug!("connecting to babel ...");
-                let node_conn = NodeConnection::try_open(data.id, NODE_RECONNECT_TIMEOUT)
-                    .await
-                    .unwrap_or_else(|err| {
-                        warn!(
-                            "failed to reestablished babel connection to running node {}: {}",
-                            data.id, err
-                        );
-                        NodeConnection::closed(data.id)
-                    });
+                let node_conn = NodeConnection::try_open(
+                    &paths.chroot,
+                    pal.babel_path(),
+                    data.id,
+                    NODE_RECONNECT_TIMEOUT,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    warn!(
+                        "failed to reestablished babel connection to running node {}: {}",
+                        data.id, err
+                    );
+                    NodeConnection::closed(&paths.chroot, data.id)
+                });
                 (Some(pid), node_conn)
             }
-            Err(_) => (None, NodeConnection::closed(data.id)),
+            Err(_) => (None, NodeConnection::closed(&paths.chroot, data.id)),
         };
         let machine = Machine::connect(config, pid).await;
         Ok(Self {
             data,
             machine,
             node_conn,
+            paths,
+            pal,
         })
     }
 
@@ -111,10 +146,10 @@ impl<P: Pal> Node<P> {
             bail!("Node should be stopped before running upgrade");
         }
 
-        Node::<P>::copy_os_image(&self.data.id, image).await?;
+        self.copy_os_image(image).await?;
 
         self.data.image = image.clone();
-        self.data.save().await
+        self.data.save(&self.paths.registry).await
     }
 
     /// Starts the node.
@@ -131,13 +166,19 @@ impl<P: Pal> Node<P> {
         if self.machine.state() == firec::MachineState::SHUTOFF {
             self.machine.start().await?;
         }
-        self.node_conn = NodeConnection::try_open(self.id(), NODE_START_TIMEOUT).await?;
+        self.node_conn = NodeConnection::try_open(
+            &self.paths.chroot,
+            self.pal.babel_path(),
+            self.id(),
+            NODE_START_TIMEOUT,
+        )
+        .await?;
         let babelsup_client = self.node_conn.babelsup_client().await?;
         with_retry!(babelsup_client.setup_supervisor(self.data.babel_conf.supervisor.clone()))?;
 
         // We save the `running` status only after all of the previous steps have succeeded.
         self.data.expected_status = NodeStatus::Running;
-        self.data.save().await
+        self.data.save(&self.paths.registry).await
     }
 
     /// Returns the actual status of the node.
@@ -195,8 +236,8 @@ impl<P: Pal> Node<P> {
         }
 
         self.data.expected_status = NodeStatus::Stopped;
-        self.data.save().await?;
-        self.node_conn = NodeConnection::closed(self.id());
+        self.data.save(&self.paths.registry).await?;
+        self.node_conn = NodeConnection::closed(&self.paths.chroot, self.id());
 
         Ok(())
     }
@@ -205,7 +246,7 @@ impl<P: Pal> Node<P> {
     #[instrument(skip(self))]
     pub async fn delete(self) -> Result<()> {
         self.machine.delete().await?;
-        self.data.delete().await
+        self.data.delete(&self.paths.registry).await
     }
 
     pub async fn update(
@@ -225,17 +266,20 @@ impl<P: Pal> Node<P> {
             // TODO change API to send Option<Vec<Parameter>> to allow setting empty properties
             self.data.properties = properties.into_iter().map(|p| (p.name, p.value)).collect();
         }
-        self.data.save().await
+        self.data.save(&self.paths.registry).await
     }
 
     /// Copy OS drive into chroot location.
-    async fn copy_os_image(id: &Uuid, image: &NodeImage) -> Result<()> {
+    async fn copy_os_image(&self, image: &NodeImage) -> Result<()> {
         let root_fs_path =
-            CookbookService::get_image_download_folder_path(image).join(ROOT_FS_FILE);
+            CookbookService::get_image_download_folder_path(&self.paths.bv_root, image)
+                .join(ROOT_FS_FILE);
 
-        let data_dir = CHROOT_PATH
+        let data_dir = self
+            .paths
+            .chroot
             .join(FC_BIN_NAME)
-            .join(id.to_string())
+            .join(self.id().to_string())
             .join("root");
         DirBuilder::new().recursive(true).create(&data_dir).await?;
 
@@ -245,8 +289,9 @@ impl<P: Pal> Node<P> {
     }
 
     /// Create new data drive in chroot location.
-    async fn create_data_image(id: &Uuid, disk_size_gb: usize) -> Result<()> {
-        let data_dir = CHROOT_PATH
+    async fn create_data_image(paths: &Paths, id: &Uuid, disk_size_gb: usize) -> Result<()> {
+        let data_dir = paths
+            .chroot
             .join(FC_BIN_NAME)
             .join(id.to_string())
             .join("root");
@@ -265,6 +310,7 @@ impl<P: Pal> Node<P> {
     }
 
     async fn create_config(
+        paths: &Paths,
         data: &NodeData<<P as Pal>::NetInterface>,
     ) -> Result<firec::config::Config<'static>> {
         let kernel_args = format!(
@@ -279,15 +325,17 @@ impl<P: Pal> Node<P> {
         let iface =
             firec::config::network::Interface::new(data.network_interface.name().clone(), "eth0");
         let root_fs_path =
-            CookbookService::get_image_download_folder_path(&data.image).join(ROOT_FS_FILE);
+            CookbookService::get_image_download_folder_path(&paths.bv_root, &data.image)
+                .join(ROOT_FS_FILE);
         let kernel_path =
-            CookbookService::get_image_download_folder_path(&data.image).join(KERNEL_FILE);
+            CookbookService::get_image_download_folder_path(&paths.bv_root, &data.image)
+                .join(KERNEL_FILE);
 
         let config = firec::config::Config::builder(Some(data.id), kernel_path)
             // Jailer configuration.
             .jailer_cfg()
-            .chroot_base_dir(&*CHROOT_PATH)
-            .exec_file(Path::new(FC_BIN_PATH))
+            .chroot_base_dir(paths.chroot.clone())
+            .exec_file(paths.bv_root.join(FC_BIN_PATH))
             .mode(JailerMode::Tmux(Some(data.name.clone().into())))
             .build()
             // Machine configuration.
@@ -300,14 +348,14 @@ impl<P: Pal> Node<P> {
             .is_root_device(true)
             .build()
             // Add data drive.
-            .add_drive("data", &*DATA_PATH)
+            .add_drive("data", paths.data.clone())
             .build()
             // Network configuration.
             .add_network_interface(iface)
             // Rest of the configuration.
             .socket_path(Path::new(FC_SOCKET_PATH))
             .kernel_args(kernel_args)
-            .vsock_cfg(VSOCK_GUEST_CID, Path::new(VSOCK_PATH))
+            .vsock_cfg(VSOCK_GUEST_CID, Path::new("/").join(VSOCK_PATH))
             .build();
 
         Ok(config)

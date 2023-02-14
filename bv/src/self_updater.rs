@@ -3,12 +3,12 @@ use crate::services::api::with_auth;
 use crate::services::cookbook::{
     cb_pb, cb_pb::bundle_service_client::BundleServiceClient, cb_pb::BundleIdentifier,
 };
-use crate::{installer, utils};
+use crate::{installer, utils, BV_VAR_PATH};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::cmp::Ordering;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
 use tokio::process::Command;
@@ -64,11 +64,15 @@ pub struct SelfUpdater<T: Sleeper, C: BundleConnector> {
     sleeper: T,
 }
 
-pub fn new<T: Sleeper>(sleeper: T, cfg: &Config) -> Result<SelfUpdater<T, DefaultConnector>> {
-    let download_path = crate::env::VARS_DIR.join("downloads");
+pub fn new<T: Sleeper>(
+    sleeper: T,
+    bv_root: &Path,
+    cfg: &Config,
+) -> Result<SelfUpdater<T, DefaultConnector>> {
+    let download_path = bv_root.join(BV_VAR_PATH).join("downloads");
     std::fs::create_dir_all(&download_path)?;
     Ok(SelfUpdater {
-        blacklist_path: crate::env::ROOT_DIR
+        blacklist_path: bv_root
             .join(installer::INSTALL_PATH)
             .join(installer::BLACKLIST),
         download_path,

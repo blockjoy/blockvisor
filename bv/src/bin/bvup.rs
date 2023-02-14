@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use blockvisord::config::Config;
 use blockvisord::hosts::get_host_info;
+use blockvisord::linux_platform::bv_root;
 use blockvisord::self_updater;
 use blockvisord::services::api::pb;
 use clap::{crate_version, ArgGroup, Parser};
@@ -51,6 +52,7 @@ pub fn get_ip_address(ifa_name: &str) -> Result<String> {
 /// Simple host init tool. It provision host with OTP than download and install latest bv bundle.
 #[tokio::main]
 async fn main() -> Result<()> {
+    let bv_root = bv_root();
     let cmd_args = CmdArgs::parse();
     let api_config = if !cmd_args.skip_init {
         println!("Provision and init blockvisor configuration");
@@ -93,7 +95,7 @@ async fn main() -> Result<()> {
             blockjoy_registry_url: cmd_args.blockjoy_registry_url,
             update_check_interval_secs: None,
         };
-        api_config.save().await?;
+        api_config.save(&bv_root).await?;
         Some(api_config)
     } else {
         None
@@ -101,13 +103,13 @@ async fn main() -> Result<()> {
     if !cmd_args.skip_download {
         println!("Download and install bv bundle");
         let api_config = match api_config {
-            None => Config::load().await.with_context(|| {
+            None => Config::load(&bv_root).await.with_context(|| {
                 "failed to load configuration - need to provision and init first"
             })?,
             Some(value) => value,
         };
 
-        let mut updater = self_updater::new(self_updater::SysTimer, &api_config)?;
+        let mut updater = self_updater::new(self_updater::SysTimer, &bv_root, &api_config)?;
         let bundle_id = updater
             .get_latest()
             .await?

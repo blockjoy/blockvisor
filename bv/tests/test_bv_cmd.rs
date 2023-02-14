@@ -1,47 +1,30 @@
-#[cfg(target_os = "linux")]
 use assert_cmd::Command;
-#[cfg(target_os = "linux")]
 use assert_fs::TempDir;
-use blockvisord::pal::LinuxPlatform;
-#[cfg(target_os = "linux")]
+use blockvisord::linux_platform::LinuxPlatform;
 use blockvisord::services::api::{self, pb};
-#[cfg(target_os = "linux")]
 use blockvisord::set_bv_status;
-#[cfg(target_os = "linux")]
 use futures_util::FutureExt;
-#[cfg(target_os = "linux")]
 use predicates::prelude::*;
-#[cfg(target_os = "linux")]
 use serial_test::serial;
-#[cfg(target_os = "linux")]
 use std::{env, fs};
-#[cfg(target_os = "linux")]
 use std::{net::ToSocketAddrs, sync::Arc};
 use sysinfo::{Pid, PidExt, ProcessExt, ProcessRefreshKind, System, SystemExt};
-#[cfg(target_os = "linux")]
 use tokio::sync::{mpsc, Mutex, RwLock};
-#[cfg(target_os = "linux")]
 use tokio::time::{sleep, Duration};
-#[cfg(target_os = "linux")]
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-#[cfg(target_os = "linux")]
 use tonic::{
     transport::{Endpoint, Server},
     Request,
 };
 
-#[cfg(target_os = "linux")]
 pub mod ui_pb {
     tonic::include_proto!("blockjoy.api.ui_v1");
 }
 
-#[cfg(target_os = "linux")]
 mod stub_server;
 
-#[cfg(target_os = "linux")]
 mod token;
 
-#[cfg(target_os = "linux")]
 fn bv_run(commands: &[&str], stdout_pattern: &str) {
     let mut cmd = Command::cargo_bin("bv").unwrap();
     cmd.args(commands)
@@ -51,7 +34,6 @@ fn bv_run(commands: &[&str], stdout_pattern: &str) {
         .stdout(predicate::str::contains(stdout_pattern));
 }
 
-#[cfg(target_os = "linux")]
 fn create_node(image: &str) -> String {
     use std::str;
 
@@ -82,7 +64,6 @@ fn create_node(image: &str) -> String {
 //// =========== HOST INTEGRATION: bv cli host only
 #[test]
 #[serial]
-#[cfg(target_os = "linux")]
 fn test_bv_cmd_start_no_init() {
     let tmp_dir = TempDir::new().unwrap();
 
@@ -96,7 +77,6 @@ fn test_bv_cmd_start_no_init() {
 
 #[test]
 #[serial]
-#[cfg(target_os = "linux")]
 fn test_bv_cmd_restart() {
     bv_run(&["stop"], "blockvisor service stopped successfully");
     bv_run(&["status"], "Service stopped");
@@ -107,28 +87,24 @@ fn test_bv_cmd_restart() {
 
 #[test]
 #[serial]
-#[cfg(target_os = "linux")]
 fn test_bv_host_metrics() {
     bv_run(&["host", "metrics"], "Used cpu:");
 }
 
 #[test]
 #[serial]
-#[cfg(target_os = "linux")]
 fn test_bv_chain_list() {
     bv_run(&["chain", "list", "testing", "validator"], "");
 }
 
 #[test]
 #[serial]
-#[cfg(target_os = "linux")]
 fn test_bv_cmd_delete_all() {
     bv_run(&["node", "rm", "--all", "--yes"], "");
 }
 
 #[test]
 #[serial]
-#[cfg(target_os = "linux")]
 fn test_bv_cmd_node_start_and_stop_all() {
     const NODES_COUNT: usize = 2;
     println!("create {NODES_COUNT} nodes");
@@ -153,7 +129,6 @@ fn test_bv_cmd_node_start_and_stop_all() {
 
 #[test]
 #[serial]
-#[cfg(target_os = "linux")]
 fn test_bv_cmd_logs() {
     println!("create a node");
     let vm_id = &create_node("testing/validator/0.0.1");
@@ -174,7 +149,6 @@ fn test_bv_cmd_logs() {
 
 #[tokio::test]
 #[serial]
-#[cfg(target_os = "linux")]
 async fn test_bv_cmd_node_lifecycle() {
     println!("create a node");
     let vm_id = &create_node("testing/validator/0.0.1");
@@ -228,7 +202,6 @@ async fn test_bv_cmd_node_lifecycle() {
 
 #[tokio::test]
 #[serial]
-#[cfg(target_os = "linux")]
 async fn test_bv_cmd_node_recovery() {
     use blockvisord::{node::FC_BIN_NAME, utils};
 
@@ -274,7 +247,6 @@ async fn test_bv_cmd_node_recovery() {
 //// =========== E2E: bv cli host + backend (otp)
 #[test]
 #[serial]
-#[cfg(target_os = "linux")]
 fn test_bv_cmd_init_unknown_otp() {
     let tmp_dir = TempDir::new().unwrap();
 
@@ -297,7 +269,6 @@ fn test_bv_cmd_init_unknown_otp() {
 //// =========== E2E: bv cli host + ui api + backend (otp)
 #[tokio::test]
 #[serial]
-#[cfg(target_os = "linux")]
 async fn test_bv_cmd_init_localhost() {
     use blockvisord::config::Config;
     use serde_json::json;
@@ -544,7 +515,6 @@ async fn test_bv_cmd_init_localhost() {
 
 #[tokio::test]
 #[serial]
-#[cfg(target_os = "linux")]
 async fn test_bv_cmd_grpc_stub_init_reset() {
     use std::path::Path;
     use stub_server::StubHostsServer;
@@ -602,12 +572,10 @@ async fn test_bv_cmd_grpc_stub_init_reset() {
     .unwrap();
 }
 
-#[cfg(target_os = "linux")]
 fn get_first_message(meta: Option<ui_pb::ResponseMeta>) -> String {
     meta.unwrap().messages.first().unwrap().clone()
 }
 
-#[cfg(target_os = "linux")]
 fn with_auth<T>(inner: T, auth_token: &str, refresh_token: &str) -> Request<T> {
     let mut request = Request::new(inner);
     request.metadata_mut().insert(
@@ -625,15 +593,19 @@ fn with_auth<T>(inner: T, auth_token: &str, refresh_token: &str) -> Request<T> {
 //// =========== HOST+COOKBOOK INTEGRATION: bv cli host + cookbook
 #[tokio::test]
 #[serial]
-#[cfg(target_os = "linux")]
 async fn test_bv_cmd_cookbook_download() {
-    use blockvisord::env::IMAGE_CACHE_DIR;
+    use blockvisord::node_data::NodeImage;
+    use blockvisord::services::cookbook::CookbookService;
     use std::path::Path;
 
-    let folder = IMAGE_CACHE_DIR
-        .join("testing")
-        .join("validator")
-        .join("0.0.3");
+    let folder = CookbookService::get_image_download_folder_path(
+        Path::new("/"),
+        &NodeImage {
+            protocol: "testing".to_string(),
+            node_type: "validator".to_string(),
+            node_version: "0.0.3".to_string(),
+        },
+    );
     let _ = tokio::fs::remove_dir_all(&folder).await;
 
     println!("create a node");
@@ -648,10 +620,9 @@ async fn test_bv_cmd_cookbook_download() {
     assert!(Path::new(&folder.join("babel.toml")).exists());
 }
 
-//// =========== HOST+BACKEND INTEGRATION: bv cli host + backend (cmds)
+//// =========== HOST+BACKEND INTEGRATION: bv nodes host + backend (cmds)
 #[tokio::test]
 #[serial]
-#[cfg(target_os = "linux")]
 async fn test_bv_cmd_grpc_commands() {
     use blockvisord::config::Config;
     use blockvisord::nodes::Nodes;
@@ -873,7 +844,9 @@ async fn test_bv_cmd_grpc_commands() {
         update_check_interval_secs: None,
     };
 
-    let nodes = Nodes::load(LinuxPlatform, config.clone()).await.unwrap();
+    let nodes = Nodes::load(LinuxPlatform::new().unwrap(), config.clone())
+        .await
+        .unwrap();
     let updates_tx = nodes.get_updates_sender().await.unwrap().clone();
     let nodes = Arc::new(RwLock::new(nodes));
 
@@ -955,7 +928,6 @@ async fn test_bv_cmd_grpc_commands() {
     assert_eq!(updates_count, expected_count);
 }
 
-#[cfg(target_os = "linux")]
 fn node_update(node_id: &str, status: pb::node_info::ContainerStatus) -> pb::InfoUpdate {
     pb::InfoUpdate {
         info: Some(pb::info_update::Info::Node(pb::NodeInfo {
@@ -966,7 +938,6 @@ fn node_update(node_id: &str, status: pb::node_info::ContainerStatus) -> pb::Inf
     }
 }
 
-#[cfg(target_os = "linux")]
 fn error_command_update(command_id: &str, message: String) -> pb::InfoUpdate {
     pb::InfoUpdate {
         info: Some(pb::info_update::Info::Command(pb::CommandInfo {
@@ -977,7 +948,6 @@ fn error_command_update(command_id: &str, message: String) -> pb::InfoUpdate {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn ack_command_update(command_id: &str) -> pb::InfoUpdate {
     pb::InfoUpdate {
         info: Some(pb::info_update::Info::Command(pb::CommandInfo {
@@ -988,7 +958,6 @@ fn ack_command_update(command_id: &str) -> pb::InfoUpdate {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn success_command_update(command_id: &str) -> pb::InfoUpdate {
     pb::InfoUpdate {
         info: Some(pb::info_update::Info::Command(pb::CommandInfo {

@@ -1,13 +1,12 @@
-use crate::{env::*, node::VSOCK_PATH, with_retry};
+use crate::{node::VSOCK_PATH, with_retry};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use babel_api::babel_client::BabelClient;
 use babel_api::babel_sup_client::BabelSupClient;
-use std::env;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio::{
-    fs,
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
     time::{sleep, timeout},
@@ -34,14 +33,14 @@ pub enum NodeConnectionState {
 
 #[derive(Debug)]
 pub struct NodeConnection {
-    node_id: uuid::Uuid,
+    socket_path: PathBuf,
     state: NodeConnectionState,
 }
 
 impl NodeConnection {
-    pub fn closed(node_id: uuid::Uuid) -> Self {
+    pub fn closed(chroot_path: &Path, node_id: uuid::Uuid) -> Self {
         Self {
-            node_id,
+            socket_path: build_socket_path(chroot_path, node_id),
             state: NodeConnectionState::Closed,
         }
     }
@@ -53,18 +52,24 @@ impl NodeConnection {
     /// Tries to open a new connection to the VM. Note that this fails if the VM hasn't started yet.
     /// It also initializes that connection by sending the opening message. Therefore, if this
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.
-    pub async fn try_open(node_id: uuid::Uuid, max_delay: Duration) -> Result<Self> {
-        let mut client = connect_babelsup(node_id, max_delay).await;
+    pub async fn try_open(
+        chroot_path: &Path,
+        babel_path: &Path,
+        node_id: uuid::Uuid,
+        max_delay: Duration,
+    ) -> Result<Self> {
+        let socket_path = build_socket_path(chroot_path, node_id);
+        let mut client = connect_babelsup(&socket_path, max_delay).await;
         let babelsup_version = with_retry!(client.get_version(()))?.into_inner();
         info!("Connected to babelsup {babelsup_version}");
-        let (babel_bin, checksum) = load_babel_bin().await?;
+        let (babel_bin, checksum) = load_babel_bin(babel_path).await?;
         let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
         if babel_status != babel_api::BabelStatus::Ok {
             info!("Invalid or missing Babel service on VM, installing new one");
             with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
         }
         Ok(Self {
-            node_id,
+            socket_path,
             state: NodeConnectionState::BabelSup(client),
         })
     }
@@ -79,7 +84,12 @@ impl NodeConnection {
             NodeConnectionState::BabelSup { .. } => {
                 debug!("Reconnecting to babel");
                 self.state = NodeConnectionState::Babel(BabelClient::new(
-                    create_channel(self.node_id, BABEL_VSOCK_PORT, CONNECTION_SWITCH_TIMEOUT).await,
+                    create_channel(
+                        &self.socket_path,
+                        BABEL_VSOCK_PORT,
+                        CONNECTION_SWITCH_TIMEOUT,
+                    )
+                    .await,
                 ));
             }
         };
@@ -99,7 +109,7 @@ impl NodeConnection {
             NodeConnectionState::Babel { .. } => {
                 debug!("Reconnecting to babelsup");
                 self.state = NodeConnectionState::BabelSup(
-                    connect_babelsup(self.node_id, CONNECTION_SWITCH_TIMEOUT).await,
+                    connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await,
                 );
             }
             NodeConnectionState::BabelSup { .. } => {}
@@ -111,19 +121,21 @@ impl NodeConnection {
         }
     }
 }
-
-async fn connect_babelsup(node_id: Uuid, max_delay: Duration) -> BabelSupClient<Channel> {
-    BabelSupClient::new(create_channel(node_id, BABEL_SUP_VSOCK_PORT, max_delay).await)
+fn build_socket_path(chroot_path: &Path, node_id: Uuid) -> PathBuf {
+    chroot_path
+        .join("firecracker")
+        .join(node_id.to_string())
+        .join("root")
+        .join(VSOCK_PATH)
+}
+async fn connect_babelsup(socket_path: &Path, max_delay: Duration) -> BabelSupClient<Channel> {
+    BabelSupClient::new(create_channel(socket_path, BABEL_SUP_VSOCK_PORT, max_delay).await)
 }
 
-async fn open_stream(node_id: uuid::Uuid, port: u32, max_delay: Duration) -> Result<UnixStream> {
+async fn open_stream(socket_path: PathBuf, port: u32, max_delay: Duration) -> Result<UnixStream> {
     // We are going to connect to the central socket for this VM. Later we will specify which
     // port we want to talk to.
-    let socket = format!(
-        "{}/firecracker/{node_id}/root{VSOCK_PATH}",
-        CHROOT_PATH.to_string_lossy()
-    );
-    debug!("Connecting to node at `{socket}`");
+    debug!("Connecting to node at `{}`", socket_path.display());
 
     // We need to implement retrying when reading from the socket, as it may take a little bit
     // of time for the socket file to get created on disk, because this is done asynchronously
@@ -131,7 +143,7 @@ async fn open_stream(node_id: uuid::Uuid, port: u32, max_delay: Duration) -> Res
     let start = std::time::Instant::now();
     let elapsed = || std::time::Instant::now() - start;
     let stream = loop {
-        match UnixStream::connect(&socket).await {
+        match UnixStream::connect(&socket_path).await {
             // Also it's possible that we will not manage to
             // initiate connection from the first attempt
             Ok(mut stream) => match handshake(&mut stream, port).await {
@@ -198,29 +210,21 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<()> {
     Ok(())
 }
 
-async fn create_channel(node_id: uuid::Uuid, vsock_port: u32, max_delay: Duration) -> Channel {
+async fn create_channel(socket_path: &Path, vsock_port: u32, max_delay: Duration) -> Channel {
+    let socket_path = socket_path.to_owned();
     Endpoint::from_static("http://[::]:50052")
         .timeout(GRPC_REQUEST_TIMEOUT)
         .connect_timeout(GRPC_CONNECT_TIMEOUT)
-        .connect_with_connector_lazy(tower::service_fn(move |_: Uri| async move {
-            open_stream(node_id, vsock_port, max_delay).await
+        .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+            let socket_path = socket_path.clone();
+            async move { open_stream(socket_path, vsock_port, max_delay).await }
         }))
 }
 
-pub async fn load_babel_bin() -> Result<(Vec<babel_api::BabelBin>, u32)> {
-    let babel_path =
-        fs::canonicalize(env::current_exe().with_context(|| "failed to get current binary path")?)
-            .await
-            .with_context(|| "non canonical current binary path")?
-            .parent()
-            .with_context(|| "invalid current binary dir - has no parent")?
-            .join("../../babel/bin/babel");
-    let file = File::open(&babel_path).await.with_context(|| {
-        format!(
-            "failed to load babel binary {}",
-            babel_path.to_string_lossy()
-        )
-    })?;
+pub async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::BabelBin>, u32)> {
+    let file = File::open(babel_path)
+        .await
+        .with_context(|| format!("failed to load babel binary {}", babel_path.display()))?;
     let mut reader = BufReader::new(file);
     let mut buf = [0; 16384];
     let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
