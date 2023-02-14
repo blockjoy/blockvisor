@@ -996,3 +996,57 @@ fn success_command_update(command_id: &str) -> pb::InfoUpdate {
         })),
     }
 }
+
+#[tokio::test]
+#[serial]
+// #[cfg(target_os = "linux")]
+async fn test_mqtt_pub_sub() {
+    use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
+    use std::time::Duration;
+    use tokio::{task, time};
+
+    let mut options = MqttOptions::parse_url("mqtt://localhost:1883?client_id=bv123").unwrap();
+    options.set_keep_alive(Duration::from_secs(5));
+
+    let (client, mut eventloop) = AsyncClient::new(options, 10);
+    client
+        .subscribe("hello/rumqtt", QoS::AtMostOnce)
+        .await
+        .unwrap();
+
+    println!("publish");
+    task::spawn(async move {
+        for i in 0..10 {
+            client
+                .publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize])
+                .await
+                .unwrap();
+            time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    println!("receive");
+    let start = std::time::Instant::now();
+    let elapsed = || std::time::Instant::now() - start;
+    loop {
+        match eventloop.poll().await {
+            Ok(_) if elapsed() > Duration::from_secs(30) => {
+                println!("timeout");
+                break;
+            }
+            Ok(Event::Incoming(Incoming::Publish(p))) => {
+                println!("Topic: {}, Payload: {:?}", p.topic, p.payload);
+            }
+            Ok(Event::Incoming(i)) => {
+                println!("Incoming = {i:?}");
+            }
+            Ok(Event::Outgoing(o)) => println!("Outgoing = {o:?}"),
+            Err(e) => {
+                println!("Error = {e:?}");
+                break;
+            }
+        }
+    }
+
+    assert!(false);
+}

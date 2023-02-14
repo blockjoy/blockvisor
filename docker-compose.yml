@@ -10,6 +10,15 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: blockvisor_db
 
+  mqtt:
+    image: emqx/emqx-enterprise:5.0.0
+    ports:
+      - 1883:1883
+      - 8083:8083
+      - 8084:8084
+      - 8883:8883
+      - 18083:18083
+
   api:
     image: 'registry.digitalocean.com/stakejoy/blockvisor-api:latest'
     ports:
