@@ -1,5 +1,6 @@
 extern crate core;
 
+pub mod blockvisord;
 pub mod cli;
 pub mod config;
 pub mod hosts;
