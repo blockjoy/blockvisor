@@ -1,11 +1,11 @@
 use babel_api::config::Babel;
 use eyre::bail;
+use std::fs;
 use std::path::Path;
-use tokio::fs;
 
-pub async fn load(path: &Path) -> eyre::Result<Babel> {
+pub fn load(path: &Path) -> eyre::Result<Babel> {
     tracing::info!("Loading babel configuration at {}", path.display());
-    let toml_str = fs::read_to_string(path).await?;
+    let toml_str = fs::read_to_string(path)?;
 
     let cfg: Babel = toml::from_str(&toml_str)?;
     if cfg.supervisor.entry_point.is_empty() {
@@ -18,8 +18,8 @@ pub async fn load(path: &Path) -> eyre::Result<Babel> {
     Ok(cfg)
 }
 
-#[tokio::test]
-async fn test_load() {
+#[test]
+fn test_load() {
     use walkdir::WalkDir;
 
     for entry in WalkDir::new("protocols") {
@@ -27,7 +27,7 @@ async fn test_load() {
         let path = entry.path();
         if path.is_file() && path.extension().unwrap_or_default() == "toml" {
             println!("loading: {path:?}");
-            load(path).await.unwrap();
+            load(path).unwrap();
         }
     }
 }

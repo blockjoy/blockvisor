@@ -27,7 +27,7 @@ jobs:
           sudo apt install -y build-essential pkg-config libssl-dev cmake tmux musl-tools pigz
       - name: Test
         run: >
-          cargo test -p babel
+          cargo test -p babel -p babel_api
   lints:
     name: Lints
     runs-on: ubuntu-latest

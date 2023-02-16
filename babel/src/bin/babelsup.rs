@@ -110,7 +110,6 @@ async fn mount_data_drive(data_dir: &str) -> eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 async fn serve(
     mut run: RunFlag,
     sup_setup: SupervisorSetup,
@@ -134,13 +133,4 @@ async fn serve(
         .serve_with_incoming_shutdown(listener.incoming(), run.wait())
         .await?;
     Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn serve(
-    _run: RunFlag,
-    _sup_setup: SupervisorSetup,
-    _babel_change_tx: supervisor::BabelChangeTx,
-) -> eyre::Result<()> {
-    unimplemented!()
 }

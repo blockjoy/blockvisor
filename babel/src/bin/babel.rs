@@ -21,7 +21,6 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 async fn serve(mut run: RunFlag) -> eyre::Result<()> {
     let babel_service = babel_service::BabelService::new()?;
     let listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_BABEL_PORT)
@@ -33,9 +32,4 @@ async fn serve(mut run: RunFlag) -> eyre::Result<()> {
         .serve_with_incoming_shutdown(listener.incoming(), run.wait())
         .await?;
     Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn serve(_run: RunFlag) -> eyre::Result<()> {
-    unimplemented!()
 }
