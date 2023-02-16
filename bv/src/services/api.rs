@@ -1,19 +1,20 @@
-use crate::get_bv_status;
 use crate::node_data::NodeImage;
 use crate::nodes::Nodes;
 use crate::server::bv_pb;
-use anyhow::{anyhow, bail, Result};
+use crate::{get_bv_status, with_retry};
+use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
-use pb::command_flow_client::CommandFlowClient;
+use pb::commands_client::CommandsClient;
 use pb::metrics_service_client::MetricsServiceClient;
 use pb::node_command::Command;
+use pb::nodes_client::NodesClient;
 use std::{str::FromStr, sync::Arc};
-use tokio::sync::{broadcast::Sender, RwLock};
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio::sync::RwLock;
 use tonic::codegen::InterceptedService;
 use tonic::service::Interceptor;
+use tonic::transport::Channel;
 use tonic::{Request, Status};
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument};
 use uuid::Uuid;
 
 pub mod pb {
@@ -26,8 +27,6 @@ const STATUS_ERROR: i32 = 1;
 #[derive(Clone)]
 pub struct AuthToken(pub String);
 
-pub type CommandsClient =
-    CommandFlowClient<InterceptedService<tonic::transport::Channel, AuthToken>>;
 pub type MetricsClient =
     MetricsServiceClient<InterceptedService<tonic::transport::Channel, AuthToken>>;
 
@@ -45,135 +44,136 @@ impl Interceptor for AuthToken {
     }
 }
 
-impl CommandsClient {
-    pub fn with_auth(channel: tonic::transport::Channel, token: AuthToken) -> Self {
-        CommandFlowClient::with_interceptor(channel, token)
-    }
-}
-
 impl MetricsClient {
     pub fn with_auth(channel: tonic::transport::Channel, token: AuthToken) -> Self {
         MetricsServiceClient::with_interceptor(channel, token)
     }
 }
 
-fn service_status_update(
-    status: bv_pb::ServiceStatus,
-    command_id: String,
-) -> Option<pb::InfoUpdate> {
-    match status {
-        bv_pb::ServiceStatus::UndefinedServiceStatus => Some(create_info_update(
-            command_id,
-            Some(STATUS_ERROR),
-            Some("service not ready, try again later".to_string()),
-        )),
-        bv_pb::ServiceStatus::Updating => Some(create_info_update(
-            command_id,
-            Some(STATUS_ERROR),
-            Some("pending update, try again later".to_string()),
-        )),
-        bv_pb::ServiceStatus::Broken => Some(create_info_update(
-            command_id,
-            Some(STATUS_ERROR),
-            Some("service is broken, call support".to_string()),
-        )),
-        bv_pb::ServiceStatus::Ok => None,
-    }
+pub struct CommandsService {
+    token: String,
+    client: CommandsClient<Channel>,
 }
 
-pub async fn process_commands_stream(
-    client: &mut CommandsClient,
-    nodes: Arc<RwLock<Nodes>>,
-    updates_tx: Sender<pb::InfoUpdate>,
-) -> Result<()> {
-    info!("Processing pending commands");
-    let updates_rx = updates_tx.subscribe();
+impl CommandsService {
+    pub async fn connect(url: &str, token: &str) -> Result<Self> {
+        let client = CommandsClient::connect(url.to_string())
+            .await
+            .context(format!("Failed to connect to commands service at {url}"))?;
 
-    let updates_stream = BroadcastStream::new(updates_rx).filter_map(|item| item.ok());
+        Ok(Self {
+            token: token.to_string(),
+            client,
+        })
+    }
 
-    let response = client.commands(updates_stream).await?;
-    let mut commands_stream = response.into_inner();
+    #[instrument(skip(self))]
+    pub async fn process_pending_commands(&mut self, nodes: Arc<RwLock<Nodes>>) -> Result<()> {
+        info!("Processing pending commands");
 
-    info!("Getting pending commands from stream...");
-    while let Some(received) = commands_stream.next().await {
-        info!("Received command: {received:?}");
-        let received = match received {
-            Ok(command) => command,
-            Err(status) => {
-                warn!("Skipping error command: {status}");
-                continue;
-            }
+        let req = pb::PendingCommandsRequest {
+            host_id: nodes.read().await.api_config.id.clone(),
+            filter_type: None,
         };
+        let resp =
+            with_retry!(self.client.pending(with_auth(req.clone(), &self.token)))?.into_inner();
 
-        let maybe_update = match received.r#type {
-            Some(pb::command::Type::Node(node_command)) => {
-                let command_id = node_command.api_command_id.clone();
-                // check for bv health status
-                let maybe_service_update =
-                    service_status_update(get_bv_status().await, command_id.clone());
-                if maybe_service_update.is_none() {
-                    // ack the command
-                    let ack = create_info_update(command_id.clone(), None, None);
-                    updates_tx.send(ack)?;
-                    // process the command
-                    match process_node_command(nodes.clone(), node_command).await {
-                        Err(error) => {
-                            error!("Error processing command: {error}");
-                            Some(create_info_update(
-                                command_id,
-                                Some(STATUS_ERROR),
-                                Some(error.to_string()),
-                            ))
+        for command in resp.commands {
+            info!("Received command: {command:?}");
+
+            match command.r#type {
+                Some(pb::command::Type::Node(node_command)) => {
+                    let command_id = node_command.api_command_id.clone();
+                    // check for bv health status
+                    let service_status = get_bv_status().await;
+                    if service_status != bv_pb::ServiceStatus::Ok {
+                        self.send_service_status_update(command_id.clone(), service_status)
+                            .await?;
+                    } else {
+                        // process the command
+                        match process_node_command(nodes.clone(), node_command).await {
+                            Err(error) => {
+                                error!("Error processing command: {error}");
+                                self.send_command_update(
+                                    command_id,
+                                    Some(STATUS_ERROR),
+                                    Some(error.to_string()),
+                                )
+                                .await?;
+                            }
+                            Ok(()) => {
+                                self.send_command_update(command_id, Some(STATUS_OK), None)
+                                    .await?;
+                            }
                         }
-                        Ok(()) => Some(create_info_update(command_id, Some(STATUS_OK), None)),
                     }
-                } else {
-                    maybe_service_update
                 }
-            }
-            Some(pb::command::Type::Host(host_command)) => {
-                let msg = "Command type `Host` not supported".to_string();
-                error!("Error processing command: {msg}");
-                let command_id = host_command.api_command_id;
-                Some(create_info_update(
-                    command_id,
-                    Some(STATUS_ERROR),
-                    Some(msg),
-                ))
-            }
-            None => {
-                let msg = "Command type is `None`".to_string();
-                error!("Error processing command: {msg}");
-                None
-            }
-        };
-
-        // send command results
-        if let Some(update) = maybe_update {
-            updates_tx.send(update)?;
+                Some(pb::command::Type::Host(host_command)) => {
+                    let msg = "Command type `Host` not supported".to_string();
+                    error!("Error processing command: {msg}");
+                    let command_id = host_command.api_command_id;
+                    self.send_command_update(command_id, Some(STATUS_ERROR), Some(msg))
+                        .await?;
+                }
+                None => {
+                    let msg = "Command type is `None`".to_string();
+                    error!("Error processing command: {msg}");
+                }
+            };
         }
+
+        Ok(())
     }
 
-    Ok(())
-}
-
-/// Create `InfoUpdate` struct for informing API that we do something with the command we have received.
-///
-/// Update will be interpreted as 'ack' (aka command is received and in progress of execution)
-/// if we set exit_code to None.
-///
-/// Update will be interpreted as 'final result' if we set exit_code to Some(value).
-fn create_info_update(
-    command_id: String,
-    exit_code: Option<i32>,
-    response: Option<String>,
-) -> pb::InfoUpdate {
-    pb::InfoUpdate {
-        info: Some(pb::info_update::Info::Command(pb::CommandInfo {
+    /// Informing API that we have finished with the command.
+    #[instrument(skip(self))]
+    async fn send_command_update(
+        &mut self,
+        command_id: String,
+        exit_code: Option<i32>,
+        response: Option<String>,
+    ) -> Result<()> {
+        let req = pb::CommandInfo {
             id: command_id,
             response,
             exit_code,
-        })),
+        };
+        with_retry!(self.client.update(with_auth(req.clone(), &self.token)))?;
+        Ok(())
+    }
+
+    async fn send_service_status_update(
+        &mut self,
+        command_id: String,
+        status: bv_pb::ServiceStatus,
+    ) -> Result<()> {
+        match status {
+            bv_pb::ServiceStatus::UndefinedServiceStatus => {
+                self.send_command_update(
+                    command_id,
+                    Some(STATUS_ERROR),
+                    Some("service not ready, try again later".to_string()),
+                )
+                .await
+            }
+            bv_pb::ServiceStatus::Updating => {
+                self.send_command_update(
+                    command_id,
+                    Some(STATUS_ERROR),
+                    Some("pending update, try again later".to_string()),
+                )
+                .await
+            }
+            bv_pb::ServiceStatus::Broken => {
+                self.send_command_update(
+                    command_id,
+                    Some(STATUS_ERROR),
+                    Some("service is broken, call support".to_string()),
+                )
+                .await
+            }
+            bv_pb::ServiceStatus::Ok => Ok(()),
+        }
     }
 }
 
@@ -238,6 +238,34 @@ async fn process_node_command(
     };
 
     Ok(())
+}
+
+pub struct NodesService {
+    token: String,
+    client: NodesClient<Channel>,
+}
+
+impl NodesService {
+    pub async fn connect(url: &str, token: &str) -> Result<Self> {
+        let client = NodesClient::connect(url.to_string())
+            .await
+            .context(format!("Failed to connect to nodes service at {url}"))?;
+
+        Ok(Self {
+            token: token.to_string(),
+            client,
+        })
+    }
+
+    #[instrument(skip(self))]
+    pub async fn send_node_update(&mut self, update: pb::NodeInfo) -> Result<()> {
+        let req = pb::NodeInfoUpdateRequest {
+            request_id: Some(Uuid::new_v4().to_string()),
+            info: Some(update),
+        };
+        with_retry!(self.client.info_update(with_auth(req.clone(), &self.token)))?;
+        Ok(())
+    }
 }
 
 pub fn with_auth<T>(inner: T, auth_token: &str) -> Request<T> {

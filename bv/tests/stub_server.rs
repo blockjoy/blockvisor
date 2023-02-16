@@ -1,17 +1,7 @@
 use blockvisord::services::api::pb;
-use std::{pin::Pin, sync::Arc};
-use tokio::sync::{mpsc, Mutex};
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tonic::{Request, Response, Status, Streaming};
-
-type ResponseResult<T> = Result<Response<T>, Status>;
-type ResponseStream = Pin<Box<dyn Stream<Item = Result<pb::Command, Status>> + Send>>;
-
-pub struct StubServer {
-    pub commands: Arc<Mutex<Vec<pb::Command>>>,
-    pub updates_tx: mpsc::Sender<pb::InfoUpdate>,
-    pub shutdown_tx: mpsc::Sender<()>,
-}
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tonic::{Request, Response, Status};
 
 pub struct StubHostsServer {}
 
@@ -67,43 +57,56 @@ impl pb::hosts_server::Hosts for StubHostsServer {
     }
 }
 
+pub struct StubNodesServer {
+    pub updates: Arc<Mutex<Vec<pb::node_info::ContainerStatus>>>,
+}
+
 #[tonic::async_trait]
-impl pb::command_flow_server::CommandFlow for StubServer {
-    type CommandsStream = ResponseStream;
-
-    async fn commands(
+impl pb::nodes_server::Nodes for StubNodesServer {
+    async fn info_update(
         &self,
-        req: Request<Streaming<pb::InfoUpdate>>,
-    ) -> ResponseResult<Self::CommandsStream> {
-        let mut in_stream = req.into_inner();
-        let (tx, rx) = mpsc::channel(128);
+        request: Request<pb::NodeInfoUpdateRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        let status = req.info.unwrap().container_status.unwrap();
+        self.updates
+            .lock()
+            .await
+            .push(pb::node_info::ContainerStatus::from_i32(status).unwrap());
+        Ok(Response::new(()))
+    }
+}
 
-        for command in self.commands.lock().await.iter() {
-            tx.send(Ok(command.clone())).await.unwrap();
-        }
+pub struct StubCommandsServer {
+    pub commands: Arc<Mutex<Vec<pb::Command>>>,
+    pub updates: Arc<Mutex<Vec<pb::CommandInfo>>>,
+}
+
+#[tonic::async_trait]
+impl pb::commands_server::Commands for StubCommandsServer {
+    async fn pending(
+        &self,
+        _request: Request<pb::PendingCommandsRequest>,
+    ) -> Result<Response<pb::CommandResponse>, Status> {
+        let reply = pb::CommandResponse {
+            commands: self.commands.lock().await.to_vec(),
+        };
         self.commands.lock().await.clear();
 
-        let shutdown_tx = self.shutdown_tx.clone();
-        let updates_tx = self.updates_tx.clone();
-        tokio::spawn(async move {
-            while let Some(result) = in_stream.next().await {
-                match result {
-                    Ok(v) => {
-                        println!("server: get update {:?}", &v);
-                        updates_tx.send(v).await.unwrap();
-                    }
-                    Err(err) => {
-                        eprintln!("server: error {:?}", err);
-                        break;
-                    }
-                }
-            }
-            println!("server: stream ended");
-            shutdown_tx.send(()).await.unwrap();
-        });
+        Ok(Response::new(reply))
+    }
 
-        let out_stream = ReceiverStream::new(rx);
+    async fn get(
+        &self,
+        _request: Request<pb::CommandInfo>,
+    ) -> Result<Response<pb::Command>, Status> {
+        unimplemented!()
+    }
 
-        Ok(Response::new(Box::pin(out_stream) as Self::CommandsStream))
+    async fn update(&self, request: Request<pb::CommandInfo>) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        self.updates.lock().await.push(req);
+
+        Ok(Response::new(()))
     }
 }

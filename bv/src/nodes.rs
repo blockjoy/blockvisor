@@ -6,11 +6,10 @@ use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::path::Path;
 use tokio::fs::{self, read_dir};
-use tokio::sync::broadcast::{self, Sender};
-use tokio::sync::OnceCell;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+use crate::services::api;
 use crate::{
     config::Config,
     env::{REGISTRY_CONFIG_DIR, REGISTRY_CONFIG_FILE},
@@ -45,7 +44,6 @@ pub struct Nodes {
     pub nodes: HashMap<Uuid, Node>,
     pub node_ids: HashMap<String, Uuid>,
     data: CommonData,
-    tx: OnceCell<Sender<pb::InfoUpdate>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -366,7 +364,6 @@ impl Nodes {
             data: nodes_data,
             nodes: HashMap::new(),
             node_ids: HashMap::new(),
-            tx: OnceCell::new(),
         }
     }
 
@@ -437,33 +434,29 @@ impl Nodes {
     }
 
     // Notify API that container is 'Running' or 'Stopped', etc
-    pub fn send_container_status(&self, id: Uuid, status: ContainerStatus) -> Result<()> {
+    pub async fn send_container_status(&self, id: Uuid, status: ContainerStatus) -> Result<()> {
         let update = pb::NodeInfo {
             id: id.to_string(),
             container_status: Some(status.into()),
             ..Default::default()
         };
-        self.send_info_update(update)
+        self.send_info_update(update).await?;
+        Ok(())
     }
 
     // Optimistically try to send node info update to API
-    pub fn send_info_update(&self, update: pb::NodeInfo) -> Result<()> {
-        if !self.tx.initialized() {
-            bail!("Updates channel not initialized")
-        }
-
-        let update = pb::InfoUpdate {
-            info: Some(pb::info_update::Info::Node(update)),
-        };
-
-        match self.tx.get().unwrap().send(update) {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                let msg = format!("Cannot send node update: {error:?}");
-                error!(msg);
-                Err(anyhow!(msg))
+    pub async fn send_info_update(&self, update: pb::NodeInfo) -> Result<()> {
+        match api::NodesService::connect(&self.api_config.blockjoy_api_url, &self.api_config.token)
+            .await
+        {
+            Ok(mut client) => {
+                if let Err(e) = client.send_node_update(update).await {
+                    error!("Cannot send node update: {:?}", e);
+                }
             }
+            Err(e) => error!("Error connecting to api: {:?}", e),
         }
+        Ok(())
     }
 
     /// Create and return the next network interface using machine index
@@ -482,16 +475,6 @@ impl Nodes {
             ))?;
 
         Ok(iface)
-    }
-
-    // Get or init updates sender
-    pub async fn get_updates_sender(&self) -> Result<&Sender<pb::InfoUpdate>> {
-        self.tx
-            .get_or_try_init(|| async {
-                let (tx, _rx) = broadcast::channel(128);
-                Ok(tx)
-            })
-            .await
     }
 }
 

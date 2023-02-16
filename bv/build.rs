@@ -5,9 +5,10 @@ fn main() {
         .compile(
             &[
                 // Backend API
-                "command_flow.proto",
+                "command.proto",
                 "host_service.proto",
                 "key_file_service.proto",
+                "node_service.proto",
                 // Cookbook API
                 "cookbook.proto",
                 // UI API (used in the tests)
@@ -20,7 +21,6 @@ fn main() {
                 "fe_host_service.proto",
                 "node_service.proto",
                 "organization_service.proto",
-                "update_service.proto",
                 "user_service.proto",
                 // Internal API
                 "blockvisor_service.proto",
