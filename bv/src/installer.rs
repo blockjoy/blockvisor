@@ -1,5 +1,6 @@
+use crate::config::{Config, CONFIG_PATH};
+use crate::server::bv_pb;
 use crate::server::bv_pb::blockvisor_client::BlockvisorClient;
-use crate::server::{bv_pb, BLOCKVISOR_SERVICE_URL};
 use crate::utils::{get_process_pid, run_cmd};
 use crate::with_retry;
 use anyhow::{bail, ensure, Context, Error, Result};
@@ -58,15 +59,22 @@ pub struct Installer<T: Timer> {
 }
 
 impl<T: Timer> Installer<T> {
-    pub fn new(timer: T, bv_root: &Path) -> Self {
-        Self::internal_new(
+    pub async fn new(timer: T, bv_root: &Path) -> Result<Self> {
+        let config = Config::load(bv_root).await.with_context(|| {
+            format!(
+                "failed to load host config from {}",
+                bv_root.join(CONFIG_PATH).display()
+            )
+        })?;
+
+        Ok(Self::internal_new(
             timer,
             bv_root,
-            Channel::from_static(BLOCKVISOR_SERVICE_URL)
+            Channel::from_shared(format!("http://localhost:{}", config.blockvisor_port))?
                 .timeout(BV_REQ_TIMEOUT)
                 .connect_timeout(BV_CONNECT_TIMEOUT)
                 .connect_lazy(),
-        )
+        ))
     }
 
     pub async fn run(mut self) -> Result<()> {

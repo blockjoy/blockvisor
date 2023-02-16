@@ -6,7 +6,7 @@ use crate::{
     nodes::Nodes,
     pal::{NetInterface, Pal},
     self_updater,
-    server::{bv_pb, BlockvisorServer, BLOCKVISOR_SERVICE_PORT},
+    server::{bv_pb, BlockvisorServer},
     services::{api, api::pb},
     try_set_bv_status,
 };
@@ -54,7 +54,7 @@ where
         let updates_tx = nodes.get_updates_sender().await?.clone();
         let nodes = Arc::new(RwLock::new(nodes));
 
-        let url = format!("0.0.0.0:{BLOCKVISOR_SERVICE_PORT}");
+        let url = format!("0.0.0.0:{}", config.blockvisor_port);
         let server = BlockvisorServer {
             nodes: nodes.clone(),
         };

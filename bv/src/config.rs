@@ -6,6 +6,10 @@ use tracing::info;
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.toml";
 
+pub fn default_blockvisor_port() -> u32 {
+    9001
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Config {
     /// Host uuid
@@ -20,6 +24,9 @@ pub struct Config {
     pub blockjoy_registry_url: String,
     /// Self update check interval - how often blockvisor shall check for new version of itself
     pub update_check_interval_secs: Option<u64>,
+    /// Port to be used by blockvisor internal service
+    #[serde(default = "default_blockvisor_port")]
+    pub blockvisor_port: u32,
 }
 
 impl Config {

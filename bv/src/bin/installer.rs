@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
         .with(tracing_journald::layer()?)
         .init();
 
-    let res = Installer::new(SysTimer, &bv_root()).run().await;
+    let res = Installer::new(SysTimer, &bv_root()).await?.run().await;
     if let Err(err) = res {
         error!("{err}");
         Err(err)

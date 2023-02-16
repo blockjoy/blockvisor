@@ -1,16 +1,13 @@
 use anyhow::{bail, Result};
-use blockvisord::config::CONFIG_PATH;
-use blockvisord::linux_platform::bv_root;
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
-    config::Config,
+    config::{Config, CONFIG_PATH},
     hosts::{get_host_info, get_host_metrics},
-    linux_platform::LinuxPlatform,
+    linux_platform::bv_root,
     pretty_table::{PrettyTable, PrettyTableRow},
     server::{
         bv_pb::blockvisor_client::BlockvisorClient,
         bv_pb::{self, BlockchainRequestParams, Node, Parameter},
-        BlockvisorServer, BLOCKVISOR_SERVICE_URL,
     },
     services::{api::pb, cookbook::CookbookService},
     utils::run_cmd,
@@ -20,6 +17,7 @@ use cli_table::print_stdout;
 use petname::Petnames;
 use std::{collections::HashMap, io::BufRead};
 use tokio::time::{sleep, Duration};
+use tonic::transport;
 use tonic::transport::Channel;
 use uuid::Uuid;
 
@@ -31,6 +29,12 @@ const BLOCKVISOR_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 async fn main() -> Result<()> {
     let args = App::parse();
 
+    if !bv_root().join(CONFIG_PATH).exists() {
+        bail!("Host is not registered, please run `bvup` first");
+    }
+    let config = Config::load(&bv_root()).await?;
+    let bv_url = format!("http://localhost:{}", config.blockvisor_port);
+
     match args.command {
         Command::Reset(cmd_args) => {
             let confirm = ask_confirm(
@@ -39,7 +43,7 @@ async fn main() -> Result<()> {
             )?;
 
             if confirm {
-                let mut service_client = BlockvisorClient::connect(BLOCKVISOR_SERVICE_URL).await?;
+                let mut service_client = BlockvisorClient::connect(bv_url).await?;
                 let nodes = service_client
                     .get_nodes(bv_pb::GetNodesRequest {})
                     .await?
@@ -53,7 +57,6 @@ async fn main() -> Result<()> {
                         .await?;
                 }
 
-                let config = Config::load(&bv_root()).await?;
                 let url = config.blockjoy_api_url;
                 let host_id = config.id;
 
@@ -69,11 +72,7 @@ async fn main() -> Result<()> {
             }
         }
         Command::Start(_) => {
-            if !bv_root().join(CONFIG_PATH).exists() {
-                bail!("Host is not registered, please run `bvup` first");
-            }
-
-            if BlockvisorServer::<LinuxPlatform>::is_running().await {
+            if is_running(bv_url).await? {
                 println!("Service already running");
                 return Ok(());
             }
@@ -88,11 +87,7 @@ async fn main() -> Result<()> {
             println!("blockvisor service stopped successfully");
         }
         Command::Status(_) => {
-            if !bv_root().join(CONFIG_PATH).exists() {
-                bail!("Host is not registered, please run `bvup` first");
-            }
-
-            if BlockvisorServer::<LinuxPlatform>::is_running().await {
+            if is_running(bv_url).await? {
                 println!("Service running");
             } else {
                 println!("Service stopped");
@@ -101,7 +96,8 @@ async fn main() -> Result<()> {
         Command::Host { command } => process_host_command(command).await?,
         Command::Chain { command } => process_chain_command(command).await?,
         Command::Node { command } => {
-            NodeClient::new()
+            let config = Config::load(&bv_root()).await?;
+            NodeClient::new(format!("http://localhost:{}", config.blockvisor_port))
                 .await?
                 .process_node_command(command)
                 .await?
@@ -109,6 +105,13 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn is_running(url: String) -> Result<bool> {
+    Ok(transport::Endpoint::from_shared(url)?
+        .connect()
+        .await
+        .is_ok())
 }
 
 async fn process_host_command(command: HostCommand) -> Result<()> {
@@ -181,9 +184,9 @@ struct NodeClient {
 }
 
 impl NodeClient {
-    async fn new() -> Result<Self> {
+    async fn new(url: String) -> Result<Self> {
         Ok(Self {
-            client: BlockvisorClient::connect(BLOCKVISOR_SERVICE_URL).await?,
+            client: BlockvisorClient::connect(url).await?,
         })
     }
 

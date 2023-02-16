@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use assert_fs::TempDir;
+use blockvisord::config::default_blockvisor_port;
 use blockvisord::linux_platform::LinuxPlatform;
 use blockvisord::services::api::{self, pb};
 use blockvisord::set_bv_status;
@@ -842,6 +843,7 @@ async fn test_bv_cmd_grpc_commands() {
         blockjoy_keys_url: "http://localhost:8081".to_string(),
         blockjoy_registry_url: "http://localhost:50051".to_string(),
         update_check_interval_secs: None,
+        blockvisor_port: default_blockvisor_port(),
     };
 
     let nodes = Nodes::load(LinuxPlatform::new().unwrap(), config.clone())

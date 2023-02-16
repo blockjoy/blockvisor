@@ -2,8 +2,8 @@ use anyhow::{anyhow, Context, Result};
 use blockvisord::config::Config;
 use blockvisord::hosts::get_host_info;
 use blockvisord::linux_platform::bv_root;
-use blockvisord::self_updater;
 use blockvisord::services::api::pb;
+use blockvisord::{config, self_updater};
 use clap::{crate_version, ArgGroup, Parser};
 use uuid::Uuid;
 
@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
             blockjoy_keys_url: cmd_args.blockjoy_keys_url,
             blockjoy_registry_url: cmd_args.blockjoy_registry_url,
             update_check_interval_secs: None,
+            blockvisor_port: config::default_blockvisor_port(),
         };
         api_config.save(&bv_root).await?;
         Some(api_config)

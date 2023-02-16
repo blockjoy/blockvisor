@@ -11,18 +11,11 @@ use crate::{
     nodes::Nodes,
     set_bv_status,
 };
+use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::{fmt, str::FromStr};
 use tokio::sync::RwLock;
-use tonic::{transport::Endpoint, Request, Response, Status};
-
-pub const BLOCKVISOR_SERVICE_PORT: usize = 9001;
-pub const BLOCKVISOR_SERVICE_URL: &str = "http://localhost:9001";
-
-lazy_static::lazy_static! {
-    pub static ref BLOCKVISOR_SERVICE_ENDPOINT: Endpoint = Endpoint::from_str(BLOCKVISOR_SERVICE_URL).expect("valid url");
-}
+use tonic::{Request, Response, Status};
 
 async fn status_check() -> Result<(), Status> {
     match get_bv_status().await {
@@ -39,14 +32,6 @@ async fn status_check() -> Result<(), Status> {
 
 pub struct BlockvisorServer<P: Pal + Debug> {
     pub nodes: Arc<RwLock<Nodes<P>>>,
-}
-
-impl<P: Pal + Debug> BlockvisorServer<P> {
-    pub async fn is_running() -> bool {
-        Endpoint::connect(&BLOCKVISOR_SERVICE_ENDPOINT)
-            .await
-            .is_ok()
-    }
 }
 
 #[tonic::async_trait]
@@ -425,6 +410,6 @@ mod helpers {
     pub(super) fn parse_uuid(uuid: impl AsRef<str>) -> Result<uuid::Uuid, tonic::Status> {
         uuid.as_ref()
             .parse()
-            .map_err(|_| tonic::Status::invalid_argument("Unparsable node id"))
+            .map_err(|_| tonic::Status::invalid_argument("Unparseable node id"))
     }
 }
