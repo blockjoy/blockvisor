@@ -96,7 +96,6 @@ async fn main() -> Result<()> {
         Command::Host { command } => process_host_command(command).await?,
         Command::Chain { command } => process_chain_command(command).await?,
         Command::Node { command } => {
-            let config = Config::load(&bv_root()).await?;
             NodeClient::new(format!("http://localhost:{}", config.blockvisor_port))
                 .await?
                 .process_node_command(command)

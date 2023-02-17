@@ -1,3 +1,4 @@
+use crate::logging::setup_logging;
 use crate::{
     config::{Config, CONFIG_PATH},
     hosts,
@@ -13,7 +14,9 @@ use crate::{
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
+use std::net::SocketAddr;
+use std::{str::FromStr, sync::Arc};
+use tokio::net::TcpListener;
 use tokio::{
     sync::RwLock,
     time::{sleep, Duration},
@@ -26,7 +29,9 @@ const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const INFO_UPDATE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct BlockvisorD<P> {
-    pub pal: P,
+    pal: P,
+    config: Config,
+    listener: TcpListener,
 }
 
 impl<P> BlockvisorD<P>
@@ -34,18 +39,39 @@ where
     P: Pal + Send + Sync + Debug + 'static,
     <P as Pal>::NetInterface: Send + Sync + Clone,
 {
-    pub async fn run(self) -> Result<()> {
-        let bv_root = self.pal.bv_root().to_path_buf();
-        let config = Config::load(&bv_root).await.with_context(|| {
+    pub async fn new(pal: P) -> Result<Self> {
+        let bv_root = pal.bv_root();
+        let config = Config::load(bv_root).await.with_context(|| {
             format!(
                 "failed to load host config from {}",
                 bv_root.join(CONFIG_PATH).display()
             )
         })?;
+        let url = format!("0.0.0.0:{}", config.blockvisor_port);
+        let listener = TcpListener::bind(url).await?;
+        Ok(Self {
+            pal,
+            config,
+            listener,
+        })
+    }
+
+    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.listener.local_addr()
+    }
+
+    pub async fn run(self) -> Result<()> {
+        setup_logging()?;
+        info!(
+            "Starting {} {} ...",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        );
+        let bv_root = self.pal.bv_root().to_path_buf();
         let nodes = if Nodes::<P>::exists(&bv_root) {
-            Nodes::load(self.pal, config.clone()).await?
+            Nodes::load(self.pal, self.config.clone()).await?
         } else {
-            let nodes = Nodes::new(self.pal, config.clone());
+            let nodes = Nodes::new(self.pal, self.config.clone());
             nodes.save().await?;
             nodes
         };
@@ -53,14 +79,13 @@ where
         try_set_bv_status(bv_pb::ServiceStatus::Ok).await;
         let nodes = Arc::new(RwLock::new(nodes));
 
-        let url = format!("0.0.0.0:{}", config.blockvisor_port);
         let server = BlockvisorServer {
             nodes: nodes.clone(),
         };
-        let internal_api_server_future = Self::create_server(url, server);
+        let internal_api_server_future = Self::create_server(self.listener, server);
 
-        let token = api::AuthToken(config.token.to_owned());
-        let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
+        let token = api::AuthToken(self.config.token.to_owned());
+        let endpoint = Endpoint::from_str(&self.config.blockjoy_api_url)?;
         let external_api_client_future = async {
             loop {
                 match api::CommandsService::connect(&config.blockjoy_api_url, &config.token).await {
@@ -121,8 +146,9 @@ where
 
         let node_updates_future = Self::node_updates(nodes.clone());
         let node_metrics_future = Self::node_metrics(nodes.clone(), &endpoint, token.clone());
-        let host_metrics_future = Self::host_metrics(config.id.clone(), &endpoint, token.clone());
-        let self_updater = self_updater::new(self_updater::SysTimer, &bv_root, &config)?;
+        let host_metrics_future =
+            Self::host_metrics(self.config.id.clone(), &endpoint, token.clone());
+        let self_updater = self_updater::new(self_updater::SysTimer, &bv_root, &self.config)?;
 
         let _ = tokio::join!(
             internal_api_server_future,
@@ -133,14 +159,15 @@ where
             host_metrics_future,
             self_updater.run()
         );
+        info!("Stopping...");
         Ok(())
     }
 
-    async fn create_server(url: String, server: BlockvisorServer<P>) -> Result<()> {
+    async fn create_server(listener: TcpListener, server: BlockvisorServer<P>) -> Result<()> {
         Server::builder()
             .max_concurrent_streams(1)
             .add_service(bv_pb::blockvisor_server::BlockvisorServer::new(server))
-            .serve(url.to_socket_addrs()?.next().unwrap())
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await?;
 
         Ok(())

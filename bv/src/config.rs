@@ -6,7 +6,7 @@ use tracing::info;
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.toml";
 
-pub fn default_blockvisor_port() -> u32 {
+pub fn default_blockvisor_port() -> u16 {
     9001
 }
 
@@ -28,7 +28,7 @@ pub struct Config {
     pub update_check_interval_secs: Option<u64>,
     /// Port to be used by blockvisor internal service
     #[serde(default = "default_blockvisor_port")]
-    pub blockvisor_port: u32,
+    pub blockvisor_port: u16,
 }
 
 impl Config {
