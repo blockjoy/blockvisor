@@ -59,12 +59,12 @@ method = "info_name"
 
 [[methods]]
 name = "consensus"
-transport = "jrpc"
-method = "info_in_consensus"
+transport = "sh"
+body = "echo -n false"
 
     [methods.response]
-    code = 200
-    field = "result.in_consensus"
+    status = 0
+    format = "raw"
 
 [[methods]]
 name = "block_age"

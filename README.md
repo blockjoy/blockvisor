@@ -29,8 +29,8 @@ Note that [git submodules](https://github.blog/2016-02-01-working-with-submodule
 git submodule update --init --recursive
 ```
 
-# Important Paths
-## Host
+## Important Paths
+### Host
 - `/opt/blockvisor/blacklist` bundle versions that failed to be installed
 - `/opt/blockvisor/current` symlink to current `<version>`
 - `/opt/blockvisor/<version>/` whole bundle
@@ -42,20 +42,23 @@ git submodule update --init --recursive
 - `/var/lib/blockvisor/firecracker/<uuid>/` node specific firecracker data (e.g. copy of images)
 - `/var/lib/blockvisor/images/<protocol>/<node_type>/<node_version>/`
 
-## Node
+### Node
 - `/usr/bin/babel`
 - `/usr/bin/babelsup`
 - `/etc/babel.conf`
 - `/etc/systemd/system/babelsup.service`
 
-## Bundle
+### Bundle
 - `bundle/installer`
 - `bundle/babel/`
 - `bundle/blockvisor/`
 - `bundle/firecracker/`
 
+## Testing
 
-## High Level Overview
+See [BV tests](bv/tests/README.md) for more.
+
+# High Level Overview
 
 ![](overview.jpg)
 

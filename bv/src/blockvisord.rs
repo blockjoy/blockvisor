@@ -1,4 +1,3 @@
-use crate::logging::setup_logging;
 use crate::{
     config::{Config, CONFIG_PATH},
     hosts,
@@ -61,7 +60,6 @@ where
     }
 
     pub async fn run(self) -> Result<()> {
-        setup_logging()?;
         info!(
             "Starting {} {} ...",
             env!("CARGO_PKG_NAME"),
@@ -88,7 +86,12 @@ where
         let endpoint = Endpoint::from_str(&self.config.blockjoy_api_url)?;
         let external_api_client_future = async {
             loop {
-                match api::CommandsService::connect(&config.blockjoy_api_url, &config.token).await {
+                match api::CommandsService::connect(
+                    &self.config.blockjoy_api_url,
+                    &self.config.token,
+                )
+                .await
+                {
                     Ok(mut client) => {
                         if let Err(e) = client
                             .get_and_process_pending_commands(&config.id, nodes.clone())

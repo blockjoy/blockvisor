@@ -29,7 +29,7 @@ pub trait Pal {
     /// The `ip` is not assigned on the host but rather by the API.
     async fn create_net_interface(
         &self,
-        name: String,
+        index: u32,
         ip: IpAddr,
         gateway: IpAddr,
     ) -> Result<Self::NetInterface>;

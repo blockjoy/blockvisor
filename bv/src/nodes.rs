@@ -507,7 +507,7 @@ impl<P: Pal + Debug> Nodes<P> {
 
         let iface = self
             .pal
-            .create_net_interface(format!("bv{}", self.data.machine_index), ip, gateway)
+            .create_net_interface(self.data.machine_index, ip, gateway)
             .await
             .context(format!(
                 "failed to create VM bridge bv{}",

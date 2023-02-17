@@ -1,3 +1,7 @@
+mod utils;
+
+use crate::utils::stub_server::{StubCommandsServer, StubHostsServer, StubNodesServer};
+use crate::utils::token;
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::config::default_blockvisor_port;
@@ -15,10 +19,6 @@ use tonic::{transport::Server, Request};
 pub mod ui_pb {
     tonic::include_proto!("blockjoy.api.ui_v1");
 }
-
-mod stub_server;
-
-mod token;
 
 fn bv_run(commands: &[&str], stdout_pattern: &str) {
     let mut cmd = Command::cargo_bin("bv").unwrap();
@@ -57,6 +57,7 @@ fn create_node(image: &str) -> String {
         .to_string()
 }
 
+//// =========== E2E: bv cli and blockvisord service - host only
 #[test]
 fn test_bv_cli_service_restart() {
     bv_run(&["stop"], "blockvisor service stopped successfully");
@@ -66,7 +67,7 @@ fn test_bv_cli_service_restart() {
     bv_run(&["start"], "Service already running");
 }
 
-//// =========== E2E: bv cli host + backend (otp)
+//// =========== E2E: bvup host + backend (otp)
 #[test]
 #[serial]
 fn test_bv_cmd_init_unknown_otp() {
@@ -90,7 +91,7 @@ fn test_bv_cmd_init_unknown_otp() {
         .stderr(predicate::str::contains("Host provision not found: no rows returned by a query that expected to return at least one row"));
 }
 
-//// =========== E2E: bv cli host + ui api + backend (otp)
+//// =========== E2E: bvup + cli host + ui api + backend (otp)
 #[tokio::test]
 #[serial]
 async fn test_bv_cmd_init_localhost() {
@@ -345,7 +346,6 @@ async fn test_bv_cmd_init_localhost() {
 #[serial]
 async fn test_bv_cmd_grpc_stub_init_reset() {
     use std::path::Path;
-    use stub_server::StubHostsServer;
 
     let server = StubHostsServer {};
 
@@ -464,7 +464,6 @@ async fn test_bv_cmd_grpc_commands() {
     use blockvisord::server::bv_pb;
     use pb::node_info::ContainerStatus;
     use serde_json::json;
-    use stub_server::{StubCommandsServer, StubNodesServer};
     use uuid::Uuid;
 
     let host_id = Uuid::new_v4().to_string();

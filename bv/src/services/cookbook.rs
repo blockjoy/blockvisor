@@ -16,6 +16,7 @@ pub mod cb_pb {
     tonic::include_proto!("blockjoy.api.v1.babel");
 }
 
+pub const IMAGES_DIR: &str = "images";
 const BABEL_ARCHIVE_IMAGE_NAME: &str = "blockjoy.gz";
 const BABEL_IMAGE_NAME: &str = "blockjoy";
 const KERNEL_ARCHIVE_NAME: &str = "kernel.gz";
@@ -141,7 +142,7 @@ impl CookbookService {
     pub fn get_image_download_folder_path(bv_root: &Path, image: &NodeImage) -> PathBuf {
         bv_root
             .join(BV_VAR_PATH)
-            .join("images")
+            .join(IMAGES_DIR)
             .join(&image.protocol)
             .join(&image.node_type)
             .join(&image.node_version)
