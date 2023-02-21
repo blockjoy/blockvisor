@@ -26,8 +26,8 @@ pub static TEST_TOKEN: AtomicU32 = AtomicU32::new(0);
 /// path to root dir used in test, instance of DummyPlatform.
 pub struct TestEnv {
     pub bv_root: PathBuf,
-    api_config: Config,
-    token: u32,
+    pub api_config: Config,
+    pub token: u32,
 }
 
 impl TestEnv {
@@ -75,8 +75,8 @@ impl TestEnv {
         })
     }
 
-    pub async fn run_blockvisord(&mut self, run: RunFlag) -> Result<JoinHandle<Result<()>>> {
-        let blockvisord = BlockvisorD::new(DummyPlatform {
+    pub fn build_dummy_platform(&self) -> DummyPlatform {
+        DummyPlatform {
             bv_root: self.bv_root.clone(),
             babel_path: Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../target")
@@ -84,8 +84,11 @@ impl TestEnv {
                 .join("release")
                 .join("babel"),
             token: self.token,
-        })
-        .await?;
+        }
+    }
+
+    pub async fn run_blockvisord(&mut self, run: RunFlag) -> Result<JoinHandle<Result<()>>> {
+        let blockvisord = BlockvisorD::new(self.build_dummy_platform()).await?;
         self.api_config.blockvisor_port = blockvisord.local_addr()?.port();
         self.api_config.save(&self.bv_root).await?;
         Ok(tokio::spawn(blockvisord.run(run)))
@@ -151,9 +154,9 @@ impl Drop for TestEnv {
 
 #[derive(Debug)]
 pub struct DummyPlatform {
-    bv_root: PathBuf,
-    babel_path: PathBuf,
-    token: u32,
+    pub(crate) bv_root: PathBuf,
+    pub(crate) babel_path: PathBuf,
+    pub(crate) token: u32,
 }
 
 #[async_trait]

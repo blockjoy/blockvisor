@@ -73,4 +73,4 @@ reinstall:
 ci-clean:
 	bv node rm --all --yes || true
 	rm -rf /var/lib/blockvisor/nodes/
-	for i in $$(seq 1 1000); do ip link delete bv$$i type tuntap; done || true
+	for i in $$(seq 1 100); do ip link delete bv$$i type tuntap; done || true

@@ -1,19 +1,23 @@
 mod utils;
 
-use crate::utils::stub_server::{StubCommandsServer, StubHostsServer, StubNodesServer};
-use crate::utils::token;
+use crate::utils::{
+    stub_server::{StubCommandsServer, StubHostsServer, StubNodesServer},
+    test_env::TestEnv,
+    token,
+};
+use anyhow::Result;
 use assert_cmd::Command;
 use assert_fs::TempDir;
-use blockvisord::config::default_blockvisor_port;
-use blockvisord::linux_platform::LinuxPlatform;
-use blockvisord::services::api::{self, pb};
-use blockvisord::set_bv_status;
+use blockvisord::{services::api, services::api::pb, set_bv_status};
+use bv_utils::run_flag::RunFlag;
 use predicates::prelude::*;
 use serial_test::serial;
-use std::{env, fs};
-use std::{net::ToSocketAddrs, sync::Arc};
-use tokio::sync::{Mutex, RwLock};
-use tokio::time::{sleep, Duration};
+use std::{fs, net::ToSocketAddrs, sync::Arc};
+use sysinfo::{Pid, PidExt, ProcessExt, ProcessRefreshKind, System, SystemExt};
+use tokio::{
+    sync::{Mutex, RwLock},
+    time::{sleep, Duration},
+};
 use tonic::{transport::Server, Request};
 
 pub mod ui_pb {
@@ -59,6 +63,7 @@ fn create_node(image: &str) -> String {
 
 //// =========== E2E: bv cli and blockvisord service - host only
 #[test]
+#[serial]
 fn test_bv_cli_service_restart() {
     bv_run(&["stop"], "blockvisor service stopped successfully");
     bv_run(&["status"], "Service stopped");
@@ -69,7 +74,6 @@ fn test_bv_cli_service_restart() {
 
 //// =========== E2E: bvup host + backend (otp)
 #[test]
-#[serial]
 fn test_bv_cmd_init_unknown_otp() {
     let tmp_dir = TempDir::new().unwrap();
 
@@ -342,7 +346,6 @@ async fn test_bv_cmd_init_localhost() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_bv_cmd_grpc_stub_init_reset() {
     use std::path::Path;
 
@@ -454,10 +457,191 @@ async fn test_bv_cmd_cookbook_download() {
     assert!(Path::new(&folder.join("babel.toml")).exists());
 }
 
-//// =========== HOST+BACKEND MOCK INTEGRATION: bv nodes host + backend (cmds)
+//// =========== HOST ONLY: offline bv cli, blockvisor and nodes
+#[test]
+fn test_bv_cmd_start_no_init() {
+    let tmp_dir = TempDir::new().unwrap();
+    let mut cmd = Command::cargo_bin("bv").unwrap();
+    cmd.arg("start")
+        .env("BV_ROOT", tmp_dir.as_os_str())
+        .assert()
+        .failure()
+        .stderr("Error: Host is not registered, please run `bvup` first\n");
+}
+
 #[tokio::test]
-#[serial]
-async fn test_bv_cmd_grpc_commands() {
+async fn test_bv_host_metrics() -> Result<()> {
+    let test_env = TestEnv::new().await?;
+    test_env.bv_run(&["host", "metrics"], "Used cpu:");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_bv_cmd_delete_all() -> Result<()> {
+    let mut test_env = TestEnv::new().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
+    test_env.bv_run(&["node", "rm", "--all", "--yes"], "");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
+    let mut test_env = TestEnv::new().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
+    const NODES_COUNT: usize = 2;
+    println!("create {NODES_COUNT} nodes");
+    let mut nodes: Vec<String> = Default::default();
+    for _ in 0..NODES_COUNT {
+        nodes.push(test_env.create_node("testing/validator/0.0.1"));
+    }
+
+    println!("start all created nodes");
+    test_env.bv_run(&["node", "start"], "Started node");
+    println!("check all nodes are running");
+    for id in &nodes {
+        test_env.bv_run(&["node", "status", id], "Running");
+    }
+    println!("stop all nodes");
+    test_env.bv_run(&["node", "stop"], "Stopped node");
+    println!("check all nodes are stopped");
+    for id in &nodes {
+        test_env.bv_run(&["node", "status", id], "Stopped");
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_bv_cmd_logs() -> Result<()> {
+    let mut test_env = TestEnv::new().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
+    println!("create a node");
+    let vm_id = &test_env.create_node("testing/validator/0.0.1");
+    println!("create vm_id: {vm_id}");
+
+    println!("start node");
+    test_env.bv_run(&["node", "start", vm_id], "Started node");
+
+    println!("get logs");
+    test_env.bv_run(
+        &["node", "logs", vm_id],
+        "Testing entry_point not configured, but parametrized with anything!",
+    );
+
+    println!("stop started node");
+    test_env.bv_run(&["node", "stop", vm_id], "Stopped node");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_bv_cmd_node_lifecycle() -> Result<()> {
+    let mut test_env = TestEnv::new().await?;
+    let mut run = RunFlag::default();
+    let bv_handle = test_env.run_blockvisord(run.clone()).await?;
+    println!("create a node");
+    let vm_id = &test_env.create_node("testing/validator/0.0.1");
+    println!("create vm_id: {vm_id}");
+
+    println!("stop stopped node");
+    test_env.bv_run(&["node", "stop", vm_id], "Stopped node");
+
+    println!("start stopped node");
+    test_env.bv_run(&["node", "start", vm_id], "Started node");
+
+    println!("stop started node");
+    test_env.bv_run(&["node", "stop", vm_id], "Stopped node");
+
+    println!("restart stopped node");
+    test_env.bv_run(&["node", "start", vm_id], "Started node");
+
+    println!("query metrics");
+    test_env.bv_run(&["node", "metrics", vm_id], "In consensus:        false");
+
+    println!("list running node before service restart");
+    test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    println!("stop service");
+    run.stop();
+    bv_handle.await.ok();
+
+    println!("start service again");
+    test_env.run_blockvisord(RunFlag::default()).await?;
+
+    println!("list running node after service restart");
+    test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    println!("upgrade running node");
+    test_env.bv_run(
+        &["node", "upgrade", vm_id, "testing/validator/0.0.2"],
+        "Upgraded node",
+    );
+
+    println!("list running node after node upgrade");
+    test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    println!("generate node keys");
+    test_env.bv_run(&["node", "run", vm_id, "generate_keys"], "");
+
+    println!("check node keys");
+    test_env.bv_run(&["node", "keys", vm_id], "first");
+
+    println!("delete started node");
+    test_env.bv_run(&["node", "delete", vm_id], "Deleted node");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_bv_cmd_node_recovery() -> Result<()> {
+    use blockvisord::{node::FC_BIN_NAME, utils};
+
+    let mut test_env = TestEnv::new().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
+
+    println!("create a node");
+    let vm_id = &test_env.create_node("testing/validator/0.0.1");
+    println!("create vm_id: {vm_id}");
+
+    println!("start stopped node");
+    test_env.bv_run(&["node", "start", vm_id], "Started node");
+
+    println!("list running node");
+    test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    let process_id = utils::get_process_pid(FC_BIN_NAME, vm_id).unwrap();
+    println!("impolitely kill node with process id {process_id}");
+    utils::run_cmd("kill", ["-9", &process_id.to_string()])
+        .await
+        .unwrap();
+    // wait until process is actually killed
+    let is_process_running = |pid| {
+        let mut sys = System::new();
+        sys.refresh_process_specifics(Pid::from_u32(pid), ProcessRefreshKind::new())
+            .then(|| sys.process(Pid::from_u32(pid)).map(|proc| proc.status()))
+            .flatten()
+            .map_or(false, |status| status != sysinfo::ProcessStatus::Zombie)
+    };
+    while is_process_running(process_id) {
+        sleep(Duration::from_millis(10)).await;
+    }
+
+    println!("list running node before recovery");
+    test_env.bv_run(&["node", "status", vm_id], "Failed");
+
+    println!("list running node after recovery");
+    let start = std::time::Instant::now();
+    let elapsed = || std::time::Instant::now() - start;
+    while !test_env.try_bv_run(&["node", "status", vm_id], "Running")
+        && elapsed() < Duration::from_secs(60)
+    {
+        sleep(Duration::from_secs(1)).await;
+    }
+
+    println!("delete started node");
+    test_env.bv_run(&["node", "delete", vm_id], "Deleted node");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_bv_cmd_grpc_commands() -> Result<()> {
     use blockvisord::config::Config;
     use blockvisord::nodes::Nodes;
     use blockvisord::server::bv_pb;
@@ -465,26 +649,12 @@ async fn test_bv_cmd_grpc_commands() {
     use serde_json::json;
     use uuid::Uuid;
 
+    let test_env = TestEnv::new().await?;
     let host_id = Uuid::new_v4().to_string();
     let node_name = "beautiful-node-name".to_string();
     let node_id = Uuid::new_v4().to_string();
     let id = node_id.clone();
     let command_id = Uuid::new_v4().to_string();
-
-    let babel_dir = fs::canonicalize(env::current_exe().unwrap())
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("../../babel/bin");
-    fs::create_dir_all(&babel_dir).unwrap();
-    fs::copy(
-        "/opt/blockvisor/current/babel/bin/babel",
-        babel_dir.join("babel"),
-    )
-    .unwrap();
-    println!("delete existing node, if any");
-    let mut cmd = Command::cargo_bin("bv").unwrap();
-    cmd.args(["node", "delete", &node_name]).assert();
 
     println!("preparing server");
     let commands = vec![
@@ -500,7 +670,7 @@ async fn test_bv_cmd_grpc_commands() {
                     image: Some(pb::ContainerImage {
                         protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
-                        node_version: "0.0.2".to_string(),
+                        node_version: "0.0.1".to_string(),
                         status: 1, // Development
                     }),
                     blockchain: "testing".to_string(),
@@ -527,7 +697,7 @@ async fn test_bv_cmd_grpc_commands() {
                     image: Some(pb::ContainerImage {
                         protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
-                        node_version: "0.0.2".to_string(),
+                        node_version: "0.0.1".to_string(),
                         status: 1, // Development
                     }),
                     blockchain: "testing".to_string(),
@@ -554,7 +724,7 @@ async fn test_bv_cmd_grpc_commands() {
                     image: Some(pb::ContainerImage {
                         protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
-                        node_version: "0.0.2".to_string(),
+                        node_version: "0.0.1".to_string(),
                         status: 1, // Development
                     }),
                     blockchain: "testing".to_string(),
@@ -640,7 +810,7 @@ async fn test_bv_cmd_grpc_commands() {
                     image: Some(pb::ContainerImage {
                         protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
-                        node_version: "0.0.3".to_string(),
+                        node_version: "0.0.2".to_string(),
                         status: 1, // Development
                     }),
                 })),
@@ -687,12 +857,10 @@ async fn test_bv_cmd_grpc_commands() {
         blockjoy_registry_url: "http://localhost:50059".to_string(),
         blockjoy_mqtt_url: "mqtt://localhost:1889".to_string(),
         update_check_interval_secs: None,
-        blockvisor_port: default_blockvisor_port(),
+        blockvisor_port: 0,
     };
 
-    let nodes = Nodes::load(LinuxPlatform::new().unwrap(), config.clone())
-        .await
-        .unwrap();
+    let nodes = Nodes::new(test_env.build_dummy_platform(), config.clone());
     let nodes = Arc::new(RwLock::new(nodes));
 
     let client_future = async {
@@ -803,4 +971,5 @@ async fn test_bv_cmd_grpc_commands() {
     for (actual, ref expected) in commands_updates.lock().await.iter().zip(expected_updates) {
         assert_eq!(actual, expected);
     }
+    Ok(())
 }

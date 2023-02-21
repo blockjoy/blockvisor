@@ -66,7 +66,7 @@ jobs:
           docker compose up -d
       - name: Test
         run: >
-          cargo test -p blockvisord
+          cargo test -p blockvisord -- --test-threads=12
       - name: Shutdown test env
         if: always()
         run: >
