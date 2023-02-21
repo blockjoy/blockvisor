@@ -3,6 +3,7 @@ members = [
     "babel_api",
     "babel",
     "bv",
+    "bv_utils",
 ]
 
 [workspace.package]

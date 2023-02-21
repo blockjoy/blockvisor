@@ -4,6 +4,7 @@ use crate::test_env::test_env::TestEnv;
 use anyhow::Result;
 use assert_cmd::Command;
 use assert_fs::TempDir;
+use bv_utils::run_flag::RunFlag;
 use std::time::Duration;
 use sysinfo::{Pid, PidExt, ProcessExt, ProcessRefreshKind, System, SystemExt};
 use tokio::time::sleep;
@@ -29,7 +30,7 @@ async fn test_bv_host_metrics() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 7)]
 async fn test_bv_cmd_delete_all() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
-    test_env.run_blockvisord().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
     test_env.bv_run(&["node", "rm", "--all", "--yes"], "");
     Ok(())
 }
@@ -37,7 +38,7 @@ async fn test_bv_cmd_delete_all() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 7)]
 async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
-    test_env.run_blockvisord().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
     const NODES_COUNT: usize = 2;
     println!("create {NODES_COUNT} nodes");
     let mut nodes: Vec<String> = Default::default();
@@ -63,7 +64,7 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 7)]
 async fn test_bv_cmd_logs() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
-    test_env.run_blockvisord().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
     println!("create a node");
     let vm_id = &test_env.create_node("testing/validator/0.0.1");
     println!("create vm_id: {vm_id}");
@@ -85,7 +86,8 @@ async fn test_bv_cmd_logs() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 7)]
 async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
-    test_env.run_blockvisord().await?;
+    let mut run = RunFlag::default();
+    let bv_handle = test_env.run_blockvisord(run.clone()).await?;
     println!("create a node");
     let vm_id = &test_env.create_node("testing/validator/0.0.1");
     println!("create vm_id: {vm_id}");
@@ -108,12 +110,12 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     println!("list running node before service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
-    // TODO implement blockvisord graceful shutdown first
-    // println!("stop service");
-    // test_env.bv_run(&["stop"], "blockvisor service stopped successfully");
-    //
-    // println!("start service");
-    // test_env.bv_run(&["start"], "blockvisor service started successfully");
+    println!("stop service");
+    run.stop();
+    bv_handle.await.ok();
+
+    println!("start service again");
+    test_env.run_blockvisord(RunFlag::default()).await?;
 
     println!("list running node after service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");
@@ -143,7 +145,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     use blockvisord::{node::FC_BIN_NAME, utils};
 
     let mut test_env = TestEnv::new().await?;
-    test_env.run_blockvisord().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
 
     println!("create a node");
     let vm_id = &test_env.create_node("testing/validator/0.0.1");
@@ -175,10 +177,14 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     println!("list running node before recovery");
     test_env.bv_run(&["node", "status", vm_id], "Failed");
 
-    sleep(Duration::from_secs(10)).await;
-
     println!("list running node after recovery");
-    test_env.bv_run(&["node", "status", vm_id], "Running");
+    let start = std::time::Instant::now();
+    let elapsed = || std::time::Instant::now() - start;
+    while !test_env.try_bv_run(&["node", "status", vm_id], "Running")
+        && elapsed() < Duration::from_secs(60)
+    {
+        sleep(Duration::from_secs(1)).await;
+    }
 
     println!("delete started node");
     test_env.bv_run(&["node", "delete", vm_id], "Deleted node");

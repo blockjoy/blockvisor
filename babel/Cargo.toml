@@ -21,8 +21,8 @@ path = "src/bin/babelsup.rs"
 [dependencies]
 async-trait = "0.1.61"
 babel_api = {version = "*", path = "../babel_api"}
+bv_utils = {version = "*", path = "../bv_utils"}
 crc = "3.0.0"
-ctrlc = "3.2.4"
 eyre = "0.6.8"
 futures = "0.3.25"
 gjson = "0.8"

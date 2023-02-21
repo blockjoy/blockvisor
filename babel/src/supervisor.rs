@@ -2,9 +2,9 @@
 /// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
 /// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::log_buffer::LogBuffer;
-use crate::run_flag::RunFlag;
 use async_trait::async_trait;
 use babel_api::config::{Entrypoint, SupervisorConfig};
+use bv_utils::run_flag::RunFlag;
 use eyre::bail;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -74,10 +74,7 @@ pub async fn run<T: Timer>(
 async fn wait_for_babel_bin(mut run: RunFlag, mut babel_change_rx: BabelChangeRx) -> BabelChangeRx {
     // if there is no babel binary yet, then just wait for babel start signal from blockvisord
     if babel_change_rx.borrow_and_update().is_none() {
-        tokio::select!(
-            _ = babel_change_rx.changed() => {},
-            _ = run.wait() => {},
-        );
+        run.select(babel_change_rx.changed()).await;
     }
     babel_change_rx
 }
@@ -247,10 +244,11 @@ impl<'a, T: Timer> Backoff<'a, T> {
         if duration > self.reset_timeout {
             self.counter = 0;
         } else {
-            tokio::select!(
-                _ = self.timer.sleep(Duration::from_millis(self.backoff_base_ms * 2u64.pow(self.counter))) => {},
-                _ = self.run.wait() => {},
-            );
+            self.run
+                .select(self.timer.sleep(Duration::from_millis(
+                    self.backoff_base_ms * 2u64.pow(self.counter),
+                )))
+                .await;
             self.counter += 1;
         }
     }
@@ -259,7 +257,6 @@ impl<'a, T: Timer> Backoff<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::run_flag::RunFlag;
     use assert_fs::TempDir;
     use async_trait::async_trait;
     use eyre::Result;

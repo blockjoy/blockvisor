@@ -11,6 +11,7 @@ use crate::{
     try_set_bv_status,
 };
 use anyhow::{Context, Result};
+use bv_utils::run_flag::RunFlag;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -59,7 +60,7 @@ where
         self.listener.local_addr()
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self, run: RunFlag) -> Result<()> {
         info!(
             "Starting {} {} ...",
             env!("CARGO_PKG_NAME"),
@@ -80,12 +81,13 @@ where
         let server = BlockvisorServer {
             nodes: nodes.clone(),
         };
-        let internal_api_server_future = Self::create_server(self.listener, server);
+        let internal_api_server_future = Self::create_server(run.clone(), self.listener, server);
 
         let token = api::AuthToken(self.config.token.to_owned());
         let endpoint = Endpoint::from_str(&self.config.blockjoy_api_url)?;
         let external_api_client_future = async {
-            loop {
+            let mut run = run.clone();
+            while run.load() {
                 match api::CommandsService::connect(
                     &self.config.blockjoy_api_url,
                     &self.config.token,
@@ -94,7 +96,7 @@ where
                 {
                     Ok(mut client) => {
                         if let Err(e) = client
-                            .get_and_process_pending_commands(&config.id, nodes.clone())
+                            .get_and_process_pending_commands(&self.config.id, nodes.clone())
                             .await
                         {
                             error!("Error processing pending commands: {:?}", e);
@@ -102,13 +104,13 @@ where
                     }
                     Err(e) => error!("Error connecting to api: {:?}", e),
                 }
-
-                sleep(RECONNECT_INTERVAL).await;
+                run.select(sleep(RECONNECT_INTERVAL)).await;
             }
         };
 
         let nodes_recovery_future = async {
-            loop {
+            let mut run = run.clone();
+            while run.load() {
                 let list: Vec<_> = nodes
                     .read()
                     .await
@@ -143,14 +145,19 @@ where
                         }
                     }
                 }
-                sleep(RECOVERY_CHECK_INTERVAL).await;
+                run.select(sleep(RECOVERY_CHECK_INTERVAL)).await;
             }
         };
 
-        let node_updates_future = Self::node_updates(nodes.clone());
-        let node_metrics_future = Self::node_metrics(nodes.clone(), &endpoint, token.clone());
-        let host_metrics_future =
-            Self::host_metrics(self.config.id.clone(), &endpoint, token.clone());
+        let node_updates_future = Self::node_updates(run.clone(), nodes.clone());
+        let node_metrics_future =
+            Self::node_metrics(run.clone(), nodes.clone(), &endpoint, token.clone());
+        let host_metrics_future = Self::host_metrics(
+            run.clone(),
+            self.config.id.clone(),
+            &endpoint,
+            token.clone(),
+        );
         let self_updater = self_updater::new(self_updater::SysTimer, &bv_root, &self.config)?;
 
         let _ = tokio::join!(
@@ -166,34 +173,42 @@ where
         Ok(())
     }
 
-    async fn create_server(listener: TcpListener, server: BlockvisorServer<P>) -> Result<()> {
+    async fn create_server(
+        mut run: RunFlag,
+        listener: TcpListener,
+        server: BlockvisorServer<P>,
+    ) -> Result<()> {
         Server::builder()
             .max_concurrent_streams(1)
             .add_service(bv_pb::blockvisor_server::BlockvisorServer::new(server))
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .serve_with_incoming_shutdown(
+                tokio_stream::wrappers::TcpListenerStream::new(listener),
+                run.wait(),
+            )
             .await?;
 
         Ok(())
     }
 
-    async fn wait_for_channel(endpoint: &Endpoint) -> Channel {
-        loop {
+    async fn wait_for_channel(mut run: RunFlag, endpoint: &Endpoint) -> Option<Channel> {
+        while run.load() {
             match Endpoint::connect(endpoint).await {
-                Ok(channel) => return channel,
+                Ok(channel) => return Some(channel),
                 Err(e) => {
                     error!("Error connecting to endpoint: {:?}", e);
-                    sleep(RECONNECT_INTERVAL).await;
+                    run.select(sleep(RECONNECT_INTERVAL)).await;
                 }
             }
         }
+        None
     }
 
     /// This task runs periodically to send important info about nodes to API.
-    async fn node_updates(nodes: Arc<RwLock<Nodes<P>>>) {
+    async fn node_updates(mut run: RunFlag, nodes: Arc<RwLock<Nodes<P>>>) {
         let mut timer = tokio::time::interval(INFO_UPDATE_INTERVAL);
         let mut known_addresses: HashMap<String, String> = HashMap::new();
-        loop {
-            timer.tick().await;
+        while run.load() {
+            run.select(timer.tick()).await;
             let mut nodes_lock = nodes.write().await;
 
             let mut updates = vec![];
@@ -225,19 +240,20 @@ where
     /// This task runs every minute to aggregate metrics from every node. It will call into the nodes
     /// query their metrics, then send them to blockvisor-api.
     async fn node_metrics(
+        mut run: RunFlag,
         nodes: Arc<RwLock<Nodes<P>>>,
         endpoint: &Endpoint,
         token: api::AuthToken,
-    ) {
+    ) -> Option<()> {
         let mut timer = tokio::time::interval(node_metrics::COLLECT_INTERVAL);
-        loop {
-            timer.tick().await;
+        while run.load() {
+            run.select(timer.tick()).await;
             let mut lock = nodes.write().await;
             let metrics = node_metrics::collect_metrics(lock.nodes.values_mut()).await;
             // Drop the lock as early as possible.
             drop(lock);
             let mut client = api::MetricsClient::with_auth(
-                Self::wait_for_channel(endpoint).await,
+                Self::wait_for_channel(run.clone(), endpoint).await?,
                 token.clone(),
             );
             let metrics: pb::NodeMetricsRequest = metrics.into();
@@ -245,16 +261,22 @@ where
                 error!("Could not send node metrics! `{e}`");
             }
         }
+        None
     }
 
-    async fn host_metrics(host_id: String, endpoint: &Endpoint, token: api::AuthToken) {
+    async fn host_metrics(
+        mut run: RunFlag,
+        host_id: String,
+        endpoint: &Endpoint,
+        token: api::AuthToken,
+    ) -> Option<()> {
         let mut timer = tokio::time::interval(hosts::COLLECT_INTERVAL);
-        loop {
-            timer.tick().await;
+        while run.load() {
+            run.select(timer.tick()).await;
             match hosts::get_host_metrics() {
                 Ok(metrics) => {
                     let mut client = api::MetricsClient::with_auth(
-                        Self::wait_for_channel(endpoint).await,
+                        Self::wait_for_channel(run.clone(), endpoint).await?,
                         token.clone(),
                     );
                     let metrics = pb::HostMetricsRequest::new(host_id.clone(), metrics);
@@ -267,5 +289,6 @@ where
                 }
             };
         }
+        None
     }
 }

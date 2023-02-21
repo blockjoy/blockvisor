@@ -1,4 +1,5 @@
-use babel::{babel_service, logging, run_flag::RunFlag};
+use babel::{babel_service, logging};
+use bv_utils::run_flag::RunFlag;
 use eyre::Context;
 use tonic::transport::Server;
 use tracing::info;

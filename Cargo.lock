@@ -302,8 +302,8 @@ dependencies = [
  "assert_fs",
  "async-trait",
  "babel_api",
+ "bv_utils",
  "crc",
- "ctrlc",
  "eyre",
  "futures",
  "gjson",
@@ -417,6 +417,7 @@ dependencies = [
  "async-trait",
  "babel_api",
  "base64 0.21.0",
+ "bv_utils",
  "clap",
  "cli-table",
  "crc",
@@ -470,6 +471,14 @@ name = "bumpalo"
 version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d261e256854913907f67ed06efbc3338dfe6179796deefc1ff763fc1aee5535"
+
+[[package]]
+name = "bv_utils"
+version = "0.8.0"
+dependencies = [
+ "ctrlc",
+ "tokio",
+]
 
 [[package]]
 name = "byteorder"

@@ -28,6 +28,7 @@ name = "bvup"
 path = "src/bin/bvup.rs"
 
 [dependencies]
+bv_utils = {version = "*", path = "../bv_utils"}
 anyhow = "1.0.68"
 async-trait = "0.1.60"
 babel_api = {version = "*", path = "../babel_api"}

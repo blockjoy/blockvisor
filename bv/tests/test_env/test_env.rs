@@ -3,18 +3,18 @@ use assert_cmd::Command;
 use async_trait::async_trait;
 use blockvisord::blockvisord::BlockvisorD;
 use blockvisord::config::Config;
-use blockvisord::node::REGISTRY_CONFIG_DIR;
-use blockvisord::nodes::CommonData;
 use blockvisord::pal::{NetInterface, Pal};
 use blockvisord::services::cookbook::IMAGES_DIR;
 use blockvisord::utils::run_cmd;
 use blockvisord::BV_VAR_PATH;
+use bv_utils::run_flag::RunFlag;
 use predicates::prelude::predicate;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use tokio::task::JoinHandle;
 
 /// Global integration tests token. All tests (that may run in parallel) share common FS and net devices space
 /// (tap devices which are created by Firecracker during tests).
@@ -34,7 +34,8 @@ impl TestEnv {
     pub async fn new() -> Result<Self> {
         // pick unique test token
         let token = TEST_TOKEN.fetch_add(1, Ordering::Relaxed);
-        // make sure temp directories names are sort - socket file path has 104 char len limit
+        // make sure temp directories names are sort - socket file path has 108 char len limit
+        // see `man 7 unix` - "On  Linux, sun_path is 108 bytes in size"
         let bv_root = if let Ok(bv_temp) = std::env::var("BV_TEMP") {
             PathBuf::from(bv_temp)
         } else {
@@ -56,26 +57,13 @@ impl TestEnv {
             bv_root.join("usr").join("bin"),
         )?;
 
-        let data = CommonData {
-            machine_index: (10 * token) as u32,
-        };
-        let config = toml::Value::try_from(&data)?;
-        let config = toml::to_string(&config)?;
-        fs::create_dir_all(bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR))?;
-        fs::write(
-            bv_root
-                .join(BV_VAR_PATH)
-                .join(REGISTRY_CONFIG_DIR)
-                .join("nodes.toml"),
-            &*config,
-        )?;
-
         let api_config = Config {
             id: "host_id".to_owned(),
             token: "token".to_owned(),
-            blockjoy_api_url: "http://localhost:8080".to_owned(),
-            blockjoy_keys_url: "http://localhost:8080".to_owned(),
-            blockjoy_registry_url: "http://localhost:50051".to_owned(),
+            blockjoy_api_url: "http://localhost:8070".to_owned(),
+            blockjoy_keys_url: "http://localhost:8070".to_owned(),
+            blockjoy_registry_url: "http://localhost:50041".to_owned(),
+            blockjoy_mqtt_url: "mqtt://localhost:1873".to_string(),
             update_check_interval_secs: None,
             blockvisor_port: 0, // 0 has special meaning - pick first free port
         };
@@ -87,7 +75,7 @@ impl TestEnv {
         })
     }
 
-    pub async fn run_blockvisord(&mut self) -> Result<()> {
+    pub async fn run_blockvisord(&mut self, run: RunFlag) -> Result<JoinHandle<Result<()>>> {
         let blockvisord = BlockvisorD::new(DummyPlatform {
             bv_root: self.bv_root.clone(),
             babel_path: Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -100,8 +88,7 @@ impl TestEnv {
         .await?;
         self.api_config.blockvisor_port = blockvisord.local_addr()?.port();
         self.api_config.save(&self.bv_root).await?;
-        tokio::spawn(blockvisord.run());
-        Ok(())
+        Ok(tokio::spawn(blockvisord.run(run)))
     }
 
     pub fn bv_run(&self, commands: &[&str], stdout_pattern: &str) {
@@ -112,6 +99,17 @@ impl TestEnv {
             .assert()
             .success()
             .stdout(predicate::str::contains(stdout_pattern));
+    }
+
+    pub fn try_bv_run(&self, commands: &[&str], stdout_pattern: &str) -> bool {
+        let mut cmd = Command::cargo_bin("bv").unwrap();
+        cmd.args(commands)
+            .env("BV_ROOT", &self.bv_root)
+            .env("NO_COLOR", "1")
+            .assert()
+            .success()
+            .try_stdout(predicate::str::contains(stdout_pattern))
+            .is_ok()
     }
 
     pub fn create_node(&self, image: &str) -> String {

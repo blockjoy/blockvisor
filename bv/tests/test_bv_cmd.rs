@@ -291,9 +291,8 @@ async fn test_bv_cmd_init_localhost() {
 
     sleep(Duration::from_secs(30)).await;
 
-    // FIXME uncomment when commands order bug FiXed
-    // println!("list created node, should be auto-started");
-    // bv_run(&["node", "status", &node_id], "Running");
+    println!("list created node, should be auto-started");
+    bv_run(&["node", "status", &node_id], "Running");
 
     let mut client = ui_pb::command_service_client::CommandServiceClient::connect(url)
         .await
@@ -675,7 +674,7 @@ async fn test_bv_cmd_grpc_commands() {
             .max_concurrent_streams(1)
             .add_service(pb::commands_server::CommandsServer::new(commands_server))
             .add_service(pb::nodes_server::NodesServer::new(nodes_server))
-            .serve("0.0.0.0:8081".to_socket_addrs().unwrap().next().unwrap())
+            .serve("0.0.0.0:8089".to_socket_addrs().unwrap().next().unwrap())
             .await
             .unwrap()
     };
@@ -683,10 +682,10 @@ async fn test_bv_cmd_grpc_commands() {
     let config = Config {
         id: Uuid::new_v4().to_string(),
         token: "any token".to_string(),
-        blockjoy_api_url: "http://localhost:8081".to_string(),
-        blockjoy_keys_url: "http://localhost:8081".to_string(),
-        blockjoy_registry_url: "http://localhost:50051".to_string(),
-        blockjoy_mqtt_url: "mqtt://localhost:1883".to_string(),
+        blockjoy_api_url: "http://localhost:8089".to_string(),
+        blockjoy_keys_url: "http://localhost:8089".to_string(),
+        blockjoy_registry_url: "http://localhost:50059".to_string(),
+        blockjoy_mqtt_url: "mqtt://localhost:1889".to_string(),
         update_check_interval_secs: None,
         blockvisor_port: default_blockvisor_port(),
     };

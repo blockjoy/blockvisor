@@ -1,4 +1,5 @@
 use ctrlc;
+use std::future::Future;
 use tokio::sync::broadcast;
 
 /// Flag representing global service state to enable graceful shutdown.
@@ -46,6 +47,13 @@ impl RunFlag {
             let _ = self.rx.recv().await;
             self.run = false;
         }
+    }
+
+    pub async fn select<T>(&mut self, future: impl Future<Output = T>) {
+        tokio::select!(
+            _ = future => {},
+            _ = self.wait() => {},
+        );
     }
 }
 

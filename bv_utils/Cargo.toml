@@ -1,0 +1,9 @@
+[package]
+name = "bv_utils"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ctrlc = "3.2.4"
+tokio = "1.17.0"
