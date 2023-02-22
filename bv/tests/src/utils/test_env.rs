@@ -31,7 +31,7 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
-    pub async fn new() -> Result<Self> {
+    pub async fn new_with_api_config(mut api_config: Config) -> Result<Self> {
         // pick unique test token
         let token = TEST_TOKEN.fetch_add(1, Ordering::Relaxed);
         // make sure temp directories names are sort - socket file path has 108 char len limit
@@ -56,7 +56,16 @@ impl TestEnv {
             Path::new("/").join("usr").join("bin"),
             bv_root.join("usr").join("bin"),
         )?;
+        api_config.blockvisor_port = 0;
+        api_config.save(&bv_root).await?;
+        Ok(Self {
+            bv_root,
+            api_config,
+            token,
+        })
+    }
 
+    pub async fn new() -> Result<Self> {
         let api_config = Config {
             id: "host_id".to_owned(),
             token: "token".to_owned(),
@@ -67,12 +76,7 @@ impl TestEnv {
             update_check_interval_secs: None,
             blockvisor_port: 0, // 0 has special meaning - pick first free port
         };
-        api_config.save(&bv_root).await?;
-        Ok(Self {
-            bv_root,
-            api_config,
-            token,
-        })
+        Self::new_with_api_config(api_config).await
     }
 
     pub fn build_dummy_platform(&self) -> DummyPlatform {
@@ -95,13 +99,7 @@ impl TestEnv {
     }
 
     pub fn bv_run(&self, commands: &[&str], stdout_pattern: &str) {
-        let mut cmd = Command::cargo_bin("bv").unwrap();
-        cmd.args(commands)
-            .env("BV_ROOT", &self.bv_root)
-            .env("NO_COLOR", "1")
-            .assert()
-            .success()
-            .stdout(predicate::str::contains(stdout_pattern));
+        bv_run(commands, stdout_pattern, Some(&self.bv_root));
     }
 
     pub fn try_bv_run(&self, commands: &[&str], stdout_pattern: &str) -> bool {
@@ -150,6 +148,17 @@ impl Drop for TestEnv {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.bv_root);
     }
+}
+
+pub fn bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
+    let mut cmd = Command::cargo_bin("bv").unwrap();
+    cmd.args(commands).env("NO_COLOR", "1");
+    if let Some(bv_root) = bv_root {
+        cmd.env("BV_ROOT", bv_root);
+    }
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(stdout_pattern));
 }
 
 #[derive(Debug)]

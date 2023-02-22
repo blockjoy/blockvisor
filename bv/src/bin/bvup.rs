@@ -35,6 +35,9 @@ pub struct CmdArgs {
     #[clap(long = "ifa", default_value = "bvbr0")]
     pub ifa: String,
 
+    #[clap(long = "port")]
+    pub blockvisor_port: Option<u16>,
+
     /// Skip provision and init phase
     #[clap(long = "skip-init")]
     pub skip_init: bool,
@@ -99,7 +102,9 @@ async fn main() -> Result<()> {
             blockjoy_registry_url: cmd_args.blockjoy_registry_url,
             blockjoy_mqtt_url: cmd_args.blockjoy_mqtt_url,
             update_check_interval_secs: None,
-            blockvisor_port: config::default_blockvisor_port(),
+            blockvisor_port: cmd_args
+                .blockvisor_port
+                .unwrap_or(config::default_blockvisor_port()),
         };
         api_config.save(&bv_root).await?;
         Some(api_config)
