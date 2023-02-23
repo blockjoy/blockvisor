@@ -17,4 +17,4 @@ jobs:
         with:
           # allow different types in commit message
           # Default: fix|feat|revert
-          types: "feat|fix|perf|refactor|test|build|docs|merge|revert"
+          types: "feat|fix|perf|refactor|test|build|docs|merge|revert|chore|ci"
