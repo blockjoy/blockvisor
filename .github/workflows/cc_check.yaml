@@ -1,0 +1,20 @@
+name: Conventional Commits
+
+on:
+  pull_request:
+    branches:
+      - "main"
+      - "master"
+
+jobs:
+  test:
+    name: Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: taskmedia/action-conventional-commits@v1.1.0
+        with:
+          # allow different types in commit message
+          # Default: fix|feat|revert
+          types: "feat|fix|perf|refactor|test|build|docs|merge|revert"
