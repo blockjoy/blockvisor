@@ -104,7 +104,7 @@ async fn main() -> Result<()> {
             update_check_interval_secs: None,
             blockvisor_port: cmd_args
                 .blockvisor_port
-                .unwrap_or(config::default_blockvisor_port()),
+                .unwrap_or_else(config::default_blockvisor_port),
         };
         api_config.save(&bv_root).await?;
         Some(api_config)

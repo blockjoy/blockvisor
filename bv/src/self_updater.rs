@@ -54,7 +54,7 @@ impl BundleConnector for DefaultConnector {
     }
 }
 
-pub struct SelfUpdater<T: Sleeper, C: BundleConnector> {
+pub struct SelfUpdater<T, C> {
     blacklist_path: PathBuf,
     download_path: PathBuf,
     check_interval: Option<Duration>,

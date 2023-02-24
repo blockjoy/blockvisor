@@ -1,9 +1,9 @@
 use crate::config::{Config, CONFIG_PATH};
 use crate::server::bv_pb;
 use crate::server::bv_pb::blockvisor_client::BlockvisorClient;
-use crate::utils::{get_process_pid, run_cmd};
 use crate::with_retry;
 use anyhow::{bail, ensure, Context, Error, Result};
+use async_trait::async_trait;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,21 +45,32 @@ pub trait Timer {
     fn sleep(&self, duration: Duration);
 }
 
+/// SystemCtl abstraction for better testing.
+#[async_trait]
+pub trait BvService {
+    async fn reload(&self) -> Result<()>;
+    async fn stop(&self) -> Result<()>;
+    async fn start(&self) -> Result<()>;
+    async fn enable(&self) -> Result<()>;
+}
+
 #[derive(Debug, PartialEq)]
 enum BackupStatus {
-    Done,
+    Done(String),
     NothingToBackup,
     ThisIsRollback,
 }
 
-pub struct Installer<T: Timer> {
+pub struct Installer<T, S> {
     paths: InstallerPaths,
     bv_client: BlockvisorClient<Channel>,
+    backup_status: BackupStatus,
     timer: T,
+    bv_service: S,
 }
 
-impl<T: Timer> Installer<T> {
-    pub async fn new(timer: T, bv_root: &Path) -> Result<Self> {
+impl<T: Timer, S: BvService> Installer<T, S> {
+    pub async fn new(timer: T, bv_service: S, bv_root: &Path) -> Result<Self> {
         let config = Config::load(bv_root).await.with_context(|| {
             format!(
                 "failed to load host config from {}",
@@ -69,6 +80,7 @@ impl<T: Timer> Installer<T> {
 
         Ok(Self::internal_new(
             timer,
+            bv_service,
             bv_root,
             Channel::from_shared(format!("http://localhost:{}", config.blockvisor_port))?
                 .timeout(BV_REQ_TIMEOUT)
@@ -84,27 +96,18 @@ impl<T: Timer> Installer<T> {
         }
         info!("installing BV {THIS_VERSION}...");
 
-        match self.preinstall() {
-            Ok(backup_status) => {
-                match self.install().await {
-                    Ok(_) => {
-                        // try cleanup after install, but cleanup result should not affect exit code
-                        let _ = self
-                            .cleanup() // do not interrupt cleanup on errors
-                            .map_err(|err| warn!("failed to cleanup after install with: {err}"));
-                        Ok(())
-                    }
-                    Err(err) => self.handle_broken_installation(backup_status, err),
-                }
-            }
-            Err(err) => {
-                // TODO: try to send install failed status to the backend
-                Err(err)
-            }
+        self.preinstall()?; // TODO: try to send install failed status to the backend in error case
+        if let Err(err) = self.install().await {
+            self.handle_broken_installation(err).await
+        } else {
+            // try cleanup after install, but cleanup result should not affect exit code
+            self.cleanup() // do not interrupt cleanup on errors
+                .unwrap_or_else(|err| warn!("failed to cleanup after install with: {err}"));
+            Ok(())
         }
     }
 
-    fn internal_new(timer: T, bv_root: &Path, bv_channel: Channel) -> Self {
+    fn internal_new(timer: T, bv_service: S, bv_root: &Path, bv_channel: Channel) -> Self {
         let install_path = bv_root.join(INSTALL_PATH);
         let current = install_path.join(CURRENT_LINK);
         let this_version = install_path.join(THIS_VERSION);
@@ -122,7 +125,9 @@ impl<T: Timer> Installer<T> {
                 blacklist,
             },
             bv_client: BlockvisorClient::new(bv_channel),
+            backup_status: BackupStatus::NothingToBackup,
             timer,
+            bv_service,
         }
     }
 
@@ -151,13 +156,13 @@ impl<T: Timer> Installer<T> {
         Ok(())
     }
 
-    fn handle_broken_installation(&self, backup_status: BackupStatus, err: Error) -> Result<()> {
+    async fn handle_broken_installation(&self, err: Error) -> Result<()> {
         self.blacklist_this_version()?;
 
-        match backup_status {
-            BackupStatus::Done => {
+        match self.backup_status {
+            BackupStatus::Done(_) => {
                 // TODO: try to send install failed status to the backend
-                self.rollback()?;
+                self.rollback().await?;
                 bail!("installation failed with: {err}, but rolled back to previous version")
             }
             BackupStatus::ThisIsRollback => {
@@ -178,10 +183,10 @@ impl<T: Timer> Installer<T> {
                 .contains(version))
     }
 
-    fn backup_running_version(&self) -> Result<BackupStatus> {
+    fn backup_running_version(&mut self) -> Result<()> {
         if let Some(running_version) = self.get_running_version()? {
-            if self.is_blacklisted(running_version.as_str())? {
-                Ok(BackupStatus::ThisIsRollback)
+            if self.is_blacklisted(&running_version)? {
+                self.backup_status = BackupStatus::ThisIsRollback;
             } else {
                 info!("backup previously installed BV {running_version}");
                 let _ = fs::remove_file(&self.paths.backup);
@@ -191,11 +196,12 @@ impl<T: Timer> Installer<T> {
                     &self.paths.backup,
                 )
                 .with_context(|| "failed to backup running version for rollback")?;
-                Ok(BackupStatus::Done)
+                self.backup_status = BackupStatus::Done(running_version);
             }
         } else {
-            Ok(BackupStatus::NothingToBackup)
+            self.backup_status = BackupStatus::NothingToBackup;
         }
+        Ok(())
     }
 
     fn get_running_version(&self) -> Result<Option<String>> {
@@ -214,7 +220,7 @@ impl<T: Timer> Installer<T> {
         }
     }
 
-    fn preinstall(&self) -> Result<BackupStatus> {
+    fn preinstall(&mut self) -> Result<()> {
         self.move_bundle_to_install_path(
             env::current_exe().with_context(|| "failed to get current binary path")?,
         )?;
@@ -224,47 +230,40 @@ impl<T: Timer> Installer<T> {
     async fn install(&mut self) -> Result<()> {
         self.prepare_running().await?;
         self.install_this_version()?;
-        Self::restart_and_reenable_blockvisor().await?;
+        self.restart_and_reenable_blockvisor().await?;
         self.health_check().await
     }
 
     async fn prepare_running(&mut self) -> Result<()> {
-        if !self.paths.current.exists() //fresh installation
-            || get_process_pid( // rollback - launched by another installer from self.paths.current
-                INSTALLER_BIN,
-                &self.paths.current.join(INSTALLER_BIN).to_string_lossy(),
-            )
-            .is_err()
-        {
-            return Ok(());
-        }
-        info!("prepare running BV for update");
-        let timestamp = self.timer.now();
-        let expired = || {
-            let now = self.timer.now();
-            let duration = now.duration_since(timestamp);
-            duration > PREPARE_FOR_UPDATE_TIMEOUT
-        };
-        loop {
-            match with_retry!(self
-                .bv_client
-                .start_update(bv_pb::StartUpdateRequest::default()))
-            {
-                Ok(resp) => {
-                    let status = resp.into_inner().status;
-                    if status == bv_pb::ServiceStatus::Updating as i32 {
-                        break;
-                    } else if expired() {
-                        bail!("prepare running BV for update failed, BV start_update respond with {status}");
+        if let BackupStatus::Done(_) = self.backup_status {
+            info!("prepare running BV for update");
+            let timestamp = self.timer.now();
+            let expired = || {
+                let now = self.timer.now();
+                let duration = now.duration_since(timestamp);
+                duration > PREPARE_FOR_UPDATE_TIMEOUT
+            };
+            loop {
+                match with_retry!(self
+                    .bv_client
+                    .start_update(bv_pb::StartUpdateRequest::default()))
+                {
+                    Ok(resp) => {
+                        let status = resp.into_inner().status;
+                        if status == bv_pb::ServiceStatus::Updating as i32 {
+                            break;
+                        } else if expired() {
+                            bail!("prepare running BV for update failed, BV start_update respond with {status}");
+                        }
+                    }
+                    Err(err) => {
+                        if expired() {
+                            bail!("prepare running BV for update failed, BV start_update respond with {err}");
+                        }
                     }
                 }
-                Err(err) => {
-                    if expired() {
-                        bail!("prepare running BV for update failed, BV start_update respond with {err}");
-                    }
-                }
+                self.timer.sleep(BV_CHECK_INTERVAL);
             }
-            self.timer.sleep(BV_CHECK_INTERVAL);
         }
         Ok(())
     }
@@ -303,11 +302,18 @@ impl<T: Timer> Installer<T> {
         symlink_all(BLOCKVISOR_SERVICES, &self.paths.system_services)
     }
 
-    async fn restart_and_reenable_blockvisor() -> Result<()> {
-        run_cmd("systemctl", ["daemon-reload"]).await?;
-        run_cmd("systemctl", ["restart", "blockvisor.service"]).await?;
-        run_cmd("systemctl", ["enable", "blockvisor.service"]).await?;
+    async fn restart_and_reenable_blockvisor(&self) -> Result<()> {
+        self.bv_service.reload().await?;
+        self.bv_service.stop().await?;
+        self.migrate_bv_data()
+            .with_context(|| "failed to migrate bv data to new version")?;
+        self.bv_service.start().await?;
+        self.bv_service.enable().await?;
+        Ok(())
+    }
 
+    fn migrate_bv_data(&self) -> Result<()> {
+        // TODO backup state/config and migrate to new version
         Ok(())
     }
 
@@ -340,7 +346,14 @@ impl<T: Timer> Installer<T> {
         Ok(())
     }
 
-    fn rollback(&self) -> Result<()> {
+    async fn rollback(&self) -> Result<()> {
+        // stop broken version first
+        self.bv_service
+            .stop()
+            .await
+            .with_context(|| "failed to stop broken installation - can't continue rollback")?;
+        self.rollback_bv_data()
+            .with_context(|| "failed to rollback BV data")?;
         let backup_installer = self.paths.backup.join(INSTALLER_BIN);
         ensure!(backup_installer.exists(), "no backup found");
         let status_code = Command::new(backup_installer)
@@ -352,6 +365,11 @@ impl<T: Timer> Installer<T> {
             status_code == 0,
             "backup installer failed with exit code {status_code}"
         );
+        Ok(())
+    }
+
+    fn rollback_bv_data(&self) -> Result<()> {
+        // TODO rollback state/config
         Ok(())
     }
 
@@ -367,6 +385,7 @@ impl<T: Timer> Installer<T> {
 
     fn cleanup(&self) -> Result<()> {
         info!("cleanup old BV files:");
+        self.cleanup_bv_data_backup()?;
         let persistent = [
             &self.paths.blacklist,
             &self.paths.current,
@@ -398,6 +417,11 @@ impl<T: Timer> Installer<T> {
                 });
             }
         }
+        Ok(())
+    }
+
+    fn cleanup_bv_data_backup(&self) -> Result<()> {
+        // TODO cleanup state/config conversion remnants
         Ok(())
     }
 }
@@ -496,6 +520,18 @@ mod tests {
         }
     }
 
+    mock! {
+        pub TestBvService {}
+
+        #[async_trait]
+        impl BvService for TestBvService {
+            async fn reload(&self) -> Result<()>;
+            async fn stop(&self) -> Result<()>;
+            async fn start(&self) -> Result<()>;
+            async fn enable(&self) -> Result<()>;
+        }
+    }
+
     fn touch_file(path: &PathBuf) -> std::io::Result<fs::File> {
         fs::OpenOptions::new().create(true).write(true).open(path)
     }
@@ -526,25 +562,17 @@ mod tests {
             )
         }
 
-        fn build_installer(&self, timer: MockTestTimer) -> Installer<MockTestTimer> {
-            Installer::internal_new(timer, &self.tmp_root, test_channel(&self.tmp_root))
-        }
-
-        fn start_dummy_installer(&self) -> Result<()> {
-            // create dummy installer that will sleep
-            let current_path = self.tmp_root.join(INSTALL_PATH).join(CURRENT_LINK);
-            let _ = fs::create_dir_all(&current_path);
-            {
-                let mut installer = fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .mode(0o770)
-                    .open(current_path.join(INSTALLER_BIN))?;
-                writeln!(installer, "#!/bin/sh")?;
-                writeln!(installer, "sleep infinity")?;
-            }
-            tokio::process::Command::new(current_path.join(INSTALLER_BIN)).spawn()?;
-            Ok(())
+        fn build_installer(
+            &self,
+            timer: MockTestTimer,
+            bv_service: MockTestBvService,
+        ) -> Installer<MockTestTimer, MockTestBvService> {
+            Installer::internal_new(
+                timer,
+                bv_service,
+                &self.tmp_root,
+                test_channel(&self.tmp_root),
+            )
         }
     }
 
@@ -552,9 +580,11 @@ mod tests {
     async fn test_prepare_running_none() -> Result<()> {
         let test_env = TestEnv::new().await?;
 
-        let mut installer = test_env.build_installer(MockTestTimer::new());
+        let mut installer =
+            test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
+        installer.backup_status = BackupStatus::NothingToBackup;
         installer.prepare_running().await?;
-        let _ = fs::create_dir_all(&installer.paths.current);
+        installer.backup_status = BackupStatus::ThisIsRollback;
         installer.prepare_running().await?;
         Ok(())
     }
@@ -563,7 +593,6 @@ mod tests {
     async fn test_prepare_running_ok() -> Result<()> {
         let test_env = TestEnv::new().await?;
 
-        test_env.start_dummy_installer()?;
         let mut bv_mock = MockTestBV::new();
         bv_mock.expect_start_update().once().returning(|_| {
             let reply = bv_pb::StartUpdateResponse {
@@ -576,7 +605,8 @@ mod tests {
         let now = Instant::now();
         timer_mock.expect_now().returning(move || now);
         let server = test_env.start_test_server(bv_mock);
-        let mut installer = test_env.build_installer(timer_mock);
+        let mut installer = test_env.build_installer(timer_mock, MockTestBvService::new());
+        installer.backup_status = BackupStatus::Done(THIS_VERSION.to_owned());
         installer.prepare_running().await?;
         server.assert().await;
         Ok(())
@@ -585,7 +615,6 @@ mod tests {
     #[tokio::test]
     async fn test_prepare_running_timeout() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        test_env.start_dummy_installer()?;
         let mut bv_mock = MockTestBV::new();
         let update_start_called = Arc::new(AtomicBool::new(false));
         let update_start_called_flag = update_start_called.clone();
@@ -612,11 +641,9 @@ mod tests {
             }
         });
         let server = test_env.start_test_server(bv_mock);
-        test_env
-            .build_installer(timer_mock)
-            .prepare_running()
-            .await
-            .unwrap_err();
+        let mut installer = test_env.build_installer(timer_mock, MockTestBvService::new());
+        installer.backup_status = BackupStatus::Done(THIS_VERSION.to_owned());
+        installer.prepare_running().await.unwrap_err();
         server.assert().await;
         Ok(())
     }
@@ -644,7 +671,10 @@ mod tests {
             sleep(Duration::from_millis(10));
         }
 
-        test_env.build_installer(timer_mock).health_check().await?;
+        test_env
+            .build_installer(timer_mock, MockTestBvService::new())
+            .health_check()
+            .await?;
         server.assert().await;
         Ok(())
     }
@@ -681,7 +711,7 @@ mod tests {
         }
 
         test_env
-            .build_installer(timer_mock)
+            .build_installer(timer_mock, MockTestBvService::new())
             .health_check()
             .await
             .unwrap_err();
@@ -692,27 +722,28 @@ mod tests {
     #[tokio::test]
     async fn test_backup_running_version() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let installer = test_env.build_installer(MockTestTimer::new());
+        let mut installer =
+            test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
 
         fs::create_dir_all(&installer.paths.install_path)?;
-        assert_eq!(
-            BackupStatus::NothingToBackup,
-            installer.backup_running_version()?
-        );
+        installer.backup_running_version()?;
+        assert_eq!(BackupStatus::NothingToBackup, installer.backup_status);
 
         fs::create_dir_all(&installer.paths.this_version)?;
         std::os::unix::fs::symlink(&installer.paths.this_version, &installer.paths.current)?;
-        assert_eq!(BackupStatus::Done, installer.backup_running_version()?);
+        installer.backup_running_version()?;
+        assert_eq!(
+            BackupStatus::Done(THIS_VERSION.to_owned()),
+            installer.backup_status
+        );
         assert_eq!(
             &installer.paths.this_version,
             &installer.paths.backup.read_link()?
         );
 
         installer.blacklist_this_version()?;
-        assert_eq!(
-            BackupStatus::ThisIsRollback,
-            installer.backup_running_version()?
-        );
+        installer.backup_running_version()?;
+        assert_eq!(BackupStatus::ThisIsRollback, installer.backup_status);
 
         Ok(())
     }
@@ -720,7 +751,7 @@ mod tests {
     #[tokio::test]
     async fn test_move_bundle_to_install_path() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let installer = test_env.build_installer(MockTestTimer::new());
+        let installer = test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
         let bundle_path = test_env.tmp_root.join("bundle");
 
         installer
@@ -754,7 +785,7 @@ mod tests {
     #[tokio::test]
     async fn test_install_this_version() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let installer = test_env.build_installer(MockTestTimer::new());
+        let installer = test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
 
         installer.install_this_version().unwrap_err();
 
@@ -790,16 +821,25 @@ mod tests {
     #[tokio::test]
     async fn test_broken_installation() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let installer = test_env.build_installer(MockTestTimer::new());
+        let mut service_mock = MockTestBvService::new();
+        service_mock.expect_reload().return_once(|| Ok(()));
+        service_mock.expect_stop().return_once(|| Ok(()));
+        service_mock.expect_stop().return_once(|| Ok(()));
+        service_mock.expect_enable().return_once(|| Ok(()));
+        let mut installer = test_env.build_installer(MockTestTimer::new(), service_mock);
 
+        installer.backup_status = BackupStatus::ThisIsRollback;
         installer
-            .handle_broken_installation(BackupStatus::ThisIsRollback, anyhow!("error"))
+            .handle_broken_installation(anyhow!("error"))
+            .await
             .unwrap_err();
         assert!(!installer.is_blacklisted(THIS_VERSION)?);
 
         fs::create_dir_all(&installer.paths.install_path)?;
+        installer.backup_status = BackupStatus::NothingToBackup;
         installer
-            .handle_broken_installation(BackupStatus::NothingToBackup, anyhow!("error"))
+            .handle_broken_installation(anyhow!("error"))
+            .await
             .unwrap_err();
         assert!(installer.is_blacklisted(THIS_VERSION)?);
 
@@ -820,8 +860,10 @@ mod tests {
             writeln!(backup_installer, "exit 1")?;
         }
         let _ = fs::remove_file(test_env.tmp_root.join("dummy_installer"));
+        installer.backup_status = BackupStatus::Done(THIS_VERSION.to_owned());
         installer
-            .handle_broken_installation(BackupStatus::Done, anyhow!("error"))
+            .handle_broken_installation(anyhow!("error"))
+            .await
             .unwrap_err();
         assert!(test_env.tmp_root.join("dummy_installer").exists());
 
@@ -831,7 +873,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let installer = test_env.build_installer(MockTestTimer::new());
+        let installer = test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
 
         // cant cleanup non existing dir nothing
         installer.cleanup().unwrap_err();

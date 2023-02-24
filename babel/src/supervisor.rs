@@ -93,7 +93,7 @@ async fn wait_for_setup<T: Timer>(
     )
 }
 
-struct Supervisor<T: Timer> {
+struct Supervisor<T> {
     run: RunFlag,
     babel_path: PathBuf,
     log_buffer: LogBuffer,
@@ -213,7 +213,7 @@ fn kill_remnants(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
     }
 }
 
-struct Backoff<'a, T: Timer> {
+struct Backoff<'a, T> {
     counter: u32,
     timestamp: Instant,
     backoff_base_ms: u64,

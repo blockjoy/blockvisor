@@ -22,7 +22,7 @@ pub trait SupervisorConfigObserver {
     async fn supervisor_config_set(&self, cfg: &SupervisorConfig) -> eyre::Result<()>;
 }
 
-pub struct BabelSupService<T: SupervisorConfigObserver> {
+pub struct BabelSupService<T> {
     sup_setup: Arc<Mutex<SupervisorSetup>>,
     babel_change_tx: supervisor::BabelChangeTx,
     babel_bin_path: PathBuf,
