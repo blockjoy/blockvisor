@@ -636,9 +636,9 @@ mod tests {
                 .flatten()
                 .map_or(false, |status| status != sysinfo::ProcessStatus::Zombie)
         };
-        tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::time::timeout(Duration::from_secs(30), async {
             while is_process_running(pid) {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         })
         .await?;

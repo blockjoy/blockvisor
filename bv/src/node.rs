@@ -42,6 +42,10 @@ pub const VSOCK_PATH: &str = "vsock.socket";
 const VSOCK_GUEST_CID: u32 = 3;
 const MAX_KERNEL_ARGS_LEN: usize = 1024;
 
+pub fn build_registry_dir(bv_root: &Path) -> PathBuf {
+    bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR)
+}
+
 #[derive(Debug)]
 pub struct Node<P: Pal> {
     pub data: NodeData<<P as Pal>::NetInterface>,
@@ -64,7 +68,7 @@ impl Paths {
         Self {
             bv_root: bv_root.to_path_buf(),
             chroot: bv_root.join(BV_VAR_PATH),
-            registry: bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR),
+            registry: build_registry_dir(bv_root),
             data: bv_root.join(BV_VAR_PATH).join(DATA_IMG_FILENAME),
         }
     }

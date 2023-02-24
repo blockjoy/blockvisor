@@ -422,8 +422,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         blockvisor_port: 0,
     };
 
-    let nodes = Nodes::new(test_env.build_dummy_platform(), config.clone());
-    let nodes = Arc::new(RwLock::new(nodes));
+    let nodes = Arc::new(RwLock::new(
+        Nodes::load(test_env.build_dummy_platform(), config.clone()).await?,
+    ));
 
     let client_future = async {
         match api::CommandsService::connect(&config.blockjoy_api_url, &config.token).await {

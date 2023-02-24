@@ -66,14 +66,9 @@ where
             env!("CARGO_PKG_NAME"),
             env!("CARGO_PKG_VERSION")
         );
+
         let bv_root = self.pal.bv_root().to_path_buf();
-        let nodes = if Nodes::<P>::exists(&bv_root) {
-            Nodes::load(self.pal, self.config.clone()).await?
-        } else {
-            let nodes = Nodes::new(self.pal, self.config.clone());
-            nodes.save().await?;
-            nodes
-        };
+        let nodes = Nodes::load(self.pal, self.config.clone()).await?;
 
         try_set_bv_status(bv_pb::ServiceStatus::Ok).await;
         let nodes = Arc::new(RwLock::new(nodes));

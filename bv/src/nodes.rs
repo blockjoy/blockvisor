@@ -11,7 +11,7 @@ use tokio::fs::{self, read_dir};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::node::REGISTRY_CONFIG_DIR;
+use crate::node::build_registry_dir;
 use crate::pal::Pal;
 use crate::{
     config::Config,
@@ -378,20 +378,39 @@ impl<P: Pal + Debug> Nodes<P> {
         Ok(all_keys)
     }
 
-    pub fn new(pal: P, api_config: Config) -> Self {
-        Self {
-            api_config,
-            data: CommonData { machine_index: 0 },
-            nodes: HashMap::new(),
-            node_ids: HashMap::new(),
-            pal: Arc::new(pal),
+    pub async fn load(pal: P, api_config: Config) -> Result<Self> {
+        let bv_root = pal.bv_root();
+        let registry_dir = build_registry_dir(bv_root);
+        if !registry_dir.exists() {
+            fs::create_dir_all(&registry_dir).await?;
         }
+        let registry_path = build_registry_filename(bv_root);
+        let pal = Arc::new(pal);
+        Ok(if registry_path.exists() {
+            let data = Self::load_data(&registry_path).await?;
+            let (nodes, node_ids) = Self::load_nodes(pal.clone(), &registry_dir).await?;
+
+            Self {
+                api_config,
+                data,
+                nodes,
+                node_ids,
+                pal,
+            }
+        } else {
+            let nodes = Self {
+                api_config,
+                data: CommonData { machine_index: 0 },
+                nodes: Default::default(),
+                node_ids: Default::default(),
+                pal,
+            };
+            nodes.save().await?;
+            nodes
+        })
     }
 
-    pub async fn load(pal: P, api_config: Config) -> Result<Self> {
-        let pal = Arc::new(pal);
-        let registry_path = build_registry_filename(pal.bv_root());
-        // First load the common data file.
+    async fn load_data(registry_path: &Path) -> Result<CommonData> {
         info!(
             "Reading nodes common config file: {}",
             registry_path.display()
@@ -399,10 +418,13 @@ impl<P: Pal + Debug> Nodes<P> {
         let config = fs::read_to_string(&registry_path)
             .await
             .context("failed to read nodes registry")?;
-        let data = toml::from_str(&config).context("failed to parse nodes registry")?;
+        toml::from_str(&config).context("failed to parse nodes registry")
+    }
 
-        let registry_dir = pal.bv_root().join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR);
-        // Now the individual node data files.
+    async fn load_nodes(
+        pal: Arc<P>,
+        registry_dir: &Path,
+    ) -> Result<(HashMap<Uuid, Node<P>>, HashMap<String, Uuid>)> {
         info!("Reading nodes config dir: {}", registry_dir.display());
         let mut nodes = HashMap::new();
         let mut node_ids = HashMap::new();
@@ -430,14 +452,7 @@ impl<P: Pal + Debug> Nodes<P> {
                 }
             };
         }
-
-        Ok(Self {
-            api_config,
-            data,
-            nodes,
-            node_ids,
-            pal,
-        })
+        Ok((nodes, node_ids))
     }
 
     pub async fn save(&self) -> Result<()> {
@@ -449,20 +464,9 @@ impl<P: Pal + Debug> Nodes<P> {
         );
         let config = toml::Value::try_from(&self.data)?;
         let config = toml::to_string(&config)?;
-        fs::create_dir_all(
-            self.pal
-                .bv_root()
-                .join(BV_VAR_PATH)
-                .join(REGISTRY_CONFIG_DIR),
-        )
-        .await?;
         fs::write(&*registry_path, &*config).await?;
 
         Ok(())
-    }
-
-    pub fn exists(bv_root: &Path) -> bool {
-        build_registry_filename(bv_root).exists()
     }
 
     // Optimistically try to notify API that container is 'Running' or 'Stopped', etc
