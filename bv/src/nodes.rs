@@ -26,7 +26,7 @@ use crate::{
     BV_VAR_PATH,
 };
 
-const REGISTRY_CONFIG_FILENAME: &str = "nodes.toml";
+pub const REGISTRY_CONFIG_FILENAME: &str = "nodes.toml";
 
 fn id_not_found(id: Uuid) -> anyhow::Error {
     anyhow!("Node with id `{}` not found", id)
@@ -36,11 +36,8 @@ fn name_not_found(name: &str) -> anyhow::Error {
     anyhow!("Node with name `{}` not found", name)
 }
 
-fn build_registry_filename(bv_root: &Path) -> PathBuf {
-    bv_root
-        .join(BV_VAR_PATH)
-        .join(REGISTRY_CONFIG_DIR)
-        .join(REGISTRY_CONFIG_FILENAME)
+pub fn build_registry_filename(bv_root: &Path) -> PathBuf {
+    bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_FILENAME)
 }
 
 #[derive(Clone, Debug)]
@@ -418,10 +415,6 @@ impl<P: Pal + Debug> Nodes<P> {
             .context("failed to read nodes registry entry")?
         {
             let path = entry.path();
-            if path == registry_path {
-                // Skip the common data file.
-                continue;
-            }
             match NodeData::load(&path)
                 .and_then(|data| async { Node::attach(pal.clone(), data).await })
                 .await

@@ -1,7 +1,9 @@
 use crate::config::{Config, CONFIG_PATH};
+use crate::node::REGISTRY_CONFIG_DIR;
+use crate::nodes::{build_registry_filename, REGISTRY_CONFIG_FILENAME};
 use crate::server::bv_pb;
 use crate::server::bv_pb::blockvisor_client::BlockvisorClient;
-use crate::with_retry;
+use crate::{with_retry, BV_VAR_PATH};
 use anyhow::{bail, ensure, Context, Error, Result};
 use async_trait::async_trait;
 use std::io::Write;
@@ -30,6 +32,7 @@ const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(60);
 const PREPARE_FOR_UPDATE_TIMEOUT: Duration = Duration::from_secs(180);
 
 struct InstallerPaths {
+    bv_root: PathBuf,
     system_services: PathBuf,
     system_bin: PathBuf,
     install_path: PathBuf,
@@ -116,6 +119,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
 
         Self {
             paths: InstallerPaths {
+                bv_root: bv_root.to_path_buf(),
                 system_services: bv_root.join(SYSTEM_SERVICES),
                 system_bin: bv_root.join(SYSTEM_BIN),
                 install_path,
@@ -313,7 +317,19 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     }
 
     fn migrate_bv_data(&self) -> Result<()> {
-        // TODO backup state/config and migrate to new version
+        // backup state/config and migrate to new version
+
+        // TODO remove that code once all bv instances are updated
+        let current_registry_filename = build_registry_filename(&self.paths.bv_root);
+        let old_registry_filename = self
+            .paths
+            .bv_root
+            .join(BV_VAR_PATH)
+            .join(REGISTRY_CONFIG_DIR)
+            .join(REGISTRY_CONFIG_FILENAME);
+        if !current_registry_filename.exists() && old_registry_filename.exists() {
+            fs::copy(old_registry_filename, current_registry_filename)?;
+        }
         Ok(())
     }
 
@@ -369,7 +385,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     }
 
     fn rollback_bv_data(&self) -> Result<()> {
-        // TODO rollback state/config
+        // rollback state/config
         Ok(())
     }
 
@@ -421,7 +437,17 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     }
 
     fn cleanup_bv_data_backup(&self) -> Result<()> {
-        // TODO cleanup state/config conversion remnants
+        // cleanup state/config conversion remnants
+
+        // TODO remove that code once all bv instances are updated
+        let old_registry_filename = self
+            .paths
+            .bv_root
+            .join(BV_VAR_PATH)
+            .join(REGISTRY_CONFIG_DIR)
+            .join(REGISTRY_CONFIG_FILENAME);
+        let _ = fs::remove_file(old_registry_filename);
+
         Ok(())
     }
 }
