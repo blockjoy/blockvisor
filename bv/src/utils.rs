@@ -212,6 +212,7 @@ pub mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::AtomicBool;
     use std::sync::{atomic, Arc};
+    use std::thread::panicking;
     use std::time::Duration;
     use tokio::net::UnixStream;
     use tokio::task::JoinHandle;
@@ -321,7 +322,9 @@ pub mod tests {
 
     impl Drop for AsyncPanicChecker {
         fn drop(&mut self) {
-            assert!(!self.flag.load(atomic::Ordering::Relaxed));
+            if !panicking() {
+                assert!(!self.flag.load(atomic::Ordering::Relaxed));
+            }
         }
     }
 
