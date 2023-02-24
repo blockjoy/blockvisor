@@ -99,47 +99,41 @@ impl babel_api::babel_server::Babel for BabelService {
             ));
         }
 
-        Ok(Response::new(babel_api::BlockchainResponse {
-            value: results.join("\n"),
-        }))
+        Ok(Response::new(babel_api::BlockchainResponse::Ok(
+            results.join("\n"),
+        )))
     }
 
     async fn blockchain_jrpc(
         &self,
         request: Request<(String, String, babel_api::config::JrpcResponse)>,
     ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(
-            self.handle_jrpc(request)
-                .await
-                .unwrap_or_else(|err| babel_api::BlockchainResponse {
-                    value: err.to_string(),
-                }),
-        ))
+        Ok(Response::new(to_blockchain_response(
+            self.handle_jrpc(request).await,
+        )))
     }
 
     async fn blockchain_rest(
         &self,
         request: Request<(String, babel_api::config::RestResponse)>,
     ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(
-            self.handle_rest(request)
-                .await
-                .unwrap_or_else(|err| babel_api::BlockchainResponse {
-                    value: err.to_string(),
-                }),
-        ))
+        Ok(Response::new(to_blockchain_response(
+            self.handle_rest(request).await,
+        )))
     }
 
     async fn blockchain_sh(
         &self,
         request: Request<(String, babel_api::config::ShResponse)>,
     ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(self.handle_sh(request).await.unwrap_or_else(
-            |err| babel_api::BlockchainResponse {
-                value: err.to_string(),
-            },
+        Ok(Response::new(to_blockchain_response(
+            self.handle_sh(request).await,
         )))
     }
+}
+
+fn to_blockchain_response(output: Result<String>) -> babel_api::BlockchainResponse {
+    output.map_err(|err| err.to_string())
 }
 
 impl BabelService {
@@ -153,7 +147,7 @@ impl BabelService {
     async fn handle_jrpc(
         &self,
         request: Request<(String, String, babel_api::config::JrpcResponse)>,
-    ) -> Result<babel_api::BlockchainResponse> {
+    ) -> Result<String> {
         let (host, method, response) = request.into_inner();
         let text: String = self
             .post(host)
@@ -168,26 +162,26 @@ impl BabelService {
         } else {
             text
         };
-        Ok(babel_api::BlockchainResponse { value })
+        Ok(value)
     }
 
     async fn handle_rest(
         &self,
         request: Request<(String, babel_api::config::RestResponse)>,
-    ) -> Result<babel_api::BlockchainResponse> {
+    ) -> Result<String> {
         let (url, response) = request.into_inner();
         let text = self.get(url).send().await?.text().await?;
         let value = match &response.field {
             Some(field) => gjson::get(&text, field).to_string(),
             None => text,
         };
-        Ok(babel_api::BlockchainResponse { value })
+        Ok(value)
     }
 
     async fn handle_sh(
         &self,
         request: Request<(String, babel_api::config::ShResponse)>,
-    ) -> Result<babel_api::BlockchainResponse> {
+    ) -> Result<String> {
         use babel_api::config::MethodResponseFormat::*;
 
         let (body, response) = request.into_inner();
@@ -204,14 +198,9 @@ impl BabelService {
         match response.format {
             Json => {
                 let content: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-                let res = babel_api::BlockchainResponse {
-                    value: serde_json::to_string(&content)?,
-                };
-                Ok(res)
+                Ok(serde_json::to_string(&content)?)
             }
-            Raw => Ok(babel_api::BlockchainResponse {
-                value: String::from_utf8_lossy(&output.stdout).to_string(),
-            }),
+            Raw => Ok(String::from_utf8_lossy(&output.stdout).to_string()),
         }
     }
 }
@@ -268,9 +257,10 @@ mod tests {
                 ],
             )))
             .await?
-            .into_inner();
+            .into_inner()
+            .unwrap();
         assert_eq!(
-            output.value,
+            output,
             format!(
                 "Done writing 3 bytes of key `second` into `{tmp_dir_str}/second/key`\n\
                  Done writing 4 bytes of key `third` into `{tmp_dir_str}/third/key`"
@@ -322,10 +312,11 @@ mod tests {
                 }],
             )))
             .await?
-            .into_inner();
+            .into_inner()
+            .unwrap();
 
         assert_eq!(
-            output.value,
+            output,
             format!("Done writing 5 bytes of key `unknown` into `{tmp_dir_str}/star/unknown`")
         );
 
@@ -371,10 +362,11 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner();
+            .into_inner()
+            .unwrap();
 
         mock.assert();
-        assert_eq!(output.value, "123");
+        assert_eq!(output, "123");
         Ok(())
     }
 
@@ -400,10 +392,11 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner();
+            .into_inner()
+            .unwrap();
 
         mock.assert();
-        assert_eq!(output.value, "[1,2,3]");
+        assert_eq!(output, "[1,2,3]");
         Ok(())
     }
 
@@ -429,10 +422,11 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner();
+            .into_inner()
+            .unwrap();
 
         mock.assert();
-        assert_eq!(output.value, "{\"result\":[1,2,3]}");
+        assert_eq!(output, "{\"result\":[1,2,3]}");
         Ok(())
     }
 
@@ -449,8 +443,9 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner();
-        assert_eq!(output.value, "\"make a toast\"");
+            .into_inner()
+            .unwrap();
+        assert_eq!(output, "\"make a toast\"");
         Ok(())
     }
 }

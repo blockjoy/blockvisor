@@ -476,16 +476,11 @@ impl<P: Pal + Debug> Node<P> {
                 method, response, ..
             } => {
                 let babel_client = self.node_conn.babel_client().await?;
-                let value = with_retry!(babel_client.blockchain_jrpc((
+                with_retry!(babel_client.blockchain_jrpc((
                     get_api_host(method)?.clone(),
                     render::render_with(method, &params, &conf, join_params)?,
                     response.clone(),
-                )))?
-                .into_inner()
-                .value;
-                value
-                    .parse()
-                    .context(format!("Could not parse {name} response: {value}"))?
+                )))
             }
             Rest {
                 method, response, ..
@@ -499,28 +494,24 @@ impl<P: Pal + Debug> Node<P> {
                 );
 
                 let babel_client = self.node_conn.babel_client().await?;
-                let value = with_retry!(babel_client.blockchain_rest((
+                with_retry!(babel_client.blockchain_rest((
                     render::render_with(&url, &params, &conf, join_params)?,
                     response.clone(),
-                )))?
-                .into_inner()
-                .value;
-                value
-                    .parse()
-                    .context(format!("Could not parse {name} response: {value}"))?
+                )))
             }
             Sh { body, response, .. } => {
                 let babel_client = self.node_conn.babel_client().await?;
-                let value = with_retry!(babel_client.blockchain_sh((
+                with_retry!(babel_client.blockchain_sh((
                     render::render_with(body, &params, &conf, render::render_sh_param)?,
                     response.clone(),
-                )))?
-                .into_inner()
-                .value;
-                value
-                    .parse()
-                    .context(format!("Could not parse {name} response: {value}"))?
+                )))
             }
+        };
+        let resp = match resp?.into_inner() {
+            Ok(value) => value
+                .parse()
+                .context(format!("Could not parse {name} response: {value}"))?,
+            Err(err) => bail!(err),
         };
         Ok(resp)
     }

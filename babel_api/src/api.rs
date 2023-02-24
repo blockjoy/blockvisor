@@ -76,10 +76,7 @@ pub trait Babel {
     ) -> BlockchainResponse;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BlockchainResponse {
-    pub value: String,
-}
+pub type BlockchainResponse = Result<String, String>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockchainKey {
