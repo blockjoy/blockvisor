@@ -217,8 +217,8 @@ impl<P: Pal + Debug> Nodes<P> {
 
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
         node.init(secret_keys).await?;
-
-        Ok(())
+        // We save the `running` status only after all of the previous steps have succeeded.
+        node.set_expected_status(NodeStatus::Running).await
     }
 
     #[instrument(skip(self))]

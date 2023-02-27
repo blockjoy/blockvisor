@@ -179,9 +179,11 @@ impl<P: Pal + Debug> Node<P> {
         .await?;
         let babelsup_client = self.node_conn.babelsup_client().await?;
         with_retry!(babelsup_client.setup_supervisor(self.data.babel_conf.supervisor.clone()))?;
+        Ok(())
+    }
 
-        // We save the `running` status only after all of the previous steps have succeeded.
-        self.data.expected_status = NodeStatus::Running;
+    pub async fn set_expected_status(&mut self, status: NodeStatus) -> Result<()> {
+        self.data.expected_status = status;
         self.data.save(&self.paths.registry).await
     }
 
@@ -239,8 +241,7 @@ impl<P: Pal + Debug> Node<P> {
             }
         }
 
-        self.data.expected_status = NodeStatus::Stopped;
-        self.data.save(&self.paths.registry).await?;
+        self.set_expected_status(NodeStatus::Stopped).await?;
         self.node_conn = NodeConnection::closed(&self.paths.chroot, self.id());
 
         Ok(())
