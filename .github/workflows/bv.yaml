@@ -1,4 +1,4 @@
-name: Blockvisor
+name: BV
 
 on:
   push:
@@ -14,8 +14,8 @@ env:
   RUST_LOG: trace
 
 jobs:
-  test:
-    name: Tests
+  bv_tests:
+    name: Blockvisord Tests
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v2
@@ -31,10 +31,7 @@ jobs:
         run: >
           sudo apt -y install build-essential pkg-config libssl-dev cmake tmux musl-tools pigz awscli
 
-      - name: Build
-        run: >
-          make build
-      - name: Reinstall
+      - name: Build and Reinstall
         run: |
           make ci-clean
           make reinstall
@@ -71,13 +68,79 @@ jobs:
         if: always()
         run: >
           docker compose down
-  lints:
-    name: Lints
-    runs-on: self-hosted
+
+  babel_tests:
+    name: Babel Tests
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: recursive
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Test
+        run: >
+          cargo test -p babel
+
+  protocols_tests:
+    name: Protocols Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Test
+        run: >
+          cargo test -p babel_api
+
+  lints:
+    name: Lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install protoc
+        run: |
+          PB_REL="https://github.com/protocolbuffers/protobuf/releases"
+          curl -LO $PB_REL/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
+          unzip protoc-3.15.8-linux-x86_64.zip -d $HOME/.local
+          export PATH="$PATH:$HOME/.local/bin"
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -88,9 +151,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: -p blockvisord -- --check
+          args: -- --check
       - name: Catch common mistakes
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -p blockvisord -- -D warnings
+          args: -- -D warnings
