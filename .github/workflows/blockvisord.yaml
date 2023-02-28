@@ -31,10 +31,7 @@ jobs:
         run: >
           sudo apt -y install build-essential pkg-config libssl-dev cmake tmux musl-tools pigz awscli
 
-      - name: Build
-        run: >
-          make build
-      - name: Reinstall
+      - name: Build and Reinstall
         run: |
           make ci-clean
           make reinstall
