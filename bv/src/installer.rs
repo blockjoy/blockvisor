@@ -24,6 +24,7 @@ pub const INSTALLER_BIN: &str = "installer";
 const FC_BIN: &str = "firecracker/bin";
 const BLOCKVISOR_BIN: &str = "blockvisor/bin";
 const BLOCKVISOR_SERVICES: &str = "blockvisor/services";
+const BLOCKVISOR_CONFIG: &str = "blockvisor.toml";
 const THIS_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BV_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const BV_REQ_TIMEOUT: Duration = Duration::from_secs(1);
@@ -328,8 +329,14 @@ impl<T: Timer, S: BvService> Installer<T, S> {
             .join(REGISTRY_CONFIG_DIR)
             .join(REGISTRY_CONFIG_FILENAME);
         if !current_registry_filename.exists() && old_registry_filename.exists() {
-            fs::copy(old_registry_filename, current_registry_filename)?;
+            fs::copy(&old_registry_filename, current_registry_filename)?;
+            fs::remove_file(&old_registry_filename)?;
         }
+        // backup blockvisor config since new version may modify/break it
+        fs::copy(
+            self.paths.bv_root.join(CONFIG_PATH),
+            self.paths.current.join(BLOCKVISOR_CONFIG),
+        )?;
         Ok(())
     }
 
@@ -386,6 +393,12 @@ impl<T: Timer, S: BvService> Installer<T, S> {
 
     fn rollback_bv_data(&self) -> Result<()> {
         // rollback state/config
+
+        // rollback blockvisor config
+        fs::copy(
+            self.paths.backup.join(BLOCKVISOR_CONFIG),
+            self.paths.bv_root.join(CONFIG_PATH),
+        )?;
         Ok(())
     }
 
@@ -870,6 +883,8 @@ mod tests {
         assert!(installer.is_blacklisted(THIS_VERSION)?);
 
         fs::create_dir_all(&installer.paths.backup)?;
+        fs::create_dir_all(&installer.paths.bv_root.join("etc"))?;
+        fs::File::create(installer.paths.backup.join(BLOCKVISOR_CONFIG))?;
         {
             // create dummy installer that will touch test file as a proof it was called
             let mut backup_installer = fs::OpenOptions::new()
