@@ -1,21 +1,26 @@
-use crate::node_data::NodeImage;
-use crate::nodes::Nodes;
-use crate::pal::Pal;
-use crate::server::bv_pb;
-use crate::{get_bv_status, with_retry};
+use crate::{
+    config::Config,
+    node_data::NodeImage,
+    nodes::Nodes,
+    pal::Pal,
+    server::bv_pb,
+    services::api::pb::ServicesResponse,
+    {get_bv_status, with_retry},
+};
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
-use pb::commands_client::CommandsClient;
-use pb::metrics_service_client::MetricsServiceClient;
-use pb::node_command::Command;
-use pb::nodes_client::NodesClient;
-use std::fmt::Debug;
-use std::{str::FromStr, sync::Arc};
+use pb::{
+    commands_client::CommandsClient, discovery_client::DiscoveryClient,
+    metrics_service_client::MetricsServiceClient, node_command::Command, nodes_client::NodesClient,
+};
+use std::{
+    fmt::Debug,
+    {str::FromStr, sync::Arc},
+};
 use tokio::sync::RwLock;
-use tonic::codegen::InterceptedService;
-use tonic::service::Interceptor;
-use tonic::transport::Channel;
-use tonic::{Request, Status};
+use tonic::{
+    codegen::InterceptedService, service::Interceptor, transport::Channel, Request, Status,
+};
 use tracing::{error, info, instrument};
 use uuid::Uuid;
 
@@ -30,8 +35,7 @@ const STATUS_ERROR: i32 = 1;
 #[derive(Clone)]
 pub struct AuthToken(pub String);
 
-pub type MetricsClient =
-    MetricsServiceClient<InterceptedService<tonic::transport::Channel, AuthToken>>;
+pub type MetricsClient = MetricsServiceClient<InterceptedService<Channel, AuthToken>>;
 
 impl Interceptor for AuthToken {
     fn call(&mut self, request: Request<()>) -> Result<Request<()>, Status> {
@@ -48,7 +52,7 @@ impl Interceptor for AuthToken {
 }
 
 impl MetricsClient {
-    pub fn with_auth(channel: tonic::transport::Channel, token: AuthToken) -> Self {
+    pub fn with_auth(channel: Channel, token: AuthToken) -> Self {
         MetricsServiceClient::with_interceptor(channel, token)
     }
 }
@@ -59,13 +63,14 @@ pub struct CommandsService {
 }
 
 impl CommandsService {
-    pub async fn connect(url: &str, token: &str) -> Result<Self> {
-        let client = CommandsClient::connect(url.to_string())
+    pub async fn connect(config: Config) -> Result<Self> {
+        let url = config.blockjoy_api_url;
+        let client = CommandsClient::connect(url.clone())
             .await
             .context(format!("Failed to connect to commands service at {url}"))?;
 
         Ok(Self {
-            token: token.to_string(),
+            token: config.token,
             client,
         })
     }
@@ -269,13 +274,14 @@ pub struct NodesService {
 }
 
 impl NodesService {
-    pub async fn connect(url: &str, token: &str) -> Result<Self> {
-        let client = NodesClient::connect(url.to_string())
+    pub async fn connect(config: Config) -> Result<Self> {
+        let url = config.blockjoy_api_url;
+        let client = NodesClient::connect(url.clone())
             .await
             .with_context(|| format!("Failed to connect to nodes service at {url}"))?;
 
         Ok(Self {
-            token: token.to_string(),
+            token: config.token,
             client,
         })
     }
@@ -290,6 +296,34 @@ impl NodesService {
             .info_update(with_auth(req.clone(), &self.token))
             .await?;
         Ok(())
+    }
+}
+
+pub struct DiscoveryService {
+    token: String,
+    client: DiscoveryClient<Channel>,
+}
+
+impl DiscoveryService {
+    pub async fn connect(config: Config) -> Result<Self> {
+        let url = config.blockjoy_api_url;
+        let client = DiscoveryClient::connect(url.clone())
+            .await
+            .with_context(|| format!("Failed to connect to discovery service at {url}"))?;
+
+        Ok(Self {
+            token: config.token,
+            client,
+        })
+    }
+
+    #[instrument(skip(self))]
+    pub async fn get_services(&mut self) -> Result<ServicesResponse> {
+        Ok(self
+            .client
+            .services(with_auth((), &self.token))
+            .await?
+            .into_inner())
     }
 }
 

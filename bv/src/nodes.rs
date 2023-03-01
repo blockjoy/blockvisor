@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::node::build_registry_dir;
 use crate::pal::Pal;
 use crate::{
-    config::Config,
+    config::SharedConfig,
     node::Node,
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     render,
@@ -48,7 +48,7 @@ pub enum ServiceStatus {
 
 #[derive(Debug)]
 pub struct Nodes<P: Pal + Debug> {
-    pub api_config: Config,
+    pub api_config: SharedConfig,
     pub nodes: HashMap<Uuid, Node<P>>,
     pub node_ids: HashMap<String, Uuid>,
     data: CommonData,
@@ -169,12 +169,9 @@ impl<P: Pal + Debug> Nodes<P> {
             .await
             .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
         {
-            let mut cookbook_service = CookbookService::connect(
-                self.pal.bv_root().to_path_buf(),
-                &self.api_config.blockjoy_registry_url,
-                &self.api_config.token,
-            )
-            .await?;
+            let mut cookbook_service =
+                CookbookService::connect(self.pal.bv_root().to_path_buf(), &self.api_config)
+                    .await?;
 
             cookbook_service.download_babel_config(image).await?;
             cookbook_service.download_image(image).await?;
@@ -309,8 +306,7 @@ impl<P: Pal + Debug> Nodes<P> {
     pub async fn exchange_keys(&mut self, id: Uuid) -> Result<HashMap<String, Vec<u8>>> {
         let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
 
-        let mut key_service =
-            KeyService::connect(&self.api_config.blockjoy_keys_url, &self.api_config.token).await?;
+        let mut key_service = KeyService::connect(&self.api_config).await?;
 
         let api_keys: HashMap<String, Vec<u8>> = key_service
             .download_keys(id)
@@ -378,7 +374,7 @@ impl<P: Pal + Debug> Nodes<P> {
         Ok(all_keys)
     }
 
-    pub async fn load(pal: P, api_config: Config) -> Result<Self> {
+    pub async fn load(pal: P, api_config: SharedConfig) -> Result<Self> {
         let bv_root = pal.bv_root();
         let registry_dir = build_registry_dir(bv_root);
         if !registry_dir.exists() {
@@ -483,10 +479,9 @@ impl<P: Pal + Debug> Nodes<P> {
 
     // Send node info update to API
     pub async fn send_info_update(&self, update: pb::NodeInfo) -> Result<()> {
-        let mut client =
-            api::NodesService::connect(&self.api_config.blockjoy_api_url, &self.api_config.token)
-                .await
-                .with_context(|| "Error connecting to api".to_string())?;
+        let mut client = api::NodesService::connect(self.api_config.read().await)
+            .await
+            .with_context(|| "Error connecting to api".to_string())?;
         client
             .send_node_update(update)
             .await

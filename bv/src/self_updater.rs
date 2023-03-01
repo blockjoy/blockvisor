@@ -1,18 +1,25 @@
-use crate::config::Config;
-use crate::services::api::with_auth;
-use crate::services::cookbook::{
-    cb_pb, cb_pb::bundle_service_client::BundleServiceClient, cb_pb::BundleIdentifier,
+use crate::{
+    config::SharedConfig,
+    installer, services,
+    services::{
+        api::AuthToken,
+        cookbook::{
+            cb_pb,
+            cb_pb::{bundle_service_client::BundleServiceClient, BundleIdentifier},
+        },
+    },
+    utils, BV_VAR_PATH,
 };
-use crate::{installer, utils, BV_VAR_PATH};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use std::cmp::Ordering;
-use std::env;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tokio::fs;
-use tokio::process::Command;
-use tokio::time::sleep;
+use std::{
+    cmp::Ordering,
+    env,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+use tokio::{fs, process::Command, time::sleep};
+use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 
 const BUNDLES_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -34,23 +41,38 @@ pub trait Sleeper {
 
 #[async_trait]
 pub trait BundleConnector {
-    async fn connect(&self) -> Result<BundleServiceClient<Channel>>;
+    async fn connect(&self) -> Result<BundleClient>;
 }
 
 pub struct DefaultConnector {
-    blockjoy_registry_url: String,
+    config: SharedConfig,
 }
 
 #[async_trait]
 impl BundleConnector for DefaultConnector {
-    async fn connect(&self) -> Result<BundleServiceClient<Channel>> {
-        Ok(BundleServiceClient::new(
-            Channel::from_shared(self.blockjoy_registry_url.clone())?
-                .timeout(BUNDLES_REQ_TIMEOUT)
-                .connect_timeout(BUNDLES_CONNECT_TIMEOUT)
-                .connect()
-                .await?,
-        ))
+    async fn connect(&self) -> Result<BundleClient> {
+        services::connect(self.config.clone(), |config| async {
+            let url = config
+                .blockjoy_registry_url
+                .ok_or_else(|| anyhow!("missing blockjoy_registry_url"))?;
+            Ok(BundleClient::with_auth(
+                Channel::from_shared(url)?
+                    .timeout(BUNDLES_REQ_TIMEOUT)
+                    .connect_timeout(BUNDLES_CONNECT_TIMEOUT)
+                    .connect()
+                    .await?,
+                AuthToken(config.token),
+            ))
+        })
+        .await
+    }
+}
+
+pub type BundleClient = BundleServiceClient<InterceptedService<Channel, AuthToken>>;
+
+impl BundleClient {
+    pub fn with_auth(channel: Channel, token: AuthToken) -> Self {
+        BundleServiceClient::with_interceptor(channel, token)
     }
 }
 
@@ -58,16 +80,15 @@ pub struct SelfUpdater<T, C> {
     blacklist_path: PathBuf,
     download_path: PathBuf,
     check_interval: Option<Duration>,
-    auth_token: String,
     bundles: C,
     latest_downloaded_version: String,
     sleeper: T,
 }
 
-pub fn new<T: Sleeper>(
+pub async fn new<T: Sleeper>(
     sleeper: T,
     bv_root: &Path,
-    cfg: &Config,
+    config: &SharedConfig,
 ) -> Result<SelfUpdater<T, DefaultConnector>> {
     let download_path = bv_root.join(BV_VAR_PATH).join("downloads");
     std::fs::create_dir_all(&download_path)?;
@@ -76,10 +97,13 @@ pub fn new<T: Sleeper>(
             .join(installer::INSTALL_PATH)
             .join(installer::BLACKLIST),
         download_path,
-        check_interval: cfg.update_check_interval_secs.map(Duration::from_secs),
-        auth_token: cfg.token.to_string(),
+        check_interval: config
+            .read()
+            .await
+            .update_check_interval_secs
+            .map(Duration::from_secs),
         bundles: DefaultConnector {
-            blockjoy_registry_url: cfg.blockjoy_registry_url.clone(),
+            config: config.clone(),
         },
         latest_downloaded_version: CURRENT_VERSION.to_string(),
         sleeper,
@@ -116,12 +140,9 @@ impl<T: Sleeper, C: BundleConnector> SelfUpdater<T, C> {
             .bundles
             .connect()
             .await?
-            .list_bundle_versions(with_auth(
-                cb_pb::BundleVersionsRequest {
-                    status: cb_pb::StatusName::Development.into(),
-                },
-                &self.auth_token,
-            ))
+            .list_bundle_versions(cb_pb::BundleVersionsRequest {
+                status: cb_pb::StatusName::Development.into(),
+            })
             .await?
             .into_inner();
         resp.identifiers
@@ -142,7 +163,7 @@ impl<T: Sleeper, C: BundleConnector> SelfUpdater<T, C> {
             .bundles
             .connect()
             .await?
-            .retrieve(with_auth(bundle, &self.auth_token))
+            .retrieve(bundle)
             .await?
             .into_inner();
 
@@ -228,8 +249,11 @@ mod tests {
 
     #[async_trait]
     impl BundleConnector for TestConnector {
-        async fn connect(&self) -> Result<BundleServiceClient<Channel>> {
-            Ok(BundleServiceClient::new(test_channel(&self.tmp_root)))
+        async fn connect(&self) -> Result<BundleClient> {
+            Ok(BundleClient::with_auth(
+                test_channel(&self.tmp_root),
+                AuthToken("test_token".to_owned()),
+            ))
         }
     }
 
@@ -255,7 +279,6 @@ mod tests {
                     blacklist_path: blacklist_path.clone(),
                     download_path,
                     check_interval: Some(Duration::from_secs(3)),
-                    auth_token: "test_token".to_string(),
                     bundles: TestConnector {
                         tmp_root: tmp_root.clone(),
                     },

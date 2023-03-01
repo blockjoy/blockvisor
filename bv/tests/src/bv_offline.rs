@@ -6,7 +6,7 @@ use anyhow::Result;
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::{
-    config::Config,
+    config::{Config, SharedConfig},
     node::FC_BIN_NAME,
     nodes::Nodes,
     server::bv_pb,
@@ -415,22 +415,26 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         id: Uuid::new_v4().to_string(),
         token: "any token".to_string(),
         blockjoy_api_url: "http://localhost:8089".to_string(),
-        blockjoy_keys_url: "http://localhost:8089".to_string(),
-        blockjoy_registry_url: "http://localhost:50059".to_string(),
-        blockjoy_mqtt_url: "mqtt://localhost:1889".to_string(),
+        blockjoy_keys_url: Some("http://localhost:8089".to_string()),
+        blockjoy_registry_url: Some("http://localhost:50059".to_string()),
+        blockjoy_mqtt_url: Some("mqtt://localhost:1889".to_string()),
         update_check_interval_secs: None,
         blockvisor_port: 0,
     };
 
     let nodes = Arc::new(RwLock::new(
-        Nodes::load(test_env.build_dummy_platform(), config.clone()).await?,
+        Nodes::load(
+            test_env.build_dummy_platform(),
+            SharedConfig::new(config.clone()),
+        )
+        .await?,
     ));
 
     let client_future = async {
-        match api::CommandsService::connect(&config.blockjoy_api_url, &config.token).await {
+        match api::CommandsService::connect(config).await {
             Ok(mut client) => {
                 if let Err(e) = client
-                    .get_and_process_pending_commands(&config.id, nodes.clone())
+                    .get_and_process_pending_commands(&host_id, nodes.clone())
                     .await
                 {
                     println!("Error processing pending commands: {:?}", e);

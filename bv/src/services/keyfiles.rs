@@ -1,9 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use tonic::transport::Channel;
 use uuid::Uuid;
 
-use crate::services::api::{pb, with_auth};
-use crate::with_retry;
+use crate::{
+    config::SharedConfig,
+    services,
+    services::api::{pb, with_auth},
+    with_retry,
+};
 
 pub struct KeyService {
     token: String,
@@ -11,14 +15,21 @@ pub struct KeyService {
 }
 
 impl KeyService {
-    pub async fn connect(url: &str, token: &str) -> Result<Self> {
-        let client = pb::key_files_client::KeyFilesClient::connect(url.to_string())
-            .await
-            .context(format!("Failed to connect to key service at {url}"))?;
-        Ok(Self {
-            token: token.to_string(),
-            client,
+    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+        services::connect(config.clone(), |config| async {
+            let url = config
+                .blockjoy_keys_url
+                .ok_or_else(|| anyhow!("missing blockjoy_keys_url"))?
+                .clone();
+            let client = pb::key_files_client::KeyFilesClient::connect(url.to_string())
+                .await
+                .context(format!("Failed to connect to key service at {url}"))?;
+            Ok(Self {
+                token: config.token,
+                client,
+            })
         })
+        .await
     }
 
     pub async fn download_keys(&mut self, node_id: Uuid) -> Result<Vec<pb::Keyfile>> {

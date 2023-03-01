@@ -9,6 +9,7 @@ fn main() {
                 "host_service.proto",
                 "key_file_service.proto",
                 "node_service.proto",
+                "discovery.proto",
                 // Cookbook API
                 "cookbook.proto",
                 // UI API (used in the tests)

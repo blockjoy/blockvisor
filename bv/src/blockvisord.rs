@@ -1,5 +1,5 @@
 use crate::{
-    config::{Config, CONFIG_PATH},
+    config::{Config, SharedConfig, CONFIG_PATH},
     hosts,
     node_data::NodeStatus,
     node_metrics,
@@ -12,12 +12,9 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use bv_utils::run_flag::RunFlag;
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::net::SocketAddr;
-use std::{str::FromStr, sync::Arc};
-use tokio::net::TcpListener;
+use std::{collections::HashMap, fmt::Debug, net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::{
+    net::TcpListener,
     sync::{watch, RwLock},
     time::{sleep, Duration},
 };
@@ -30,7 +27,7 @@ const INFO_UPDATE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct BlockvisorD<P> {
     pal: P,
-    config: Config,
+    config: SharedConfig,
     listener: TcpListener,
 }
 
@@ -51,7 +48,7 @@ where
         let listener = TcpListener::bind(url).await?;
         Ok(Self {
             pal,
-            config,
+            config: SharedConfig::new(config),
             listener,
         })
     }
@@ -85,9 +82,9 @@ where
                 tokio::select! {
                     _ = cmd_watch_rx.changed() => {
                         info!("MQTT watch triggerred");
-                        match api::CommandsService::connect(&self.config.blockjoy_api_url, &self.config.token).await {
+                        match api::CommandsService::connect(self.config.read().await).await {
                             Ok(mut client) => {
-                                if let Err(e) = client.get_and_process_pending_commands(&self.config.id, nodes.clone()).await {
+                                if let Err(e) = client.get_and_process_pending_commands(&self.config.read().await.id, nodes.clone()).await {
                                     error!("Error processing pending commands: {:?}", e);
                                 }
                             }
@@ -112,13 +109,7 @@ where
             let mut run = run.clone();
             while run.load() {
                 info!("Connecting to MQTT");
-                match mqtt::CommandsStream::connect(
-                    &self.config.blockjoy_mqtt_url,
-                    &self.config.id,
-                    &self.config.token,
-                )
-                .await
-                {
+                match mqtt::CommandsStream::connect(&self.config).await {
                     Ok(mut client) => {
                         // get pending commands on reconnect
                         notify();
@@ -188,19 +179,16 @@ where
             }
         };
 
-        let token = api::AuthToken(self.config.token.to_owned());
-        let endpoint = Endpoint::from_str(&self.config.blockjoy_api_url)?;
+        let config = self.config.read().await;
+        let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
 
         let node_updates_future = Self::node_updates(run.clone(), nodes.clone());
         let node_metrics_future =
-            Self::node_metrics(run.clone(), nodes.clone(), &endpoint, token.clone());
-        let host_metrics_future = Self::host_metrics(
-            run.clone(),
-            self.config.id.clone(),
-            &endpoint,
-            token.clone(),
-        );
-        let self_updater = self_updater::new(self_updater::SysTimer, &bv_root, &self.config)?;
+            Self::node_metrics(run.clone(), nodes.clone(), &endpoint, self.config.clone());
+        let host_metrics_future =
+            Self::host_metrics(run.clone(), config.id, &endpoint, self.config.clone());
+        let self_updater =
+            self_updater::new(self_updater::SysTimer, &bv_root, &self.config).await?;
 
         let _ = tokio::join!(
             internal_api_server_future,
@@ -286,7 +274,7 @@ where
         mut run: RunFlag,
         nodes: Arc<RwLock<Nodes<P>>>,
         endpoint: &Endpoint,
-        token: api::AuthToken,
+        config: SharedConfig,
     ) -> Option<()> {
         let mut timer = tokio::time::interval(node_metrics::COLLECT_INTERVAL);
         while run.load() {
@@ -297,7 +285,7 @@ where
             drop(lock);
             let mut client = api::MetricsClient::with_auth(
                 Self::wait_for_channel(run.clone(), endpoint).await?,
-                token.clone(),
+                api::AuthToken(config.read().await.token),
             );
             let metrics: pb::NodeMetricsRequest = metrics.into();
             if let Err(e) = client.node(metrics).await {
@@ -311,7 +299,7 @@ where
         mut run: RunFlag,
         host_id: String,
         endpoint: &Endpoint,
-        token: api::AuthToken,
+        config: SharedConfig,
     ) -> Option<()> {
         let mut timer = tokio::time::interval(hosts::COLLECT_INTERVAL);
         while run.load() {
@@ -320,7 +308,7 @@ where
                 Ok(metrics) => {
                     let mut client = api::MetricsClient::with_auth(
                         Self::wait_for_channel(run.clone(), endpoint).await?,
-                        token.clone(),
+                        api::AuthToken(config.read().await.token),
                     );
                     let metrics = pb::HostMetricsRequest::new(host_id.clone(), metrics);
                     if let Err(e) = client.host(metrics).await {

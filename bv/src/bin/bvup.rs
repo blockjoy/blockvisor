@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Context, Result};
-use blockvisord::config::Config;
-use blockvisord::hosts::get_host_info;
-use blockvisord::linux_platform::bv_root;
-use blockvisord::services::api::pb;
-use blockvisord::{config, self_updater};
+use blockvisord::config::SharedConfig;
+use blockvisord::{
+    config, config::Config, hosts::get_host_info, linux_platform::bv_root, self_updater,
+    services::api::pb,
+};
 use clap::{crate_version, ArgGroup, Parser};
 use uuid::Uuid;
 
@@ -20,16 +20,16 @@ pub struct CmdArgs {
     pub blockjoy_api_url: String,
 
     /// BlockJoy keys service url
-    #[clap(long = "keys", default_value = "https://api.dev.blockjoy.com")]
-    pub blockjoy_keys_url: String,
+    #[clap(long = "keys")]
+    pub blockjoy_keys_url: Option<String>,
 
     /// BlockJoy registry url
-    #[clap(long = "registry", default_value = "https://api.dev.blockjoy.com")]
-    pub blockjoy_registry_url: String,
+    #[clap(long = "registry")]
+    pub blockjoy_registry_url: Option<String>,
 
     /// BlockJoy MQTT url
     #[clap(long = "mqtt")]
-    pub blockjoy_mqtt_url: String,
+    pub blockjoy_mqtt_url: Option<String>,
 
     /// Network interface name
     #[clap(long = "ifa", default_value = "bvbr0")]
@@ -113,14 +113,14 @@ async fn main() -> Result<()> {
     };
     if !cmd_args.skip_download {
         println!("Download and install bv bundle");
-        let api_config = match api_config {
+        let api_config = SharedConfig::new(match api_config {
             None => Config::load(&bv_root).await.with_context(|| {
                 "failed to load configuration - need to provision and init first"
             })?,
             Some(value) => value,
-        };
+        });
 
-        let mut updater = self_updater::new(self_updater::SysTimer, &bv_root, &api_config)?;
+        let mut updater = self_updater::new(self_updater::SysTimer, &bv_root, &api_config).await?;
         let bundle_id = updater
             .get_latest()
             .await?

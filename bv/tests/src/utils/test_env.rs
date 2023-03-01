@@ -1,19 +1,24 @@
 use anyhow::Result;
 use assert_cmd::Command;
 use async_trait::async_trait;
-use blockvisord::blockvisord::BlockvisorD;
-use blockvisord::config::Config;
-use blockvisord::pal::{NetInterface, Pal};
-use blockvisord::services::cookbook::IMAGES_DIR;
-use blockvisord::utils::run_cmd;
-use blockvisord::BV_VAR_PATH;
+use blockvisord::{
+    blockvisord::BlockvisorD,
+    config::Config,
+    pal::{NetInterface, Pal},
+    services::cookbook::IMAGES_DIR,
+    utils::run_cmd,
+    BV_VAR_PATH,
+};
 use bv_utils::run_flag::RunFlag;
 use predicates::prelude::predicate;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::net::IpAddr;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::{
+    fs,
+    net::IpAddr,
+    path::{Path, PathBuf},
+    str,
+    sync::atomic::{AtomicU32, Ordering},
+};
 use tokio::task::JoinHandle;
 
 /// Global integration tests token. All tests (that may run in parallel) share common FS and net devices space
@@ -70,9 +75,9 @@ impl TestEnv {
             id: "host_id".to_owned(),
             token: "token".to_owned(),
             blockjoy_api_url: "http://localhost:8070".to_owned(),
-            blockjoy_keys_url: "http://localhost:8070".to_owned(),
-            blockjoy_registry_url: "http://localhost:50041".to_owned(),
-            blockjoy_mqtt_url: "mqtt://localhost:1873".to_string(),
+            blockjoy_keys_url: Some("http://localhost:8070".to_owned()),
+            blockjoy_registry_url: Some("http://localhost:50041".to_owned()),
+            blockjoy_mqtt_url: Some("mqtt://localhost:1873".to_string()),
             update_check_interval_secs: None,
             blockvisor_port: 0, // 0 has special meaning - pick first free port
         };
@@ -114,8 +119,6 @@ impl TestEnv {
     }
 
     pub fn create_node(&self, image: &str) -> String {
-        use std::str;
-
         let mut cmd = Command::cargo_bin("bv").unwrap();
         let cmd = cmd
             .args([

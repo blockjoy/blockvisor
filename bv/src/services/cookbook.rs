@@ -1,14 +1,18 @@
 use crate::{
+    config::SharedConfig,
     node::{KERNEL_FILE, ROOT_FS_FILE},
     node_data::NodeImage,
+    services,
     services::api::with_auth,
     utils, with_retry, BV_VAR_PATH,
 };
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use babel_api::config::Babel;
 use std::path::{Path, PathBuf};
-use tokio::fs::{self, DirBuilder, File};
-use tokio::io::AsyncWriteExt;
+use tokio::{
+    fs::{self, DirBuilder, File},
+    io::AsyncWriteExt,
+};
 use tonic::transport::Channel;
 use tracing::{debug, info, instrument};
 
@@ -29,17 +33,24 @@ pub struct CookbookService {
 }
 
 impl CookbookService {
-    pub async fn connect(bv_root: PathBuf, url: &str, token: &str) -> Result<Self> {
-        let client =
-            cb_pb::cook_book_service_client::CookBookServiceClient::connect(url.to_string())
-                .await
-                .context(format!("Failed to connect to cookbook service at {url}"))?;
+    pub async fn connect(bv_root: PathBuf, config: &SharedConfig) -> Result<Self> {
+        services::connect(config.clone(), |config| async {
+            let url = config
+                .blockjoy_registry_url
+                .ok_or_else(|| anyhow!("missing blockjoy_registry_url"))?
+                .clone();
+            let client =
+                cb_pb::cook_book_service_client::CookBookServiceClient::connect(url.to_string())
+                    .await
+                    .context(format!("Failed to connect to cookbook service at {url}"))?;
 
-        Ok(Self {
-            token: token.to_string(),
-            client,
-            bv_root,
+            Ok(Self {
+                token: config.token,
+                client,
+                bv_root: bv_root.clone(),
+            })
         })
+        .await
     }
 
     #[instrument(skip(self))]

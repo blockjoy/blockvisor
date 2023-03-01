@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use blockvisord::config::SharedConfig;
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
     config::{Config, CONFIG_PATH},
@@ -154,7 +155,7 @@ async fn process_host_command(command: HostCommand) -> Result<()> {
 
 #[allow(unreachable_code)]
 async fn process_chain_command(command: ChainCommand) -> Result<()> {
-    let config = Config::load(&bv_root()).await?;
+    let config = SharedConfig::new(Config::load(&bv_root()).await?);
 
     match command {
         ChainCommand::List {
@@ -162,9 +163,7 @@ async fn process_chain_command(command: ChainCommand) -> Result<()> {
             r#type,
             number,
         } => {
-            let mut cookbook_service =
-                CookbookService::connect(bv_root(), &config.blockjoy_registry_url, &config.token)
-                    .await?;
+            let mut cookbook_service = CookbookService::connect(bv_root(), &config).await?;
             let mut versions = cookbook_service.list_versions(&protocol, &r#type).await?;
 
             versions.truncate(number);
