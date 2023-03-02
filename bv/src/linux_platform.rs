@@ -69,9 +69,6 @@ impl Pal for LinuxPlatform {
         // First create the interface.
         run_cmd("ip", ["tuntap", "add", &name, "mode", "tap"]).await?;
 
-        // Then link it to master
-        remaster(&name).await?;
-
         Ok(LinuxNetInterface { name, ip, gateway })
     }
 }
@@ -100,7 +97,7 @@ impl NetInterface for LinuxNetInterface {
     }
 
     /// Remaster the network interface.
-    async fn remaster(self) -> Result<()> {
+    async fn remaster(&self) -> Result<()> {
         remaster(&self.name).await
     }
 
@@ -112,18 +109,10 @@ impl NetInterface for LinuxNetInterface {
 
 async fn remaster(name: &str) -> Result<()> {
     // Set bridge as the interface's master.
-    if let Err(e) = run_cmd("ip", ["link", "set", name, "master", BRIDGE_IFACE])
+    run_cmd("ip", ["link", "set", name, "master", BRIDGE_IFACE])
         // Start the interface.
         .and_then(|_| run_cmd("ip", ["link", "set", name, "up"]))
         .await
-    {
-        // Clean up the interface if we failed to set it up completely.
-        delete(name).await?;
-
-        return Err(e);
-    }
-
-    Ok(())
 }
 
 async fn delete(name: &str) -> Result<()> {

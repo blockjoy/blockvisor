@@ -214,7 +214,7 @@ impl NetInterface for DummyNet {
     fn gateway(&self) -> &IpAddr {
         &self.gateway
     }
-    async fn remaster(self) -> Result<()> {
+    async fn remaster(&self) -> Result<()> {
         Ok(())
     }
     async fn delete(self) -> Result<()> {

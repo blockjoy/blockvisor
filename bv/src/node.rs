@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::{collections::HashMap, path::Path, str::FromStr, time::Duration};
 use tokio::fs::DirBuilder;
 use tokio::time::Instant;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::pal::{NetInterface, Pal};
@@ -41,6 +41,9 @@ const DATA_FILE: &str = "data.img";
 pub const VSOCK_PATH: &str = "vsock.socket";
 const VSOCK_GUEST_CID: u32 = 3;
 const MAX_KERNEL_ARGS_LEN: usize = 1024;
+const MAX_START_TRIES: usize = 3;
+const MAX_STOP_TRIES: usize = 3;
+const MAX_RECONNECT_TRIES: usize = 5;
 
 pub fn build_registry_dir(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR)
@@ -53,6 +56,14 @@ pub struct Node<P: Pal> {
     node_conn: NodeConnection,
     paths: Paths,
     pal: Arc<P>,
+    recovery_counters: RecoveryCounters,
+}
+
+#[derive(Debug, Default)]
+struct RecoveryCounters {
+    reconnect: usize,
+    stop: usize,
+    start: usize,
 }
 
 #[derive(Debug)]
@@ -94,6 +105,7 @@ impl<P: Pal + Debug> Node<P> {
             node_conn: NodeConnection::closed(&paths.chroot, node_id),
             paths,
             pal,
+            recovery_counters: Default::default(),
         })
     }
 
@@ -135,6 +147,7 @@ impl<P: Pal + Debug> Node<P> {
             node_conn,
             paths,
             pal,
+            recovery_counters: Default::default(),
         })
     }
 
@@ -159,15 +172,15 @@ impl<P: Pal + Debug> Node<P> {
     /// Starts the node.
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
-        if self.status() == NodeStatus::Running
-            || (self.status() == NodeStatus::Failed
-                && self.expected_status() == NodeStatus::Stopped)
-        {
-            info!("Node is recovering, will not start immediately");
+        if self.status() == NodeStatus::Running {
             return Ok(());
+        }
+        if self.status() == NodeStatus::Failed && self.expected_status() == NodeStatus::Stopped {
+            bail!("can't start node which is not stopped properly");
         }
 
         if self.machine.state() == firec::MachineState::SHUTOFF {
+            self.data.network_interface.remaster().await?;
             self.machine.start().await?;
         }
         self.node_conn = NodeConnection::try_open(
@@ -189,20 +202,106 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Returns the actual status of the node.
     pub fn status(&self) -> NodeStatus {
-        let actual_status = match self.machine.state() {
+        let machine_status = match self.machine.state() {
             firec::MachineState::RUNNING => NodeStatus::Running,
             firec::MachineState::SHUTOFF => NodeStatus::Stopped,
         };
-        if actual_status == self.data.expected_status {
-            if actual_status == NodeStatus::Running && self.node_conn.is_closed() {
-                // node is running, but babel connection is broken for some reason
+        if machine_status == self.data.expected_status {
+            if machine_status == NodeStatus::Running
+                && (self.node_conn.is_closed() || self.node_conn.is_broken())
+            {
+                // node is running, but there is no babel connection or is broken for some reason
                 NodeStatus::Failed
             } else {
-                actual_status
+                machine_status
             }
         } else {
             NodeStatus::Failed
         }
+    }
+
+    pub async fn recover(&mut self) -> Result<()> {
+        let id = self.id();
+        match self.data.expected_status {
+            NodeStatus::Running => {
+                if self.machine.state() == firec::MachineState::SHUTOFF
+                    || self.node_conn.is_closed()
+                {
+                    self.started_node_recovery().await?;
+                } else if self.node_conn.is_broken() {
+                    self.node_connection_recovery().await?;
+                }
+            }
+            NodeStatus::Stopped => {
+                self.recovery_counters.stop += 1;
+                info!("Recovery: stopping node with ID `{id}`");
+                if let Err(e) = self.stop().await {
+                    error!("Recovery: stopping node with ID `{id}` failed: {e}");
+                    if self.recovery_counters.stop >= MAX_STOP_TRIES {
+                        error!("Recovery: retries count exceeded, mark as failed");
+                        self.set_expected_status(NodeStatus::Failed).await?;
+                    }
+                } else {
+                    self.post_recovery();
+                }
+            }
+            NodeStatus::Failed => {
+                warn!("Recovery: node with ID `{id}` cannot be recovered");
+            }
+        }
+        Ok(())
+    }
+
+    async fn started_node_recovery(&mut self) -> Result<()> {
+        self.recovery_counters.start += 1;
+        if let Err(e) = self.start().await {
+            let id = self.id();
+            error!("Recovery: starting node with ID `{id}` failed: {e}");
+            if self.recovery_counters.start >= MAX_START_TRIES {
+                error!("Recovery: retries count exceeded, mark as failed");
+                self.set_expected_status(NodeStatus::Failed).await?;
+            }
+        } else {
+            self.post_recovery();
+        }
+        Ok(())
+    }
+
+    async fn node_connection_recovery(&mut self) -> Result<()> {
+        let id = self.id();
+        self.recovery_counters.reconnect += 1;
+        info!("Recovery: fix broken connection to node with ID `{id}`");
+        if let Err(e) = self.babelsup_connection_test().await {
+            error!("Recovery: reconnect to node with ID `{id}` failed: {e}");
+            if self.recovery_counters.reconnect >= MAX_RECONNECT_TRIES {
+                error!("Recovery: restart broken node with ID `{id}`");
+
+                self.recovery_counters.stop += 1;
+                if let Err(e) = self.stop().await {
+                    error!("Recovery: stopping node with ID `{id}` failed: {e}");
+                    if self.recovery_counters.stop >= MAX_STOP_TRIES {
+                        error!("Recovery: retries count exceeded, mark as failed");
+                        self.set_expected_status(NodeStatus::Failed).await?;
+                    }
+                } else {
+                    self.started_node_recovery().await?;
+                }
+            }
+        } else {
+            self.post_recovery();
+        }
+        Ok(())
+    }
+
+    fn post_recovery(&mut self) {
+        // reset counters on successful recovery
+        self.recovery_counters = Default::default();
+    }
+
+    async fn babelsup_connection_test(&mut self) -> Result<()> {
+        let client = self.node_conn.babelsup_client().await?;
+        with_retry!(client.get_version(()))?;
+        Ok(())
     }
 
     /// Returns the expected status of the node.
@@ -240,8 +339,6 @@ impl<P: Pal + Debug> Node<P> {
                 firec::MachineState::SHUTOFF => break,
             }
         }
-
-        self.set_expected_status(NodeStatus::Stopped).await?;
         self.node_conn = NodeConnection::closed(&self.paths.chroot, self.id());
 
         Ok(())
@@ -466,6 +563,7 @@ impl<P: Pal + Debug> Node<P> {
         };
         let join_params = |v: &Vec<String>| Ok(v.join(","));
         let conf = toml::Value::try_from(&self.data.babel_conf)?;
+        let babel_client = self.node_conn.babel_client().await?;
         let resp = match self
             .data
             .babel_conf
@@ -476,7 +574,6 @@ impl<P: Pal + Debug> Node<P> {
             Jrpc {
                 method, response, ..
             } => {
-                let babel_client = self.node_conn.babel_client().await?;
                 with_retry!(babel_client.blockchain_jrpc((
                     get_api_host(method)?.clone(),
                     render::render_with(method, &params, &conf, join_params)?,
@@ -494,21 +591,25 @@ impl<P: Pal + Debug> Node<P> {
                     method.trim_start_matches('/')
                 );
 
-                let babel_client = self.node_conn.babel_client().await?;
                 with_retry!(babel_client.blockchain_rest((
                     render::render_with(&url, &params, &conf, join_params)?,
                     response.clone(),
                 )))
             }
             Sh { body, response, .. } => {
-                let babel_client = self.node_conn.babel_client().await?;
                 with_retry!(babel_client.blockchain_sh((
                     render::render_with(body, &params, &conf, render::render_sh_param)?,
                     response.clone(),
                 )))
             }
         };
-        let resp = match resp?.into_inner() {
+        let resp = match resp
+            .map_err(|err| {
+                self.node_conn.mark_broken();
+                err
+            })?
+            .into_inner()
+        {
             Ok(value) => value
                 .parse()
                 .context(format!("Could not parse {name} response: {value}"))?,

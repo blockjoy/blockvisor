@@ -4,7 +4,7 @@ use crate::{
     node_data::NodeStatus,
     node_metrics,
     nodes::Nodes,
-    pal::{NetInterface, Pal},
+    pal::Pal,
     self_updater,
     server::{bv_pb, BlockvisorServer},
     services::{api, api::pb, mqtt},
@@ -20,7 +20,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tonic::transport::{Channel, Endpoint, Server};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
@@ -212,31 +212,13 @@ where
                 .list()
                 .await
                 .iter()
-                .map(|node| (node.data.clone(), node.status()))
+                .map(|node| (node.data.id, node.status(), node.expected_status()))
                 .collect();
 
-            for (node_data, node_status) in list {
-                let id = node_data.id;
-                if node_status == NodeStatus::Failed {
-                    match node_data.expected_status {
-                        NodeStatus::Running => {
-                            info!("Recovery: starting node with ID `{id}`");
-                            if let Err(e) = node_data.network_interface.remaster().await {
-                                error!("Recovery: remastering network for node with ID `{id}` failed: {e}");
-                            }
-                            if let Err(e) = nodes.write().await.force_start(id).await {
-                                error!("Recovery: starting node with ID `{id}` failed: {e}");
-                            }
-                        }
-                        NodeStatus::Stopped => {
-                            info!("Recovery: stopping node with ID `{id}`");
-                            if let Err(e) = nodes.write().await.force_stop(id).await {
-                                error!("Recovery: stopping node with ID `{id}` failed: {e}",);
-                            }
-                        }
-                        NodeStatus::Failed => {
-                            warn!("Recovery: node with ID `{id}` cannot be recovered");
-                        }
+            for (id, node_status, expected_status) in list {
+                if node_status == NodeStatus::Failed && expected_status != NodeStatus::Failed {
+                    if let Err(e) = nodes.write().await.recover(id).await {
+                        error!("Recovery: node with ID `{id}` failed: {e}");
                     }
                 }
             }

@@ -27,6 +27,7 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Debug)]
 pub enum NodeConnectionState {
     Closed,
+    Broken,
     Babel(BabelClient<Channel>),
     BabelSup(BabelSupClient<Channel>),
 }
@@ -38,7 +39,7 @@ pub struct NodeConnection {
 }
 
 impl NodeConnection {
-    pub fn closed(chroot_path: &Path, node_id: uuid::Uuid) -> Self {
+    pub fn closed(chroot_path: &Path, node_id: Uuid) -> Self {
         Self {
             socket_path: build_socket_path(chroot_path, node_id),
             state: NodeConnectionState::Closed,
@@ -49,13 +50,22 @@ impl NodeConnection {
         matches!(self.state, NodeConnectionState::Closed)
     }
 
+    /// Mark connection as broken, which meant it will be reestablished on next `*_client` call.
+    pub fn mark_broken(&mut self) {
+        self.state = NodeConnectionState::Broken;
+    }
+
+    pub fn is_broken(&self) -> bool {
+        matches!(self.state, NodeConnectionState::Broken)
+    }
+
     /// Tries to open a new connection to the VM. Note that this fails if the VM hasn't started yet.
     /// It also initializes that connection by sending the opening message. Therefore, if this
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.
     pub async fn try_open(
         chroot_path: &Path,
         babel_path: &Path,
-        node_id: uuid::Uuid,
+        node_id: Uuid,
         max_delay: Duration,
     ) -> Result<Self> {
         let socket_path = build_socket_path(chroot_path, node_id);
@@ -81,7 +91,7 @@ impl NodeConnection {
                 bail!("Cannot change port to babel: node connection is closed")
             }
             NodeConnectionState::Babel { .. } => {}
-            NodeConnectionState::BabelSup { .. } => {
+            NodeConnectionState::BabelSup { .. } | NodeConnectionState::Broken => {
                 debug!("Reconnecting to babel");
                 self.state = NodeConnectionState::Babel(BabelClient::new(
                     create_channel(
@@ -106,7 +116,7 @@ impl NodeConnection {
             NodeConnectionState::Closed => {
                 bail!("Cannot change port to babelsup: node connection is closed")
             }
-            NodeConnectionState::Babel { .. } => {
+            NodeConnectionState::Babel { .. } | NodeConnectionState::Broken => {
                 debug!("Reconnecting to babelsup");
                 self.state = NodeConnectionState::BabelSup(
                     connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await,

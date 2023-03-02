@@ -42,7 +42,7 @@ pub trait NetInterface {
     fn gateway(&self) -> &IpAddr;
 
     /// Remaster the network interface.
-    async fn remaster(self) -> Result<()>;
+    async fn remaster(&self) -> Result<()>;
     /// Delete the network interface.
     async fn delete(self) -> Result<()>;
 }

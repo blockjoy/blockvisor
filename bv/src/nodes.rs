@@ -193,32 +193,6 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn force_start(&mut self, id: Uuid) -> Result<()> {
-        self.send_container_status(id, ContainerStatus::Starting)
-            .await;
-
-        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
-        node.start().await?;
-        debug!("Node started");
-
-        self.send_container_status(id, ContainerStatus::Running)
-            .await;
-
-        let secret_keys = match self.exchange_keys(id).await {
-            Ok(secret_keys) => secret_keys,
-            Err(e) => {
-                error!("Failed to retrieve keys when starting node: `{e}`");
-                HashMap::new()
-            }
-        };
-
-        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
-        node.init(secret_keys).await?;
-        // We save the `running` status only after all of the previous steps have succeeded.
-        node.set_expected_status(NodeStatus::Running).await
-    }
-
-    #[instrument(skip(self))]
     pub async fn start(&mut self, id: Uuid) -> Result<()> {
         if NodeStatus::Running
             != self
@@ -227,10 +201,30 @@ impl<P: Pal + Debug> Nodes<P> {
                 .ok_or_else(|| id_not_found(id))?
                 .expected_status()
         {
-            self.force_start(id).await
-        } else {
-            Ok(())
+            self.send_container_status(id, ContainerStatus::Starting)
+                .await;
+
+            let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
+            node.start().await?;
+            debug!("Node started");
+
+            self.send_container_status(id, ContainerStatus::Running)
+                .await;
+
+            let secret_keys = match self.exchange_keys(id).await {
+                Ok(secret_keys) => secret_keys,
+                Err(e) => {
+                    error!("Failed to retrieve keys when starting node: `{e}`");
+                    HashMap::new()
+                }
+            };
+
+            let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
+            node.init(secret_keys).await?;
+            // We save the `running` status only after all of the previous steps have succeeded.
+            node.set_expected_status(NodeStatus::Running).await?;
         }
+        Ok(())
     }
 
     #[instrument(skip(self))]
@@ -249,20 +243,6 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn force_stop(&mut self, id: Uuid) -> Result<()> {
-        self.send_container_status(id, ContainerStatus::Stopping)
-            .await;
-
-        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
-        node.stop().await?;
-        debug!("Node stopped");
-
-        self.send_container_status(id, ContainerStatus::Stopped)
-            .await;
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
     pub async fn stop(&mut self, id: Uuid) -> Result<()> {
         if NodeStatus::Stopped
             != self
@@ -271,10 +251,20 @@ impl<P: Pal + Debug> Nodes<P> {
                 .ok_or_else(|| id_not_found(id))?
                 .expected_status()
         {
-            self.force_stop(id).await
-        } else {
-            Ok(())
+            self.send_container_status(id, ContainerStatus::Stopping)
+                .await;
+
+            let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
+            node.stop().await?;
+            debug!("Node stopped");
+
+            self.send_container_status(id, ContainerStatus::Stopped)
+                .await;
+
+            let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
+            node.set_expected_status(NodeStatus::Stopped).await?;
         }
+        Ok(())
     }
 
     #[instrument(skip(self))]
@@ -289,6 +279,16 @@ impl<P: Pal + Debug> Nodes<P> {
         let node = self.nodes.get(&id).ok_or_else(|| id_not_found(id))?;
 
         Ok(node.status())
+    }
+
+    #[instrument(skip(self))]
+    pub async fn recover(&mut self, id: Uuid) -> Result<()> {
+        self.send_container_status(id, ContainerStatus::UndefinedContainerStatus)
+            .await;
+
+        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
+
+        node.recover().await
     }
 
     pub async fn node_id_for_name(&self, name: &str) -> Result<Uuid> {
