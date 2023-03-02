@@ -13,9 +13,10 @@ use crate::{
 use anyhow::{Context, Result};
 use bv_utils::run_flag::RunFlag;
 use std::{collections::HashMap, fmt::Debug, net::SocketAddr, str::FromStr, sync::Arc};
+use tokio::sync::watch::Sender;
 use tokio::{
     net::TcpListener,
-    sync::{watch, RwLock},
+    sync::{watch, watch::Receiver, RwLock},
     time::{sleep, Duration},
 };
 use tonic::transport::{Channel, Endpoint, Server};
@@ -73,122 +74,33 @@ where
         let server = BlockvisorServer {
             nodes: nodes.clone(),
         };
-        let internal_api_server_future = Self::create_server(run.clone(), self.listener, server);
+        let internal_api_server_future =
+            Self::create_internal_api_server(run.clone(), self.listener, server);
 
-        let (cmd_watch_tx, mut cmd_watch_rx) = watch::channel(());
-        let external_api_client_future = async {
-            let mut run = run.clone();
-            while run.load() {
-                tokio::select! {
-                    _ = cmd_watch_rx.changed() => {
-                        info!("MQTT watch triggerred");
-                        match api::CommandsService::connect(self.config.read().await).await {
-                            Ok(mut client) => {
-                                if let Err(e) = client.get_and_process_pending_commands(&self.config.read().await.id, nodes.clone()).await {
-                                    error!("Error processing pending commands: {:?}", e);
-                                }
-                            }
-                            Err(e) => error!("Error connecting to api: {:?}", e),
-                        }
-                    }
-                    _ = sleep(RECONNECT_INTERVAL) => {
-                        info!("Waiting for commands notification...");
-                    }
-                    _ = run.wait() => {}
-                }
-            }
-        };
+        let (cmd_watch_tx, cmd_watch_rx) = watch::channel(());
+        let external_api_client_future = Self::create_external_api_listener(
+            run.clone(),
+            nodes.clone(),
+            cmd_watch_rx,
+            &self.config,
+        );
+        let mqtt_notification_future =
+            Self::create_mqtt_listener(run.clone(), cmd_watch_tx, &self.config);
 
-        let notify = || {
-            info!("MQTT send notification");
-            cmd_watch_tx
-                .send(())
-                .unwrap_or_else(|_| error!("MQTT command watch error"));
-        };
-        let mqtt_notification_future = async {
-            let mut run = run.clone();
-            while run.load() {
-                info!("Connecting to MQTT");
-                match mqtt::CommandsStream::connect(&self.config).await {
-                    Ok(mut client) => {
-                        // get pending commands on reconnect
-                        notify();
-                        while run.load() {
-                            info!("MQTT watch wait...");
-                            tokio::select! {
-                                cmds = client.wait_for_pending_commands() => {
-                                    match cmds {
-                                        Ok(Some(_)) => notify(),
-                                        Ok(None) => {}
-                                        Err(e) => {
-                                            error!("MQTT error: {e:?}");
-                                            break;
-                                        }
-                                    }
-                                }
-                                _ = run.wait() => {}
-                            }
-                        }
-                    }
-                    Err(e) => error!("Error connecting to MQTT: {:?}", e),
-                }
-                run.select(sleep(RECONNECT_INTERVAL)).await;
-                // get pending commands if mqtt is not avail
-                notify();
-            }
-        };
+        let nodes_recovery_future = Self::nodes_recovery(run.clone(), nodes.clone());
 
-        let nodes_recovery_future = async {
-            let mut run = run.clone();
-            while run.load() {
-                let list: Vec<_> = nodes
-                    .read()
-                    .await
-                    .list()
-                    .await
-                    .iter()
-                    .map(|node| (node.data.clone(), node.status()))
-                    .collect();
-
-                for (node_data, node_status) in list {
-                    let id = node_data.id;
-                    if node_status == NodeStatus::Failed {
-                        match node_data.expected_status {
-                            NodeStatus::Running => {
-                                info!("Recovery: starting node with ID `{id}`");
-                                if let Err(e) = node_data.network_interface.remaster().await {
-                                    error!("Recovery: remastering network for node with ID `{id}` failed: {e}");
-                                }
-                                if let Err(e) = nodes.write().await.force_start(id).await {
-                                    error!("Recovery: starting node with ID `{id}` failed: {e}");
-                                }
-                            }
-                            NodeStatus::Stopped => {
-                                info!("Recovery: stopping node with ID `{id}`");
-                                if let Err(e) = nodes.write().await.force_stop(id).await {
-                                    error!("Recovery: stopping node with ID `{id}` failed: {e}",);
-                                }
-                            }
-                            NodeStatus::Failed => {
-                                warn!("Recovery: node with ID `{id}` cannot be recovered");
-                            }
-                        }
-                    }
-                }
-                run.select(sleep(RECOVERY_CHECK_INTERVAL)).await;
-            }
-        };
+        let node_updates_future = Self::node_updates(run.clone(), nodes.clone());
 
         let config = self.config.read().await;
         let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
-
-        let node_updates_future = Self::node_updates(run.clone(), nodes.clone());
         let node_metrics_future =
             Self::node_metrics(run.clone(), nodes.clone(), &endpoint, self.config.clone());
         let host_metrics_future =
             Self::host_metrics(run.clone(), config.id, &endpoint, self.config.clone());
-        let self_updater =
-            self_updater::new(self_updater::SysTimer, &bv_root, &self.config).await?;
+
+        let self_updater_future = self_updater::new(self_updater::SysTimer, &bv_root, &self.config)
+            .await?
+            .run();
 
         let _ = tokio::join!(
             internal_api_server_future,
@@ -198,13 +110,13 @@ where
             node_updates_future,
             node_metrics_future,
             host_metrics_future,
-            self_updater.run()
+            self_updater_future
         );
         info!("Stopping...");
         Ok(())
     }
 
-    async fn create_server(
+    async fn create_internal_api_server(
         mut run: RunFlag,
         listener: TcpListener,
         server: BlockvisorServer<P>,
@@ -221,17 +133,113 @@ where
         Ok(())
     }
 
-    async fn wait_for_channel(mut run: RunFlag, endpoint: &Endpoint) -> Option<Channel> {
+    async fn create_external_api_listener(
+        mut run: RunFlag,
+        nodes: Arc<RwLock<Nodes<P>>>,
+        mut cmd_watch_rx: Receiver<()>,
+        config: &SharedConfig,
+    ) {
         while run.load() {
-            match Endpoint::connect(endpoint).await {
-                Ok(channel) => return Some(channel),
-                Err(e) => {
-                    error!("Error connecting to endpoint: {:?}", e);
-                    run.select(sleep(RECONNECT_INTERVAL)).await;
+            tokio::select! {
+                _ = cmd_watch_rx.changed() => {
+                    info!("MQTT watch triggerred");
+                    match api::CommandsService::connect(config.read().await).await {
+                        Ok(mut client) => {
+                            if let Err(e) = client.get_and_process_pending_commands(&config.read().await.id, nodes.clone()).await {
+                                error!("Error processing pending commands: {:?}", e);
+                            }
+                        }
+                        Err(e) => error!("Error connecting to api: {:?}", e),
+                    }
                 }
+                _ = sleep(RECONNECT_INTERVAL) => {
+                    info!("Waiting for commands notification...");
+                }
+                _ = run.wait() => {}
             }
         }
-        None
+    }
+
+    async fn create_mqtt_listener(
+        mut run: RunFlag,
+        cmd_watch_tx: Sender<()>,
+        config: &SharedConfig,
+    ) {
+        let notify = || {
+            info!("MQTT send notification");
+            cmd_watch_tx
+                .send(())
+                .unwrap_or_else(|_| error!("MQTT command watch error"));
+        };
+        while run.load() {
+            info!("Connecting to MQTT");
+            match mqtt::CommandsStream::connect(config).await {
+                Ok(mut client) => {
+                    // get pending commands on reconnect
+                    notify();
+                    while run.load() {
+                        info!("MQTT watch wait...");
+                        tokio::select! {
+                            cmds = client.wait_for_pending_commands() => {
+                                match cmds {
+                                    Ok(Some(_)) => notify(),
+                                    Ok(None) => {}
+                                    Err(e) => {
+                                        error!("MQTT error: {e:?}");
+                                        break;
+                                    }
+                                }
+                            }
+                            _ = run.wait() => {}
+                        }
+                    }
+                }
+                Err(e) => error!("Error connecting to MQTT: {:?}", e),
+            }
+            run.select(sleep(RECONNECT_INTERVAL)).await;
+            // get pending commands if mqtt is not avail
+            notify();
+        }
+    }
+
+    async fn nodes_recovery(mut run: RunFlag, nodes: Arc<RwLock<Nodes<P>>>) {
+        while run.load() {
+            let list: Vec<_> = nodes
+                .read()
+                .await
+                .list()
+                .await
+                .iter()
+                .map(|node| (node.data.clone(), node.status()))
+                .collect();
+
+            for (node_data, node_status) in list {
+                let id = node_data.id;
+                if node_status == NodeStatus::Failed {
+                    match node_data.expected_status {
+                        NodeStatus::Running => {
+                            info!("Recovery: starting node with ID `{id}`");
+                            if let Err(e) = node_data.network_interface.remaster().await {
+                                error!("Recovery: remastering network for node with ID `{id}` failed: {e}");
+                            }
+                            if let Err(e) = nodes.write().await.force_start(id).await {
+                                error!("Recovery: starting node with ID `{id}` failed: {e}");
+                            }
+                        }
+                        NodeStatus::Stopped => {
+                            info!("Recovery: stopping node with ID `{id}`");
+                            if let Err(e) = nodes.write().await.force_stop(id).await {
+                                error!("Recovery: stopping node with ID `{id}` failed: {e}",);
+                            }
+                        }
+                        NodeStatus::Failed => {
+                            warn!("Recovery: node with ID `{id}` cannot be recovered");
+                        }
+                    }
+                }
+            }
+            run.select(sleep(RECOVERY_CHECK_INTERVAL)).await;
+        }
     }
 
     /// This task runs periodically to send important info about nodes to API.
@@ -266,6 +274,19 @@ where
                 }
             }
         }
+    }
+
+    async fn wait_for_channel(mut run: RunFlag, endpoint: &Endpoint) -> Option<Channel> {
+        while run.load() {
+            match Endpoint::connect(endpoint).await {
+                Ok(channel) => return Some(channel),
+                Err(e) => {
+                    error!("Error connecting to endpoint: {:?}", e);
+                    run.select(sleep(RECONNECT_INTERVAL)).await;
+                }
+            }
+        }
+        None
     }
 
     /// This task runs every minute to aggregate metrics from every node. It will call into the nodes
