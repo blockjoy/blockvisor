@@ -20,7 +20,7 @@ services:
       - 18083:18083
 
   api:
-    image: 'registry.digitalocean.com/stakejoy/blockvisor-api:latest'
+    image: 'us-docker.pkg.dev/blockjoy-deployer/blockvisor-api/dev-blockvisor-api:latest'
     ports:
       - 8080:8080
     environment:
@@ -57,14 +57,14 @@ services:
       - database
 
   migrations:
-    image: 'registry.digitalocean.com/stakejoy/blockvisor-api-migrations:latest'
+    image: 'us-docker.pkg.dev/blockjoy-deployer/blockvisor-api-migrations/dev-blockvisor-api-migrations:latest'
     environment:
       DATABASE_URL: postgres://blockvisor:password@database:5432/blockvisor_db
     depends_on:
       - api
 
   cookbook:
-    image: 'registry.digitalocean.com/stakejoy/babel-cookbook:latest'
+    image: 'us-docker.pkg.dev/blockjoy-deployer/babel-cookbook/dev-babel-cookbook:latest'
     ports:
       - 50051:50051
     environment:
