@@ -21,8 +21,8 @@ cmds = [
   "rm /etc/resolv.conf",
   "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
-  "wget -O /root/genesis.cosmoshub-4.json.gz  https://raw.githubusercontent.com/cosmos/mainnet/master/genesis/genesis.cosmoshub-4.json.gz",
-  "gunzip /root/genesis.cosmoshub-4.json.gz",
+  "wget -O /root/genesis.cosmoshub.json.gz  https://raw.githubusercontent.com/cosmos/mainnet/master/genesis/genesis.cosmoshub-4.json.gz",
+  "gunzip /root/genesis.cosmoshub.json.gz",
   #"gaiad init test-cosmos-node --chain-id cosmoshub-4",
   #"sed -i'' 's/minimum-gas-prices = ""/minimum-gas-prices = "0.0025uatom"/' $HOME/.gaia/config/app.toml
   #"sed -i'' 's/persistent_peers = ""/persistent_peers = '"\"$(curl -s https://raw.githubusercontent.com/cosmos/chain-registry/master/cosmoshub/chain.json | jq -r '[foreach .peers.seeds[] as $item (""; "\($item.id)@\($item.address)")] | join(",")')\""'/' $HOME/.gaia/config/config.toml
@@ -42,15 +42,15 @@ apt_build_machine = []
 git_repo = "https://github.com/cosmos/gaia.git"
 git_tag = "v7.1.0"
 build_cmds =  [
-                "cp babelsup/usr/bin/babelsup /var/lib/yafim/target/cosmos/node/mnt/usr/bin/",
-                "cp babelsup/etc/systemd/system/babelsup.service /var/lib/yafim/target/cosmos/node/mnt/etc/systemd/system/",
-                "cp babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service /var/lib/yafim/target/cosmos/node/mnt/etc/systemd/system/multi-user.target.wants/",
-                "echo 'root:f&IS_rwh' | chpasswd -R /var/lib/yafim/target/cosmos/node/mnt/",
-                "echo cosmos > /var/lib/yafim/target/cosmos/node/mnt/etc/hostname",
+                "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/cosmos/node/mnt/usr/bin/",
+                "cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/cosmos/node/mnt/etc/systemd/system/",
+                "cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/cosmos/node/mnt/etc/systemd/system/multi-user.target.wants/",
+                "echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/cosmos/node/mnt/",
+                "echo cosmos > {{.YafimHome}}/target/cosmos/node/mnt/etc/hostname",
                 "sudo apt update",
                 "sudo apt install -y build-essential git binutils-dev libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev cmake gcc g++ python libssl-dev pkg-config clang llvm",
-		"cd gaia && make build-linux",
-		"cp gaia/build/gaiad target/cosmos/node/mnt/usr/bin/"
+		"cd {{.YafimHome}}/gaia && make build-linux",
+		"cp {{.YafimHome}}/gaia/build/gaiad {{.YafimHome}}/target/cosmos/node/mnt/usr/bin/"
 	      ]
 
 

@@ -19,13 +19,14 @@ disk_size_gb = 100
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
-data_directory_mount_point = "/blockjoy/tezos/node"
+data_directory_mount_point = "/blockjoy/tezos/data"
+
 
     [[supervisor.entry_point]]
     name = "tezos-node"
     body = """
     test -f /blockjoy/.init && \
-    tezos --version
+    octez-node run --data-dir=/blockjoy/tezos/data --log-output=stdout
     """
 
 [[methods]]
@@ -55,14 +56,43 @@ method = "" # find
     code = 200
     field = "" # find
 
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+    octez-node config init --data-dir /blockjoy/tezos/data --network={{NETWORK}} --history-mode=babelref:'nets.{{NETWORK}}.history' && \
+    octez-node config update --config-file=/blockjoy/tezos/data/config.json --data-dir=/blockjoy/tezos/data --rpc-addr="localhost:8732" && \
+    touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+echo -n "Cancelled"
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
 [nets.mainnet] 
 net_type = "main"
-url = "https://mainnet.api.tez.ie" # tbd
+url = ""
+history = "rolling"
 
 [nets.ghostnet]
 net_type = "test"
-url = "https://ghostnet.ecadinfra.com" # tbd
+url = ""
+history = "rolling"
 
 [nets.liamnet]
 net_type = "test"
-url = "https://limanet.ecadinfra.com" # tbd
+url = ""
+history="rolling"
+

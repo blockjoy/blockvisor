@@ -1,3 +1,12 @@
+#octez-node config init --data-dir ~/tezos-ghostnet --network=ghostnet --history-mode=full
+#octez-node run --rpc-addr 127.0.0.1:8732 --log-output tezos.log
+#./octez-node config update --config-file=tmp/config.json --data-dir=tmp \
+#  --peer="192.168.1.3:9733" \
+#  --private-mode \
+#  --rpc-addr="localhost:8733" --net-addr="1.2.3.4" \
+#  --connections=25 \
+#  --log-output="octez-node.log" \
+#  --history-mode=full
 application_name = "tezos"
 node_type = "node"
 version = "15.1.0-build.1"
@@ -15,21 +24,22 @@ cmds = [
   "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
   "sudo apt upgrade -y",
-  "wget https://github.com/serokell/tezos-packaging/releases/download/v15.1-2/binaries-15.1-2.tar.gz",
-  "sudo tar -xvzf binaries-15.1-2.tar.gz",
+#TODO find latest version?
+  "wget -O tezos.tar.gz https://github.com/serokell/tezos-packaging/releases/download/v15.1-2/binaries-15.1-2.tar.gz",
+  "sudo tar -xvzf tezos.tar.gz",
   "sudo chmod +x  octez-*",
   "sudo mv octez-* /usr/bin/",
 ]
 
 [build_machine]
 apt_build_machine = []
-git_repo = "git@github.com:blockjoy/blockvisor.git"
-git_tag = "master"
+git_repo = ""
+git_tag = ""
 build_cmds =  [
-		"cp babelsup/usr/bin/babelsup target/tezos/node/mnt/usr/bin/",
-		"cp babelsup/etc/systemd/system/babelsup.service target/tezos/node/mnt/etc/systemd/system/",
-		"cp babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service target/tezos/node/mnt/etc/systemd/system/multi-user.target.wants/",
-                "cp blockvisor/babel_api/protocols/tezos/node.toml /root/yafim/target/tezos/node/mnt/etc/babel.conf",	
-		"echo 'root:f&IS_rwh' | chpasswd -R /root/yafim/target/tezos/node/mnt/",
-		"echo tezos-node > /root/yafim/target/tezos/node/mnt/etc/hostname",
+		"cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/tezos/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/tezos/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/tezos/node/mnt/etc/systemd/system/multi-user.target.wants/",
+                "cp {{.YafimHome}}/blockvisor/babel_api/protocols/tezos/node.toml {{.YafimHome}}/target/tezos/node/mnt/etc/babel.conf",	
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/tezos/node/mnt/",
+		"echo tezos-node > {{.YafimHome}}/target/tezos/node/mnt/etc/hostname",
 ]

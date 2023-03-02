@@ -1,0 +1,49 @@
+#HARDWARE SPECS Minimum:
+
+#CPU with 8 cores
+#16GB RAM
+#2TB free storage space to sync the Mainnet
+
+#Recommended:
+#CPU with 16+ cores(32+ cores for a super representative)
+#32GB+ RAM(64GB+ for a super representative)
+#High Performance SSD with at least 2.5TB free space
+#100+ MB/s download Internet service
+
+application_name = "tron"
+node_type = "node"
+version = ""
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = ["build-essential"]
+apt_source = ["universe","multiverse"]
+cmds = [
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+  "apt update",
+  "apt upgrade -y",
+  "wget -O /root/FullNode.jar https://github.com/tronprotocol/java-tron/releases/download/GreatVoyage-v4.7.1/FullNode.jar",
+  "apt-get install -y default-jre",
+  #"java -Xmx2g -XX:+UseConcMarkSweepGC -jar /root/FullNode.jar -c main_net_config.conf",
+
+]
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+		"cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/tron/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/tron/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/tron/node/mnt/etc/systemd/system/multi-user.target.wants/",
+                "cp {{.YafimHome}}/blockvisor/babel_api/protocols/tron/node.toml {{.YafimHome}}/target/tron/node/mnt/etc/babel.conf",	
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/tron/node/mnt/",
+		"echo tron-node > {{.YafimHome}}/target/tron/node/mnt/etc/hostname",
+                
+]

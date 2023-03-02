@@ -1,0 +1,68 @@
+[env]
+path_append = "/blockjoy/bin/"
+
+[config]
+protocol = "tron"
+node_type = "validator"
+node_version = "0.5.0"
+min_babel_version = "0.0.1"
+description = "tron blockchain validator"
+api_host = "http://localhost:50545/"
+ports = [50545]
+
+[requirements]
+vcpu_count = 16
+mem_size_mb = 32768 
+disk_size_gb = 1500
+
+[supervisor]
+backoff_timeout_ms = 60000
+backoff_base_ms = 100
+log_buffer_capacity_ln = 1000
+data_directory_mount_point = "/blockjoy/tron/data"
+
+   [[supervisor.entry_point]]
+    name = "tron-run"
+    body = """
+    test -f /blockjoy/.init && \
+    exit 0
+    """
+
+[[methods]]
+name = "height"
+transport = "jrpc"
+method = "eth_syncing" # only if syncing
+
+    [methods.response]
+    code = 200
+    field = "result.highestBlock"
+
+[[methods]]
+name = "address"
+transport = "jrpc"
+method = "eth_accounts"
+
+    [methods.response]
+    code = 200
+    field = "result" 
+
+[[methods]]
+name = "status"
+transport = "jrpc"
+method = "eth_syncing"
+
+    [methods.response]
+    code = 200
+    field = "result"
+
+[nets.mainnet]
+net_type = "main"
+url = "https://rpc.ankr.com/http/tron"
+
+[nets.shasta]
+net_type = "test"
+url = "https://api.shasta.trongrid.io"
+
+[nets.nile]
+net_type = "test"
+url = "https://nile.trongrid.io"
