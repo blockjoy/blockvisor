@@ -1,8 +1,9 @@
+use crate::src::utils::stub_server::StubDiscoveryService;
 use crate::src::utils::{
     stub_server::{StubCommandsServer, StubNodesServer},
     test_env::TestEnv,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::{
@@ -10,6 +11,7 @@ use blockvisord::{
     node::FC_BIN_NAME,
     nodes::Nodes,
     server::bv_pb,
+    services,
     services::{api, api::pb},
     set_bv_status, utils,
 };
@@ -538,5 +540,48 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     for (actual, ref expected) in commands_updates.lock().await.iter().zip(expected_updates) {
         assert_eq!(actual, expected);
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_discovery_on_connection_error() -> Result<()> {
+    let discovery_service = StubDiscoveryService;
+    let server_future = async {
+        Server::builder()
+            .max_concurrent_streams(1)
+            .add_service(pb::discovery_server::DiscoveryServer::new(
+                discovery_service,
+            ))
+            .serve("0.0.0.0:8091".to_socket_addrs().unwrap().next().unwrap())
+            .await
+            .unwrap()
+    };
+    let config = Config {
+        id: Uuid::new_v4().to_string(),
+        token: "any token".to_string(),
+        blockjoy_api_url: "http://localhost:8091".to_string(),
+        blockjoy_keys_url: None,
+        blockjoy_registry_url: None,
+        blockjoy_mqtt_url: None,
+        update_check_interval_secs: None,
+        blockvisor_port: 0,
+    };
+    let connect_future = services::connect(SharedConfig::new(config.clone()), |config| async {
+        if config.blockjoy_keys_url.is_none()
+            && config.blockjoy_registry_url.is_none()
+            && config.blockjoy_mqtt_url.is_none()
+        {
+            bail!("first try without urls")
+        }
+        Ok(config)
+    });
+    println!("run server");
+    let final_cfg = tokio::select! {
+        _ = server_future => {unreachable!()},
+        res = connect_future => {res},
+    }?;
+    assert_eq!("key_service_url", &final_cfg.blockjoy_keys_url.unwrap());
+    assert_eq!("registry_url", &final_cfg.blockjoy_registry_url.unwrap());
+    assert_eq!("notification_url", &final_cfg.blockjoy_mqtt_url.unwrap());
     Ok(())
 }

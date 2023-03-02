@@ -1,4 +1,5 @@
 use blockvisord::services::api::pb;
+use blockvisord::services::api::pb::ServicesResponse;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
@@ -108,5 +109,18 @@ impl pb::commands_server::Commands for StubCommandsServer {
         self.updates.lock().await.push(req);
 
         Ok(Response::new(()))
+    }
+}
+
+pub struct StubDiscoveryService;
+
+#[tonic::async_trait]
+impl pb::discovery_server::Discovery for StubDiscoveryService {
+    async fn services(&self, _: Request<()>) -> Result<Response<ServicesResponse>, Status> {
+        Ok(Response::new(ServicesResponse {
+            key_service_url: "key_service_url".to_string(),
+            registry_url: "registry_url".to_string(),
+            notification_url: "notification_url".to_string(),
+        }))
     }
 }
