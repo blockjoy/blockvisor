@@ -113,6 +113,8 @@ where
             self_updater_future
         );
         info!("Stopping...");
+        // store fresh config before exit since service urls could change
+        self.config.read().await.save(&bv_root).await?;
         Ok(())
     }
 
