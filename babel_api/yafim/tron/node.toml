@@ -18,7 +18,7 @@ version = ""
 debian_version = "focal"
 rootfs_size = "10G"
 fs_type = "ext4"
-apt_image = ["build-essential"]
+apt_image = ["build-essential", "openjdk-8-jre"]
 apt_source = ["universe","multiverse"]
 cmds = [
   "systemctl disable systemd-resolved.service",
@@ -29,7 +29,8 @@ cmds = [
   "apt update",
   "apt upgrade -y",
   "wget -O /root/FullNode.jar https://github.com/tronprotocol/java-tron/releases/download/GreatVoyage-v4.7.1/FullNode.jar",
-  "apt-get install -y default-jre",
+  #"apt-get install -y default-jre",
+  #"apt install openjdk-8-jre",
   #"java -Xmx2g -XX:+UseConcMarkSweepGC -jar /root/FullNode.jar -c main_net_config.conf",
 
 ]
