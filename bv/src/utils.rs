@@ -15,7 +15,7 @@ use tracing::{debug, info};
 #[macro_export]
 macro_rules! with_retry {
     ($fun:expr) => {{
-        const RPC_RETRY_MAX: u32 = 5;
+        const RPC_RETRY_MAX: u32 = 3;
         const RPC_BACKOFF_BASE_MSEC: u64 = 300;
         let mut retry_count = 0;
         loop {

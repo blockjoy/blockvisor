@@ -122,6 +122,25 @@ body = "echo 'noop for testing'"
     status = 200
     format = "raw"
 
+[[methods]]
+name = "stop_babelsup"
+transport = "sh"
+body = "systemctl stop babelsup"
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "disable_babelsup"
+transport = "sh"
+body = "systemctl disable babelsup"
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+
 [nets.mainnet]
 net_type = "main"
 url = "https://rpc.ankr.com/eth"

@@ -20,7 +20,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tonic::transport::{Channel, Endpoint, Server};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
@@ -151,7 +151,7 @@ where
                                 error!("Error processing pending commands: {:?}", e);
                             }
                         }
-                        Err(e) => error!("Error connecting to api: {:?}", e),
+                        Err(e) => warn!("Error connecting to api: {:?}", e),
                     }
                 }
                 _ = sleep(RECONNECT_INTERVAL) => {
@@ -187,7 +187,7 @@ where
                                     Ok(Some(_)) => notify(),
                                     Ok(None) => {}
                                     Err(e) => {
-                                        error!("MQTT error: {e:?}");
+                                        warn!("MQTT error: {e:?}");
                                         break;
                                     }
                                 }
@@ -196,7 +196,7 @@ where
                         }
                     }
                 }
-                Err(e) => error!("Error connecting to MQTT: {:?}", e),
+                Err(e) => warn!("Error connecting to MQTT: {:?}", e),
             }
             run.select(sleep(RECONNECT_INTERVAL)).await;
             // get pending commands if mqtt is not avail
@@ -265,7 +265,7 @@ where
             match Endpoint::connect(endpoint).await {
                 Ok(channel) => return Some(channel),
                 Err(e) => {
-                    error!("Error connecting to endpoint: {:?}", e);
+                    warn!("Error connecting to endpoint: {:?}", e);
                     run.select(sleep(RECONNECT_INTERVAL)).await;
                 }
             }

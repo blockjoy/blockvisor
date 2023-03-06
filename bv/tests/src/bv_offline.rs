@@ -196,15 +196,50 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
 
     println!("list running node before recovery");
     test_env.bv_run(&["node", "status", vm_id], "Failed");
+    test_env
+        .wait_for_running_node(vm_id, Duration::from_secs(60))
+        .await;
 
-    println!("list running node after recovery");
-    let start = std::time::Instant::now();
-    let elapsed = || std::time::Instant::now() - start;
-    while !test_env.try_bv_run(&["node", "status", vm_id], "Running")
-        && elapsed() < Duration::from_secs(60)
-    {
-        sleep(Duration::from_secs(1)).await;
-    }
+    println!("stop babelsup - break node");
+    // it may fail because it stop babalsup so ignore result
+    let _ = test_env.try_bv_run(&["node", "run", vm_id, "stop_babelsup"], "");
+
+    println!("list running node before recovery");
+    test_env.bv_run(&["node", "status", vm_id], "Failed");
+    test_env
+        .wait_for_running_node(vm_id, Duration::from_secs(60))
+        .await;
+
+    println!("delete started node");
+    test_env.bv_run(&["node", "delete", vm_id], "Deleted node");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
+    let mut test_env = TestEnv::new().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
+
+    println!("create a node");
+    let vm_id = &test_env.create_node("testing/validator/0.0.1");
+    println!("create vm_id: {vm_id}");
+
+    println!("start stopped node");
+    test_env.bv_run(&["node", "start", vm_id], "Started node");
+
+    println!("list running node");
+    test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    println!("disable and stop babelsup - permanently break node");
+    test_env.bv_run(&["node", "run", vm_id, "disable_babelsup"], "");
+    // it may fail because it stop babalsup so ignore result
+    let _ = test_env.try_bv_run(&["node", "run", vm_id, "stop_babelsup"], "");
+
+    println!("list running node before recovery");
+    test_env.bv_run(&["node", "status", vm_id], "Failed");
+    test_env
+        .wait_for_node_fail(vm_id, Duration::from_secs(300))
+        .await;
 
     println!("delete started node");
     test_env.bv_run(&["node", "delete", vm_id], "Deleted node");

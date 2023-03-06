@@ -1,6 +1,8 @@
 use anyhow::Result;
 use assert_cmd::Command;
 use async_trait::async_trait;
+use blockvisord::node::REGISTRY_CONFIG_DIR;
+use blockvisord::node_data::{NodeData, NodeStatus};
 use blockvisord::{
     blockvisord::BlockvisorD,
     config::Config,
@@ -12,6 +14,7 @@ use blockvisord::{
 use bv_utils::run_flag::RunFlag;
 use predicates::prelude::predicate;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use std::{
     fs,
     net::IpAddr,
@@ -20,6 +23,7 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
 };
 use tokio::task::JoinHandle;
+use tokio::time::sleep;
 
 /// Global integration tests token. All tests (that may run in parallel) share common FS and net devices space
 /// (tap devices which are created by Firecracker during tests).
@@ -113,9 +117,44 @@ impl TestEnv {
             .env("BV_ROOT", &self.bv_root)
             .env("NO_COLOR", "1")
             .assert()
-            .success()
             .try_stdout(predicate::str::contains(stdout_pattern))
             .is_ok()
+    }
+
+    pub async fn wait_for_running_node(&self, vm_id: &str, timeout: Duration) {
+        println!("wait for running node");
+        let start = std::time::Instant::now();
+        while !self.try_bv_run(&["node", "status", vm_id], "Running") {
+            if start.elapsed() < timeout {
+                sleep(Duration::from_secs(1)).await;
+            } else {
+                panic!("timeout expired")
+            }
+        }
+    }
+
+    pub async fn wait_for_node_fail(&self, vm_id: &str, timeout: Duration) {
+        println!("wait for node to permanently fail");
+        let node_path = self
+            .bv_root
+            .join(BV_VAR_PATH)
+            .join(REGISTRY_CONFIG_DIR)
+            .join(format!("{vm_id}.toml"));
+        let start = std::time::Instant::now();
+        loop {
+            if NodeData::<DummyNet>::load(&node_path)
+                .await
+                .unwrap()
+                .expected_status
+                == NodeStatus::Failed
+            {
+                break;
+            } else if start.elapsed() < timeout {
+                sleep(Duration::from_secs(5)).await;
+            } else {
+                panic!("timeout expired")
+            }
+        }
     }
 
     pub fn create_node(&self, image: &str) -> String {

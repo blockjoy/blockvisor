@@ -43,7 +43,7 @@ const VSOCK_GUEST_CID: u32 = 3;
 const MAX_KERNEL_ARGS_LEN: usize = 1024;
 const MAX_START_TRIES: usize = 3;
 const MAX_STOP_TRIES: usize = 3;
-const MAX_RECONNECT_TRIES: usize = 5;
+const MAX_RECONNECT_TRIES: usize = 3;
 
 pub fn build_registry_dir(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR)
@@ -224,11 +224,9 @@ impl<P: Pal + Debug> Node<P> {
         let id = self.id();
         match self.data.expected_status {
             NodeStatus::Running => {
-                if self.machine.state() == firec::MachineState::SHUTOFF
-                    || self.node_conn.is_closed()
-                {
+                if self.machine.state() == firec::MachineState::SHUTOFF {
                     self.started_node_recovery().await?;
-                } else if self.node_conn.is_broken() {
+                } else {
                     self.node_connection_recovery().await?;
                 }
             }
@@ -236,7 +234,7 @@ impl<P: Pal + Debug> Node<P> {
                 self.recovery_counters.stop += 1;
                 info!("Recovery: stopping node with ID `{id}`");
                 if let Err(e) = self.stop().await {
-                    error!("Recovery: stopping node with ID `{id}` failed: {e}");
+                    warn!("Recovery: stopping node with ID `{id}` failed: {e}");
                     if self.recovery_counters.stop >= MAX_STOP_TRIES {
                         error!("Recovery: retries count exceeded, mark as failed");
                         self.set_expected_status(NodeStatus::Failed).await?;
@@ -253,10 +251,11 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     async fn started_node_recovery(&mut self) -> Result<()> {
+        let id = self.id();
         self.recovery_counters.start += 1;
+        info!("Recovery: starting node with ID `{id}`");
         if let Err(e) = self.start().await {
-            let id = self.id();
-            error!("Recovery: starting node with ID `{id}` failed: {e}");
+            warn!("Recovery: starting node with ID `{id}` failed: {e}");
             if self.recovery_counters.start >= MAX_START_TRIES {
                 error!("Recovery: retries count exceeded, mark as failed");
                 self.set_expected_status(NodeStatus::Failed).await?;
@@ -271,14 +270,14 @@ impl<P: Pal + Debug> Node<P> {
         let id = self.id();
         self.recovery_counters.reconnect += 1;
         info!("Recovery: fix broken connection to node with ID `{id}`");
-        if let Err(e) = self.babelsup_connection_test().await {
-            error!("Recovery: reconnect to node with ID `{id}` failed: {e}");
+        if let Err(e) = self.node_conn.connection_test().await {
+            warn!("Recovery: reconnect to node with ID `{id}` failed: {e}");
             if self.recovery_counters.reconnect >= MAX_RECONNECT_TRIES {
-                error!("Recovery: restart broken node with ID `{id}`");
+                info!("Recovery: restart broken node with ID `{id}`");
 
                 self.recovery_counters.stop += 1;
                 if let Err(e) = self.stop().await {
-                    error!("Recovery: stopping node with ID `{id}` failed: {e}");
+                    warn!("Recovery: stopping node with ID `{id}` failed: {e}");
                     if self.recovery_counters.stop >= MAX_STOP_TRIES {
                         error!("Recovery: retries count exceeded, mark as failed");
                         self.set_expected_status(NodeStatus::Failed).await?;
@@ -287,6 +286,9 @@ impl<P: Pal + Debug> Node<P> {
                     self.started_node_recovery().await?;
                 }
             }
+        } else if self.node_conn.is_closed() {
+            // node wasn't fully started so proceed with other stuff
+            self.started_node_recovery().await?;
         } else {
             self.post_recovery();
         }
@@ -296,12 +298,6 @@ impl<P: Pal + Debug> Node<P> {
     fn post_recovery(&mut self) {
         // reset counters on successful recovery
         self.recovery_counters = Default::default();
-    }
-
-    async fn babelsup_connection_test(&mut self) -> Result<()> {
-        let client = self.node_conn.babelsup_client().await?;
-        with_retry!(client.get_version(()))?;
-        Ok(())
     }
 
     /// Returns the expected status of the node.
@@ -326,10 +322,9 @@ impl<P: Pal + Debug> Node<P> {
         }
 
         let start = Instant::now();
-        let elapsed = || Instant::now() - start;
         loop {
             match self.machine.state() {
-                firec::MachineState::RUNNING if elapsed() < NODE_STOP_TIMEOUT => {
+                firec::MachineState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
                     debug!("Firecracker process not shutdown yet, will retry");
                     tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
                 }

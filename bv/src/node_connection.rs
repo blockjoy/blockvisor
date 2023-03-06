@@ -69,7 +69,7 @@ impl NodeConnection {
         max_delay: Duration,
     ) -> Result<Self> {
         let socket_path = build_socket_path(chroot_path, node_id);
-        let mut client = connect_babelsup(&socket_path, max_delay).await;
+        let mut client = connect_babelsup(&socket_path, max_delay).await?;
         let babelsup_version = with_retry!(client.get_version(()))?.into_inner();
         info!("Connected to babelsup {babelsup_version}");
         let (babel_bin, checksum) = load_babel_bin(babel_path).await?;
@@ -82,6 +82,12 @@ impl NodeConnection {
             socket_path,
             state: NodeConnectionState::BabelSup(client),
         })
+    }
+
+    pub async fn connection_test(&self) -> Result<()> {
+        let mut client = connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?;
+        with_retry!(client.get_version(()))?;
+        Ok(())
     }
 
     /// This function gets gRPC client connected to babel. It reconnect to babelsup if necessary.
@@ -99,7 +105,7 @@ impl NodeConnection {
                         BABEL_VSOCK_PORT,
                         CONNECTION_SWITCH_TIMEOUT,
                     )
-                    .await,
+                    .await?,
                 ));
             }
         };
@@ -119,7 +125,7 @@ impl NodeConnection {
             NodeConnectionState::Babel { .. } | NodeConnectionState::Broken => {
                 debug!("Reconnecting to babelsup");
                 self.state = NodeConnectionState::BabelSup(
-                    connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await,
+                    connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?,
                 );
             }
             NodeConnectionState::BabelSup { .. } => {}
@@ -138,8 +144,13 @@ fn build_socket_path(chroot_path: &Path, node_id: Uuid) -> PathBuf {
         .join("root")
         .join(VSOCK_PATH)
 }
-async fn connect_babelsup(socket_path: &Path, max_delay: Duration) -> BabelSupClient<Channel> {
-    BabelSupClient::new(create_channel(socket_path, BABEL_SUP_VSOCK_PORT, max_delay).await)
+async fn connect_babelsup(
+    socket_path: &Path,
+    max_delay: Duration,
+) -> Result<BabelSupClient<Channel>> {
+    Ok(BabelSupClient::new(
+        create_channel(socket_path, BABEL_SUP_VSOCK_PORT, max_delay).await?,
+    ))
 }
 
 async fn open_stream(socket_path: PathBuf, port: u32, max_delay: Duration) -> Result<UnixStream> {
@@ -151,33 +162,31 @@ async fn open_stream(socket_path: PathBuf, port: u32, max_delay: Duration) -> Re
     // of time for the socket file to get created on disk, because this is done asynchronously
     // by Firecracker.
     let start = std::time::Instant::now();
-    let elapsed = || std::time::Instant::now() - start;
     let stream = loop {
         match UnixStream::connect(&socket_path).await {
             // Also it's possible that we will not manage to
             // initiate connection from the first attempt
             Ok(mut stream) => match handshake(&mut stream, port).await {
                 Ok(_) => break Ok(stream),
-                Err(e) if elapsed() < max_delay => {
+                Err(e) if start.elapsed() < max_delay => {
                     debug!(
                         "Handshake error, retrying in {} seconds: {}",
                         RETRY_INTERVAL.as_secs(),
                         e
                     );
-                    sleep(RETRY_INTERVAL).await;
                 }
                 Err(e) => break Err(anyhow!("handshake error {e}")),
             },
-            Err(e) if elapsed() < max_delay => {
+            Err(e) if start.elapsed() < max_delay => {
                 debug!(
                     "No socket file yet, retrying in {} seconds: {}",
                     RETRY_INTERVAL.as_secs(),
                     e
                 );
-                sleep(RETRY_INTERVAL).await;
             }
             Err(e) => break Err(anyhow!("uds connect error {e}")),
         };
+        sleep(Ord::min(RETRY_INTERVAL, max_delay - start.elapsed())).await;
     }
     .context("Failed to connect to node bus")?;
 
@@ -220,15 +229,20 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<()> {
     Ok(())
 }
 
-async fn create_channel(socket_path: &Path, vsock_port: u32, max_delay: Duration) -> Channel {
+async fn create_channel(
+    socket_path: &Path,
+    vsock_port: u32,
+    max_delay: Duration,
+) -> Result<Channel> {
     let socket_path = socket_path.to_owned();
-    Endpoint::from_static("http://[::]:50052")
+    Ok(Endpoint::from_static("http://[::]:50052")
         .timeout(GRPC_REQUEST_TIMEOUT)
         .connect_timeout(GRPC_CONNECT_TIMEOUT)
-        .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+        .connect_with_connector(tower::service_fn(move |_: Uri| {
             let socket_path = socket_path.clone();
             async move { open_stream(socket_path, vsock_port, max_delay).await }
         }))
+        .await?)
 }
 
 pub async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::BabelBin>, u32)> {
