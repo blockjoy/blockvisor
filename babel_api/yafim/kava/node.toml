@@ -1,0 +1,43 @@
+# HARDWARE SPECS
+# all-purpose server with at least 32GB of RAM, good connectivity, and a solid state drive with sufficient disk space. Storage requirements are discussed further in the section below. In addition, you’ll need to open port 26656 to connect to the Kava peer-to-peer network
+
+# Install Manual https://docs.kava.io/docs/participate/validator-node/
+
+application_name = "kava"
+node_type = "node"
+version = ""
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = ["build-essential", "jq", "git"]
+apt_source = ["universe"]
+cmds = [
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+#  "kava init kava-node --chain-id kava_2222-10",
+
+
+] 
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+	        "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/kava/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/kava/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/kava/node.toml {{.YafimHome}}/target/kava/node/mnt/etc/babel.conf",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/kava/node/mnt",
+		"echo kava-node > {{.YafimHome}}/target/kava/node/mnt/etc/hostname",
+                "wget https://dl.google.com/go/go1.18.1.linux-amd64.tar.gz && tar -xvf go1.18.1.linux-amd64.tar.gz && mv go/bin/go* {{.YafimHome}}/target/kava/node/mnt/usr/bin/",
+                "wget -O kava.tar.gz https://github.com/Kava-Labs/kava/archive/refs/tags/v0.21.0.tar.gz",
+                "tar xvzf kava.tar.gz",
+                "cd kava-0.21.0/cmd/kava && go build -o /usr/bin/kava main.go",
+                "cp /usr/bin/kava {{.YafimHome}}/target/kava/node/mnt/usr/bin/"
+]
