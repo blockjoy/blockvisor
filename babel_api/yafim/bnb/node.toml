@@ -4,6 +4,8 @@
 # 16 cores of CPU and 64 GB of memory (RAM)
 # A broadband Internet connection with upload/download speeds of 5 MB/S
 
+# Install Manual https://docs.bnbchain.org/docs/validator/fullnode/
+
 application_name = "bnb"
 node_type = "node"
 version = ""
