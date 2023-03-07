@@ -31,6 +31,17 @@ Note that [git submodules](https://github.blog/2016-02-01-working-with-submodule
 git submodule update --init --recursive
 ```
 
+## Log Levels Policy
+- `error` - internal BV error (potential bug) or nonrecoverable error that requires manual actions;
+error should rise alert
+- `warn` - abnormal events that BV is capable to handle, e.g. networking issues, node recovery;
+may be caused by external errors, but BV should recover when external system get to normal
+- `info` - main actions with minimum context, e.g. node created;
+avoid for frequently recurring actions like sending node status
+- `debug` - Detailed actions flow with variables, include recurring actions like sending node status;
+used during debugging issues, not printed by default
+- `trace` - debug messages used on development phase by devs
+
 ## Important Paths
 ### Host
 - `/opt/blockvisor/blacklist` bundle versions that failed to be installed
