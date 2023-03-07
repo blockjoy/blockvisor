@@ -1,0 +1,65 @@
+[env]
+path_append = "/blockjoy/bin/"
+
+[config]
+protocol = "polkadot"
+node_type = "validator"
+node_version = "0.9.30"
+min_babel_version = "0.0.1"
+description = "polkadot blockchain validator"
+api_host = "http://localhost:9933/"
+ports = [9933]
+
+[requirements]
+vcpu_count = 4
+mem_size_mb = 16384
+disk_size_gb = 1000
+
+[supervisor]
+backoff_timeout_ms = 60000
+backoff_base_ms = 100
+log_buffer_capacity_ln = 1000
+data_directory_mount_point = "/blockjoy/miner/data"
+
+    [[supervisor.entry_point]]
+    name = "todo"
+    body = ""
+
+[[methods]]
+name = "height"
+transport = "jrpc"
+method = "chain_getFinalizedHead"
+
+    [methods.response]
+    code = 200
+    field = "result" # need to figure out data with testing
+
+[[methods]]
+name = "address"
+transport = "jrpc"
+method = "system_localPeerId" 
+
+    [methods.response]
+    code = 200
+    field = "result" # find this
+
+[[methods]]
+name = "status"
+transport = "jrpc"
+method = "system_syncState"
+
+    [methods.response]
+    code = 200
+    field = "result" # find this
+
+[nets.mainnet]
+net_type = "main"
+url = "wss://rpc.polkadot.io"
+
+[nets.westend]
+net_type = "test"
+url = "wss://westend-rpc.polkadot.io"
+
+[nets.rococo]
+net_type = "test"
+url = "	wss://rococo-rpc.polkadot.io"
