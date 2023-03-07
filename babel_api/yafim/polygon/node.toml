@@ -1,6 +1,6 @@
 application_name = "polygon"
 node_type = "node"
-version = ""
+version = "0.3.0-build.1"
 
 [image]
 debian_version = "focal"

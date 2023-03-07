@@ -1,6 +1,6 @@
 application_name = "avalanche"
 node_type = "node"
-version = ""
+version = "1.9.9-build.1"
 
 [image]
 debian_version = "focal"

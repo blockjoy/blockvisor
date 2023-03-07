@@ -12,7 +12,7 @@
 
 application_name = "tron"
 node_type = "node"
-version = ""
+version = "4.7.1-build.1"
 
 [image]
 debian_version = "focal"

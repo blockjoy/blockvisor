@@ -1,6 +1,6 @@
 application_name = "polkadot"
 node_type = "node"
-version = ""
+version = "0.9.39-build.1"
 
 [image]
 debian_version = "focal"
@@ -16,9 +16,9 @@ cmds = [
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
   "apt update",
   "apt upgrade -y",
-  "wget https://github.com/paritytech/polkadot/releases/download/v0.9.39/polkadot",
+  "wget -O polkadot https://github.com/paritytech/polkadot/releases/download/v0.9.39/polkadot",
   "cp polkadot /usr/bin/",
-  "polkadot --version",
+  #"polkadot --version",
 
 ]
 

@@ -9,7 +9,7 @@
 #  --history-mode=full
 application_name = "tezos"
 node_type = "node"
-version = "15.1.0-build.1"
+version = "15.1.2-build.1"
 
 [image]
 debian_version = "focal"
