@@ -28,10 +28,10 @@ apt_build_machine = []
 git_repo = ""
 git_tag = ""
 build_cmds =  [
-		"cp {{.YafimHome}}babelsup/usr/bin/babelsup {{.YafimHome}}/target/avalanche/node/mnt/usr/bin/",
-		"cp {{.YafimHome}}babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/avalanche/node/mnt/etc/systemd/system/",
-		"cp {{.YafimHome}}babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/avalanche/node/mnt/etc/systemd/system/multi-user.target.wants/",
-                "cp {{.YafimHome}}blockvisor/babel_api/protocols/avalanche/node.toml {{.YafimHome}}/target/avalanche/node/mnt/etc/babel.conf",	
+		"cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/avalanche/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/avalanche/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/avalanche/node/mnt/etc/systemd/system/multi-user.target.wants/",
+                "cp {{.YafimHome}}/blockvisor/babel_api/protocols/avalanche/node.toml {{.YafimHome}}/target/avalanche/node/mnt/etc/babel.conf",	
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/avalanche/node/mnt/",
 		"echo avalanche-node > {{.YafimHome}}/target/avalanche/node/mnt/etc/hostname",
 ]
