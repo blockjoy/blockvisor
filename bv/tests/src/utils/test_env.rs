@@ -1,8 +1,10 @@
 use anyhow::Result;
 use assert_cmd::Command;
 use async_trait::async_trait;
+use blockvisord::config::SharedConfig;
 use blockvisord::node::REGISTRY_CONFIG_DIR;
 use blockvisord::node_data::{NodeData, NodeStatus};
+use blockvisord::pal::{CommandsStream, ServiceConnector};
 use blockvisord::{
     blockvisord::BlockvisorD,
     config::Config,
@@ -233,6 +235,16 @@ impl Pal for DummyPlatform {
         let _ = run_cmd("ip", ["link", "delete", &name, "type", "tuntap"]).await;
         Ok(DummyNet { name, ip, gateway })
     }
+
+    type CommandsStream = EmptyStream;
+    type CommandsStreamConnector = EmptyStreamConnector;
+
+    fn create_commands_stream_connector(
+        &self,
+        _config: &SharedConfig,
+    ) -> Self::CommandsStreamConnector {
+        EmptyStreamConnector
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -258,5 +270,23 @@ impl NetInterface for DummyNet {
     }
     async fn delete(self) -> Result<()> {
         Ok(())
+    }
+}
+
+pub struct EmptyStreamConnector;
+pub struct EmptyStream;
+
+#[async_trait]
+impl ServiceConnector<EmptyStream> for EmptyStreamConnector {
+    async fn connect(&self) -> Result<EmptyStream> {
+        Ok(EmptyStream)
+    }
+}
+
+#[async_trait]
+impl CommandsStream for EmptyStream {
+    async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>> {
+        sleep(Duration::from_millis(100)).await;
+        Ok(None)
     }
 }

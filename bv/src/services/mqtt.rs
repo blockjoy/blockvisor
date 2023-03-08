@@ -1,5 +1,6 @@
-use crate::{config::SharedConfig, services};
+use crate::{config::SharedConfig, pal, services};
 use anyhow::{anyhow, bail, Result};
+use async_trait::async_trait;
 use reqwest::Url;
 use rumqttc::{AsyncClient, Event, EventLoop, Incoming, LastWill, MqttOptions, QoS};
 use std::time::Duration;
@@ -8,13 +9,18 @@ use tracing::info;
 const ONLINE: &[u8] = "online".as_bytes();
 const OFFLINE: &[u8] = "offline".as_bytes();
 
-pub struct CommandsStream {
-    eventloop: EventLoop,
+pub struct MqttConnector {
+    pub config: SharedConfig,
 }
 
-impl CommandsStream {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        services::connect(config.clone(), |config| async {
+pub struct MqttStream {
+    event_loop: EventLoop,
+}
+
+#[async_trait]
+impl pal::ServiceConnector<MqttStream> for MqttConnector {
+    async fn connect(&self) -> Result<MqttStream> {
+        services::connect(self.config.clone(), |config| async {
             let url = config
                 .blockjoy_mqtt_url
                 .ok_or_else(|| anyhow!("missing blockjoy_mqtt_url"))?
@@ -56,13 +62,18 @@ impl CommandsStream {
             let host_topic = format!("/bv/hosts/{host_id}/#");
             client.subscribe(host_topic, QoS::AtMostOnce).await?;
 
-            Ok(Self { eventloop })
+            Ok(MqttStream {
+                event_loop: eventloop,
+            })
         })
         .await
     }
+}
 
-    pub async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>> {
-        match self.eventloop.poll().await {
+#[async_trait]
+impl pal::CommandsStream for MqttStream {
+    async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>> {
+        match self.event_loop.poll().await {
             Ok(Event::Incoming(Incoming::Publish(p))) => {
                 info!("MQTT incoming topic: {}, payload: {:?}", p.topic, p.payload);
                 Ok(Some(p.payload.to_vec()))

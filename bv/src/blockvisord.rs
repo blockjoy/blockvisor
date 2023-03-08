@@ -4,10 +4,10 @@ use crate::{
     node_data::NodeStatus,
     node_metrics,
     nodes::Nodes,
-    pal::Pal,
+    pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
     server::{bv_pb, BlockvisorServer},
-    services::{api, api::pb, mqtt},
+    services::{api, api::pb},
     try_set_bv_status,
 };
 use anyhow::{Context, Result};
@@ -66,6 +66,7 @@ where
         );
 
         let bv_root = self.pal.bv_root().to_path_buf();
+        let cmds_connector = self.pal.create_commands_stream_connector(&self.config);
         let nodes = Nodes::load(self.pal, self.config.clone()).await?;
 
         try_set_bv_status(bv_pb::ServiceStatus::Ok).await;
@@ -85,7 +86,7 @@ where
             &self.config,
         );
         let mqtt_notification_future =
-            Self::create_mqtt_listener(run.clone(), cmd_watch_tx, &self.config);
+            Self::create_commands_listener(run.clone(), cmds_connector, cmd_watch_tx);
 
         let nodes_recovery_future = Self::nodes_recovery(run.clone(), nodes.clone());
 
@@ -162,10 +163,10 @@ where
         }
     }
 
-    async fn create_mqtt_listener(
+    async fn create_commands_listener(
         mut run: RunFlag,
+        connector: P::CommandsStreamConnector,
         cmd_watch_tx: Sender<()>,
-        config: &SharedConfig,
     ) {
         let notify = || {
             debug!("MQTT send notification");
@@ -175,7 +176,7 @@ where
         };
         while run.load() {
             debug!("Connecting to MQTT");
-            match mqtt::CommandsStream::connect(config).await {
+            match connector.connect().await {
                 Ok(mut client) => {
                     // get pending commands on reconnect
                     notify();

@@ -1,3 +1,4 @@
+use crate::config::SharedConfig;
 /// Platform Abstraction Layer is a helper module which goal is to increase testability of BV.
 /// Original intention is testability, not portability, nevertheless it may be useful if such requirement appear.
 ///
@@ -33,6 +34,16 @@ pub trait Pal {
         ip: IpAddr,
         gateway: IpAddr,
     ) -> Result<Self::NetInterface>;
+
+    /// Type representing commands stream.
+    type CommandsStream: CommandsStream;
+    /// Type representing commands stream connector.
+    type CommandsStreamConnector: ServiceConnector<Self::CommandsStream>;
+    /// Creates commands stream connector.
+    fn create_commands_stream_connector(
+        &self,
+        config: &SharedConfig,
+    ) -> Self::CommandsStreamConnector;
 }
 
 #[async_trait]
@@ -45,4 +56,15 @@ pub trait NetInterface {
     async fn remaster(&self) -> Result<()>;
     /// Delete the network interface.
     async fn delete(self) -> Result<()>;
+}
+
+#[async_trait]
+pub trait ServiceConnector<S> {
+    async fn connect(&self) -> Result<S>;
+}
+
+#[async_trait]
+pub trait CommandsStream {
+    /// Wait for next command. Returns pb::Command serialized with protobufs to bytes.
+    async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>>;
 }

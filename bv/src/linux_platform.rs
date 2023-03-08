@@ -1,5 +1,7 @@
+use crate::config::SharedConfig;
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::pal::{NetInterface, Pal};
+use crate::services;
 use crate::utils::run_cmd;
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
@@ -70,6 +72,17 @@ impl Pal for LinuxPlatform {
         run_cmd("ip", ["tuntap", "add", &name, "mode", "tap"]).await?;
 
         Ok(LinuxNetInterface { name, ip, gateway })
+    }
+
+    type CommandsStream = services::mqtt::MqttStream;
+    type CommandsStreamConnector = services::mqtt::MqttConnector;
+    fn create_commands_stream_connector(
+        &self,
+        config: &SharedConfig,
+    ) -> Self::CommandsStreamConnector {
+        services::mqtt::MqttConnector {
+            config: config.clone(),
+        }
     }
 }
 
