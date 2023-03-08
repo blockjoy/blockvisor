@@ -60,9 +60,9 @@ name = "init"
 transport = "sh"
 body = """
 ! test -f /blockjoy/.init && \
-neard --home babelref:'supervisor.data_directory_mount_point' init --chain-id {{NETWORK}} --download-genesis --download-config  && \
-aws s3 --no-sign-request cp s3://near-protocol-public/backups/{{NETWORK}}/rpc/latest . && \
-aws s3 --no-sign-request cp --no-sign-request --recursive s3://near-protocol-public/backups/{{NETWORK}}/rpc/$(cat latest) babelref:'supervisor.data_directory_mount_point'/data && \
+neard --home babelref:'supervisor.data_directory_mount_point' init --chain-id {{NETWORK}} --download-genesis --download-config 2>&1 | logger -t babel.init && \
+aws s3 --no-sign-request cp s3://near-protocol-public/backups/{{NETWORK}}/rpc/latest . 2>&1 | logger -t babel.init && \
+aws s3 --no-sign-request cp --no-sign-request --recursive s3://near-protocol-public/backups/{{NETWORK}}/rpc/$(cat latest) babelref:'supervisor.data_directory_mount_point'/data 2>&1 | logger -t babel.init && \
 touch /blockjoy/.init
 """
 
