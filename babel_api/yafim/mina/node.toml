@@ -1,0 +1,38 @@
+# HARDWARE SPECS:
+# at least a 8-core processor
+# at least 16GB of RAM
+
+application_name = "mina"
+node_type = "node"
+version = "1.3.1.2-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = [""]
+apt_source = [""]
+cmds = [
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+  "echo 'deb [trusted=yes] http://packages.o1test.net focal stable' | tee /etc/apt/sources.list.d/mina.list",
+  "apt-get update",
+  "apt-get install -y mina-mainnet=1.3.1.2-25388a0",
+
+] 
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+	        "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/mina/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/mina/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/mina/node.toml {{.YafimHome}}/target/mina/node/mnt/etc/babel.conf",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/mina/node/mnt",
+		"echo mina-node > {{.YafimHome}}/target/mina/node/mnt/etc/hostname",
+]

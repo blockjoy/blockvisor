@@ -1,0 +1,40 @@
+application_name = "osmosis"
+node_type = "node"
+version = "14.0.1-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = ["build-essential", "curl", "jq",]
+apt_source = [""]
+cmds = [
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+  "wget -O ./osmosisd https://github.com/osmosis-labs/osmosis/releases/download/v14.0.1/osmosisd-14.0.1-linux-amd64",
+  "chmod +x ./osmosisd && cp ./osmosisd /usr/bin/",
+] 
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+	        "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/osmosis/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/osmosis/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/osmosis/node.toml {{.YafimHome}}/target/osmosis/node/mnt/etc/babel.conf",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/osmosis/node/mnt",
+		"echo osmosis-node > {{.YafimHome}}/target/osmosis/node/mnt/etc/hostname",
+                "wget -O ./go-install.sh https://raw.githubusercontent.com/maticnetwork/node-ansible/master/go-install.sh",
+                "bash ./go-install.sh",
+                "ln -nfs ~/.go/bin/go /usr/bin/go || exit 0",
+                "sudo cp ~/.go/bin/go {{.YafimHome}}/target/osmosis/node/mnt/usr/bin/",
+                "sudo cp -rf ~/go {{.YafimHome}}/target/osmosis/node/mnt/root/",
+                "sudo cp ~/go/bin/* {{.YafimHome}}/target/osmosis/node/mnt/usr/bin/",
+
+
+]
