@@ -10,8 +10,8 @@ version = "1.3.1.2-build.1"
 debian_version = "focal"
 rootfs_size = "10G"
 fs_type = "ext4"
-apt_image = [""]
-apt_source = [""]
+apt_image = []
+apt_source = []
 cmds = [
   "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
   "systemctl disable systemd-resolved.service",
@@ -20,7 +20,7 @@ cmds = [
   "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
   "echo 'deb [trusted=yes] http://packages.o1test.net focal stable' | tee /etc/apt/sources.list.d/mina.list",
-  "apt-get update",
+  "apt-get update -y",
   "apt-get install -y mina-mainnet=1.3.1.2-25388a0",
 
 ] 

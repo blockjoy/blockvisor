@@ -6,8 +6,8 @@ version = "14.0.1-build.1"
 debian_version = "focal"
 rootfs_size = "10G"
 fs_type = "ext4"
-apt_image = ["build-essential", "curl", "jq",]
-apt_source = [""]
+apt_image = ["build-essential", "curl", "jq"]
+apt_source = ["multiverse"]
 cmds = [
   "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
   "systemctl disable systemd-resolved.service",
@@ -29,12 +29,11 @@ build_cmds =  [
 		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/osmosis/node.toml {{.YafimHome}}/target/osmosis/node/mnt/etc/babel.conf",
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/osmosis/node/mnt",
 		"echo osmosis-node > {{.YafimHome}}/target/osmosis/node/mnt/etc/hostname",
-                "wget -O ./go-install.sh https://raw.githubusercontent.com/maticnetwork/node-ansible/master/go-install.sh",
-                "bash ./go-install.sh",
-                "ln -nfs ~/.go/bin/go /usr/bin/go || exit 0",
-                "sudo cp ~/.go/bin/go {{.YafimHome}}/target/osmosis/node/mnt/usr/bin/",
-                "sudo cp -rf ~/go {{.YafimHome}}/target/osmosis/node/mnt/root/",
-                "sudo cp ~/go/bin/* {{.YafimHome}}/target/osmosis/node/mnt/usr/bin/",
+                #"wget -O ./go-install.sh https://raw.githubusercontent.com/maticnetwork/node-ansible/master/go-install.sh",
+                #"bash ./go-install.sh",
+                #"ln -nfs ~/.go/bin/go /usr/bin/go || exit 0",
+                #"sudo cp -rf ~/go {{.YafimHome}}/target/osmosis/node/mnt/root/",
+                #"sudo cp ~/go/bin/* {{.YafimHome}}/target/osmosis/node/mnt/usr/bin/",
 
 
 ]
