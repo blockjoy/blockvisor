@@ -220,7 +220,7 @@ impl<P: Pal + Debug> Nodes<P> {
             };
 
             let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
-            node.init(secret_keys).await?;
+            node.babel_engine.init(secret_keys).await?;
             // We save the `running` status only after all of the previous steps have succeeded.
             node.set_expected_status(NodeStatus::Running).await?;
         }
@@ -318,6 +318,7 @@ impl<P: Pal + Debug> Nodes<P> {
         debug!("Received API keys: {api_keys_set:?}");
 
         let node_keys: HashMap<String, Vec<u8>> = node
+            .babel_engine
             .download_keys()
             .await?
             .into_iter()
@@ -336,7 +337,7 @@ impl<P: Pal + Debug> Nodes<P> {
             })
             .collect();
         if !keys1.is_empty() {
-            node.upload_keys(keys1).await?;
+            node.babel_engine.upload_keys(keys1).await?;
         }
 
         // Keys present on Node, but not in API, will be sent to API
@@ -354,10 +355,13 @@ impl<P: Pal + Debug> Nodes<P> {
         // Generate keys if we should (and can)
         if api_keys_set.is_empty()
             && node_keys_set.is_empty()
-            && node.has_capability(&babel_api::BabelMethod::GenerateKeys.to_string())
+            && node
+                .babel_engine
+                .has_capability(&babel_api::BabelMethod::GenerateKeys.to_string())
         {
-            node.generate_keys().await?;
+            node.babel_engine.generate_keys().await?;
             let gen_keys: Vec<_> = node
+                .babel_engine
                 .download_keys()
                 .await?
                 .into_iter()

@@ -236,7 +236,7 @@ where
 
             let mut updates = vec![];
             for node in nodes_lock.nodes.values_mut() {
-                if let Ok(address) = node.address().await {
+                if let Ok(address) = node.babel_engine.address().await {
                     updates.push((node.id().to_string(), address));
                 }
             }

@@ -263,6 +263,7 @@ where
             .nodes
             .get_mut(&node_id)
             .ok_or_else(|| Status::invalid_argument("No such node"))?
+            .babel_engine
             .get_logs()
             .await
             .map_err(|e| Status::internal(format!("Call to babel failed: `{e}`")))?;
@@ -284,6 +285,7 @@ where
             .nodes
             .get_mut(&node_id)
             .ok_or_else(|| Status::invalid_argument("No such node"))?
+            .babel_engine
             .download_keys()
             .await
             .map_err(|e| Status::internal(format!("Call to babel failed: `{e}`")))?;
@@ -328,6 +330,7 @@ where
             .nodes
             .get_mut(&node_id)
             .ok_or_else(|| Status::invalid_argument("No such node"))?
+            .babel_engine
             .capabilities();
         Ok(Response::new(bv_pb::ListCapabilitiesResponse {
             capabilities,
@@ -355,6 +358,7 @@ where
             .nodes
             .get_mut(&node_id)
             .ok_or_else(|| Status::invalid_argument("No such node"))?
+            .babel_engine
             .call_method(&request.method, params)
             .await
             .map_err(|e| Status::internal(format!("Call to babel failed: `{e}`")))?;
@@ -374,7 +378,7 @@ where
             .nodes
             .get_mut(&node_id)
             .ok_or_else(|| Status::invalid_argument("No such node"))?;
-        let (_, metrics) = node_metrics::collect_metric(node).await;
+        let metrics = node_metrics::collect_metric(&mut node.babel_engine).await;
         Ok(Response::new(bv_pb::GetNodeMetricsResponse {
             height: metrics.height,
             block_age: metrics.block_age,
