@@ -12,8 +12,6 @@
 # Network Settings
 # Open up port 22 for SSH, as well as port 5050 for both TCP and UDP traffic. A custom port can be used with "--port <port>" flag when run your opera node.
 
-# Genesis file to download https://github.com/Fantom-foundation/lachesis_launch/blob/master/docs/genesis-files.md
-
 application_name = "fantom"
 node_type = "node"
 version = "1.1.1-build.1"
@@ -31,6 +29,7 @@ cmds = [
   "rm /etc/resolv.conf",
   "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
+# Genesis file to download https://github.com/Fantom-foundation/lachesis_launch/blob/master/docs/genesis-files.md
  #"nohup ./opera --genesis mainnet-109331-pruned-mpt.g --nousb \
  # --db.preset ldb-1 &"
 ] 
