@@ -226,7 +226,7 @@ impl<'a, T: Timer> Backoff<'a, T> {
     fn new(timer: &'a T, run: RunFlag, config: &SupervisorConfig) -> Self {
         Self {
             counter: 0,
-            timestamp: Instant::now(),
+            timestamp: timer.now(),
             backoff_base_ms: config.backoff_base_ms,
             reset_timeout: Duration::from_millis(config.backoff_timeout_ms),
             run,
@@ -370,8 +370,7 @@ mod tests {
 
         let mut test_run = test_env.run.clone();
         let mut timer_mock = MockTestTimer::new();
-        timer_mock.expect_now().once().returning(move || now);
-        timer_mock.expect_now().once().returning(move || now);
+        timer_mock.expect_now().times(4).returning(move || now);
         timer_mock
             .expect_now()
             .times(3)
@@ -400,16 +399,14 @@ mod tests {
         let now = Instant::now();
 
         let mut timer_mock = MockTestTimer::new();
-        timer_mock.expect_now().once().returning(move || now);
+        timer_mock.expect_now().returning(move || now);
         const RANGE: u32 = 8;
         for n in 0..RANGE {
-            timer_mock.expect_now().times(2).returning(move || now);
             timer_mock
                 .expect_sleep()
                 .with(predicate::eq(Duration::from_millis(10 * 2u64.pow(n))))
                 .returning(|_| ());
         }
-        timer_mock.expect_now().times(2).returning(move || now);
         timer_mock
             .expect_sleep()
             .once()
@@ -504,10 +501,10 @@ mod tests {
         let mut timer_mock = MockTestTimer::new();
         let change_tx = babel_change_tx.clone();
         // expect now from run_babel
-        timer_mock.expect_now().once().returning(move || now);
+        timer_mock.expect_now().times(2).returning(move || now);
         // expect now from run_entry_point
         let control_file = test_env.ctrl_file.clone();
-        timer_mock.expect_now().once().returning(move || {
+        timer_mock.expect_now().times(2).returning(move || {
             let change_tx = change_tx.clone();
             assert!(!control_file.exists());
             let control_file = control_file.clone();
@@ -596,7 +593,7 @@ mod tests {
         let now = Instant::now();
 
         let mut timer_mock = MockTestTimer::new();
-        timer_mock.expect_now().once().returning(move || now);
+        timer_mock.expect_now().times(2).returning(move || now);
         wait_for_babel(test_run.clone(), test_env.ctrl_file.clone());
         let mut rx = test_env.setup(cfg).unwrap();
         run(
