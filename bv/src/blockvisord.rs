@@ -58,7 +58,7 @@ where
         self.listener.local_addr()
     }
 
-    pub async fn run(self, run: RunFlag) -> Result<()> {
+    pub async fn run(self, mut run: RunFlag) -> Result<()> {
         info!(
             "Starting {} {} ...",
             env!("CARGO_PKG_NAME"),

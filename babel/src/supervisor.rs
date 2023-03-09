@@ -53,21 +53,21 @@ pub type SupervisorSetupTx = oneshot::Sender<SupervisorSetup>;
 
 pub async fn run<T: Timer>(
     timer: T,
-    run: RunFlag,
+    mut run: RunFlag,
     babel_path: PathBuf,
     sup_setup_rx: SupervisorSetupRx,
     babel_change_rx: BabelChangeRx,
 ) {
     let babel_change_rx = wait_for_babel_bin(run.clone(), babel_change_rx).await;
-    if let Some(supervisor) = wait_for_setup(timer, run, babel_path, sup_setup_rx).await {
+    if let Some(supervisor) = wait_for_setup(timer, run.clone(), babel_path, sup_setup_rx).await {
         supervisor.kill_all_remnants();
 
         let mut futures = FuturesUnordered::new();
         for entry_point in &supervisor.config.entry_point {
-            futures.push(supervisor.run_entrypoint(entry_point));
+            futures.push(supervisor.run_entrypoint(run.clone(), entry_point));
         }
         let entry_futures = async { while (futures.next().await).is_some() {} };
-        tokio::join!(entry_futures, supervisor.run_babel(babel_change_rx));
+        tokio::join!(entry_futures, supervisor.run_babel(run, babel_change_rx));
     }
 }
 
@@ -87,14 +87,13 @@ async fn wait_for_setup<T: Timer>(
 ) -> Option<Supervisor<T>> {
     tokio::select!(
         setup = sup_setup_rx => {
-            Some(Supervisor::new(timer, run, babel_path, setup.ok()?))
+            Some(Supervisor::new(timer, babel_path, setup.ok()?))
         },
         _ = run.wait() => None, // return anything
     )
 }
 
 struct Supervisor<T> {
-    run: RunFlag,
     babel_path: PathBuf,
     log_buffer: LogBuffer,
     config: SupervisorConfig,
@@ -102,9 +101,8 @@ struct Supervisor<T> {
 }
 
 impl<T: Timer> Supervisor<T> {
-    fn new(timer: T, run: RunFlag, babel_path: PathBuf, setup: SupervisorSetup) -> Self {
+    fn new(timer: T, babel_path: PathBuf, setup: SupervisorSetup) -> Self {
         Supervisor {
-            run,
             babel_path,
             log_buffer: setup.log_buffer,
             config: setup.config,
@@ -124,10 +122,9 @@ impl<T: Timer> Supervisor<T> {
         }
     }
 
-    async fn run_babel(&self, mut babel_change_rx: BabelChangeRx) {
+    async fn run_babel(&self, mut run: RunFlag, mut babel_change_rx: BabelChangeRx) {
         let mut cmd = Command::new(&self.babel_path);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut run = self.run.clone();
         let mut backoff = Backoff::new(&self.timer, run.clone(), &self.config);
         while run.load() {
             backoff.start();
@@ -156,13 +153,12 @@ impl<T: Timer> Supervisor<T> {
         }
     }
 
-    async fn run_entrypoint(&self, entrypoint: &Entrypoint) {
+    async fn run_entrypoint(&self, mut run: RunFlag, entrypoint: &Entrypoint) {
         let entry_name = &entrypoint.name;
         let mut cmd = Command::new("sh");
         cmd.args(["-c", &entrypoint.body])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut run = self.run.clone();
         let mut backoff = Backoff::new(&self.timer, run.clone(), &self.config);
         while run.load() {
             backoff.start();
@@ -335,18 +331,15 @@ mod tests {
         })
     }
 
-    fn wait_for_babel(mut test_run: RunFlag, control_file: PathBuf) {
-        tokio::spawn(async move {
-            // asynchronously wait for dummy babel to start
-            let _ = tokio::time::timeout(Duration::from_millis(500), async {
-                while !control_file.exists() {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-            })
-            .await;
-            // and send stop signal
-            test_run.stop();
-        });
+    async fn wait_for_babel(control_file: PathBuf) {
+        // asynchronously wait for dummy babel to start
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !control_file.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     fn minimal_cfg() -> SupervisorConfig {
@@ -370,11 +363,11 @@ mod tests {
 
         let mut test_run = test_env.run.clone();
         let mut timer_mock = MockTestTimer::new();
-        timer_mock.expect_now().times(4).returning(move || now);
-        timer_mock
-            .expect_now()
-            .times(3)
-            .returning(move || now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1)));
+        timer_mock.expect_now().times(2).returning(move || now);
+        timer_mock.expect_now().returning(move || {
+            let n = now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1));
+            n
+        });
         timer_mock.expect_sleep().once().returning(move |_| {
             test_run.stop();
         });
@@ -552,10 +545,8 @@ mod tests {
         timer_mock.expect_now().returning(move || now);
         timer_mock.expect_now().returning(move || now);
         timer_mock.expect_sleep().times(3).returning(|_| ());
-        let control_file = test_env.ctrl_file.clone();
         timer_mock.expect_sleep().returning(move |_| {
             test_run.stop();
-            wait_for_babel(test_run.clone(), control_file.clone());
         });
         let mut rx = test_env.setup(minimal_cfg()).unwrap();
         run(
@@ -588,13 +579,18 @@ mod tests {
             log_buffer_capacity_ln: 10,
             ..Default::default()
         };
-        let test_run = test_env.run.clone();
+        let mut test_run = test_env.run.clone();
 
         let now = Instant::now();
 
         let mut timer_mock = MockTestTimer::new();
         timer_mock.expect_now().times(2).returning(move || now);
-        wait_for_babel(test_run.clone(), test_env.ctrl_file.clone());
+        let ctrl_file = test_env.ctrl_file.clone();
+        tokio::spawn(async move {
+            wait_for_babel(ctrl_file).await;
+            test_run.stop();
+        });
+        // and send stop signal
         let mut rx = test_env.setup(cfg).unwrap();
         run(
             timer_mock,
@@ -620,8 +616,7 @@ mod tests {
         cmd.args(["a", "b", "c"]);
         let child = cmd.spawn()?;
         let pid = child.id().unwrap();
-        let test_run = test_env.run.clone();
-        wait_for_babel(test_run.clone(), test_env.ctrl_file.clone());
+        wait_for_babel(test_env.ctrl_file.clone()).await;
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
