@@ -1,0 +1,51 @@
+# HARDWARE SPECS:
+
+# Node Specifications
+# We recommend the following or better:
+# AWS m5.xlarge with 4 vCPUs (3.1 GHz), 16GB of memory, up to 10 Gbps network bandwidth.
+# We would recommend going with Ubuntu Server 20.04 LTS (64-bit). 
+# Storage
+# 1 TB is sufficient if you're running using a no-history genesis in snapsync mode (and then get it synced to the latest block).
+# 2 TB is sufficient if you're running using a pruned datadir.
+# 8.5 TB is needed if you'd like to run with a full size (non-pruned) datadir.
+
+# Network Settings
+# Open up port 22 for SSH, as well as port 5050 for both TCP and UDP traffic. A custom port can be used with "--port <port>" flag when run your opera node.
+
+# Genesis file to download https://github.com/Fantom-foundation/lachesis_launch/blob/master/docs/genesis-files.md
+
+application_name = "fantom"
+node_type = "node"
+version = "1.1.1-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = []
+apt_source = []
+cmds = [
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
+ #"nohup ./opera --genesis mainnet-109331-pruned-mpt.g --nousb \
+ # --db.preset ldb-1 &"
+] 
+
+[build_machine]
+apt_build_machine = ["build-essential"]
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+	        "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/fantom/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/fantom/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/fantom/node.toml {{.YafimHome}}/target/fantom/node/mnt/etc/babel.conf",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/fantom/node/mnt",
+		"echo fantom > {{.YafimHome}}/target/fantom/node/mnt/etc/hostname",
+                "wget -O {{.YafimHome}}/target/fantom/go-opera.tar.gz https://github.com/Fantom-foundation/go-opera/archive/refs/tags/v1.1.1-rc.2.tar.gz",
+                "cd {{.YafimHome}}/target/fantom/ && tar -xvzf {{.YafimHome}}/target/fantom/go-opera.tar.gz --transform 's!^[^/]\\+\\($\\|/\\)!opera\\1!' && cd opera && make",
+                "cp {{.YafimHome}}/target/fantom/opera/build/opera {{.YafimHome}}/target/fantom/node/mnt/usr/bin/",
+]

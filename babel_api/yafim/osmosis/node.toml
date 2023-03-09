@@ -1,3 +1,6 @@
+# MANUAL https://polkachu.com/installation/osmosis
+# Other docs https://docs.osmosis.zone/osmosis-core/osmosisd/ and https://catboss.medium.com/cat-boss-setting-up-a-fullnode-for-osmosis-osmosis-1-5f9752460f8f
+
 application_name = "osmosis"
 node_type = "node"
 version = "14.0.1-build.1"
@@ -6,8 +9,8 @@ version = "14.0.1-build.1"
 debian_version = "focal"
 rootfs_size = "10G"
 fs_type = "ext4"
-apt_image = ["build-essential", "curl", "jq"]
-apt_source = ["multiverse"]
+apt_image = []
+apt_source = []
 cmds = [
   "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
   "systemctl disable systemd-resolved.service",
@@ -17,6 +20,15 @@ cmds = [
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
   "wget -O ./osmosisd https://github.com/osmosis-labs/osmosis/releases/download/v14.0.1/osmosisd-14.0.1-linux-amd64",
   "chmod +x ./osmosisd && cp ./osmosisd /usr/bin/",
+  #"osmosisd init YOUR_MONIKER --chain-id osmosis-1",
+  #"wget -O genesis.json https://snapshots.polkachu.com/genesis/osmosis/genesis.json --inet4-only",
+  #"mv genesis.json ~/.osmosisd/config",
+  #"sed -i 's/seeds = ""/seeds = "ade4d8bc8cbe014af6ebdf3cb7b1e9ad36f412c0@seeds.polkachu.com:12556"/' ~/.osmosisd/config/config.toml",
+  #"mkdir -p ~/.osmosisd/cosmovisor/genesis/bin",
+  #"mkdir -p ~/.osmosisd/cosmovisor/upgrades",
+  #"cp /usr/bin/osmosisd ~/.osmosisd/cosmovisor/genesis/bin",
+  # Download Osmosis Snapshot 11GB https://polkachu.com/tendermint_snapshots/osmosis
+  
 ] 
 
 [build_machine]
@@ -29,11 +41,6 @@ build_cmds =  [
 		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/osmosis/node.toml {{.YafimHome}}/target/osmosis/node/mnt/etc/babel.conf",
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/osmosis/node/mnt",
 		"echo osmosis-node > {{.YafimHome}}/target/osmosis/node/mnt/etc/hostname",
-                #"wget -O ./go-install.sh https://raw.githubusercontent.com/maticnetwork/node-ansible/master/go-install.sh",
-                #"bash ./go-install.sh",
-                #"ln -nfs ~/.go/bin/go /usr/bin/go || exit 0",
-                #"sudo cp -rf ~/go {{.YafimHome}}/target/osmosis/node/mnt/root/",
-                #"sudo cp ~/go/bin/* {{.YafimHome}}/target/osmosis/node/mnt/usr/bin/",
 
 
 ]
