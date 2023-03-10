@@ -4,14 +4,11 @@ use babel_api::babel_client::BabelClient;
 use babel_api::babel_sup_client::BabelSupClient;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tokio::fs::File;
-use tokio::io::BufReader;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::UnixStream,
     time::{sleep, timeout},
 };
-use tokio_stream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::{debug, info};
 use uuid::Uuid;
@@ -62,22 +59,11 @@ impl NodeConnection {
     /// Tries to open a new connection to the VM. Note that this fails if the VM hasn't started yet.
     /// It also initializes that connection by sending the opening message. Therefore, if this
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.
-    pub async fn try_open(
-        chroot_path: &Path,
-        babel_path: &Path,
-        node_id: Uuid,
-        max_delay: Duration,
-    ) -> Result<Self> {
+    pub async fn try_open(chroot_path: &Path, node_id: Uuid, max_delay: Duration) -> Result<Self> {
         let socket_path = build_socket_path(chroot_path, node_id);
         let mut client = connect_babelsup(&socket_path, max_delay).await?;
         let babelsup_version = with_retry!(client.get_version(()))?.into_inner();
         info!("Connected to babelsup {babelsup_version}");
-        let (babel_bin, checksum) = load_babel_bin(babel_path).await?;
-        let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
-        if babel_status != babel_api::BabelStatus::Ok {
-            info!("Invalid or missing Babel service on VM, installing new one");
-            with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
-        }
         Ok(Self {
             socket_path,
             state: NodeConnectionState::BabelSup(client),
@@ -243,25 +229,4 @@ async fn create_channel(
             async move { open_stream(socket_path, vsock_port, max_delay).await }
         }))
         .await?)
-}
-
-pub async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::BabelBin>, u32)> {
-    let file = File::open(babel_path)
-        .await
-        .with_context(|| format!("failed to load babel binary {}", babel_path.display()))?;
-    let mut reader = BufReader::new(file);
-    let mut buf = [0; 16384];
-    let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
-    let mut digest = crc.digest();
-    let mut babel_bin = Vec::<babel_api::BabelBin>::default();
-    while let Ok(size) = reader.read(&mut buf[..]).await {
-        if size == 0 {
-            break;
-        }
-        digest.update(&buf[0..size]);
-        babel_bin.push(babel_api::BabelBin::Bin(buf[0..size].to_vec()));
-    }
-    let checksum = digest.finalize();
-    babel_bin.push(babel_api::BabelBin::Checksum(checksum));
-    Ok((babel_bin, checksum))
 }

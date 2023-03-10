@@ -44,6 +44,8 @@ pub enum BabelBin {
 
 #[tonic_rpc::tonic_rpc(bincode)]
 pub trait Babel {
+    /// Setup firewall according to given configuration.
+    fn setup_firewall(config: config::firewall::Config);
     /// Download key files from locations specified in `keys` section of Babel config.
     fn download_keys(config: config::KeysConfig) -> Vec<BlockchainKey>;
     /// Upload files into locations specified in `keys` section of Babel config.

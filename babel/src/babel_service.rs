@@ -1,13 +1,15 @@
+use crate::ufw_wrapper::apply_firewall_config;
 use async_trait::async_trait;
 use babel_api::BlockchainKey;
 use eyre::{bail, Result};
 use serde_json::json;
-use std::path::Path;
-use std::time::Duration;
-use tokio::fs;
-use tokio::fs::{DirBuilder, File};
-use tokio::io::AsyncWriteExt;
-use tonic::{Request, Response, Status};
+use std::{path::Path, time::Duration};
+use tokio::{
+    fs,
+    fs::{DirBuilder, File},
+    io::AsyncWriteExt,
+};
+use tonic::{Code, Request, Response, Status};
 
 const WILDCARD_KEY_NAME: &str = "*";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -26,6 +28,21 @@ impl std::ops::Deref for BabelService {
 
 #[async_trait]
 impl babel_api::babel_server::Babel for BabelService {
+    async fn setup_firewall(
+        &self,
+        request: Request<babel_api::config::firewall::Config>,
+    ) -> Result<Response<()>, Status> {
+        apply_firewall_config(request.into_inner())
+            .await
+            .map_err(|err| {
+                Status::new(
+                    Code::Internal,
+                    format!("failed to apply firewall config with: {err}"),
+                )
+            })?;
+        Ok(Response::new(()))
+    }
+
     async fn download_keys(
         &self,
         request: Request<babel_api::config::KeysConfig>,

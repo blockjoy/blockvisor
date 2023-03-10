@@ -8,7 +8,7 @@ use crate::{
     with_retry, BV_VAR_PATH,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use firec::{config::JailerMode, Machine};
 use std::{
     ffi::OsStr,
@@ -17,6 +17,8 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, BufReader};
 use tokio::{fs::DirBuilder, time::Instant};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
@@ -124,7 +126,7 @@ impl<P: Pal + Debug> Node<P> {
                 // for the nodes to come online. For that reason we restrict the allowed delay
                 // further down.
                 debug!("connecting to babel ...");
-                let node_conn = NodeConnection::try_open(
+                let node_conn = Self::connect(
                     &paths.chroot,
                     pal.babel_path(),
                     node_id,
@@ -190,7 +192,7 @@ impl<P: Pal + Debug> Node<P> {
             self.data.network_interface.remaster().await?;
             self.machine.start().await?;
         }
-        self.babel_engine.node_conn = NodeConnection::try_open(
+        self.babel_engine.node_conn = Self::connect(
             &self.paths.chroot,
             self.pal.babel_path(),
             self.id(),
@@ -199,6 +201,10 @@ impl<P: Pal + Debug> Node<P> {
         .await?;
         let babelsup_client = self.babel_engine.node_conn.babelsup_client().await?;
         with_retry!(babelsup_client.setup_supervisor(self.data.babel_conf.supervisor.clone()))?;
+        if let Some(firewall_config) = &self.data.babel_conf.firewall {
+            let babel_client = self.babel_engine.node_conn.babel_client().await?;
+            with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
+        }
         Ok(())
     }
 
@@ -256,6 +262,44 @@ impl<P: Pal + Debug> Node<P> {
             }
         }
         Ok(())
+    }
+
+    async fn connect(
+        chroot_path: &Path,
+        babel_path: &Path,
+        node_id: Uuid,
+        max_delay: Duration,
+    ) -> Result<NodeConnection> {
+        let mut connection = NodeConnection::try_open(chroot_path, node_id, max_delay).await?;
+        let (babel_bin, checksum) = Self::load_babel_bin(babel_path).await?;
+        let client = connection.babelsup_client().await?;
+        let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
+        if babel_status != babel_api::BabelStatus::Ok {
+            info!("Invalid or missing Babel service on VM, installing new one");
+            with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
+        }
+        Ok(connection)
+    }
+
+    async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::BabelBin>, u32)> {
+        let file = File::open(babel_path)
+            .await
+            .with_context(|| format!("failed to load babel binary {}", babel_path.display()))?;
+        let mut reader = BufReader::new(file);
+        let mut buf = [0; 16384];
+        let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
+        let mut digest = crc.digest();
+        let mut babel_bin = Vec::<babel_api::BabelBin>::default();
+        while let Ok(size) = reader.read(&mut buf[..]).await {
+            if size == 0 {
+                break;
+            }
+            digest.update(&buf[0..size]);
+            babel_bin.push(babel_api::BabelBin::Bin(buf[0..size].to_vec()));
+        }
+        let checksum = digest.finalize();
+        babel_bin.push(babel_api::BabelBin::Checksum(checksum));
+        Ok((babel_bin, checksum))
     }
 
     async fn started_node_recovery(&mut self) -> Result<()> {
