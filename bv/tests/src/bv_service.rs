@@ -285,6 +285,9 @@ async fn test_bv_service_e2e() {
             self_update: Some(false),
             network: Some("".to_string()),
             blockchain_name: Some("aetherium".to_string()),
+            created_by: None,
+            created_by_name: None,
+            created_by_email: None,
         }),
     };
     let node: ui_pb::CreateNodeResponse = node_client

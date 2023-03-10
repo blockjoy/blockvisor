@@ -9,6 +9,7 @@ use crate::{
 };
 
 use anyhow::{bail, Context, Result};
+use babel_api::config::firewall;
 use firec::{config::JailerMode, Machine};
 use std::{
     ffi::OsStr,
@@ -425,6 +426,14 @@ impl<P: Pal + Debug> Node<P> {
             // TODO change API to send Option<Vec<Parameter>> to allow setting empty properties
             self.data.properties = properties.into_iter().map(|p| (p.name, p.value)).collect();
         }
+        self.data.save(&self.paths.registry).await
+    }
+
+    pub async fn firewall_update(&mut self, config: firewall::Config) -> Result<()> {
+        babel_api::check_firewall_config(&config)?;
+        let babel_client = self.babel_engine.node_conn.babel_client().await?;
+        with_retry!(babel_client.setup_firewall(config.clone()))?;
+        self.data.babel_conf.firewall = Some(config);
         self.data.save(&self.paths.registry).await
     }
 

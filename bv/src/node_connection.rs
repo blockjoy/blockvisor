@@ -17,7 +17,7 @@ pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 const GRPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-const GRPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const GRPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECTION_SWITCH_TIMEOUT: Duration = Duration::from_secs(1);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 

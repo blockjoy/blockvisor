@@ -451,6 +451,54 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 })),
             })),
         },
+        // update firewall with invalid rules
+        pb::Command {
+            r#type: Some(pb::command::Type::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::FirewallUpdate(
+                    pb::NodeFirewallUpdate {
+                        enabled: true,
+                        default_in: pb::Policy::Deny as i32,
+                        default_out: pb::Policy::Allow as i32,
+                        rules: vec![pb::Rule {
+                            name: "Rule B".to_string(),
+                            policy: pb::Policy::Allow as i32,
+                            direction: pb::Direction::In as i32,
+                            protocol: None,
+                            ips: Some("invalid_ip".to_string()),
+                            ports: vec![8080],
+                        }],
+                    },
+                )),
+            })),
+        },
+        // update firewall rules
+        pb::Command {
+            r#type: Some(pb::command::Type::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::FirewallUpdate(
+                    pb::NodeFirewallUpdate {
+                        enabled: true,
+                        default_in: pb::Policy::Deny as i32,
+                        default_out: pb::Policy::Allow as i32,
+                        rules: vec![pb::Rule {
+                            name: "Rule A".to_string(),
+                            policy: pb::Policy::Allow as i32,
+                            direction: pb::Direction::In as i32,
+                            protocol: Some(pb::Protocol::Tcp as i32),
+                            ips: Some("192.168.0.1/24".to_string()),
+                            ports: vec![8080, 8000],
+                        }],
+                    },
+                )),
+            })),
+        },
         // delete
         pb::Command {
             r#type: Some(pb::command::Type::Node(pb::NodeCommand {
@@ -601,6 +649,16 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             id: command_id.clone(),
             response: None,
             exit_code: Some(0),
+        },
+        pb::CommandInfo {
+            id: command_id.clone(),
+            response: None,
+            exit_code: Some(0),
+        },
+        pb::CommandInfo {
+            id: command_id.clone(),
+            response: Some("invalid ip address 'invalid_ip' in firewall rule 'Rule B'".to_string()),
+            exit_code: Some(1),
         },
         pb::CommandInfo {
             id: command_id.clone(),

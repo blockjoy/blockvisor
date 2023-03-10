@@ -1,3 +1,4 @@
+use crate::services::api::pb::{Direction, NodeFirewallUpdate, Policy, Protocol};
 use crate::{
     config::Config,
     node_data::NodeImage,
@@ -8,6 +9,7 @@ use crate::{
     {get_bv_status, with_retry},
 };
 use anyhow::{anyhow, bail, Context, Result};
+use babel_api::config::firewall;
 use base64::Engine;
 use metrics::{register_counter, Counter};
 use pb::{
@@ -49,6 +51,8 @@ lazy_static::lazy_static! {
     pub static ref API_UPGRADE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.upgrade.ms");
     pub static ref API_UPDATE_COUNTER: Counter = register_counter!("api.commands.update.calls");
     pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
+    pub static ref API_FIREWALL_UPDATE_COUNTER: Counter = register_counter!("api.commands.firewall_update.calls");
+    pub static ref API_FIREWALL_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.firewall_update.ms");
 }
 
 #[derive(Clone)]
@@ -295,6 +299,15 @@ async fn process_node_command<P: Pal + Debug>(
             }
             Command::InfoGet(_) => unimplemented!(),
             Command::Generic(_) => unimplemented!(),
+            Command::FirewallUpdate(update) => {
+                nodes
+                    .write()
+                    .await
+                    .firewall_update(node_id, update.try_into()?)
+                    .await?;
+                API_FIREWALL_UPDATE_COUNTER.increment(1);
+                API_FIREWALL_UPDATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
+            }
         },
         None => bail!("Node command is `None`"),
     };
@@ -382,5 +395,80 @@ impl From<pb::ContainerImage> for NodeImage {
             node_type: image.node_type.to_lowercase(),
             node_version: image.node_version.to_lowercase(),
         }
+    }
+}
+
+impl TryFrom<Policy> for firewall::Policy {
+    type Error = anyhow::Error;
+    fn try_from(value: Policy) -> std::result::Result<Self, Self::Error> {
+        Ok(match value {
+            Policy::UndefinedPolicy => {
+                bail!("Invalid Policy")
+            }
+            Policy::Allow => firewall::Policy::Allow,
+            Policy::Deny => firewall::Policy::Deny,
+            Policy::Reject => firewall::Policy::Reject,
+        })
+    }
+}
+
+fn try_policy(value: i32) -> Result<firewall::Policy> {
+    Policy::from_i32(value)
+        .unwrap_or(Policy::UndefinedPolicy)
+        .try_into()
+}
+
+impl TryFrom<Direction> for firewall::Direction {
+    type Error = anyhow::Error;
+    fn try_from(value: Direction) -> std::result::Result<Self, Self::Error> {
+        Ok(match value {
+            Direction::UndefinedDirection => {
+                bail!("Invalid Direction")
+            }
+            Direction::In => firewall::Direction::In,
+            Direction::Out => firewall::Direction::Out,
+        })
+    }
+}
+
+impl TryFrom<Protocol> for firewall::Protocol {
+    type Error = anyhow::Error;
+    fn try_from(value: Protocol) -> std::result::Result<Self, Self::Error> {
+        Ok(match value {
+            Protocol::Both => firewall::Protocol::Both,
+            Protocol::Tcp => firewall::Protocol::Tcp,
+            Protocol::Udp => firewall::Protocol::Udp,
+        })
+    }
+}
+
+impl TryFrom<NodeFirewallUpdate> for firewall::Config {
+    type Error = anyhow::Error;
+    fn try_from(update: NodeFirewallUpdate) -> std::result::Result<Self, Self::Error> {
+        Ok(Self {
+            enabled: update.enabled,
+            default_in: try_policy(update.default_in)?,
+            default_out: try_policy(update.default_out)?,
+            rules: update
+                .rules
+                .into_iter()
+                .map(|rule| {
+                    Ok(firewall::Rule {
+                        name: rule.name,
+                        policy: try_policy(rule.policy)?,
+                        direction: Direction::from_i32(rule.direction)
+                            .unwrap_or(Direction::UndefinedDirection)
+                            .try_into()?,
+                        protocol: Some(
+                            Protocol::from_i32(rule.policy)
+                                .unwrap_or(Protocol::Both)
+                                .try_into()?,
+                        ),
+                        ips: rule.ips,
+                        ports: rule.ports.into_iter().map(|p| p as u16).collect(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+        })
     }
 }

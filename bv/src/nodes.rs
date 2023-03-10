@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use babel_api::config::{Babel, Entrypoint};
+use babel_api::config::{firewall, Babel, Entrypoint};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -80,8 +80,12 @@ impl<P: Pal + Debug> Nodes<P> {
             bail!("Node with name `{name}` exists");
         }
 
-        let ip = ip.parse()?;
-        let gateway = gateway.parse()?;
+        let ip = ip
+            .parse()
+            .with_context(|| format!("invalid ip {ip} for node {id}"))?;
+        let gateway = gateway
+            .parse()
+            .with_context(|| format!("invalid gateway {gateway} for node {id}"))?;
 
         if self
             .nodes
@@ -246,11 +250,14 @@ impl<P: Pal + Debug> Nodes<P> {
         self_update: Option<bool>,
         properties: Vec<Parameter>,
     ) -> Result<()> {
-        let node = self
-            .nodes
-            .get_mut(&id)
-            .ok_or_else(|| anyhow!("No node exists with id `{id}`"))?;
+        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
         node.update(name, self_update, properties).await
+    }
+
+    #[instrument(skip(self))]
+    pub async fn firewall_update(&mut self, id: Uuid, config: firewall::Config) -> Result<()> {
+        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
+        node.firewall_update(config).await
     }
 
     #[instrument(skip(self))]
