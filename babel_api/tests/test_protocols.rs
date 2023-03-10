@@ -1,9 +1,9 @@
+use anyhow::bail;
 use babel_api::config::Babel;
-use eyre::bail;
 use std::fs;
 use std::path::Path;
 
-pub fn load(path: &Path) -> eyre::Result<Babel> {
+pub fn load(path: &Path) -> anyhow::Result<Babel> {
     tracing::info!("Loading babel configuration at {}", path.display());
     let toml_str = fs::read_to_string(path)?;
 
@@ -14,6 +14,7 @@ pub fn load(path: &Path) -> eyre::Result<Babel> {
     if cfg.supervisor.log_buffer_capacity_ln == 0 || cfg.supervisor.log_buffer_capacity_ln > 4096 {
         bail!("invalid log_buffer_capacity_ln - must be in [1..4096]");
     }
+    babel_api::check_babel_config(&cfg)?;
     tracing::debug!("Loaded babel configuration: {:?}", &cfg);
     Ok(cfg)
 }

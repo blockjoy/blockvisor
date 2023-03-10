@@ -81,7 +81,7 @@ impl<P: Pal + Debug> Nodes<P> {
         }
 
         let mut babel_conf = self.fetch_image_data(&image).await?;
-        check_babel_version(&babel_conf.config.min_babel_version)?;
+        babel_api::check_babel_config(&babel_conf)?;
         let conf = toml::Value::try_from(&babel_conf)?;
         babel_conf.supervisor.entry_point =
             render_entry_points(babel_conf.supervisor.entry_point, &properties, &conf)?;
@@ -127,8 +127,8 @@ impl<P: Pal + Debug> Nodes<P> {
                 .data
                 .image
         {
-            let babel = self.fetch_image_data(&image).await?;
-            check_babel_version(&babel.config.min_babel_version)?;
+            let babel_config = self.fetch_image_data(&image).await?;
+            babel_api::check_babel_config(&babel_config)?;
 
             self.send_container_status(id, ContainerStatus::Upgrading)
                 .await;
@@ -143,9 +143,11 @@ impl<P: Pal + Debug> Nodes<P> {
             if image.node_type != node.data.image.node_type {
                 bail!("Cannot upgrade node type to `{}`", image.node_type);
             }
-            if node.data.babel_conf.requirements.vcpu_count != babel.requirements.vcpu_count
-                || node.data.babel_conf.requirements.mem_size_mb != babel.requirements.mem_size_mb
-                || node.data.babel_conf.requirements.disk_size_gb != babel.requirements.disk_size_gb
+            if node.data.babel_conf.requirements.vcpu_count != babel_config.requirements.vcpu_count
+                || node.data.babel_conf.requirements.mem_size_mb
+                    != babel_config.requirements.mem_size_mb
+                || node.data.babel_conf.requirements.disk_size_gb
+                    != babel_config.requirements.disk_size_gb
             {
                 bail!("Cannot upgrade node requirements");
             }
@@ -514,14 +516,6 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 }
 
-fn check_babel_version(min_babel_version: &str) -> Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
-    if version < min_babel_version {
-        bail!("Required minimum babel version is `{min_babel_version}`, running is `{version}`");
-    }
-    Ok(())
-}
-
 fn render_entry_points(
     mut entry_points: Vec<Entrypoint>,
     params: &NodeProperties,
@@ -606,6 +600,7 @@ mod tests {
             },
             nets: Default::default(),
             supervisor: Default::default(),
+            firewall: None,
             keys: None,
             methods: BTreeMap::from([
                 (

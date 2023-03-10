@@ -12,6 +12,8 @@ pub struct Babel {
     pub requirements: Requirements,
     ///Commands to start blockchain node
     pub supervisor: SupervisorConfig,
+    /// Firewall configuration that is applied on node start.
+    pub firewall: Option<firewall::Config>,
     pub keys: Option<KeysConfig>,
     #[serde(
         deserialize_with = "deserialize_methods",
@@ -93,9 +95,6 @@ pub struct Config {
     /// The url where the node exposes its endpoints. Since the blockchain node is running on the
     /// same OS as babel, this will be a local url (usually). Example: `http://localhost:4467/`.
     pub api_host: Option<String>,
-    /// Ports used by blockchain software
-    /// Ports visibility will be controlled with some kind of firewall
-    pub ports: Vec<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,4 +188,49 @@ pub struct ShResponse {
 pub enum MethodResponseFormat {
     Raw,
     Json,
+}
+
+pub mod firewall {
+    use super::*;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Rule {
+        pub name: String,
+        pub policy: Policy,
+        pub direction: Direction,
+        pub protocol: Option<Protocol>,
+        pub ips: Option<String>,
+        pub ports: Vec<u16>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Config {
+        pub enabled: bool,
+        pub default_in: Policy,
+        pub default_out: Policy,
+        pub rules: Vec<Rule>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum Policy {
+        Allow,
+        Deny,
+        Reject,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum Direction {
+        Out,
+        In,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum Protocol {
+        Tcp,
+        Udp,
+        Both,
+    }
 }
