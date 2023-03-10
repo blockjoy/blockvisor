@@ -6,7 +6,7 @@ use crate::{
     nodes::Nodes,
     pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
-    server::{bv_pb, BlockvisorServer},
+    server::{self, bv_pb, BlockvisorServer},
     services::{api, api::pb, mqtt},
     try_set_bv_status,
 };
@@ -81,6 +81,7 @@ where
 
         let server = BlockvisorServer {
             nodes: nodes.clone(),
+            cache: Arc::new(RwLock::new(server::Cache::new(nodes.clone()).await?)),
         };
         let internal_api_server_future =
             Self::create_internal_api_server(run.clone(), self.listener, server);

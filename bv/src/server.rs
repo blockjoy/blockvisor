@@ -11,12 +11,16 @@ use crate::{
     nodes::Nodes,
     set_bv_status,
 };
+use anyhow::Result;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::instrument;
+use uuid::Uuid;
 
 async fn status_check() -> Result<(), Status> {
     match get_bv_status().await {
@@ -31,8 +35,43 @@ async fn status_check() -> Result<(), Status> {
     }
 }
 
+pub struct Cache {
+    node_ids: HashMap<String, Uuid>,
+    capabilities: HashMap<String, Vec<String>>,
+}
+
+impl Cache {
+    pub async fn new<P: Pal + Debug>(nodes: Arc<RwLock<Nodes<P>>>) -> Result<Self> {
+        let mut node_ids = HashMap::new();
+        let mut capabilities = HashMap::new();
+
+        let node_lock = nodes.read().await;
+        for node in node_lock.list().await {
+            node_ids.insert(node.data.name.clone(), node.data.id);
+            let caps = node_lock
+                .nodes
+                .get(&node.data.id)
+                .ok_or_else(|| Status::invalid_argument("No such node"))?
+                .babel_engine
+                .capabilities();
+            capabilities.insert(node.data.id.to_string(), caps);
+        }
+
+        Ok(Self {
+            node_ids,
+            capabilities,
+        })
+    }
+
+    fn remove(&mut self, node_id: &str) {
+        self.node_ids.remove(node_id);
+        self.capabilities.remove(node_id);
+    }
+}
+
 pub struct BlockvisorServer<P: Pal + Debug> {
     pub nodes: Arc<RwLock<Nodes<P>>>,
+    pub cache: Arc<RwLock<Cache>>,
 }
 
 #[tonic::async_trait]
@@ -132,7 +171,7 @@ where
     ) -> Result<Response<bv_pb::DeleteNodeResponse>, Status> {
         status_check().await?;
         let request = request.into_inner();
-        let id = helpers::parse_uuid(request.id)?;
+        let id = helpers::parse_uuid(request.id.clone())?;
 
         self.nodes
             .write()
@@ -140,6 +179,8 @@ where
             .delete(id)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
+
+        self.cache.write().await.remove(&request.id);
 
         let reply = bv_pb::DeleteNodeResponse {};
         Ok(Response::new(reply))
@@ -302,17 +343,23 @@ where
         let request = request.into_inner();
         let name = request.name;
 
-        let id = self
-            .nodes
-            .read()
-            .await
-            .node_id_for_name(&name)
-            .await
-            .map_err(|e| Status::unknown(e.to_string()))?;
-
-        let reply = bv_pb::GetNodeIdForNameResponse { id: id.to_string() };
-
-        Ok(Response::new(reply))
+        let mut cache = self.cache.write().await;
+        let id = match cache.node_ids.entry(name.clone()) {
+            Entry::Occupied(entry) => *entry.get(),
+            Entry::Vacant(entry) => {
+                let id = self
+                    .nodes
+                    .read()
+                    .await
+                    .node_id_for_name(&name)
+                    .await
+                    .map_err(|e| Status::unknown(e.to_string()))?;
+                *entry.insert(id)
+            }
+        };
+        Ok(Response::new(bv_pb::GetNodeIdForNameResponse {
+            id: id.to_string(),
+        }))
     }
 
     #[instrument(skip(self), ret(Debug))]
@@ -322,16 +369,24 @@ where
     ) -> Result<Response<bv_pb::ListCapabilitiesResponse>, Status> {
         status_check().await?;
         let request = request.into_inner();
-        let node_id = helpers::parse_uuid(request.node_id)?;
-        let capabilities = self
-            .nodes
-            .read()
-            .await
-            .nodes
-            .get(&node_id)
-            .ok_or_else(|| Status::invalid_argument("No such node"))?
-            .babel_engine
-            .capabilities();
+
+        let mut cache = self.cache.write().await;
+        let capabilities = match cache.capabilities.entry(request.node_id.clone()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let node_id = helpers::parse_uuid(&request.node_id)?;
+                let caps = self
+                    .nodes
+                    .read()
+                    .await
+                    .nodes
+                    .get(&node_id)
+                    .ok_or_else(|| Status::invalid_argument("No such node"))?
+                    .babel_engine
+                    .capabilities();
+                entry.insert(caps).to_vec()
+            }
+        };
         Ok(Response::new(bv_pb::ListCapabilitiesResponse {
             capabilities,
         }))
