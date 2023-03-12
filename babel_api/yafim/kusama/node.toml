@@ -1,0 +1,36 @@
+application_name = "kusama"
+node_type = "node"
+version = "0.9.39-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = []
+apt_source = []
+cmds = [
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+  "apt update",
+  "apt upgrade -y",
+  "wget -O kusama https://github.com/paritytech/polkadot/releases/download/v0.9.39/polkadot",
+  "cp polkadot /usr/bin/",
+  #"polkadot --chain-id kusama",
+
+]
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+		"cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/kusama/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/kusama/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/kusama/node/mnt/etc/systemd/system/multi-user.target.wants/",
+                "cp {{.YafimHome}}/blockvisor/babel_api/protocols/kusama/node.toml {{.YafimHome}}/target/kusama/node/mnt/etc/babel.conf",	
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/kusama/node/mnt/",
+		"echo kusama-node > {{.YafimHome}}/target/kusama/node/mnt/etc/hostname",
+]

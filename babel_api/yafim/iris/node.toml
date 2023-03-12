@@ -1,0 +1,49 @@
+# HARDWARE SPECS
+# Minimum Requeirment
+# 2 CPU
+# Memory: 6GB
+# Disk: 256GB SSD
+# OS: Ubuntu 16.04 LTS +
+# Bandwidth: 20Mbps
+# Allow all incoming connections on TCP port 26656 and 26657
+#
+
+application_name = "iris"
+node_type = "node"
+version = "1.4.1-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = []
+apt_source = []
+cmds = [
+  "wget -O lighthouse.tar.gz https://github.com/sigp/lighthouse/releases/download/v3.4.0/lighthouse-v3.4.0-x86_64-unknown-linux-gnu.tar.gz",
+  "mkdir -p /blockjoy","tar xvzf lighthouse.tar.gz --directory /usr/bin/",
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+  "wget -O iris.tar.gz https://github.com/irisnet/irishub/releases/download/v1.4.1/iris-linux-amd64-v1.4.1.tar.gz",
+  "tar -xvzf iris.tar.gz --transform 's!^[^/]\\+\\($\\|/\\)!iris\\1!'",
+  "chmod +x iris && mv iris /usr/bin/"
+#"iris init <moniker> --chain-id=irishub-1",
+#"curl -o ~/.iris/config/config.toml https://raw.githubusercontent.com/irisnet/mainnet/master/config/config.toml",
+#"curl -o ~/.iris/config/genesis.json https://raw.githubusercontent.com/irisnet/mainnet/master/config/genesis.json",
+#"iris start",
+] 
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+	        "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/iris/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/iris/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/iris/node.toml {{.YafimHome}}/target/iris/node/mnt/etc/babel.conf",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/iris/node/mnt",
+		"echo iris-node > {{.YafimHome}}/target/iris/node/mnt/etc/hostname"
+]
