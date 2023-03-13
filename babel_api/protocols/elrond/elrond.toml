@@ -8,7 +8,12 @@ node_version = "1.3.44"
 min_babel_version = "0.0.1"
 description = "elrond blockchain validator"
 api_host = "https://api.multiversx.com"
-ports = []
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+rules = []
 
 [requirements]
 vcpu_count = 4

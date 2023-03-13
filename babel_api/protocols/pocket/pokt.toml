@@ -8,7 +8,17 @@ node_version = "0.8.3" #VERSION TBD
 min_babel_version = "0.0.1"
 description = "pokt blockchain validator"
 api_host = "http://localhost:8081/v1/"
-ports = [8081]
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+
+    [[firewall.rules]]
+    name = "Allowed incoming traffic on port"
+    policy = "allow"
+    direction = "in"
+    ports = [8081]
 
 [requirements]
 vcpu_count = 4

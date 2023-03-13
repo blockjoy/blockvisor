@@ -8,7 +8,26 @@ node_version = "1.15.9"
 min_babel_version = "0.0.1"
 description = "testing blockchain validator"
 api_host = "http://localhost:4467/"
-ports = [4467]
+
+[firewall]
+enabled = true #ufw enable or ufw disable (false)
+default_in = "deny" #ufw default deny incoming
+default_out = "allow"  #ufw default allow outgoing
+
+    [[firewall.rules]]
+    name = "Allowed incoming tcp traffic on port"
+    policy = "allow"
+    direction = "in"
+    protocol = "tcp"
+    ports = [24567] #ufw allow in proto tcp port 24567
+
+    [[firewall.rules]]
+    name = "Allowed incoming udp traffic on ip and port"
+    policy = "allow"
+    direction = "in"
+    protocol = "udp"
+    ip = "192.168.0.1"
+    ports = [24567] #ufw allow in proto udp from 192.168.0.1 port 24567
 
 [requirements]
 vcpu_count = 1
