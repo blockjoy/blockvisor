@@ -4,7 +4,7 @@ path_append = "/blockjoy/bin/"
 [config]
 protocol = "kava"
 node_type = "validator"
-node_version = "0.16.1" # recc mainnet
+node_version = "0.21.0" # recc mainnet
 min_babel_version = "0.0.1"
 description = "kava blockchain validator"
 api_host = "http://localhost:26656/"
@@ -12,19 +12,31 @@ api_host = "http://localhost:26656/"
 ports = [26656, 8545]
 
 [requirements]
-vcpu_count = 2
-mem_size_mb = 8192
+vcpu_count = 4
+mem_size_mb = 32768
 disk_size_gb = 500
 
 [supervisor]
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
-data_directory_mount_point = "/blockjoy/miner/data"
+data_directory_mount_point = "/blockjoy/kava"
 
     [[supervisor.entry_point]]
-    name = "todo"
-    body = ""
+    name = "kava-node"
+    body = """
+    test -f /blockjoy/.init && \
+    kava --home babelref:'supervisor.data_directory_mount_point' start
+    """
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+kava --home babelref:'supervisor.data_directory_mount_point' init kava-node --chain-id kava_2222-10
+touch /blockjoy/.init
+"""
 
 [[methods]]
 name = "height"

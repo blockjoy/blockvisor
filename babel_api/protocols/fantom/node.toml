@@ -19,11 +19,27 @@ disk_size_gb = 1000
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
-data_directory_mount_point = "/blockjoy/miner/data"
+data_directory_mount_point = "/blockjoy/fantom"
 
     [[supervisor.entry_point]]
-    name = "todo"
-    body = ""
+    name = "fantom-node"
+    body = """
+    test -f /blockjoy/.init && \
+    nohup opera --genesis babelref:'nets.{{NETWORK}}.genesis_file_name' --nousb --datadir babelref:'supervisor.data_directory_mount_point' --db.preset ldb-1 start &
+    """
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+curl -o babelref:'supervisor.data_directory_mount_point'/babelref:'nets.{{NETWORK}}.genesis_file_name' https://files.fantom.network/babelref:'nets.{{NETWORK}}.genesis_file_name  2>&1 | logger -t babel.init && \
+touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
 
 [[methods]]
 name = "height"
@@ -55,7 +71,9 @@ method = "eth_syncing"
 [nets.mainnet]
 net_type = "main"
 url = "https://rpc.ankr.com/fantom/"
+genesis_file_name = "mainnet-171200-pruned-mpt.g"
 
 [nets.testnet]
 net_type = "test"
 url = "https://rpc.ankr.com/fantom_testnet/"
+genesis_file_name = ""

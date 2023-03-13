@@ -4,7 +4,7 @@ path_append = "/blockjoy/bin/"
 [config]
 protocol = "iris"
 node_type = "validator"
-node_version = "1.1.1"
+node_version = "1.4.1"
 min_babel_version = "0.0.1"
 description = "iris blockchain validator"
 api_host = "http://localhost:26657/"
@@ -19,11 +19,29 @@ disk_size_gb = 256
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
-data_directory_mount_point = "/blockjoy/miner/data"
+data_directory_mount_point = "/blockjoy/iris"
 
     [[supervisor.entry_point]]
-    name = "todo"
-    body = ""
+    name = "iris-node"
+    body = """
+    test -f /blockjoy/.init && \
+    iris --home babelref:'supervisor.data_directory_mount_point' start
+    """
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+iris --home babelref:'supervisor.data_directory_mount_point' init --chain-id=babelref:'nets.{{NETWORK}}.chain_id' 2>&1 | logger -t babel.init && \
+curl -o babelref:'supervisor.data_directory_mount_point'/config/config.toml https://raw.githubusercontent.com/irisnet/mainnet/master/config/config.toml 2>&1 | logger -t babel.init && \
+curl -o babelref:'supervisor.data_directory_mount_point'/config/genesis.json https://raw.githubusercontent.com/irisnet/mainnet/master/config/genesis.json 2>&1 | logger -t babel.init && \
+touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
 
 [[methods]]
 name = "height"
@@ -64,7 +82,9 @@ method = "genesis"
 [nets.mainnet]
 net_type = "main"
 url = "https://raw.githubusercontent.com/irisnet/mainnet/master/config/config.toml" # tbd
+chain_id = "irishub-1"
 
 [nets.testnet]
 net_type = "test"
 url = "https://github.com/irisnet/testnets/blob/master/nyancat/config/config.toml" # tbd
+chain_id = ""

@@ -11,7 +11,7 @@ version = "0.21.0-build.1"
 debian_version = "focal"
 rootfs_size = "10G"
 fs_type = "ext4"
-apt_image = ["build-essential", "jq", "git"]
+apt_image = ["curl", "build-essential", "jq", "git"]
 apt_source = ["universe"]
 cmds = [
   "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",

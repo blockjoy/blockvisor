@@ -20,8 +20,8 @@ version = "1.1.1-build.1"
 debian_version = "focal"
 rootfs_size = "10G"
 fs_type = "ext4"
-apt_image = []
-apt_source = []
+apt_image = ["curl"]
+apt_source = ["universe"]
 cmds = [
   "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
   "systemctl disable systemd-resolved.service",
