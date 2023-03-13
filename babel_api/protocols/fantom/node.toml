@@ -42,6 +42,17 @@ touch /blockjoy/.init
     format = "raw"
 
 [[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+echo -n "Cancelled"
+""" 
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
 name = "height"
 transport = "jrpc"
 method = "eth_syncing" # only if syncing
