@@ -1,36 +1,65 @@
+use async_trait::async_trait;
 use babel_api::config::firewall::{Config, Protocol, Rule};
 use eyre::{bail, Result};
 use serde_variant::to_variant_name;
 
 pub async fn apply_firewall_config(config: Config) -> Result<()> {
+    apply_firewall_config_with(config, SysRunner).await
+}
+
+#[async_trait]
+trait UfwRunner {
+    async fn run<'a>(&self, args: &[&'a str]) -> Result<()>;
+}
+
+struct SysRunner;
+
+#[async_trait]
+impl UfwRunner for SysRunner {
+    async fn run<'a>(&self, args: &[&'a str]) -> Result<()> {
+        let output = tokio::process::Command::new("ufw")
+            .args(args)
+            .output()
+            .await?;
+        if !output.status.success() {
+            bail!("Failed to run command 'ufw', got output: `{output:?}`");
+        }
+        Ok(())
+    }
+}
+
+async fn apply_firewall_config_with(config: Config, runner: impl UfwRunner) -> Result<()> {
     if config.enabled {
         // first convert config to convenient structure
         let rule_args = RuleArgs::from_rules(&config.rules);
         // dry-run rules to make sure they are valid
         for args in &rule_args {
-            dry_run_ufw(&args.into()).await?;
+            dry_run(&runner, &args.into()).await?;
         }
         //finally reset and apply whole firewall config
-        run_ufw(&["reset", "--force"]).await?;
-        run_ufw(&["enable"]).await?;
-        run_ufw(&["default", variant_to_string(&config.default_in), "incoming"]).await?;
-        run_ufw(&[
-            "default",
-            variant_to_string(&config.default_out),
-            "outgoing",
-        ])
-        .await?;
+        runner.run(&["reset", "--force"]).await?;
+        runner.run(&["enable"]).await?;
+        runner
+            .run(&["default", variant_to_string(&config.default_in), "incoming"])
+            .await?;
+        runner
+            .run(&[
+                "default",
+                variant_to_string(&config.default_out),
+                "outgoing",
+            ])
+            .await?;
         // and actually apply rules
         for args in &rule_args {
-            run_ufw(&args.into()).await?;
+            runner.run(&args.into()).await?;
         }
     } else {
-        run_ufw(&["disable"]).await?;
+        runner.run(&["disable"]).await?;
     }
     Ok(())
 }
 
-pub struct RuleArgs<'a> {
+struct RuleArgs<'a> {
     policy: &'a str,
     direction: &'a str,
     protocol: &'a str,
@@ -40,7 +69,7 @@ pub struct RuleArgs<'a> {
 }
 
 impl<'a> RuleArgs<'a> {
-    pub fn from_rules(rules: &'a Vec<Rule>) -> Vec<Self> {
+    fn from_rules(rules: &'a Vec<Rule>) -> Vec<Self> {
         let mut rule_args = Vec::default();
         for rule in rules {
             let proto = rule.protocol.as_ref();
@@ -58,7 +87,7 @@ impl<'a> RuleArgs<'a> {
         rule_args
     }
 
-    pub fn into(&self) -> [&str; 10] {
+    fn into(&self) -> [&str; 10] {
         [
             self.policy,
             self.direction,
@@ -74,23 +103,223 @@ impl<'a> RuleArgs<'a> {
     }
 }
 
-pub fn variant_to_string<T: serde::ser::Serialize>(variant: &T) -> &str {
+fn variant_to_string<T: serde::ser::Serialize>(variant: &T) -> &str {
     // `to_variant_name()` may fail only with `UnsupportedType` which shall not happen,
     // so it is safe to unwrap here.
     to_variant_name(variant).unwrap()
 }
 
-pub async fn dry_run_ufw(args: &[&str]) -> Result<()> {
-    run_ufw(&[&["--dry-run"], args].concat()).await
+async fn dry_run(runner: &impl UfwRunner, args: &[&str]) -> Result<()> {
+    runner.run(&[&["--dry-run"], args].concat()).await
 }
 
-pub async fn run_ufw(args: &[&str]) -> Result<()> {
-    let output = tokio::process::Command::new("ufw")
-        .args(args)
-        .output()
-        .await?;
-    if !output.status.success() {
-        bail!("Failed to run command 'ufw', got output `{output:?}`");
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use babel_api::config::firewall::{Direction, Policy};
+    use mockall::*;
+
+    mock! {
+        pub TestRunner {}
+
+        #[async_trait]
+        impl UfwRunner for TestRunner {
+            async fn run<'a>(&self, args: &[&'a str]) -> Result<()>;
+        }
     }
-    Ok(())
+
+    fn expect_with_args(mock_runner: &mut MockTestRunner, expected_args: &'static [&str]) {
+        mock_runner
+            .expect_run()
+            .once()
+            .withf(move |args| args == expected_args)
+            .returning(|_| Ok(()));
+    }
+
+    #[tokio::test]
+    async fn test_run_failed() -> Result<()> {
+        let config = Config {
+            enabled: false,
+            default_in: Policy::Allow,
+            default_out: Policy::Allow,
+            rules: vec![],
+        };
+        let mut mock_runner = MockTestRunner::new();
+        mock_runner
+            .expect_run()
+            .once()
+            .withf(|args| args == ["disable"])
+            .returning(|_| bail!("test_error"));
+
+        assert_eq!(
+            "test_error",
+            apply_firewall_config_with(config, mock_runner)
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_disable() -> Result<()> {
+        let config = Config {
+            enabled: false,
+            default_in: Policy::Allow,
+            default_out: Policy::Allow,
+            rules: vec![],
+        };
+        let mut mock_runner = MockTestRunner::new();
+        expect_with_args(&mut mock_runner, &["disable"]);
+
+        apply_firewall_config_with(config, mock_runner).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_no_rules() -> Result<()> {
+        let config = Config {
+            enabled: true,
+            default_in: Policy::Deny,
+            default_out: Policy::Allow,
+            rules: vec![],
+        };
+        let mut mock_runner = MockTestRunner::new();
+        expect_with_args(&mut mock_runner, &["reset", "--force"]);
+        expect_with_args(&mut mock_runner, &["enable"]);
+        expect_with_args(&mut mock_runner, &["default", "deny", "incoming"]);
+        expect_with_args(&mut mock_runner, &["default", "allow", "outgoing"]);
+
+        apply_firewall_config_with(config, mock_runner).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_with_rules() -> Result<()> {
+        let config = Config {
+            enabled: true,
+            default_in: Policy::Deny,
+            default_out: Policy::Reject,
+            rules: vec![
+                Rule {
+                    name: "rule A".to_string(),
+                    policy: Policy::Allow,
+                    direction: Direction::Out,
+                    protocol: None,
+                    ips: None,
+                    ports: vec![7],
+                },
+                Rule {
+                    name: "rule B".to_string(),
+                    policy: Policy::Allow,
+                    direction: Direction::In,
+                    protocol: Some(Protocol::Tcp),
+                    ips: Some("ip.is.validated.before".to_string()),
+                    ports: vec![144, 77],
+                },
+                Rule {
+                    name: "empty rule".to_string(),
+                    policy: Policy::Allow,
+                    direction: Direction::Out,
+                    protocol: None,
+                    ips: None,
+                    ports: vec![],
+                },
+            ],
+        };
+        let mut mock_runner = MockTestRunner::new();
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "out",
+                "proto",
+                "both",
+                "from",
+                "any",
+                "port",
+                "7",
+                "comment",
+                "rule A",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "in",
+                "proto",
+                "tcp",
+                "from",
+                "ip.is.validated.before",
+                "port",
+                "144",
+                "comment",
+                "rule B",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "in",
+                "proto",
+                "tcp",
+                "from",
+                "ip.is.validated.before",
+                "port",
+                "77",
+                "comment",
+                "rule B",
+            ],
+        );
+
+        expect_with_args(&mut mock_runner, &["reset", "--force"]);
+        expect_with_args(&mut mock_runner, &["enable"]);
+        expect_with_args(&mut mock_runner, &["default", "deny", "incoming"]);
+        expect_with_args(&mut mock_runner, &["default", "reject", "outgoing"]);
+
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow", "out", "proto", "both", "from", "any", "port", "7", "comment", "rule A",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow",
+                "in",
+                "proto",
+                "tcp",
+                "from",
+                "ip.is.validated.before",
+                "port",
+                "144",
+                "comment",
+                "rule B",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow",
+                "in",
+                "proto",
+                "tcp",
+                "from",
+                "ip.is.validated.before",
+                "port",
+                "77",
+                "comment",
+                "rule B",
+            ],
+        );
+
+        apply_firewall_config_with(config, mock_runner).await?;
+        Ok(())
+    }
 }
