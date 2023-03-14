@@ -8,7 +8,17 @@ node_version = "0.27.4"
 min_babel_version = "0.0.1"
 description = "flow blockchain validator"
 api_host = "http://localhost:3569/"
-ports = [3569]
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+
+    [[firewall.rules]]
+    name = "Allowed incoming traffic on port"
+    policy = "allow"
+    direction = "in"
+    ports = [3569]
 
 [requirements]
 vcpu_count = 4

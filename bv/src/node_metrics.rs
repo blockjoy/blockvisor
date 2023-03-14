@@ -1,5 +1,6 @@
 //! Here we have the code related to the metrics for nodes. We
 
+use crate::babel_engine::BabelEngine;
 use crate::node;
 use crate::node_data::NodeStatus;
 use crate::pal::Pal;
@@ -41,39 +42,39 @@ pub async fn collect_metrics<P: Pal + Debug + 'static>(
 ) -> Metrics {
     let metrics_fut: Vec<_> = nodes
         .filter(|n| n.status() == NodeStatus::Running)
-        .map(collect_metric)
+        .map(|node| async { (node.id(), collect_metric(&mut node.babel_engine).await) })
         .collect();
     let metrics: Vec<_> = futures_util::future::join_all(metrics_fut).await;
     Metrics(metrics.into_iter().collect())
 }
 
 /// Returns the metric for a single node.
-pub async fn collect_metric<P: Pal + Debug>(node: &mut node::Node<P>) -> (NodeId, Metric) {
+pub async fn collect_metric(babel_engine: &mut BabelEngine) -> Metric {
     use babel_api::BabelMethod;
 
-    let capabilities = node.capabilities();
+    let capabilities = babel_engine.capabilities();
     let height = match capabilities.contains(&BabelMethod::Height.to_string()) {
-        true => timeout(node.height()).await.ok(),
+        true => timeout(babel_engine.height()).await.ok(),
         false => None,
     };
     let block_age = match capabilities.contains(&BabelMethod::BlockAge.to_string()) {
-        true => timeout(node.block_age()).await.ok(),
+        true => timeout(babel_engine.block_age()).await.ok(),
         false => None,
     };
     let staking_status = match capabilities.contains(&BabelMethod::StakingStatus.to_string()) {
-        true => timeout(node.staking_status()).await.ok(),
+        true => timeout(babel_engine.staking_status()).await.ok(),
         false => None,
     };
     let consensus = match capabilities.contains(&BabelMethod::Consensus.to_string()) {
-        true => timeout(node.consensus()).await.ok(),
+        true => timeout(babel_engine.consensus()).await.ok(),
         false => None,
     };
     let sync_status = match capabilities.contains(&BabelMethod::SyncStatus.to_string()) {
-        true => timeout(node.sync_status()).await.ok(),
+        true => timeout(babel_engine.sync_status()).await.ok(),
         false => None,
     };
 
-    let metric = Metric {
+    Metric {
         // these could be optional
         height,
         block_age,
@@ -81,10 +82,8 @@ pub async fn collect_metric<P: Pal + Debug>(node: &mut node::Node<P>) -> (NodeId
         consensus,
         sync_status,
         // these are expected in every chain
-        application_status: timeout(node.application_status()).await.ok(),
-    };
-
-    (node.id(), metric)
+        application_status: timeout(babel_engine.application_status()).await.ok(),
+    }
 }
 
 async fn timeout<F, T>(fut: F) -> anyhow::Result<T>

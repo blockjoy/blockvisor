@@ -12,7 +12,7 @@ use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::node::build_registry_dir;
-use crate::pal::Pal;
+use crate::pal::{NetInterface, Pal};
 use crate::{
     config::SharedConfig,
     node::Node,
@@ -80,8 +80,19 @@ impl<P: Pal + Debug> Nodes<P> {
             bail!("Node with name `{name}` exists");
         }
 
+        let ip = ip.parse()?;
+        let gateway = gateway.parse()?;
+
+        if self
+            .nodes
+            .values()
+            .any(|n| n.data.network_interface.ip() == &ip)
+        {
+            bail!("Node with ip address `{ip}` exists");
+        }
+
         let mut babel_conf = self.fetch_image_data(&image).await?;
-        check_babel_version(&babel_conf.config.min_babel_version)?;
+        babel_api::check_babel_config(&babel_conf)?;
         let conf = toml::Value::try_from(&babel_conf)?;
         babel_conf.supervisor.entry_point =
             render_entry_points(babel_conf.supervisor.entry_point, &properties, &conf)?;
@@ -90,8 +101,6 @@ impl<P: Pal + Debug> Nodes<P> {
             .await;
 
         self.data.machine_index += 1;
-        let ip = ip.parse()?;
-        let gateway = gateway.parse()?;
         let network_interface = self.create_network_interface(ip, gateway).await?;
 
         let node_data = NodeData {
@@ -127,8 +136,8 @@ impl<P: Pal + Debug> Nodes<P> {
                 .data
                 .image
         {
-            let babel = self.fetch_image_data(&image).await?;
-            check_babel_version(&babel.config.min_babel_version)?;
+            let babel_config = self.fetch_image_data(&image).await?;
+            babel_api::check_babel_config(&babel_config)?;
 
             self.send_container_status(id, ContainerStatus::Upgrading)
                 .await;
@@ -143,9 +152,11 @@ impl<P: Pal + Debug> Nodes<P> {
             if image.node_type != node.data.image.node_type {
                 bail!("Cannot upgrade node type to `{}`", image.node_type);
             }
-            if node.data.babel_conf.requirements.vcpu_count != babel.requirements.vcpu_count
-                || node.data.babel_conf.requirements.mem_size_mb != babel.requirements.mem_size_mb
-                || node.data.babel_conf.requirements.disk_size_gb != babel.requirements.disk_size_gb
+            if node.data.babel_conf.requirements.vcpu_count != babel_config.requirements.vcpu_count
+                || node.data.babel_conf.requirements.mem_size_mb
+                    != babel_config.requirements.mem_size_mb
+                || node.data.babel_conf.requirements.disk_size_gb
+                    != babel_config.requirements.disk_size_gb
             {
                 bail!("Cannot upgrade node requirements");
             }
@@ -220,7 +231,7 @@ impl<P: Pal + Debug> Nodes<P> {
             };
 
             let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
-            node.init(secret_keys).await?;
+            node.babel_engine.init(secret_keys).await?;
             // We save the `running` status only after all of the previous steps have succeeded.
             node.set_expected_status(NodeStatus::Running).await?;
         }
@@ -286,8 +297,18 @@ impl<P: Pal + Debug> Nodes<P> {
         self.send_container_status(id, ContainerStatus::UndefinedContainerStatus)
             .await;
 
-        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
+        let node = self.nodes.get(&id).ok_or_else(|| id_not_found(id))?;
+        if !node.is_data_valid().await? {
+            // If some files are corrupted, the files will be recreated.
+            // Some intermediate data could be lost in that case.
+            let node_data = node.data.clone();
+            self.fetch_image_data(&node_data.image).await?;
+            let new = Node::create(self.pal.clone(), node_data).await?;
+            self.nodes.insert(id, new);
+            debug!("Node recreated");
+        }
 
+        let node = self.nodes.get_mut(&id).ok_or_else(|| id_not_found(id))?;
         node.recover().await
     }
 
@@ -318,6 +339,7 @@ impl<P: Pal + Debug> Nodes<P> {
         debug!("Received API keys: {api_keys_set:?}");
 
         let node_keys: HashMap<String, Vec<u8>> = node
+            .babel_engine
             .download_keys()
             .await?
             .into_iter()
@@ -329,14 +351,13 @@ impl<P: Pal + Debug> Nodes<P> {
         // Keys present in API, but not on Node, will be sent to Node
         let keys1: Vec<_> = api_keys_set
             .difference(&node_keys_set)
-            .into_iter()
             .map(|n| babel_api::BlockchainKey {
                 name: n.to_string(),
                 content: api_keys.get(*n).unwrap().to_vec(), // checked
             })
             .collect();
         if !keys1.is_empty() {
-            node.upload_keys(keys1).await?;
+            node.babel_engine.upload_keys(keys1).await?;
         }
 
         // Keys present on Node, but not in API, will be sent to API
@@ -354,10 +375,13 @@ impl<P: Pal + Debug> Nodes<P> {
         // Generate keys if we should (and can)
         if api_keys_set.is_empty()
             && node_keys_set.is_empty()
-            && node.has_capability(&babel_api::BabelMethod::GenerateKeys.to_string())
+            && node
+                .babel_engine
+                .has_capability(&babel_api::BabelMethod::GenerateKeys.to_string())
         {
-            node.generate_keys().await?;
+            node.babel_engine.generate_keys().await?;
             let gen_keys: Vec<_> = node
+                .babel_engine
                 .download_keys()
                 .await?
                 .into_iter()
@@ -510,14 +534,6 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 }
 
-fn check_babel_version(min_babel_version: &str) -> Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
-    if version < min_babel_version {
-        bail!("Required minimum babel version is `{min_babel_version}`, running is `{version}`");
-    }
-    Ok(())
-}
-
 fn render_entry_points(
     mut entry_points: Vec<Entrypoint>,
     params: &NodeProperties,
@@ -602,6 +618,7 @@ mod tests {
             },
             nets: Default::default(),
             supervisor: Default::default(),
+            firewall: None,
             keys: None,
             methods: BTreeMap::from([
                 (

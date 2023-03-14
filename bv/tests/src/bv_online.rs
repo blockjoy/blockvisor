@@ -54,7 +54,7 @@ async fn test_bv_cmd_cookbook_download() -> Result<()> {
     let _ = tokio::fs::remove_dir_all(&folder).await;
 
     println!("create a node");
-    let vm_id = test_env.create_node("testing/validator/0.0.3");
+    let vm_id = test_env.create_node("testing/validator/0.0.3", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("delete node");

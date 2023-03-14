@@ -8,7 +8,17 @@ node_version = "3.14.2"
 min_babel_version = "0.0.1"
 description = "algo blockchain validator"
 api_host = "https://localhost:4001"
-ports = [4001]
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+
+    [[firewall.rules]]
+    name = "Allowed incoming traffic on port"
+    policy = "allow"
+    direction = "in"
+    ports = [4001]
 
 [requirements]
 vcpu_count = 4 

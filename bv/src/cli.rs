@@ -161,7 +161,7 @@ pub enum NodeCommand {
         id_or_names: Vec<String>,
     },
 
-    /// Return the block height of the blockchain the node is running
+    /// Return supported methods that could be executed on running node via `bv node run`
     #[clap(alias = "caps")]
     Capabilities {
         /// Node id or name
@@ -174,7 +174,7 @@ pub enum NodeCommand {
         /// The id or name of the node that the command should be run against.
         id_or_name: String,
         /// The method that should be called. This should be one of the methods listed when
-        /// `nv node capabilities <id_or_name>` is ran.
+        /// `bv node capabilities <id_or_name>` is ran.
         method: String,
         /// The payload that should be passed to the endpoint. This should be a json encoded blob.
         #[clap(long)]

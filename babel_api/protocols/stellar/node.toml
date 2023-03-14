@@ -8,7 +8,12 @@ node_version = "19.7.0"
 min_babel_version = "0.0.1"
 description = "stellar blockchain validator"
 api_host = "https://horizon.stellar.org/"
-ports = []
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+rules = []
 
 [requirements]
 vcpu_count = 4 

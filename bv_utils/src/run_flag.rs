@@ -14,7 +14,7 @@ pub struct RunFlag {
 impl RunFlag {
     /// Create [Self] with CtrlC handler attached.
     pub fn run_until_ctrlc() -> Self {
-        let run = Self::default();
+        let mut run = Self::default();
         let mut ctrlc_run = run.clone();
         ctrlc::set_handler(move || {
             ctrlc_run.stop();
@@ -55,21 +55,20 @@ impl RunFlag {
             _ = self.wait() => {},
         );
     }
+
+    pub fn clone(&mut self) -> Self {
+        let rx = self.rx.resubscribe();
+        Self {
+            run: self.load(),
+            tx: self.tx.clone(),
+            rx,
+        }
+    }
 }
 
 impl Default for RunFlag {
     fn default() -> Self {
         let (tx, rx) = broadcast::channel(1);
         Self { run: true, tx, rx }
-    }
-}
-
-impl Clone for RunFlag {
-    fn clone(&self) -> Self {
-        Self {
-            run: self.run,
-            tx: self.tx.clone(),
-            rx: self.rx.resubscribe(),
-        }
     }
 }

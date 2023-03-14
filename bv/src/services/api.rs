@@ -9,6 +9,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
+use metrics::{register_counter, Counter};
 use pb::{
     commands_client::CommandsClient, discovery_client::DiscoveryClient,
     metrics_service_client::MetricsServiceClient, node_command::Command, nodes_client::NodesClient,
@@ -18,6 +19,7 @@ use std::{
     {str::FromStr, sync::Arc},
 };
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 use tonic::{
     codegen::InterceptedService, service::Interceptor, transport::Channel, Request, Status,
 };
@@ -31,6 +33,23 @@ pub mod pb {
 
 const STATUS_OK: i32 = 0;
 const STATUS_ERROR: i32 = 1;
+
+lazy_static::lazy_static! {
+    pub static ref API_CREATE_COUNTER: Counter = register_counter!("api.commands.create.calls");
+    pub static ref API_CREATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.create.ms");
+    pub static ref API_DELETE_COUNTER: Counter = register_counter!("api.commands.delete.calls");
+    pub static ref API_DELETE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.delete.ms");
+    pub static ref API_START_COUNTER: Counter = register_counter!("api.commands.start.calls");
+    pub static ref API_START_TIME_MS_COUNTER: Counter = register_counter!("api.commands.start.ms");
+    pub static ref API_STOP_COUNTER: Counter = register_counter!("api.commands.stop.calls");
+    pub static ref API_STOP_TIME_MS_COUNTER: Counter = register_counter!("api.commands.stop.ms");
+    pub static ref API_RESTART_COUNTER: Counter = register_counter!("api.commands.restart.calls");
+    pub static ref API_RESTART_TIME_MS_COUNTER: Counter = register_counter!("api.commands.restart.ms");
+    pub static ref API_UPGRADE_COUNTER: Counter = register_counter!("api.commands.upgrade.calls");
+    pub static ref API_UPGRADE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.upgrade.ms");
+    pub static ref API_UPDATE_COUNTER: Counter = register_counter!("api.commands.update.calls");
+    pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
+}
 
 #[derive(Clone)]
 pub struct AuthToken(pub String);
@@ -210,6 +229,7 @@ async fn process_node_command<P: Pal + Debug>(
     node_command: pb::NodeCommand,
 ) -> Result<()> {
     let node_id = Uuid::from_str(&node_command.node_id)?;
+    let now = Instant::now();
     match node_command.command {
         Some(cmd) => match cmd {
             Command::Create(args) => {
@@ -227,19 +247,29 @@ async fn process_node_command<P: Pal + Debug>(
                     .await
                     .create(node_id, args.name, image, args.ip, args.gateway, properties)
                     .await?;
+                API_CREATE_COUNTER.increment(1);
+                API_CREATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Delete(_) => {
                 nodes.write().await.delete(node_id).await?;
+                API_DELETE_COUNTER.increment(1);
+                API_DELETE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Start(_) => {
                 nodes.write().await.start(node_id).await?;
+                API_START_COUNTER.increment(1);
+                API_START_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Stop(_) => {
                 nodes.write().await.stop(node_id).await?;
+                API_STOP_COUNTER.increment(1);
+                API_STOP_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Restart(_) => {
                 nodes.write().await.stop(node_id).await?;
                 nodes.write().await.start(node_id).await?;
+                API_RESTART_COUNTER.increment(1);
+                API_RESTART_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Upgrade(args) => {
                 let image: NodeImage = args
@@ -247,6 +277,8 @@ async fn process_node_command<P: Pal + Debug>(
                     .ok_or_else(|| anyhow!("Image not provided"))?
                     .into();
                 nodes.write().await.upgrade(node_id, image).await?;
+                API_UPGRADE_COUNTER.increment(1);
+                API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Update(pb::NodeInfoUpdate {
                 name,
@@ -258,6 +290,8 @@ async fn process_node_command<P: Pal + Debug>(
                     .await
                     .update(node_id, name, self_update, properties)
                     .await?;
+                API_UPDATE_COUNTER.increment(1);
+                API_UPDATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::InfoGet(_) => unimplemented!(),
             Command::Generic(_) => unimplemented!(),

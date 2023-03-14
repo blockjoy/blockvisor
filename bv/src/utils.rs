@@ -257,6 +257,7 @@ pub mod tests {
                 ),
             ]),
             supervisor: Default::default(),
+            firewall: None,
             keys: None,
             methods: Default::default(),
         };
@@ -282,7 +283,6 @@ pub mod tests {
             node_type: "".to_string(),
             description: None,
             api_host: None,
-            ports: vec![],
         }
     }
 

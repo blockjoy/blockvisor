@@ -13,7 +13,7 @@ use blockvisord::{
     server::bv_pb,
     services,
     services::{api, api::pb},
-    set_bv_status, utils,
+    set_bv_status, utils, BV_VAR_PATH,
 };
 use bv_utils::run_flag::RunFlag;
 use pb::node_info::ContainerStatus;
@@ -64,8 +64,8 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
     const NODES_COUNT: usize = 2;
     println!("create {NODES_COUNT} nodes");
     let mut nodes: Vec<String> = Default::default();
-    for _ in 0..NODES_COUNT {
-        nodes.push(test_env.create_node("testing/validator/0.0.1"));
+    for i in 0..NODES_COUNT {
+        nodes.push(test_env.create_node("testing/validator/0.0.1", &format!("216.18.214.{i}")));
     }
 
     println!("start all created nodes");
@@ -88,7 +88,7 @@ async fn test_bv_cmd_logs() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
     test_env.run_blockvisord(RunFlag::default()).await?;
     println!("create a node");
-    let vm_id = &test_env.create_node("testing/validator/0.0.1");
+    let vm_id = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start node");
@@ -111,7 +111,7 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     let mut run = RunFlag::default();
     let bv_handle = test_env.run_blockvisord(run.clone()).await?;
     println!("create a node");
-    let vm_id = &test_env.create_node("testing/validator/0.0.1");
+    let vm_id = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("stop stopped node");
@@ -168,7 +168,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     test_env.run_blockvisord(RunFlag::default()).await?;
 
     println!("create a node");
-    let vm_id = &test_env.create_node("testing/validator/0.0.1");
+    let vm_id = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start stopped node");
@@ -176,6 +176,15 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
 
     println!("list running node");
     test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    let chroot = test_env
+        .bv_root
+        .join(BV_VAR_PATH)
+        .join(FC_BIN_NAME)
+        .join(vm_id)
+        .join("root");
+    let _ = tokio::fs::remove_dir_all(&chroot).await;
+    println!("impolitely remove all files from `{chroot:?}` location");
 
     let process_id = utils::get_process_pid(FC_BIN_NAME, vm_id).unwrap();
     println!("impolitely kill node with process id {process_id}");
@@ -221,7 +230,7 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
     test_env.run_blockvisord(RunFlag::default()).await?;
 
     println!("create a node");
-    let vm_id = &test_env.create_node("testing/validator/0.0.1");
+    let vm_id = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start stopped node");
@@ -301,7 +310,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     }),
                     blockchain: "testing".to_string(),
                     r#type: json!({"id": 3, "properties": []}).to_string(),
-                    ip: "216.18.214.195".to_string(),
+                    ip: "216.18.214.196".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
                     properties: vec![pb::Parameter {
@@ -320,6 +329,33 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 host_id: host_id.clone(),
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: node_name.clone(),
+                    image: Some(pb::ContainerImage {
+                        protocol: "testing".to_string(),
+                        node_type: "validator".to_string(),
+                        node_version: "0.0.1".to_string(),
+                        status: 1, // Development
+                    }),
+                    blockchain: "testing".to_string(),
+                    r#type: json!({"id": 3, "properties": []}).to_string(),
+                    ip: "216.18.214.197".to_string(),
+                    gateway: "216.18.214.193".to_string(),
+                    self_update: false,
+                    properties: vec![pb::Parameter {
+                        name: "TESTING_PARAM".to_string(),
+                        value: "anything".to_string(),
+                    }],
+                })),
+            })),
+        },
+        // create with same node ip address
+        pb::Command {
+            r#type: Some(pb::command::Type::Node(pb::NodeCommand {
+                node_id: Uuid::new_v4().to_string(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Create(pb::NodeCreate {
+                    name: "some-new-name".to_string(),
                     image: Some(pb::ContainerImage {
                         protocol: "testing".to_string(),
                         node_type: "validator".to_string(),
@@ -529,6 +565,11 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         pb::CommandInfo {
             id: command_id.clone(),
             response: Some("Node with name `beautiful-node-name` exists".to_string()),
+            exit_code: Some(1),
+        },
+        pb::CommandInfo {
+            id: command_id.clone(),
+            response: Some("Node with ip address `216.18.214.195` exists".to_string()),
             exit_code: Some(1),
         },
         pb::CommandInfo {

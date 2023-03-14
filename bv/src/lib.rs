@@ -1,5 +1,6 @@
 extern crate core;
 
+pub mod babel_engine;
 pub mod blockvisord;
 pub mod cli;
 pub mod config;

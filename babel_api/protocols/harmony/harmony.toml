@@ -9,7 +9,17 @@ min_babel_version = "0.0.1"
 description = "harmony blockchain validator"
 api_host = "http://localhost:9599" # shard 1 = 9598
 # mainnet:  https://rpc.s0.t.hmny.io
-ports = [9599, 9598]
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+
+    [[firewall.rules]]
+    name = "Allowed incoming traffic on port"
+    policy = "allow"
+    direction = "in"
+    ports = [9599, 9598]
 
 [requirements]
 vcpu_count = 4

@@ -4,7 +4,7 @@ use crate::{
     node_data::NodeStatus,
     node_metrics,
     nodes::Nodes,
-    pal::Pal,
+    pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
     server::{bv_pb, BlockvisorServer},
     services::{api, api::pb, mqtt},
@@ -12,6 +12,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use bv_utils::run_flag::RunFlag;
+use metrics_exporter_prometheus::PrometheusBuilder;
 use std::{collections::HashMap, fmt::Debug, net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::sync::watch::Sender;
 use tokio::{
@@ -58,14 +59,21 @@ where
         self.listener.local_addr()
     }
 
-    pub async fn run(self, run: RunFlag) -> Result<()> {
+    pub async fn run(self, mut run: RunFlag) -> Result<()> {
         info!(
             "Starting {} {} ...",
             env!("CARGO_PKG_NAME"),
             env!("CARGO_PKG_VERSION")
         );
 
+        // setup metrics endpoint
+        let builder = PrometheusBuilder::new();
+        builder
+            .install()
+            .unwrap_or_else(|e| error!("Cannot create Prometheus endpoint: {e}"));
+
         let bv_root = self.pal.bv_root().to_path_buf();
+        let cmds_connector = self.pal.create_commands_stream_connector(&self.config);
         let nodes = Nodes::load(self.pal, self.config.clone()).await?;
 
         try_set_bv_status(bv_pb::ServiceStatus::Ok).await;
@@ -85,7 +93,7 @@ where
             &self.config,
         );
         let mqtt_notification_future =
-            Self::create_mqtt_listener(run.clone(), cmd_watch_tx, &self.config);
+            Self::create_commands_listener(run.clone(), cmds_connector, cmd_watch_tx);
 
         let nodes_recovery_future = Self::nodes_recovery(run.clone(), nodes.clone());
 
@@ -162,20 +170,21 @@ where
         }
     }
 
-    async fn create_mqtt_listener(
+    async fn create_commands_listener(
         mut run: RunFlag,
+        connector: P::CommandsStreamConnector,
         cmd_watch_tx: Sender<()>,
-        config: &SharedConfig,
     ) {
         let notify = || {
             debug!("MQTT send notification");
+            mqtt::MQTT_NOTIFY_COUNTER.increment(1);
             cmd_watch_tx
                 .send(())
                 .unwrap_or_else(|_| error!("MQTT command watch error"));
         };
         while run.load() {
             debug!("Connecting to MQTT");
-            match mqtt::CommandsStream::connect(config).await {
+            match connector.connect().await {
                 Ok(mut client) => {
                     // get pending commands on reconnect
                     notify();
@@ -188,6 +197,7 @@ where
                                     Ok(None) => {}
                                     Err(e) => {
                                         warn!("MQTT error: {e:?}");
+                                        mqtt::MQTT_ERROR_COUNTER.increment(1);
                                         break;
                                     }
                                 }
@@ -236,7 +246,7 @@ where
 
             let mut updates = vec![];
             for node in nodes_lock.nodes.values_mut() {
-                if let Ok(address) = node.address().await {
+                if let Ok(address) = node.babel_engine.address().await {
                     updates.push((node.id().to_string(), address));
                 }
             }

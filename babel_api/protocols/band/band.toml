@@ -8,7 +8,17 @@ node_version = "2.4.1"
 min_babel_version = "0.0.1"
 description = "band blockchain validator"
 api_host = "http://localhost:26657/"
-ports = [26657]
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+
+    [[firewall.rules]]
+    name = "Allowed incoming traffic on port"
+    policy = "allow"
+    direction = "in"
+    ports = [26657]
 
 [requirements]
 vcpu_count = 2 
