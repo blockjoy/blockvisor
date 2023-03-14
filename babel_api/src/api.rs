@@ -49,7 +49,7 @@ pub trait Babel {
     /// Download key files from locations specified in `keys` section of Babel config.
     fn download_keys(config: config::KeysConfig) -> Vec<BlockchainKey>;
     /// Upload files into locations specified in `keys` section of Babel config.
-    fn upload_keys(config: config::KeysConfig, keys: Vec<BlockchainKey>) -> BlockchainResponse;
+    fn upload_keys(config: config::KeysConfig, keys: Vec<BlockchainKey>) -> String;
 
     /// Send a Jrpc request to the current blockchain.
     fn blockchain_jrpc(
@@ -59,7 +59,7 @@ pub trait Babel {
         method: String,
         /// This field is ignored.
         response: config::JrpcResponse,
-    ) -> BlockchainResponse;
+    ) -> String;
 
     /// Send a Rest request to the current blockchain.
     fn blockchain_rest(
@@ -67,7 +67,7 @@ pub trait Babel {
         url: String,
         /// These are the configuration options for parsing the response.
         response: config::RestResponse,
-    ) -> BlockchainResponse;
+    ) -> String;
 
     /// Send a Sh request to the current blockchain.
     fn blockchain_sh(
@@ -75,10 +75,8 @@ pub trait Babel {
         body: String,
         /// These are the configuration options for parsing the response.
         response: config::ShResponse,
-    ) -> BlockchainResponse;
+    ) -> String;
 }
-
-pub type BlockchainResponse = Result<String, String>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockchainKey {

@@ -68,7 +68,7 @@ impl babel_api::babel_server::Babel for BabelService {
     async fn upload_keys(
         &self,
         request: Request<(babel_api::config::KeysConfig, Vec<BlockchainKey>)>,
-    ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
+    ) -> Result<Response<String>, Status> {
         let (config, keys) = request.into_inner();
         if keys.is_empty() {
             return Err(Status::invalid_argument(
@@ -116,41 +116,39 @@ impl babel_api::babel_server::Babel for BabelService {
             ));
         }
 
-        Ok(Response::new(babel_api::BlockchainResponse::Ok(
-            results.join("\n"),
-        )))
+        Ok(Response::new(results.join("\n")))
     }
 
     async fn blockchain_jrpc(
         &self,
         request: Request<(String, String, babel_api::config::JrpcResponse)>,
-    ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(to_blockchain_response(
-            self.handle_jrpc(request).await,
-        )))
+    ) -> Result<Response<String>, Status> {
+        Ok(Response::new(
+            self.handle_jrpc(request).await.map_err(to_blockchain_err)?,
+        ))
     }
 
     async fn blockchain_rest(
         &self,
         request: Request<(String, babel_api::config::RestResponse)>,
-    ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(to_blockchain_response(
-            self.handle_rest(request).await,
-        )))
+    ) -> Result<Response<String>, Status> {
+        Ok(Response::new(
+            self.handle_rest(request).await.map_err(to_blockchain_err)?,
+        ))
     }
 
     async fn blockchain_sh(
         &self,
         request: Request<(String, babel_api::config::ShResponse)>,
-    ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(to_blockchain_response(
-            self.handle_sh(request).await,
-        )))
+    ) -> Result<Response<String>, Status> {
+        Ok(Response::new(
+            self.handle_sh(request).await.map_err(to_blockchain_err)?,
+        ))
     }
 }
 
-fn to_blockchain_response(output: Result<String>) -> babel_api::BlockchainResponse {
-    output.map_err(|err| err.to_string())
+fn to_blockchain_err(err: eyre::Error) -> Status {
+    Status::new(Code::Internal, err.to_string())
 }
 
 impl BabelService {
@@ -274,8 +272,7 @@ mod tests {
                 ],
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
         assert_eq!(
             output,
             format!(
@@ -329,8 +326,7 @@ mod tests {
                 }],
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
 
         assert_eq!(
             output,
@@ -379,8 +375,7 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
 
         mock.assert();
         assert_eq!(output, "123");
@@ -409,8 +404,7 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
 
         mock.assert();
         assert_eq!(output, "[1,2,3]");
@@ -439,8 +433,7 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
 
         mock.assert();
         assert_eq!(output, "{\"result\":[1,2,3]}");
@@ -460,8 +453,7 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
         assert_eq!(output, "\"make a toast\"");
         Ok(())
     }
