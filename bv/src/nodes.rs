@@ -48,9 +48,9 @@ pub enum ServiceStatus {
 
 #[derive(Debug)]
 pub struct Nodes<P: Pal + Debug> {
-    pub api_config: SharedConfig,
+    api_config: SharedConfig,
     pub nodes: HashMap<Uuid, Node<P>>,
-    pub node_ids: HashMap<String, Uuid>,
+    node_ids: HashMap<String, Uuid>,
     data: CommonData,
     pal: Arc<P>,
 }
