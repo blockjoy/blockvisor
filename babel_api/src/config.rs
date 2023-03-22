@@ -26,7 +26,7 @@ pub struct Babel {
 pub struct SupervisorConfig {
     /// Path to mount data drive to
     pub data_directory_mount_point: String,
-    ///  if entry_point stay alive given amount of time (in miliseconds) backof is reset
+    ///  if entry_point stay alive given amount of time (in miliseconds) backoff is reset
     pub backoff_timeout_ms: u64,
     /// base time (in miliseconds) for backof, multiplied by consecutive power of 2 each time
     pub backoff_base_ms: u64,
@@ -39,6 +39,46 @@ pub struct SupervisorConfig {
 pub struct Entrypoint {
     pub name: String,
     pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobConfig {
+    pub name: String,
+    pub body: String,
+    pub restart: RestartPolicy,
+    pub needs: Vec<String>,
+    pub callback: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RestartConfig {
+    /// if entry_point stay alive given amount of time (in miliseconds) backoff is reset
+    pub backoff_timeout_ms: u64,
+    /// base time (in miliseconds) for backof, multiplied by consecutive power of 2 each time
+    pub backoff_base_ms: u64,
+    /// maximum number of retries
+    pub max_retries: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartPolicy {
+    Never,
+    Always(RestartConfig),
+    OnFailure(RestartConfig),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStatus {
+    Pending,
+    Running(Option<String>), // may optionally contain progress message
+    Finished {
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+    },
+    Stopped,
 }
 
 impl Default for SupervisorConfig {

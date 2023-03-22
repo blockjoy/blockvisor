@@ -282,14 +282,14 @@ impl<P: Pal + Debug> Node<P> {
         let (babel_bin, checksum) = Self::load_babel_bin(babel_path).await?;
         let client = connection.babelsup_client().await?;
         let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
-        if babel_status != babel_api::BabelStatus::Ok {
+        if babel_status != babel_api::BinaryStatus::Ok {
             info!("Invalid or missing Babel service on VM, installing new one");
             with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
         }
         Ok(connection)
     }
 
-    async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::BabelBin>, u32)> {
+    async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::Binary>, u32)> {
         let file = File::open(babel_path)
             .await
             .with_context(|| format!("failed to load babel binary {}", babel_path.display()))?;
@@ -297,16 +297,16 @@ impl<P: Pal + Debug> Node<P> {
         let mut buf = [0; 16384];
         let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
         let mut digest = crc.digest();
-        let mut babel_bin = Vec::<babel_api::BabelBin>::default();
+        let mut babel_bin = Vec::<babel_api::Binary>::default();
         while let Ok(size) = reader.read(&mut buf[..]).await {
             if size == 0 {
                 break;
             }
             digest.update(&buf[0..size]);
-            babel_bin.push(babel_api::BabelBin::Bin(buf[0..size].to_vec()));
+            babel_bin.push(babel_api::Binary::Bin(buf[0..size].to_vec()));
         }
         let checksum = digest.finalize();
-        babel_bin.push(babel_api::BabelBin::Checksum(checksum));
+        babel_bin.push(babel_api::Binary::Checksum(checksum));
         Ok((babel_bin, checksum))
     }
 

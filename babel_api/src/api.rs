@@ -23,21 +23,21 @@ pub trait BabelSup {
     fn get_version() -> String;
     #[server_streaming]
     fn get_logs() -> String;
-    fn check_babel(checksum: u32) -> BabelStatus;
+    fn check_babel(checksum: u32) -> BinaryStatus;
     #[client_streaming]
-    fn start_new_babel(babel_bin: BabelBin);
+    fn start_new_babel(babel_bin: Binary);
     fn setup_supervisor(config: SupervisorConfig);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum BabelStatus {
+pub enum BinaryStatus {
     Ok,
     ChecksumMismatch,
     Missing,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum BabelBin {
+pub enum Binary {
     Bin(Vec<u8>),
     Checksum(u32),
 }
@@ -46,10 +46,23 @@ pub enum BabelBin {
 pub trait Babel {
     /// Setup firewall according to given configuration.
     fn setup_firewall(config: config::firewall::Config);
+    /// Mount data directory.
+    fn mount_data_directory(data_directory_mount_point: String);
     /// Download key files from locations specified in `keys` section of Babel config.
     fn download_keys(config: config::KeysConfig) -> Vec<BlockchainKey>;
     /// Upload files into locations specified in `keys` section of Babel config.
     fn upload_keys(config: config::KeysConfig, keys: Vec<BlockchainKey>) -> String;
+    /// Check if JobRunner binary exists and its checksum match expected.
+    fn check_job_runner(checksum: u32) -> BinaryStatus;
+    /// Upload JobRunner binary, overriding existing one (if any).
+    #[client_streaming]
+    fn upload_job_runner(babel_bin: Binary);
+    /// Start background job with unique name.
+    fn start_job(job_name: String, job: config::JobConfig);
+    /// Stop background job with given unique name if running.
+    fn stop_job(job_name: String);
+    /// Get background job status by unique name.
+    fn job_status(job_name: String) -> config::JobStatus;
 
     /// Send a Jrpc request to the current blockchain.
     fn blockchain_jrpc(

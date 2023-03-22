@@ -1,5 +1,6 @@
 use crate::ufw_wrapper::apply_firewall_config;
 use async_trait::async_trait;
+use babel_api::config::{JobConfig, JobStatus};
 use babel_api::BlockchainKey;
 use eyre::{bail, Result};
 use serde_json::json;
@@ -9,7 +10,7 @@ use tokio::{
     fs::{DirBuilder, File},
     io::AsyncWriteExt,
 };
-use tonic::{Code, Request, Response, Status};
+use tonic::{Code, Request, Response, Status, Streaming};
 
 const WILDCARD_KEY_NAME: &str = "*";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -41,6 +42,13 @@ impl babel_api::babel_server::Babel for BabelService {
                 )
             })?;
         Ok(Response::new(()))
+    }
+
+    async fn mount_data_directory(
+        &self,
+        _request: Request<String>,
+    ) -> Result<Response<()>, Status> {
+        unimplemented!();
     }
 
     async fn download_keys(
@@ -117,6 +125,35 @@ impl babel_api::babel_server::Babel for BabelService {
         }
 
         Ok(Response::new(results.join("\n")))
+    }
+
+    async fn check_job_runner(
+        &self,
+        _request: Request<u32>,
+    ) -> Result<Response<babel_api::BinaryStatus>, Status> {
+        unimplemented!();
+    }
+
+    async fn upload_job_runner(
+        &self,
+        _request: Request<Streaming<babel_api::Binary>>,
+    ) -> Result<Response<()>, Status> {
+        unimplemented!();
+    }
+
+    async fn start_job(
+        &self,
+        _request: Request<(String, JobConfig)>,
+    ) -> Result<Response<()>, Status> {
+        unimplemented!();
+    }
+
+    async fn stop_job(&self, _request: Request<String>) -> Result<Response<()>, Status> {
+        unimplemented!();
+    }
+
+    async fn job_status(&self, _request: Request<String>) -> Result<Response<JobStatus>, Status> {
+        unimplemented!();
     }
 
     async fn blockchain_jrpc(
