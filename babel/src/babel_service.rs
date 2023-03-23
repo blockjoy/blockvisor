@@ -5,20 +5,29 @@ use babel_api::config::{JobConfig, JobStatus};
 use babel_api::BlockchainKey;
 use eyre::{bail, Result};
 use serde_json::json;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::{path::Path, time::Duration};
+use tokio::sync::RwLock;
 use tokio::{
     fs,
     fs::{DirBuilder, File},
     io::AsyncWriteExt,
 };
-use tonic::{Code, Request, Response, Status, Streaming};
+use tonic::{Request, Response, Status, Streaming};
 
 const WILDCARD_KEY_NAME: &str = "*";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const DATA_DRIVE_PATH: &str = "/dev/vdb";
 
+/// Lock used to avoid reading job runner binary while it is modified.
+/// It stores CRC32 checksum of the binary file.
+pub type JobRunnerLock = Arc<RwLock<Option<u32>>>;
+
 pub struct BabelService {
     inner: reqwest::Client,
+    job_runner_lock: JobRunnerLock,
+    job_runner_bin_path: PathBuf,
 }
 
 impl std::ops::Deref for BabelService {
@@ -38,10 +47,7 @@ impl babel_api::babel_server::Babel for BabelService {
         apply_firewall_config(request.into_inner())
             .await
             .map_err(|err| {
-                Status::new(
-                    Code::Internal,
-                    format!("failed to apply firewall config with: {err}"),
-                )
+                Status::internal(format!("failed to apply firewall config with: {err}"))
             })?;
         Ok(Response::new(()))
     }
@@ -53,12 +59,17 @@ impl babel_api::babel_server::Babel for BabelService {
         // https://github.com/firecracker-microvm/firecracker-containerd/blob/main/docs/design-approaches.md#block-devices
         let out = utils::mount_drive(DATA_DRIVE_PATH, &data_directory_mount_point)
             .await
-            .map_err(|err| Status::new(Code::Internal, format!("failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point} with: {err}")))?;
+            .map_err(|err| Status::internal(format!("failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point} with: {err}")))?;
         match out.status.code() {
             Some(0) => Ok(Response::new(())),
-            // it is ok if we can't mount because it is already mounted
-            Some(32) if String::from_utf8_lossy(&out.stderr).contains("already mounted") => Ok(Response::new(())),
-            _ => Err(Status::new(Code::Internal, format!("failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point} with: {out:?}"))),
+            Some(32) if String::from_utf8_lossy(&out.stderr).contains("already mounted") => {
+                Err(Status::already_exists(format!(
+                    "drive {DATA_DRIVE_PATH} already mounted into {data_directory_mount_point} "
+                )))
+            }
+            _ => Err(Status::internal(format!(
+                "failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point} with: {out:?}"
+            ))),
         }
     }
 
@@ -140,16 +151,29 @@ impl babel_api::babel_server::Babel for BabelService {
 
     async fn check_job_runner(
         &self,
-        _request: Request<u32>,
+        request: Request<u32>,
     ) -> Result<Response<babel_api::BinaryStatus>, Status> {
-        unimplemented!();
+        let expected_checksum = request.into_inner();
+        let job_runner_status = match *self.job_runner_lock.read().await {
+            Some(checksum) if checksum == expected_checksum => babel_api::BinaryStatus::Ok,
+            Some(_) => babel_api::BinaryStatus::ChecksumMismatch,
+            None => babel_api::BinaryStatus::Missing,
+        };
+        Ok(Response::new(job_runner_status))
     }
 
     async fn upload_job_runner(
         &self,
-        _request: Request<Streaming<babel_api::Binary>>,
+        request: Request<Streaming<babel_api::Binary>>,
     ) -> Result<Response<()>, Status> {
-        unimplemented!();
+        let mut stream = request.into_inner();
+        // block using job runner binary
+        let mut lock = self.job_runner_lock.write().await;
+        let checksum = utils::save_bin_stream(&self.job_runner_bin_path, &mut stream)
+            .await
+            .map_err(|e| Status::internal(format!("upload_job_runner failed with {e}")))?;
+        lock.replace(checksum);
+        Ok(Response::new(()))
     }
 
     async fn start_job(
@@ -196,15 +220,19 @@ impl babel_api::babel_server::Babel for BabelService {
 }
 
 fn to_blockchain_err(err: eyre::Error) -> Status {
-    Status::new(Code::Internal, err.to_string())
+    Status::internal(err.to_string())
 }
 
 impl BabelService {
-    pub fn new() -> Result<Self> {
+    pub fn new(job_runner_lock: JobRunnerLock, job_runner_bin_path: PathBuf) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .build()?;
-        Ok(Self { inner: client })
+        Ok(Self {
+            inner: client,
+            job_runner_lock,
+            job_runner_bin_path,
+        })
     }
 
     async fn handle_jrpc(
@@ -272,17 +300,76 @@ impl BabelService {
 mod tests {
     use super::*;
     use assert_fs::TempDir;
+    use babel_api::babel_client::BabelClient;
     use babel_api::babel_server::Babel;
     use babel_api::config::{JrpcResponse, MethodResponseFormat, RestResponse, ShResponse};
     use httpmock::prelude::*;
     use std::collections::HashMap;
+    use tokio::net::UnixStream;
+    use tokio_stream::wrappers::UnixListenerStream;
+    use tonic::transport::{Channel, Endpoint, Server, Uri};
+
+    async fn babel_server(
+        job_runner_lock: JobRunnerLock,
+        job_runner_bin_path: PathBuf,
+        uds_stream: UnixListenerStream,
+    ) -> Result<()> {
+        let babel_service = BabelService::new(job_runner_lock, job_runner_bin_path)?;
+        Server::builder()
+            .max_concurrent_streams(1)
+            .add_service(babel_api::babel_server::BabelServer::new(babel_service))
+            .serve_with_incoming(uds_stream)
+            .await?;
+        Ok(())
+    }
+
+    fn test_client(tmp_root: &Path) -> Result<BabelClient<Channel>> {
+        let socket_path = tmp_root.join("test_socket");
+        let channel = Endpoint::from_static("http://[::]:50052")
+            .timeout(Duration::from_secs(1))
+            .connect_timeout(Duration::from_secs(1))
+            .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+                UnixStream::connect(socket_path.clone())
+            }));
+        Ok(BabelClient::new(channel))
+    }
+
+    struct TestEnv {
+        job_runner_bin_path: PathBuf,
+        job_runner_lock: JobRunnerLock,
+        client: BabelClient<Channel>,
+    }
+
+    fn setup_test_env() -> Result<TestEnv> {
+        let tmp_root = TempDir::new()?.to_path_buf();
+        std::fs::create_dir_all(&tmp_root)?;
+        let path = tmp_root.join("job_runner");
+        let lock = Arc::new(RwLock::new(None));
+        let client = test_client(&tmp_root)?;
+        let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(
+            tmp_root.join("test_socket"),
+        )?);
+        let job_runner_lock = lock.clone();
+        let job_runner_bin_path = path.clone();
+        tokio::spawn(async move { babel_server(lock, path, uds_stream).await });
+
+        Ok(TestEnv {
+            job_runner_bin_path,
+            job_runner_lock,
+            client,
+        })
+    }
+
+    fn build_babel_service_with_defaults() -> Result<BabelService> {
+        BabelService::new(Arc::new(Default::default()), Default::default())
+    }
 
     #[tokio::test]
     async fn test_upload_download_keys() -> Result<()> {
         let tmp_dir = TempDir::new().unwrap();
         let tmp_dir_str = format!("{}", tmp_dir.to_string_lossy());
 
-        let service = BabelService::new()?;
+        let service = build_babel_service_with_defaults()?;
         let cfg = HashMap::from([
             ("first".to_string(), format!("{tmp_dir_str}/first/key")),
             ("second".to_string(), format!("{tmp_dir_str}/second/key")),
@@ -362,7 +449,7 @@ mod tests {
             WILDCARD_KEY_NAME.to_string(),
             format!("{tmp_dir_str}/star/"),
         )]);
-        let service = BabelService::new()?;
+        let service = build_babel_service_with_defaults()?;
 
         println!("upload unknown keys");
         let output = service
@@ -412,7 +499,7 @@ mod tests {
                 }));
         });
 
-        let service = BabelService::new()?;
+        let service = build_babel_service_with_defaults()?;
         let output = service
             .blockchain_jrpc(Request::new((
                 format!("http://{}", server.address()),
@@ -441,7 +528,7 @@ mod tests {
                 .json_body(json!({"result": [1, 2, 3]}));
         });
 
-        let service = BabelService::new()?;
+        let service = build_babel_service_with_defaults()?;
         let output = service
             .blockchain_rest(Request::new((
                 format!("http://{}/items", server.address()),
@@ -470,7 +557,7 @@ mod tests {
                 .json_body(json!({"result": [1, 2, 3]}));
         });
 
-        let service = BabelService::new()?;
+        let service = build_babel_service_with_defaults()?;
         let output = service
             .blockchain_rest(Request::new((
                 format!("http://{}/items", server.address()),
@@ -490,7 +577,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sh() -> Result<()> {
-        let service = BabelService::new()?;
+        let service = build_babel_service_with_defaults()?;
 
         let output = service
             .blockchain_sh(Request::new((
@@ -503,6 +590,81 @@ mod tests {
             .await?
             .into_inner();
         assert_eq!(output, "\"make a toast\"");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_upload_job_runner() -> Result<()> {
+        let mut test_env = setup_test_env()?;
+
+        let incomplete_runner_bin = vec![
+            babel_api::Binary::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
+            babel_api::Binary::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
+            babel_api::Binary::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
+        ];
+
+        test_env
+            .client
+            .upload_job_runner(tokio_stream::iter(incomplete_runner_bin.clone()))
+            .await
+            .unwrap_err();
+        assert!(test_env.job_runner_lock.read().await.is_none());
+
+        let mut invalid_runner_bin = incomplete_runner_bin.clone();
+        invalid_runner_bin.push(babel_api::Binary::Checksum(123));
+        test_env
+            .client
+            .upload_job_runner(tokio_stream::iter(invalid_runner_bin))
+            .await
+            .unwrap_err();
+        assert!(test_env.job_runner_lock.read().await.is_none());
+
+        let mut runner_bin = incomplete_runner_bin.clone();
+        runner_bin.push(babel_api::Binary::Checksum(4135829304));
+        test_env
+            .client
+            .upload_job_runner(tokio_stream::iter(runner_bin))
+            .await?;
+        assert_eq!(4135829304, test_env.job_runner_lock.read().await.unwrap());
+        assert_eq!(
+            4135829304,
+            utils::file_checksum(&test_env.job_runner_bin_path)
+                .await
+                .unwrap()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_check_job_runner() -> Result<()> {
+        let job_runner_bin_path = TempDir::new().unwrap().join("job_runner");
+        let job_runner_lock = Arc::new(RwLock::new(None));
+
+        let service = BabelService::new(job_runner_lock.clone(), job_runner_bin_path)?;
+
+        assert_eq!(
+            babel_api::BinaryStatus::Missing,
+            service
+                .check_job_runner(Request::new(123))
+                .await?
+                .into_inner()
+        );
+
+        job_runner_lock.write().await.replace(321);
+        assert_eq!(
+            babel_api::BinaryStatus::ChecksumMismatch,
+            service
+                .check_job_runner(Request::new(123))
+                .await?
+                .into_inner()
+        );
+        assert_eq!(
+            babel_api::BinaryStatus::Ok,
+            service
+                .check_job_runner(Request::new(321))
+                .await?
+                .into_inner()
+        );
         Ok(())
     }
 }

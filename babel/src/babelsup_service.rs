@@ -1,13 +1,10 @@
 use crate::{supervisor, utils};
 use async_trait::async_trait;
 use babel_api::config::SupervisorConfig;
-use futures::StreamExt;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::{fs, mem};
-use tokio::fs::OpenOptions;
-use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{broadcast, Mutex};
 use tonic::{Request, Response, Status, Streaming};
 
@@ -81,25 +78,13 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::babel_sup_s
         request: Request<Streaming<babel_api::Binary>>,
     ) -> Result<Response<()>, Status> {
         let mut stream = request.into_inner();
-        let expected_checksum = self.save_babel_stream(&mut stream).await?;
-
-        let checksum = utils::file_checksum(&self.babel_bin_path)
+        let checksum = utils::save_bin_stream(&self.babel_bin_path, &mut stream)
             .await
-            .map_err(|err| {
-                Status::internal(format!("failed to calculate babel binary checksum: {err}"))
-            })?;
-
-        if expected_checksum == checksum {
-            self.babel_change_tx.send_modify(|value| {
-                let _ = value.insert(checksum);
-            });
-            Ok(Response::new(()))
-        } else {
-            Err(Status::internal(format!(
-                "received babel binary checksum ({checksum})\
-                 doesn't match expected ({expected_checksum})"
-            )))
-        }
+            .map_err(|e| Status::internal(format!("start_new_babel failed with {e}")))?;
+        self.babel_change_tx.send_modify(|value| {
+            let _ = value.insert(checksum);
+        });
+        Ok(Response::new(()))
     }
 
     async fn setup_supervisor(
@@ -156,44 +141,6 @@ impl<T: SupervisorConfigObserver> BabelSupService<T> {
             supervisor_cfg_observer,
         }
     }
-
-    /// Write babel binary stream into the file.
-    async fn save_babel_stream(
-        &self,
-        stream: &mut Streaming<babel_api::Binary>,
-    ) -> Result<u32, Status> {
-        let _ = tokio::fs::remove_file(&self.babel_bin_path).await;
-        let file = OpenOptions::new()
-            .write(true)
-            .mode(0o770)
-            .append(false)
-            .create(true)
-            .open(&self.babel_bin_path)
-            .await
-            .map_err(|err| Status::internal(format!("failed to open babel binary file: {err}")))?;
-        let mut writer = BufWriter::new(file);
-        let mut expected_checksum = None;
-        while let Some(part) = stream.next().await {
-            let part = part.map_err(|e| Status::internal(e.to_string()))?;
-            match part {
-                babel_api::Binary::Bin(bin) => {
-                    writer.write(&bin).await.map_err(|err| {
-                        Status::internal(format!("failed to save babel binary: {err}"))
-                    })?;
-                }
-                babel_api::Binary::Checksum(checksum) => {
-                    expected_checksum = Some(checksum);
-                }
-            }
-        }
-        writer
-            .flush()
-            .await
-            .map_err(|err| Status::internal(format!("failed to save babel binary: {err}")))?;
-        expected_checksum.ok_or_else(|| {
-            Status::invalid_argument("incomplete babel_bin stream - missing checksum")
-        })
-    }
 }
 
 #[cfg(test)]
@@ -205,6 +152,7 @@ mod tests {
     use babel_api::babel_sup_server::BabelSup;
     use babel_api::config::{Entrypoint, SupervisorConfig};
     use eyre::Result;
+    use futures::StreamExt;
     use std::fs;
     use std::path::Path;
     use std::time::Duration;
