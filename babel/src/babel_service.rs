@@ -1,4 +1,5 @@
 use crate::ufw_wrapper::apply_firewall_config;
+use crate::utils;
 use async_trait::async_trait;
 use babel_api::config::{JobConfig, JobStatus};
 use babel_api::BlockchainKey;
@@ -14,6 +15,7 @@ use tonic::{Code, Request, Response, Status, Streaming};
 
 const WILDCARD_KEY_NAME: &str = "*";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const DATA_DRIVE_PATH: &str = "/dev/vdb";
 
 pub struct BabelService {
     inner: reqwest::Client,
@@ -44,11 +46,20 @@ impl babel_api::babel_server::Babel for BabelService {
         Ok(Response::new(()))
     }
 
-    async fn mount_data_directory(
-        &self,
-        _request: Request<String>,
-    ) -> Result<Response<()>, Status> {
-        unimplemented!();
+    async fn mount_data_directory(&self, request: Request<String>) -> Result<Response<()>, Status> {
+        let data_directory_mount_point = request.into_inner();
+        // We assume that root drive will become /dev/vda, and data drive will become /dev/vdb inside VM
+        // However, this can be a wrong assumption ¯\_(ツ)_/¯:
+        // https://github.com/firecracker-microvm/firecracker-containerd/blob/main/docs/design-approaches.md#block-devices
+        let out = utils::mount_drive(DATA_DRIVE_PATH, &data_directory_mount_point)
+            .await
+            .map_err(|err| Status::new(Code::Internal, format!("failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point} with: {err}")))?;
+        match out.status.code() {
+            Some(0) => Ok(Response::new(())),
+            // it is ok if we can't mount because it is already mounted
+            Some(32) if String::from_utf8_lossy(&out.stderr).contains("already mounted") => Ok(Response::new(())),
+            _ => Err(Status::new(Code::Internal, format!("failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point} with: {out:?}"))),
+        }
     }
 
     async fn download_keys(
