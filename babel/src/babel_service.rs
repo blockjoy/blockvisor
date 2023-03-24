@@ -1,5 +1,6 @@
 use crate::ufw_wrapper::apply_firewall_config;
 use async_trait::async_trait;
+use babel_api::config::{JobConfig, JobStatus};
 use babel_api::BlockchainKey;
 use eyre::{bail, Result};
 use serde_json::json;
@@ -9,7 +10,7 @@ use tokio::{
     fs::{DirBuilder, File},
     io::AsyncWriteExt,
 };
-use tonic::{Code, Request, Response, Status};
+use tonic::{Code, Request, Response, Status, Streaming};
 
 const WILDCARD_KEY_NAME: &str = "*";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -43,6 +44,13 @@ impl babel_api::babel_server::Babel for BabelService {
         Ok(Response::new(()))
     }
 
+    async fn mount_data_directory(
+        &self,
+        _request: Request<String>,
+    ) -> Result<Response<()>, Status> {
+        unimplemented!();
+    }
+
     async fn download_keys(
         &self,
         request: Request<babel_api::config::KeysConfig>,
@@ -68,7 +76,7 @@ impl babel_api::babel_server::Babel for BabelService {
     async fn upload_keys(
         &self,
         request: Request<(babel_api::config::KeysConfig, Vec<BlockchainKey>)>,
-    ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
+    ) -> Result<Response<String>, Status> {
         let (config, keys) = request.into_inner();
         if keys.is_empty() {
             return Err(Status::invalid_argument(
@@ -116,41 +124,68 @@ impl babel_api::babel_server::Babel for BabelService {
             ));
         }
 
-        Ok(Response::new(babel_api::BlockchainResponse::Ok(
-            results.join("\n"),
-        )))
+        Ok(Response::new(results.join("\n")))
+    }
+
+    async fn check_job_runner(
+        &self,
+        _request: Request<u32>,
+    ) -> Result<Response<babel_api::BinaryStatus>, Status> {
+        unimplemented!();
+    }
+
+    async fn upload_job_runner(
+        &self,
+        _request: Request<Streaming<babel_api::Binary>>,
+    ) -> Result<Response<()>, Status> {
+        unimplemented!();
+    }
+
+    async fn start_job(
+        &self,
+        _request: Request<(String, JobConfig)>,
+    ) -> Result<Response<()>, Status> {
+        unimplemented!();
+    }
+
+    async fn stop_job(&self, _request: Request<String>) -> Result<Response<()>, Status> {
+        unimplemented!();
+    }
+
+    async fn job_status(&self, _request: Request<String>) -> Result<Response<JobStatus>, Status> {
+        unimplemented!();
     }
 
     async fn blockchain_jrpc(
         &self,
         request: Request<(String, String, babel_api::config::JrpcResponse)>,
-    ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(to_blockchain_response(
-            self.handle_jrpc(request).await,
-        )))
+    ) -> Result<Response<String>, Status> {
+        Ok(Response::new(
+            self.handle_jrpc(request).await.map_err(to_blockchain_err)?,
+        ))
     }
 
     async fn blockchain_rest(
         &self,
         request: Request<(String, babel_api::config::RestResponse)>,
-    ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(to_blockchain_response(
-            self.handle_rest(request).await,
-        )))
+    ) -> Result<Response<String>, Status> {
+        Ok(Response::new(
+            self.handle_rest(request).await.map_err(to_blockchain_err)?,
+        ))
     }
 
     async fn blockchain_sh(
         &self,
         request: Request<(String, babel_api::config::ShResponse)>,
-    ) -> Result<Response<babel_api::BlockchainResponse>, Status> {
-        Ok(Response::new(to_blockchain_response(
-            self.handle_sh(request).await,
-        )))
+    ) -> Result<Response<String>, Status> {
+        Ok(Response::new(
+            self.handle_sh(request).await.map_err(to_blockchain_err)?,
+        ))
     }
 }
 
-fn to_blockchain_response(output: Result<String>) -> babel_api::BlockchainResponse {
-    output.map_err(|err| err.to_string())
+fn to_blockchain_err(err: eyre::Error) -> Status {
+    Status::new(Code::Internal, err.to_string())
 }
 
 impl BabelService {
@@ -274,8 +309,7 @@ mod tests {
                 ],
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
         assert_eq!(
             output,
             format!(
@@ -329,8 +363,7 @@ mod tests {
                 }],
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
 
         assert_eq!(
             output,
@@ -379,8 +412,7 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
 
         mock.assert();
         assert_eq!(output, "123");
@@ -409,8 +441,7 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
 
         mock.assert();
         assert_eq!(output, "[1,2,3]");
@@ -439,8 +470,7 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
 
         mock.assert();
         assert_eq!(output, "{\"result\":[1,2,3]}");
@@ -460,8 +490,7 @@ mod tests {
                 },
             )))
             .await?
-            .into_inner()
-            .unwrap();
+            .into_inner();
         assert_eq!(output, "\"make a toast\"");
         Ok(())
     }

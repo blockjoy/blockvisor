@@ -174,19 +174,20 @@ impl BabelEngine {
                 )))
             }
         };
-        let resp = match resp
-            .map_err(|err| {
-                self.node_conn.mark_broken();
-                err
+        let value = resp
+            .map_err(|err| match err.code() {
+                // just forward internal errors
+                tonic::Code::Internal => err,
+                _ => {
+                    // for others mark connection as broken
+                    self.node_conn.mark_broken();
+                    err
+                }
             })?
-            .into_inner()
-        {
-            Ok(value) => value
-                .parse()
-                .context(format!("Could not parse {name} response: {value}"))?,
-            Err(err) => bail!(err),
-        };
-        Ok(resp)
+            .into_inner();
+        value
+            .parse()
+            .context(format!("Could not parse {name} response: {value}"))
     }
 
     /// Returns the methods that are supported by this blockchain. Calling any method on this

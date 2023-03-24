@@ -9,6 +9,7 @@ use crate::{
 };
 
 use anyhow::{bail, Context, Result};
+use babel_api::config::firewall;
 use firec::{config::JailerMode, Machine};
 use std::{
     ffi::OsStr,
@@ -281,14 +282,14 @@ impl<P: Pal + Debug> Node<P> {
         let (babel_bin, checksum) = Self::load_babel_bin(babel_path).await?;
         let client = connection.babelsup_client().await?;
         let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
-        if babel_status != babel_api::BabelStatus::Ok {
+        if babel_status != babel_api::BinaryStatus::Ok {
             info!("Invalid or missing Babel service on VM, installing new one");
             with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
         }
         Ok(connection)
     }
 
-    async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::BabelBin>, u32)> {
+    async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::Binary>, u32)> {
         let file = File::open(babel_path)
             .await
             .with_context(|| format!("failed to load babel binary {}", babel_path.display()))?;
@@ -296,16 +297,16 @@ impl<P: Pal + Debug> Node<P> {
         let mut buf = [0; 16384];
         let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
         let mut digest = crc.digest();
-        let mut babel_bin = Vec::<babel_api::BabelBin>::default();
+        let mut babel_bin = Vec::<babel_api::Binary>::default();
         while let Ok(size) = reader.read(&mut buf[..]).await {
             if size == 0 {
                 break;
             }
             digest.update(&buf[0..size]);
-            babel_bin.push(babel_api::BabelBin::Bin(buf[0..size].to_vec()));
+            babel_bin.push(babel_api::Binary::Bin(buf[0..size].to_vec()));
         }
         let checksum = digest.finalize();
-        babel_bin.push(babel_api::BabelBin::Checksum(checksum));
+        babel_bin.push(babel_api::Binary::Checksum(checksum));
         Ok((babel_bin, checksum))
     }
 
@@ -413,7 +414,10 @@ impl<P: Pal + Debug> Node<P> {
     ) -> Result<()> {
         // If the fields we receive are populated, we update the node data.
         if let Some(name) = name {
-            self.data.name = name;
+            // TODO: we need to remove it from protos
+            if self.data.name == name {
+                warn!("Cannot change node name to `{name}`, operation is not supported");
+            }
         }
         if let Some(self_update) = self_update {
             self.data.self_update = self_update;
@@ -422,6 +426,14 @@ impl<P: Pal + Debug> Node<P> {
             // TODO change API to send Option<Vec<Parameter>> to allow setting empty properties
             self.data.properties = properties.into_iter().map(|p| (p.name, p.value)).collect();
         }
+        self.data.save(&self.paths.registry).await
+    }
+
+    pub async fn firewall_update(&mut self, config: firewall::Config) -> Result<()> {
+        babel_api::check_firewall_config(&config)?;
+        let babel_client = self.babel_engine.node_conn.babel_client().await?;
+        with_retry!(babel_client.setup_firewall(config.clone()))?;
+        self.data.babel_conf.firewall = Some(config);
         self.data.save(&self.paths.registry).await
     }
 

@@ -2,19 +2,16 @@ pub mod bv_pb {
     tonic::include_proto!("blockjoy.blockvisor.v1");
 }
 
-use crate::node::Node;
 use crate::pal::{NetInterface, Pal};
 use crate::{
     get_bv_status,
     node_data::{NodeImage, NodeStatus},
-    node_metrics,
     nodes::Nodes,
     set_bv_status,
 };
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::instrument;
 
@@ -32,7 +29,7 @@ async fn status_check() -> Result<(), Status> {
 }
 
 pub struct BlockvisorServer<P: Pal + Debug> {
-    pub nodes: Arc<RwLock<Nodes<P>>>,
+    pub nodes: Arc<Nodes<P>>,
 }
 
 #[tonic::async_trait]
@@ -82,8 +79,6 @@ where
             .collect();
 
         self.nodes
-            .write()
-            .await
             .create(
                 id,
                 request.name,
@@ -114,8 +109,6 @@ where
             .into();
 
         self.nodes
-            .write()
-            .await
             .upgrade(id, image)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
@@ -135,8 +128,6 @@ where
         let id = helpers::parse_uuid(request.id)?;
 
         self.nodes
-            .write()
-            .await
             .delete(id)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
@@ -155,8 +146,6 @@ where
         let id = helpers::parse_uuid(request.id)?;
 
         self.nodes
-            .write()
-            .await
             .start(id)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
@@ -176,8 +165,6 @@ where
         let id = helpers::parse_uuid(request.id)?;
 
         self.nodes
-            .write()
-            .await
             .stop(id)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
@@ -193,10 +180,10 @@ where
         _request: Request<bv_pb::GetNodesRequest>,
     ) -> Result<Response<bv_pb::GetNodesResponse>, Status> {
         status_check().await?;
-        let nodes = self.nodes.read().await;
-        let list: Vec<&Node<P>> = nodes.list().await;
+        let nodes_lock = self.nodes.nodes.read().await;
         let mut nodes = vec![];
-        for node in list {
+        for node in nodes_lock.values() {
+            let node = node.read().await;
             let status = match node.status() {
                 NodeStatus::Running => bv_pb::NodeStatus::Running,
                 NodeStatus::Stopped => bv_pb::NodeStatus::Stopped,
@@ -230,8 +217,6 @@ where
 
         let status = self
             .nodes
-            .read()
-            .await
             .status(id)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
@@ -255,18 +240,14 @@ where
     ) -> Result<Response<bv_pb::GetNodeLogsResponse>, Status> {
         status_check().await?;
         let request = request.into_inner();
-        let node_id = helpers::parse_uuid(request.id)?;
+        let id = helpers::parse_uuid(request.id)?;
+
         let logs = self
             .nodes
-            .write()
+            .logs(id)
             .await
-            .nodes
-            .get_mut(&node_id)
-            .ok_or_else(|| Status::invalid_argument("No such node"))?
-            .babel_engine
-            .get_logs()
-            .await
-            .map_err(|e| Status::internal(format!("Call to babel failed: `{e}`")))?;
+            .map_err(|e| Status::unknown(e.to_string()))?;
+
         Ok(Response::new(bv_pb::GetNodeLogsResponse { logs }))
     }
 
@@ -277,18 +258,14 @@ where
     ) -> Result<Response<bv_pb::GetNodeKeysResponse>, Status> {
         status_check().await?;
         let request = request.into_inner();
-        let node_id = helpers::parse_uuid(request.id)?;
+        let id = helpers::parse_uuid(request.id)?;
+
         let keys = self
             .nodes
-            .write()
+            .keys(id)
             .await
-            .nodes
-            .get_mut(&node_id)
-            .ok_or_else(|| Status::invalid_argument("No such node"))?
-            .babel_engine
-            .download_keys()
-            .await
-            .map_err(|e| Status::internal(format!("Call to babel failed: `{e}`")))?;
+            .map_err(|e| Status::unknown(e.to_string()))?;
+
         let names = keys.into_iter().map(|k| k.name).collect();
         Ok(Response::new(bv_pb::GetNodeKeysResponse { names }))
     }
@@ -304,8 +281,6 @@ where
 
         let id = self
             .nodes
-            .read()
-            .await
             .node_id_for_name(&name)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
@@ -322,16 +297,14 @@ where
     ) -> Result<Response<bv_pb::ListCapabilitiesResponse>, Status> {
         status_check().await?;
         let request = request.into_inner();
-        let node_id = helpers::parse_uuid(request.node_id)?;
+        let id = helpers::parse_uuid(request.node_id)?;
+
         let capabilities = self
             .nodes
-            .read()
+            .capabilities(id)
             .await
-            .nodes
-            .get(&node_id)
-            .ok_or_else(|| Status::invalid_argument("No such node"))?
-            .babel_engine
-            .capabilities();
+            .map_err(|e| Status::unknown(e.to_string()))?;
+
         Ok(Response::new(bv_pb::ListCapabilitiesResponse {
             capabilities,
         }))
@@ -345,7 +318,8 @@ where
     ) -> Result<Response<bv_pb::BlockchainResponse>, Status> {
         status_check().await?;
         let request = request.into_inner();
-        let node_id = helpers::parse_uuid(request.node_id)?;
+        let id = helpers::parse_uuid(request.node_id)?;
+
         let params = request
             .params
             .into_iter()
@@ -353,15 +327,10 @@ where
             .collect();
         let value = self
             .nodes
-            .write()
+            .call_method(id, &request.method, params)
             .await
-            .nodes
-            .get_mut(&node_id)
-            .ok_or_else(|| Status::invalid_argument("No such node"))?
-            .babel_engine
-            .call_method(&request.method, params)
-            .await
-            .map_err(|e| Status::internal(format!("Call to babel failed: `{e}`")))?;
+            .map_err(|e| Status::unknown(e.to_string()))?;
+
         Ok(Response::new(bv_pb::BlockchainResponse { value }))
     }
 
@@ -372,13 +341,14 @@ where
     ) -> Result<Response<bv_pb::GetNodeMetricsResponse>, Status> {
         status_check().await?;
         let request = request.into_inner();
-        let node_id = helpers::parse_uuid(request.node_id)?;
-        let mut node_lock = self.nodes.write().await;
-        let node = node_lock
+        let id = helpers::parse_uuid(request.node_id)?;
+
+        let metrics = self
             .nodes
-            .get_mut(&node_id)
-            .ok_or_else(|| Status::invalid_argument("No such node"))?;
-        let metrics = node_metrics::collect_metric(&mut node.babel_engine).await;
+            .metrics(id)
+            .await
+            .map_err(|e| Status::unknown(e.to_string()))?;
+
         Ok(Response::new(bv_pb::GetNodeMetricsResponse {
             height: metrics.height,
             block_age: metrics.block_age,

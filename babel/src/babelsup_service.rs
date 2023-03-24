@@ -61,24 +61,24 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::babel_sup_s
     async fn check_babel(
         &self,
         request: Request<u32>,
-    ) -> Result<Response<babel_api::BabelStatus>, Status> {
+    ) -> Result<Response<babel_api::BinaryStatus>, Status> {
         let expected_checksum = request.into_inner();
         let babel_status = match *self.babel_change_tx.borrow() {
             Some(checksum) => {
                 if checksum == expected_checksum {
-                    babel_api::BabelStatus::Ok
+                    babel_api::BinaryStatus::Ok
                 } else {
-                    babel_api::BabelStatus::ChecksumMismatch
+                    babel_api::BinaryStatus::ChecksumMismatch
                 }
             }
-            None => babel_api::BabelStatus::Missing,
+            None => babel_api::BinaryStatus::Missing,
         };
         Ok(Response::new(babel_status))
     }
 
     async fn start_new_babel(
         &self,
-        request: Request<Streaming<babel_api::BabelBin>>,
+        request: Request<Streaming<babel_api::Binary>>,
     ) -> Result<Response<()>, Status> {
         let mut stream = request.into_inner();
         let expected_checksum = self.save_babel_stream(&mut stream).await?;
@@ -160,7 +160,7 @@ impl<T: SupervisorConfigObserver> BabelSupService<T> {
     /// Write babel binary stream into the file.
     async fn save_babel_stream(
         &self,
-        stream: &mut Streaming<babel_api::BabelBin>,
+        stream: &mut Streaming<babel_api::Binary>,
     ) -> Result<u32, Status> {
         let _ = tokio::fs::remove_file(&self.babel_bin_path).await;
         let file = OpenOptions::new()
@@ -176,12 +176,12 @@ impl<T: SupervisorConfigObserver> BabelSupService<T> {
         while let Some(part) = stream.next().await {
             let part = part.map_err(|e| Status::internal(e.to_string()))?;
             match part {
-                babel_api::BabelBin::Bin(bin) => {
+                babel_api::Binary::Bin(bin) => {
                     writer.write(&bin).await.map_err(|err| {
                         Status::internal(format!("failed to save babel binary: {err}"))
                     })?;
                 }
-                babel_api::BabelBin::Checksum(checksum) => {
+                babel_api::Binary::Checksum(checksum) => {
                     expected_checksum = Some(checksum);
                 }
             }
@@ -303,9 +303,9 @@ mod tests {
         let mut test_env = setup_test_env()?;
 
         let incomplete_babel_bin = vec![
-            babel_api::BabelBin::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
-            babel_api::BabelBin::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
-            babel_api::BabelBin::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
+            babel_api::Binary::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
+            babel_api::Binary::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
+            babel_api::Binary::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
         ];
 
         test_env
@@ -316,7 +316,7 @@ mod tests {
         assert!(!test_env.babel_change_rx.has_changed()?);
 
         let mut invalid_babel_bin = incomplete_babel_bin.clone();
-        invalid_babel_bin.push(babel_api::BabelBin::Checksum(123));
+        invalid_babel_bin.push(babel_api::Binary::Checksum(123));
         test_env
             .client
             .start_new_babel(tokio_stream::iter(invalid_babel_bin))
@@ -325,7 +325,7 @@ mod tests {
         assert!(!test_env.babel_change_rx.has_changed()?);
 
         let mut babel_bin = incomplete_babel_bin.clone();
-        babel_bin.push(babel_api::BabelBin::Checksum(4135829304));
+        babel_bin.push(babel_api::Binary::Checksum(4135829304));
         test_env
             .client
             .start_new_babel(tokio_stream::iter(babel_bin))
@@ -354,7 +354,7 @@ mod tests {
         );
 
         assert_eq!(
-            babel_api::BabelStatus::Missing,
+            babel_api::BinaryStatus::Missing,
             sup_service
                 .check_babel(Request::new(123))
                 .await?
@@ -372,14 +372,14 @@ mod tests {
         );
 
         assert_eq!(
-            babel_api::BabelStatus::ChecksumMismatch,
+            babel_api::BinaryStatus::ChecksumMismatch,
             sup_service
                 .check_babel(Request::new(123))
                 .await?
                 .into_inner()
         );
         assert_eq!(
-            babel_api::BabelStatus::Ok,
+            babel_api::BinaryStatus::Ok,
             sup_service
                 .check_babel(Request::new(321))
                 .await?

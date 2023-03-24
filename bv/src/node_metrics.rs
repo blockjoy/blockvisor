@@ -1,12 +1,13 @@
 //! Here we have the code related to the metrics for nodes. We
 
 use crate::babel_engine::BabelEngine;
-use crate::node;
 use crate::node_data::NodeStatus;
+use crate::nodes::Nodes;
 use crate::pal::Pal;
 use crate::services::api::pb;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 use tracing::warn;
 
 /// The interval by which we collect metrics from each of the nodes.
@@ -37,15 +38,21 @@ pub struct Metric {
 /// be efficient, but since we are dealing with a virtual socket the latency is very low, in the
 /// hundres of nanoseconds. Furthermore, we require unique access to the node to query a metric, so
 /// sequentially is easier to program.
-pub async fn collect_metrics<P: Pal + Debug + 'static>(
-    nodes: impl Iterator<Item = &mut node::Node<P>>,
-) -> Metrics {
-    let metrics_fut: Vec<_> = nodes
-        .filter(|n| n.status() == NodeStatus::Running)
-        .map(|node| async { (node.id(), collect_metric(&mut node.babel_engine).await) })
+pub async fn collect_metrics<P: Pal + Debug + 'static>(nodes: Arc<Nodes<P>>) -> Metrics {
+    let nodes_lock = nodes.nodes.read().await;
+    let metrics_fut: Vec<_> = nodes_lock
+        .values()
+        .map(|n| async {
+            let mut node = n.write().await;
+            if node.status() == NodeStatus::Running {
+                None
+            } else {
+                Some((node.id(), collect_metric(&mut node.babel_engine).await))
+            }
+        })
         .collect();
     let metrics: Vec<_> = futures_util::future::join_all(metrics_fut).await;
-    Metrics(metrics.into_iter().collect())
+    Metrics(metrics.into_iter().flatten().collect())
 }
 
 /// Returns the metric for a single node.

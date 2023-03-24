@@ -22,7 +22,8 @@ impl UfwRunner for SysRunner {
             .output()
             .await?;
         if !output.status.success() {
-            bail!("Failed to run command 'ufw', got output: `{output:?}`");
+            let args_str = args.join(" ");
+            bail!("Failed to run command 'ufw {args_str}', got output: `{output:?}`");
         }
         Ok(())
     }
@@ -37,7 +38,7 @@ async fn apply_firewall_config_with(config: Config, runner: impl UfwRunner) -> R
             dry_run(&runner, &args.into()).await?;
         }
         //finally reset and apply whole firewall config
-        runner.run(&["reset", "--force"]).await?;
+        runner.run(&["--force", "reset"]).await?;
         runner.run(&["enable"]).await?;
         runner
             .run(&["default", variant_to_string(&config.default_in), "incoming"])
@@ -185,7 +186,7 @@ mod tests {
             rules: vec![],
         };
         let mut mock_runner = MockTestRunner::new();
-        expect_with_args(&mut mock_runner, &["reset", "--force"]);
+        expect_with_args(&mut mock_runner, &["--force", "reset"]);
         expect_with_args(&mut mock_runner, &["enable"]);
         expect_with_args(&mut mock_runner, &["default", "deny", "incoming"]);
         expect_with_args(&mut mock_runner, &["default", "allow", "outgoing"]);
@@ -277,7 +278,7 @@ mod tests {
             ],
         );
 
-        expect_with_args(&mut mock_runner, &["reset", "--force"]);
+        expect_with_args(&mut mock_runner, &["--force", "reset"]);
         expect_with_args(&mut mock_runner, &["enable"]);
         expect_with_args(&mut mock_runner, &["default", "deny", "incoming"]);
         expect_with_args(&mut mock_runner, &["default", "reject", "outgoing"]);

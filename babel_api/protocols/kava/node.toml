@@ -46,7 +46,10 @@ body = """
 ! test -f /blockjoy/.init && \
 kava --home babelref:'supervisor.data_directory_mount_point' init kava-node --chain-id kava_2222-10
 touch /blockjoy/.init
-"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
 
 [[methods]]
 name = "height"

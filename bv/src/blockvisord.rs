@@ -17,11 +17,12 @@ use std::{collections::HashMap, fmt::Debug, net::SocketAddr, str::FromStr, sync:
 use tokio::sync::watch::Sender;
 use tokio::{
     net::TcpListener,
-    sync::{watch, watch::Receiver, RwLock},
+    sync::{watch, watch::Receiver},
     time::{sleep, Duration},
 };
 use tonic::transport::{Channel, Endpoint, Server};
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
@@ -77,7 +78,7 @@ where
         let nodes = Nodes::load(self.pal, self.config.clone()).await?;
 
         try_set_bv_status(bv_pb::ServiceStatus::Ok).await;
-        let nodes = Arc::new(RwLock::new(nodes));
+        let nodes = Arc::new(nodes);
 
         let server = BlockvisorServer {
             nodes: nodes.clone(),
@@ -97,7 +98,8 @@ where
 
         let nodes_recovery_future = Self::nodes_recovery(run.clone(), nodes.clone());
 
-        let node_updates_future = Self::node_updates(run.clone(), nodes.clone());
+        let node_updates_future =
+            Self::node_updates(run.clone(), nodes.clone(), self.config.clone());
 
         let config = self.config.read().await;
         let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
@@ -145,7 +147,7 @@ where
 
     async fn create_external_api_listener(
         mut run: RunFlag,
-        nodes: Arc<RwLock<Nodes<P>>>,
+        nodes: Arc<Nodes<P>>,
         mut cmd_watch_rx: Receiver<()>,
         config: &SharedConfig,
     ) {
@@ -214,57 +216,54 @@ where
         }
     }
 
-    async fn nodes_recovery(mut run: RunFlag, nodes: Arc<RwLock<Nodes<P>>>) {
+    async fn nodes_recovery(mut run: RunFlag, nodes: Arc<Nodes<P>>) {
         while run.load() {
-            let list: Vec<_> = nodes
-                .read()
-                .await
-                .list()
-                .await
-                .iter()
-                .map(|node| (node.data.id, node.status(), node.expected_status()))
-                .collect();
-
-            for (id, node_status, expected_status) in list {
-                if node_status == NodeStatus::Failed && expected_status != NodeStatus::Failed {
-                    if let Err(e) = nodes.write().await.recover(id).await {
-                        error!("Recovery: node with ID `{id}` failed: {e}");
-                    }
-                }
-            }
+            let _ = nodes.recover().await;
             run.select(sleep(RECOVERY_CHECK_INTERVAL)).await;
         }
     }
 
     /// This task runs periodically to send important info about nodes to API.
-    async fn node_updates(mut run: RunFlag, nodes: Arc<RwLock<Nodes<P>>>) {
+    async fn node_updates(mut run: RunFlag, nodes: Arc<Nodes<P>>, config: SharedConfig) {
         let mut timer = tokio::time::interval(INFO_UPDATE_INTERVAL);
-        let mut known_addresses: HashMap<String, String> = HashMap::new();
+        let mut known_addresses: HashMap<Uuid, Option<String>> = HashMap::new();
+        let mut known_statuses: HashMap<Uuid, NodeStatus> = HashMap::new();
         while run.load() {
             run.select(timer.tick()).await;
-            let mut nodes_lock = nodes.write().await;
 
             let mut updates = vec![];
-            for node in nodes_lock.nodes.values_mut() {
-                if let Ok(address) = node.babel_engine.address().await {
-                    updates.push((node.id().to_string(), address));
-                }
+            for node in nodes.nodes.read().await.values() {
+                let mut node = node.write().await;
+                let address = node.babel_engine.address().await.ok();
+                updates.push((node.id(), address, node.status()));
             }
 
-            for (node_id, address) in updates {
-                if known_addresses.get(&node_id) == Some(&address) {
+            for (node_id, address, status) in updates {
+                if known_addresses.get(&node_id) == Some(&address)
+                    && known_statuses.get(&node_id) == Some(&status)
+                {
                     continue;
                 }
 
+                let container_status = match status {
+                    NodeStatus::Running => pb::node_info::ContainerStatus::Running,
+                    NodeStatus::Stopped => pb::node_info::ContainerStatus::Stopped,
+                    NodeStatus::Failed => pb::node_info::ContainerStatus::UndefinedContainerStatus,
+                };
                 let update = pb::NodeInfo {
-                    id: node_id.clone(),
-                    address: Some(address.clone()),
+                    id: node_id.to_string(),
+                    address: address.clone(),
+                    container_status: Some(container_status.into()),
                     ..Default::default()
                 };
 
-                if nodes_lock.send_info_update(update).await.is_ok() {
-                    // cache addresses to not send the same address if it has not changed
+                if Self::send_node_info_update(config.clone(), update)
+                    .await
+                    .is_ok()
+                {
+                    // cache to not send the same data if it has not changed
                     known_addresses.entry(node_id).or_insert(address);
+                    known_statuses.entry(node_id).or_insert(status);
                 }
             }
         }
@@ -287,17 +286,14 @@ where
     /// query their metrics, then send them to blockvisor-api.
     async fn node_metrics(
         mut run: RunFlag,
-        nodes: Arc<RwLock<Nodes<P>>>,
+        nodes: Arc<Nodes<P>>,
         endpoint: &Endpoint,
         config: SharedConfig,
     ) -> Option<()> {
         let mut timer = tokio::time::interval(node_metrics::COLLECT_INTERVAL);
         while run.load() {
             run.select(timer.tick()).await;
-            let mut lock = nodes.write().await;
-            let metrics = node_metrics::collect_metrics(lock.nodes.values_mut()).await;
-            // Drop the lock as early as possible.
-            drop(lock);
+            let metrics = node_metrics::collect_metrics(nodes.clone()).await;
             let mut client = api::MetricsClient::with_auth(
                 Self::wait_for_channel(run.clone(), endpoint).await?,
                 api::AuthToken(config.read().await.token),
@@ -336,5 +332,17 @@ where
             };
         }
         None
+    }
+
+    // Send node info update to control plane
+    async fn send_node_info_update(config: SharedConfig, update: pb::NodeInfo) -> Result<()> {
+        let mut client = api::NodesService::connect(config.read().await)
+            .await
+            .with_context(|| "Error connecting to api".to_string())?;
+        client
+            .send_node_update(update)
+            .await
+            .with_context(|| "Cannot send node update".to_string())?;
+        Ok(())
     }
 }
