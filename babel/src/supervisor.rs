@@ -2,9 +2,9 @@
 /// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
 /// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::log_buffer::LogBuffer;
-use async_trait::async_trait;
 use babel_api::config::{Entrypoint, SupervisorConfig};
 use bv_utils::run_flag::RunFlag;
+use bv_utils::timer::AsyncTimer;
 use eyre::bail;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -17,13 +17,6 @@ use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
-
-/// Time abstraction for better testing.
-#[async_trait]
-pub trait Timer {
-    fn now(&self) -> Instant;
-    async fn sleep(&self, duration: Duration);
-}
 
 pub fn load_config(json_str: &str) -> eyre::Result<SupervisorConfig> {
     let cfg: SupervisorConfig = serde_json::from_str(json_str)?;
@@ -51,7 +44,7 @@ pub type BabelChangeRx = watch::Receiver<Option<u32>>;
 pub type SupervisorSetupRx = oneshot::Receiver<SupervisorSetup>;
 pub type SupervisorSetupTx = oneshot::Sender<SupervisorSetup>;
 
-pub async fn run<T: Timer>(
+pub async fn run<T: AsyncTimer>(
     timer: T,
     mut run: RunFlag,
     babel_path: PathBuf,
@@ -79,7 +72,7 @@ async fn wait_for_babel_bin(mut run: RunFlag, mut babel_change_rx: BabelChangeRx
     babel_change_rx
 }
 
-async fn wait_for_setup<T: Timer>(
+async fn wait_for_setup<T: AsyncTimer>(
     timer: T,
     mut run: RunFlag,
     babel_path: PathBuf,
@@ -100,7 +93,7 @@ struct Supervisor<T> {
     timer: T,
 }
 
-impl<T: Timer> Supervisor<T> {
+impl<T: AsyncTimer> Supervisor<T> {
     fn new(timer: T, babel_path: PathBuf, setup: SupervisorSetup) -> Self {
         Supervisor {
             babel_path,
@@ -218,7 +211,7 @@ struct Backoff<'a, T> {
     timer: &'a T,
 }
 
-impl<'a, T: Timer> Backoff<'a, T> {
+impl<'a, T: AsyncTimer> Backoff<'a, T> {
     fn new(timer: &'a T, run: RunFlag, config: &SupervisorConfig) -> Self {
         Self {
             counter: 0,
@@ -254,7 +247,7 @@ impl<'a, T: Timer> Backoff<'a, T> {
 mod tests {
     use super::*;
     use assert_fs::TempDir;
-    use async_trait::async_trait;
+    use bv_utils::timer::MockAsyncTimer;
     use eyre::Result;
     use mockall::*;
     use std::fs;
@@ -267,16 +260,6 @@ mod tests {
     use sysinfo::{PidExt, ProcessRefreshKind};
     use tokio::sync::broadcast;
     use tokio::time::Duration;
-
-    mock! {
-        pub TestTimer {}
-
-        #[async_trait]
-        impl Timer for TestTimer {
-            fn now(&self) -> Instant;
-            async fn sleep(&self, duration: Duration);
-        }
-    }
 
     struct TestEnv {
         tmp_root: PathBuf,
@@ -362,7 +345,7 @@ mod tests {
         let now = Instant::now();
 
         let mut test_run = test_env.run.clone();
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockAsyncTimer::new();
         timer_mock.expect_now().times(2).returning(move || now);
         timer_mock.expect_now().returning(move || {
             let n = now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1));
@@ -391,7 +374,7 @@ mod tests {
 
         let now = Instant::now();
 
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockAsyncTimer::new();
         timer_mock.expect_now().returning(move || now);
         const RANGE: u32 = 8;
         for n in 0..RANGE {
@@ -446,7 +429,7 @@ mod tests {
 
         let now = Instant::now();
 
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockAsyncTimer::new();
         timer_mock.expect_now().returning(move || now);
         let first_file_path = file_path.clone();
         timer_mock.expect_sleep().once().returning(move |_| {
@@ -491,7 +474,7 @@ mod tests {
         let babel_change_tx = Arc::new(test_env.babel_change_tx);
 
         let now = Instant::now();
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockAsyncTimer::new();
         let change_tx = babel_change_tx.clone();
         // expect now from run_babel
         timer_mock.expect_now().times(2).returning(move || now);
@@ -541,7 +524,7 @@ mod tests {
 
         let now = Instant::now();
 
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockAsyncTimer::new();
         timer_mock.expect_now().returning(move || now);
         timer_mock.expect_now().returning(move || now);
         timer_mock.expect_sleep().times(3).returning(|_| ());
@@ -583,7 +566,7 @@ mod tests {
 
         let now = Instant::now();
 
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockAsyncTimer::new();
         timer_mock.expect_now().times(2).returning(move || now);
         let ctrl_file = test_env.ctrl_file.clone();
         tokio::spawn(async move {

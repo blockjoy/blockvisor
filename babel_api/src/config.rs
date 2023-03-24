@@ -74,7 +74,7 @@ pub enum JobStatus {
     Pending,
     Running(Option<String>), // may optionally contain progress message
     Finished {
-        exit_code: i32,
+        exit_code: Option<i32>,
         stdout: String,
         stderr: String,
     },

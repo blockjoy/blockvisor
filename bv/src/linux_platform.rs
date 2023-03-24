@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 pub struct LinuxPlatform {
     bv_root: PathBuf,
     babel_path: PathBuf,
+    job_runner_path: PathBuf,
 }
 
 const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
@@ -26,22 +27,31 @@ pub fn bv_root() -> PathBuf {
 
 impl LinuxPlatform {
     pub fn new() -> Result<Self> {
-        let babel_path = fs::canonicalize(
+        let babel_dir = fs::canonicalize(
             std::env::current_exe().with_context(|| "failed to get current binary path")?,
         )
         .with_context(|| "non canonical current binary path")?
         .parent()
         .with_context(|| "invalid current binary dir - has no parent")?
-        .join("../../babel/bin/babel");
+        .join("../../babel/bin");
+        let babel_path = babel_dir.join("babel");
         if !babel_path.exists() {
             bail!(
                 "babel binary bundled with BV not found: {}",
-                babel_path.to_string_lossy()
+                babel_path.display()
+            )
+        }
+        let job_runner_path = babel_dir.join("babel_job_runner");
+        if !job_runner_path.exists() {
+            bail!(
+                "job runner binary bundled with BV not found: {}",
+                job_runner_path.display()
             )
         }
         Ok(Self {
             bv_root: bv_root(),
             babel_path,
+            job_runner_path,
         })
     }
 }
@@ -54,6 +64,10 @@ impl Pal for LinuxPlatform {
 
     fn babel_path(&self) -> &Path {
         self.babel_path.as_path()
+    }
+
+    fn job_runner_path(&self) -> &Path {
+        self.job_runner_path.as_path()
     }
 
     type NetInterface = LinuxNetInterface;

@@ -5,5 +5,7 @@ version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait = "0.1.60"
 ctrlc = "3.2.4"
 tokio = "1.17.0"
+mockall = "0.11.3"

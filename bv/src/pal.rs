@@ -23,6 +23,9 @@ pub trait Pal {
     /// Path to babel binary bundled with this BV.
     fn babel_path(&self) -> &Path;
 
+    /// Path to job runner binary bundled with this BV.
+    fn job_runner_path(&self) -> &Path;
+
     /// Type representing network interface. It is required to be Serialize/Deserialize
     /// since it's going to be part of node data.
     type NetInterface: NetInterface + Serialize + DeserializeOwned + Debug + Clone;

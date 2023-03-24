@@ -492,7 +492,9 @@ checksum = "0d261e256854913907f67ed06efbc3338dfe6179796deefc1ff763fc1aee5535"
 name = "bv_utils"
 version = "0.10.0"
 dependencies = [
+ "async-trait",
  "ctrlc",
+ "mockall",
  "tokio",
 ]
 

@@ -12,32 +12,20 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use bv_utils::timer::AsyncTimer;
 use std::{
     cmp::Ordering,
     env,
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::{fs, process::Command, time::sleep};
+use tokio::{fs, process::Command};
 use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 
 const BUNDLES_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const BUNDLES_REQ_TIMEOUT: Duration = Duration::from_secs(5);
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-pub struct SysTimer;
-#[async_trait]
-impl Sleeper for SysTimer {
-    async fn sleep(&self, duration: Duration) {
-        sleep(duration).await
-    }
-}
-
-#[async_trait]
-pub trait Sleeper {
-    async fn sleep(&self, duration: Duration);
-}
 
 #[async_trait]
 pub trait BundleConnector {
@@ -85,7 +73,7 @@ pub struct SelfUpdater<T, C> {
     sleeper: T,
 }
 
-pub async fn new<T: Sleeper>(
+pub async fn new<T: AsyncTimer>(
     sleeper: T,
     bv_root: &Path,
     config: &SharedConfig,
@@ -110,7 +98,7 @@ pub async fn new<T: Sleeper>(
     })
 }
 
-impl<T: Sleeper, C: BundleConnector> SelfUpdater<T, C> {
+impl<T: AsyncTimer, C: BundleConnector> SelfUpdater<T, C> {
     pub async fn run(mut self) {
         if let Some(check_interval) = self.check_interval {
             loop {
@@ -193,6 +181,7 @@ mod tests {
     use super::*;
     use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
+    use bv_utils::timer::MockAsyncTimer;
     use httpmock::prelude::GET;
     use httpmock::MockServer;
     use mockall::*;
@@ -234,15 +223,6 @@ mod tests {
         }
     }
 
-    mock! {
-        pub TestSleeper {}
-
-        #[async_trait]
-        impl Sleeper for TestSleeper {
-            async fn sleep(&self, duration: Duration);
-        }
-    }
-
     struct TestConnector {
         tmp_root: PathBuf,
     }
@@ -261,7 +241,7 @@ mod tests {
     /// path to root dir used in test, instance of AsyncPanicChecker to make sure that all panics
     /// from other threads will be propagated.
     struct TestEnv {
-        updater: SelfUpdater<MockTestSleeper, TestConnector>,
+        updater: SelfUpdater<MockAsyncTimer, TestConnector>,
         blacklist_path: PathBuf,
         tmp_root: PathBuf,
         _async_panic_checker: utils::tests::AsyncPanicChecker,
@@ -283,7 +263,7 @@ mod tests {
                         tmp_root: tmp_root.clone(),
                     },
                     latest_downloaded_version: CURRENT_VERSION.to_string(),
-                    sleeper: MockTestSleeper::new(),
+                    sleeper: MockAsyncTimer::new(),
                 },
                 blacklist_path,
                 tmp_root,
@@ -345,7 +325,7 @@ mod tests {
     async fn wait_for_ctrl_file(ctrl_file_path: &Path) {
         tokio::time::timeout(Duration::from_millis(500), async {
             while !ctrl_file_path.exists() {
-                sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await

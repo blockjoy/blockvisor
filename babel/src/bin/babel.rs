@@ -9,7 +9,6 @@ use tonic::transport::Server;
 use tracing::info;
 
 lazy_static::lazy_static! {
-    static ref JOBS_PATH: &'static Path = Path::new("/var/lib/babel/jobs");
     static ref JOB_RUNNER_BIN_PATH: &'static Path = Path::new("/usr/bin/babel_job_runner");
 }
 const VSOCK_HOST_CID: u32 = 3;

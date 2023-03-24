@@ -6,10 +6,11 @@ use crate::server::bv_pb::blockvisor_client::BlockvisorClient;
 use crate::{with_retry, BV_VAR_PATH};
 use anyhow::{bail, ensure, Context, Error, Result};
 use async_trait::async_trait;
+use bv_utils::timer::Timer;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{env, fs};
 use tonic::transport::Channel;
 use tracing::{debug, info, warn};
@@ -41,12 +42,6 @@ struct InstallerPaths {
     this_version: PathBuf,
     backup: PathBuf,
     blacklist: PathBuf,
-}
-
-/// Time abstraction for better testing.
-pub trait Timer {
-    fn now(&self) -> Instant;
-    fn sleep(&self, duration: Duration);
 }
 
 /// SystemCtl abstraction for better testing.
@@ -473,6 +468,7 @@ mod tests {
     use crate::utils::tests::test_channel;
     use anyhow::anyhow;
     use assert_fs::TempDir;
+    use bv_utils::timer::MockTimer;
     use mockall::*;
     use std::ops::Add;
     use std::os::unix::fs::OpenOptionsExt;
@@ -480,6 +476,7 @@ mod tests {
     use std::sync::atomic::Ordering::Relaxed;
     use std::sync::Arc;
     use std::thread::sleep;
+    use std::time::Instant;
     use tonic::Response;
 
     mock! {
@@ -551,15 +548,6 @@ mod tests {
     }
 
     mock! {
-        pub TestTimer {}
-
-        impl Timer for TestTimer {
-            fn now(&self) -> Instant;
-            fn sleep(&self, duration: Duration);
-        }
-    }
-
-    mock! {
         pub TestBvService {}
 
         #[async_trait]
@@ -603,9 +591,9 @@ mod tests {
 
         fn build_installer(
             &self,
-            timer: MockTestTimer,
+            timer: MockTimer,
             bv_service: MockTestBvService,
-        ) -> Installer<MockTestTimer, MockTestBvService> {
+        ) -> Installer<MockTimer, MockTestBvService> {
             Installer::internal_new(
                 timer,
                 bv_service,
@@ -619,8 +607,7 @@ mod tests {
     async fn test_prepare_running_none() -> Result<()> {
         let test_env = TestEnv::new().await?;
 
-        let mut installer =
-            test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
+        let mut installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
         installer.backup_status = BackupStatus::NothingToBackup;
         installer.prepare_running().await?;
         installer.backup_status = BackupStatus::ThisIsRollback;
@@ -639,7 +626,7 @@ mod tests {
             };
             Ok(Response::new(reply))
         });
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockTimer::new();
         timer_mock.expect_sleep().returning(|_| ());
         let now = Instant::now();
         timer_mock.expect_now().returning(move || now);
@@ -664,7 +651,7 @@ mod tests {
             update_start_called_flag.store(true, Relaxed);
             Ok(Response::new(reply))
         });
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockTimer::new();
         let now = Instant::now();
         timer_mock.expect_now().once().returning(move || now);
         timer_mock
@@ -698,7 +685,7 @@ mod tests {
             };
             Ok(Response::new(reply))
         });
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockTimer::new();
         timer_mock.expect_now().returning(Instant::now);
         let server = test_env.start_test_server(bv_mock);
         let mut client = BlockvisorClient::new(test_channel(&test_env.tmp_root));
@@ -728,7 +715,7 @@ mod tests {
             };
             Ok(Response::new(reply))
         });
-        let mut timer_mock = MockTestTimer::new();
+        let mut timer_mock = MockTimer::new();
         let now = Instant::now();
         timer_mock.expect_now().once().returning(move || now);
         timer_mock
@@ -761,8 +748,7 @@ mod tests {
     #[tokio::test]
     async fn test_backup_running_version() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let mut installer =
-            test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
+        let mut installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
 
         fs::create_dir_all(&installer.paths.install_path)?;
         installer.backup_running_version()?;
@@ -790,7 +776,7 @@ mod tests {
     #[tokio::test]
     async fn test_move_bundle_to_install_path() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let installer = test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
+        let installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
         let bundle_path = test_env.tmp_root.join("bundle");
 
         installer
@@ -824,7 +810,7 @@ mod tests {
     #[tokio::test]
     async fn test_install_this_version() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let installer = test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
+        let installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
 
         installer.install_this_version().unwrap_err();
 
@@ -865,7 +851,7 @@ mod tests {
         service_mock.expect_stop().return_once(|| Ok(()));
         service_mock.expect_stop().return_once(|| Ok(()));
         service_mock.expect_enable().return_once(|| Ok(()));
-        let mut installer = test_env.build_installer(MockTestTimer::new(), service_mock);
+        let mut installer = test_env.build_installer(MockTimer::new(), service_mock);
 
         installer.backup_status = BackupStatus::ThisIsRollback;
         installer
@@ -914,7 +900,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let installer = test_env.build_installer(MockTestTimer::new(), MockTestBvService::new());
+        let installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
 
         // cant cleanup non existing dir nothing
         installer.cleanup().unwrap_err();

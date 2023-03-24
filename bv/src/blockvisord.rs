@@ -108,9 +108,10 @@ where
         let host_metrics_future =
             Self::host_metrics(run.clone(), config.id, &endpoint, self.config.clone());
 
-        let self_updater_future = self_updater::new(self_updater::SysTimer, &bv_root, &self.config)
-            .await?
-            .run();
+        let self_updater_future =
+            self_updater::new(bv_utils::timer::SysTimer, &bv_root, &self.config)
+                .await?
+                .run();
 
         let _ = tokio::join!(
             internal_api_server_future,

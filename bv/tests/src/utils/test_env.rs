@@ -91,13 +91,14 @@ impl TestEnv {
     }
 
     pub fn build_dummy_platform(&self) -> DummyPlatform {
+        let babel_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../target")
+            .join("x86_64-unknown-linux-musl")
+            .join("release");
         DummyPlatform {
             bv_root: self.bv_root.clone(),
-            babel_path: Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../target")
-                .join("x86_64-unknown-linux-musl")
-                .join("release")
-                .join("babel"),
+            babel_path: babel_dir.join("babel"),
+            job_runner_path: babel_dir.join("babel_job_runner"),
             token: self.token,
         }
     }
@@ -209,6 +210,7 @@ pub fn bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
 pub struct DummyPlatform {
     pub(crate) bv_root: PathBuf,
     pub(crate) babel_path: PathBuf,
+    pub(crate) job_runner_path: PathBuf,
     pub(crate) token: u32,
 }
 
@@ -220,6 +222,10 @@ impl Pal for DummyPlatform {
 
     fn babel_path(&self) -> &Path {
         &self.babel_path
+    }
+
+    fn job_runner_path(&self) -> &Path {
+        self.job_runner_path.as_path()
     }
 
     type NetInterface = DummyNet;

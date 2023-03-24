@@ -6,7 +6,6 @@ use babel_api::config::SupervisorConfig;
 use bv_utils::run_flag::RunFlag;
 use eyre::{anyhow, Context};
 use std::path::Path;
-use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::fs::DirBuilder;
 use tokio::sync::{oneshot, watch};
@@ -48,7 +47,7 @@ async fn main() -> eyre::Result<()> {
     };
 
     let supervisor_handle = tokio::spawn(supervisor::run(
-        SysTimer,
+        bv_utils::timer::SysTimer,
         run.clone(),
         BABEL_BIN_PATH.to_path_buf(),
         sup_setup_rx,
@@ -71,19 +70,6 @@ async fn load_config() -> eyre::Result<SupervisorConfig> {
     );
     let json_str = fs::read_to_string(&*BABELSUP_CONFIG_PATH).await?;
     supervisor::load_config(&json_str)
-}
-
-struct SysTimer;
-
-#[async_trait]
-impl supervisor::Timer for SysTimer {
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-
-    async fn sleep(&self, duration: Duration) {
-        tokio::time::sleep(duration).await
-    }
 }
 
 struct ConfigObserver;

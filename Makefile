@@ -9,6 +9,7 @@ build-release:
 	strip target/x86_64-unknown-linux-musl/release/blockvisord
 	cargo build -p babel --target x86_64-unknown-linux-musl --release
 	strip target/x86_64-unknown-linux-musl/release/babel
+	strip target/x86_64-unknown-linux-musl/release/babel_job_runner
 	strip target/x86_64-unknown-linux-musl/release/babelsup
 
 get-firecraker: FC_VERSION=v1.1.3
@@ -31,6 +32,7 @@ bundle: get-firecraker build-release
 	cp bv/data/blockvisor.service /tmp/bundle/blockvisor/services
 	mkdir -p /tmp/bundle/babel/bin
 	cp target/x86_64-unknown-linux-musl/release/babel /tmp/bundle/babel/bin
+	cp target/x86_64-unknown-linux-musl/release/babel_job_runner /tmp/bundle/babel/bin
 	mkdir -p /tmp/bundle/firecracker/bin
 	cp /tmp/fc/firecracker /tmp/bundle/firecracker/bin
 	cp /tmp/fc/jailer /tmp/bundle/firecracker/bin
@@ -54,7 +56,6 @@ install: bundle
 	for image in $$(find /var/lib/blockvisor/images/ -name "*.img"); do \
 		echo $$image; \
 		mount $$image /mnt/fc; \
-		rm -f /mnt/fc/usr/bin/babel; \
 		install -m u=rwx,g=rx,o=rx target/x86_64-unknown-linux-musl/release/babelsup /mnt/fc/usr/bin/; \
 		install -m u=rw,g=r,o=r babel/data/babelsup.service /mnt/fc/etc/systemd/system/; \
 		ln -srf /mnt/fc/etc/systemd/system/babelsup.service /mnt/fc/etc/systemd/system/multi-user.target.wants/babelsup.service; \

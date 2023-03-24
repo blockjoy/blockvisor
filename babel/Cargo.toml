@@ -18,6 +18,11 @@ path = "src/bin/babel.rs"
 name = "babelsup"
 path = "src/bin/babelsup.rs"
 
+[[bin]]
+name = "babel_job_runner"
+path = "src/bin/job_runner.rs"
+
+
 [dependencies]
 async-trait = "0.1.61"
 babel_api = {version = "*", path = "../babel_api"}
