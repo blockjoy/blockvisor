@@ -43,7 +43,6 @@ pub struct Entrypoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobConfig {
-    pub name: String,
     pub body: String,
     pub restart: RestartPolicy,
     pub needs: Vec<String>,

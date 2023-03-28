@@ -90,11 +90,12 @@ impl<'a, T: AsyncTimer> Backoff<'a, T> {
     }
 
     /// Calculates timeout according to configured backoff procedure and asynchronously wait.
-    /// Returns `false` immediately if no timeout, but exceeded retry limit; `true` otherwise.
+    /// Returns `LimitStatus::Exceeded` immediately if no timeout, but exceeded retry limit;
+    /// `LimitStatus::Ok` otherwise.
     pub async fn wait_with_limit(&mut self, max_retries: u32) -> LimitStatus {
         if self.check_timeout().await == TimeoutStatus::Expired {
             LimitStatus::Ok
-        } else if self.counter > max_retries {
+        } else if self.counter >= max_retries {
             LimitStatus::Exceeded
         } else {
             self.backoff().await;

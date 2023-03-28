@@ -8,9 +8,9 @@ use std::env;
 use tokio::{join, select};
 use tracing::info;
 
-/// Logs are forwarded asap to babel, so we don't need big buffer, only to buffer logs during some
-/// temporary babel unavailability (e.g. while updating).
-const LOG_BUFFER_CAPACITY: usize = 1024;
+/// Logs are forwarded asap to log server, so we don't need big buffer, only to buffer logs during some
+/// temporary log server unavailability (e.g. while updating).
+const LOG_BUFFER_CAPACITY_LN: usize = 1024;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -30,7 +30,7 @@ async fn main() -> eyre::Result<()> {
 
     let mut run = RunFlag::run_until_ctrlc();
 
-    let log_buffer = LogBuffer::new(LOG_BUFFER_CAPACITY);
+    let log_buffer = LogBuffer::new(LOG_BUFFER_CAPACITY_LN);
     let mut log_rx = log_buffer.subscribe();
     let mut log_run = run.clone();
     let log_handler = async move {

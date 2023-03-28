@@ -128,19 +128,26 @@ impl<T: AsyncTimer> JobRunner<T> {
 
     pub async fn run(mut self, mut run: RunFlag) {
         self.kill_all_remnants();
+        self.set_status(JobStatus::Running(None));
+        if let Err(err) = self.job_data.save(&self.jobs_dir) {
+            error!("failed to save job data: {err}")
+        }
         if let Err(status) = self.try_run_job(run.clone()).await {
-            self.job_data.status = status;
-            if let Err(err) = self.job_data.save(&self.jobs_dir) {
-                error!("failed to save job data: {err}")
-            }
+            self.set_status(status);
             run.stop();
+        }
+    }
+
+    fn set_status(&mut self, value: JobStatus) {
+        self.job_data.status = value.clone();
+        if let Err(err) = self.job_data.save(&self.jobs_dir) {
+            error!("job status changed to {value:?}, but failed to save job data: {err}")
         }
     }
 
     /// Run and restart job child process until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(&mut self, mut run: RunFlag) -> Result<(), JobStatus> {
-        self.job_data.status = JobStatus::Running(None);
         let job_name = &self.job_data.name;
         let mut cmd = Command::new("sh");
         cmd.args(["-c", &self.job_data.config.body])
@@ -188,4 +195,180 @@ impl<T: AsyncTimer> JobRunner<T> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use assert_fs::TempDir;
+    use babel_api::config::JobConfig;
+    use bv_utils::timer::MockAsyncTimer;
+    use std::fs;
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+
+    #[tokio::test]
+    async fn test_stopped_restart_never() -> Result<()> {
+        let test_run = RunFlag::default();
+        let timer_mock = MockAsyncTimer::new();
+        let mut backoff = JobBackoff::new(&timer_mock, test_run, &RestartPolicy::Never);
+        backoff.start(); // should do nothing
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: None,
+                message: "test message".to_string()
+            },
+            backoff
+                .stopped(None, "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            backoff
+                .stopped(Some(0), "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stopped_restart_always() -> Result<()> {
+        let test_run = RunFlag::default();
+        let mut timer_mock = MockAsyncTimer::new();
+        let now = std::time::Instant::now();
+        timer_mock.expect_now().returning(move || now);
+        timer_mock.expect_sleep().returning(|_| ());
+
+        let mut backoff = JobBackoff::new(
+            &timer_mock,
+            test_run,
+            &RestartPolicy::Always(RestartConfig {
+                backoff_timeout_ms: 1000,
+                backoff_base_ms: 100,
+                max_retries: Some(1),
+            }),
+        );
+        backoff.start();
+        backoff
+            .stopped(Some(0), "test message".to_owned())
+            .await
+            .unwrap();
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(1),
+                message: "test message".to_string()
+            },
+            backoff
+                .stopped(Some(1), "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stopped_restart_on_failure() -> Result<()> {
+        let test_run = RunFlag::default();
+        let mut timer_mock = MockAsyncTimer::new();
+        let now = std::time::Instant::now();
+        timer_mock.expect_now().returning(move || now);
+        timer_mock.expect_sleep().returning(|_| ());
+
+        let mut backoff = JobBackoff::new(
+            &timer_mock,
+            test_run,
+            &RestartPolicy::OnFailure(RestartConfig {
+                backoff_timeout_ms: 1000,
+                backoff_base_ms: 100,
+                max_retries: Some(1),
+            }),
+        );
+        backoff.start();
+        backoff
+            .stopped(Some(1), "test message".to_owned())
+            .await
+            .unwrap();
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(1),
+                message: "test message".to_string()
+            },
+            backoff
+                .stopped(Some(1), "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            backoff
+                .stopped(Some(0), "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_run_with_logs() -> Result<()> {
+        let job_name = "job_name".to_string();
+        let tmp_root = TempDir::new()?.to_path_buf();
+        let jobs_dir = tmp_root.join("jobs");
+        fs::create_dir_all(&jobs_dir)?;
+        let test_run = RunFlag::default();
+        let log_buffer = LogBuffer::new(16);
+        let mut log_rx = log_buffer.subscribe();
+        let cmd_path = tmp_root.join("test_cmd");
+        {
+            let mut cmd_file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .mode(0o770)
+                .open(&cmd_path)?;
+            writeln!(cmd_file, "#!/bin/sh")?;
+            writeln!(cmd_file, "echo 'cmd log'")?;
+        }
+        let data = JobData {
+            name: job_name.clone(),
+            config: JobConfig {
+                body: cmd_path.to_string_lossy().to_string(),
+                restart: RestartPolicy::Always(RestartConfig {
+                    backoff_timeout_ms: 1000,
+                    backoff_base_ms: 100,
+                    max_retries: Some(3),
+                }),
+                needs: vec![],
+                callback: "".to_string(),
+            },
+            status: JobStatus::Pending,
+        };
+        data.save(&jobs_dir)?;
+
+        let mut timer_mock = MockAsyncTimer::new();
+        let now = std::time::Instant::now();
+        timer_mock.expect_now().returning(move || now);
+        timer_mock.expect_sleep().returning(|_| ());
+        JobRunner::new(timer_mock, &jobs_dir, job_name.clone(), log_buffer)?
+            .run(test_run)
+            .await;
+
+        let data = JobData::load(&JobData::file_path(&job_name, &jobs_dir))?;
+        assert_eq!(
+            data.status,
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "Job 'job_name' finished with Ok(ExitStatus(unix_wait_status(0)))"
+                    .to_string()
+            }
+        );
+        assert_eq!(log_rx.recv().await?, "cmd log\n"); // first start
+        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 1
+        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 2
+        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 3
+        log_rx.try_recv().unwrap_err();
+        Ok(())
+    }
+}
