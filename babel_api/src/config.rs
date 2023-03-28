@@ -57,7 +57,7 @@ pub struct RestartConfig {
     /// base time (in miliseconds) for backof, multiplied by consecutive power of 2 each time
     pub backoff_base_ms: u64,
     /// maximum number of retries
-    pub max_retries: Option<usize>,
+    pub max_retries: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -75,8 +75,7 @@ pub enum JobStatus {
     Running(Option<String>), // may optionally contain progress message
     Finished {
         exit_code: Option<i32>,
-        stdout: String,
-        stderr: String,
+        message: String,
     },
     Stopped,
 }

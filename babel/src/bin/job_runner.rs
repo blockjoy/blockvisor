@@ -1,10 +1,16 @@
 use babel::job_data::JOBS_DIR;
 use babel::job_runner::JobRunner;
+use babel::log_buffer::LogBuffer;
 use babel::logging;
 use bv_utils::run_flag::RunFlag;
 use eyre::{anyhow, bail};
 use std::env;
+use tokio::{join, select};
 use tracing::info;
+
+/// Logs are forwarded asap to babel, so we don't need big buffer, only to buffer logs during some
+/// temporary babel unavailability (e.g. while updating).
+const LOG_BUFFER_CAPACITY: usize = 1024;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -22,10 +28,25 @@ async fn main() -> eyre::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let run = RunFlag::run_until_ctrlc();
-    JobRunner::new(bv_utils::timer::SysTimer, &JOBS_DIR, job_name)?
-        .run(run)
-        .await;
+    let mut run = RunFlag::run_until_ctrlc();
+
+    let log_buffer = LogBuffer::new(LOG_BUFFER_CAPACITY);
+    let mut log_rx = log_buffer.subscribe();
+    let mut log_run = run.clone();
+    let log_handler = async move {
+        while log_run.load() {
+            select!(
+                _log = log_rx.recv() => {
+                        // TODO send log to Babel or other logs server
+                    }
+                _ = log_run.wait() => {}
+            );
+        }
+    };
+    join!(
+        JobRunner::new(bv_utils::timer::SysTimer, &JOBS_DIR, job_name, log_buffer)?.run(run),
+        log_handler
+    );
 
     Ok(())
 }

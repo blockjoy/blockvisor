@@ -4,7 +4,7 @@ use tokio::sync::broadcast::error::SendError;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-/// This struct implements logs buffer that gather `stdout` and `stderr` from entry_points
+/// This struct implements logs buffer that gather `stdout` and `stderr` from child process
 /// and store them in circular buffer. Internally `tokio::broadcast` is used as a circular buffer
 /// since it has all required properties out of the box.  
 /// See tokio::broadcast for more details.
@@ -18,7 +18,7 @@ impl LogBuffer {
     /// NOTE: According to `tokio::broadcast` implementation capacity is rounded up to next power of 2.
     pub fn new(mut capacity: usize) -> Self {
         if capacity == 0 {
-            capacity = 1; // tokio panic if it's 0, but we don't
+            capacity = 1; // tokio panic if it's 0, but we don't want to
         }
         let (tx, rx) = broadcast::channel(capacity);
         Self { tx, rx }

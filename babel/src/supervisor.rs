@@ -2,17 +2,16 @@
 /// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
 /// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::log_buffer::LogBuffer;
+use crate::utils::{kill_remnants, Backoff};
 use babel_api::config::{Entrypoint, SupervisorConfig};
 use bv_utils::run_flag::RunFlag;
 use bv_utils::timer::AsyncTimer;
 use eyre::bail;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::Instant;
-use sysinfo::{Pid, Process, ProcessExt, System, SystemExt};
+use sysinfo::{System, SystemExt};
 use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Duration;
@@ -118,30 +117,38 @@ impl<T: AsyncTimer> Supervisor<T> {
     async fn run_babel(&self, mut run: RunFlag, mut babel_change_rx: BabelChangeRx) {
         let mut cmd = Command::new(&self.babel_path);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut backoff = Backoff::new(&self.timer, run.clone(), &self.config);
+        let mut backoff = Backoff::new(
+            &self.timer,
+            run.clone(),
+            self.config.backoff_base_ms,
+            Duration::from_millis(self.config.backoff_timeout_ms),
+        );
         while run.load() {
             backoff.start();
-            if let Ok(mut child) = cmd.spawn() {
-                info!("Spawned Babel");
-                self.log_buffer
-                    .attach("babel", child.stdout.take(), child.stderr.take());
-                tokio::select!(
-                    _ = child.wait() => {
-                        error!("Babel stopped unexpected");
-                        backoff.wait().await;
-                    },
-                    _ = babel_change_rx.changed() => {
-                        info!("Babel changed - restart service");
-                        let _ = child.kill().await;
-                    },
-                    _ = run.wait() => {
-                        info!("Supervisor stopped, killing babel");
-                        let _ = child.kill().await;
-                    },
-                );
-            } else {
-                error!("Failed to spawn babel");
-                backoff.wait().await;
+            match cmd.spawn() {
+                Ok(mut child) => {
+                    info!("Spawned Babel");
+                    self.log_buffer
+                        .attach("babel", child.stdout.take(), child.stderr.take());
+                    tokio::select!(
+                        _ = child.wait() => {
+                            error!("Babel stopped unexpected");
+                            backoff.wait().await;
+                        },
+                        _ = babel_change_rx.changed() => {
+                            info!("Babel changed - restart service");
+                            let _ = child.kill().await;
+                        },
+                        _ = run.wait() => {
+                            info!("Supervisor stopped, killing babel");
+                            let _ = child.kill().await;
+                        },
+                    );
+                }
+                Err(err) => {
+                    error!("Failed to spawn babel: {err}");
+                    backoff.wait().await;
+                }
             }
         }
     }
@@ -152,7 +159,12 @@ impl<T: AsyncTimer> Supervisor<T> {
         cmd.args(["-c", &entrypoint.body])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut backoff = Backoff::new(&self.timer, run.clone(), &self.config);
+        let mut backoff = Backoff::new(
+            &self.timer,
+            run.clone(),
+            self.config.backoff_base_ms,
+            Duration::from_millis(self.config.backoff_timeout_ms),
+        );
         while run.load() {
             backoff.start();
             if let Ok(mut child) = cmd.spawn() {
@@ -177,72 +189,6 @@ impl<T: AsyncTimer> Supervisor<T> {
     }
 }
 
-fn kill_remnants(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
-    let remnants: Vec<_> = ps
-        .iter()
-        .filter(|(_, process)| {
-            let proc_call = process.cmd();
-            if let Some(proc_cmd) = proc_call.first() {
-                if proc_cmd == "/bin/sh" {
-                    // if first element is shell call, just ignore it and treat second as cmd, rest are arguments
-                    proc_call.len() > 1 && cmd == proc_call[1] && args == proc_call[2..].to_vec()
-                } else {
-                    // first element is cmd, rest are arguments
-                    cmd == proc_cmd && args == proc_call[1..].to_vec()
-                }
-            } else {
-                false
-            }
-        })
-        .collect();
-
-    for (_, proc) in remnants {
-        proc.kill();
-        proc.wait();
-    }
-}
-
-struct Backoff<'a, T> {
-    counter: u32,
-    timestamp: Instant,
-    backoff_base_ms: u64,
-    reset_timeout: Duration,
-    run: RunFlag,
-    timer: &'a T,
-}
-
-impl<'a, T: AsyncTimer> Backoff<'a, T> {
-    fn new(timer: &'a T, run: RunFlag, config: &SupervisorConfig) -> Self {
-        Self {
-            counter: 0,
-            timestamp: timer.now(),
-            backoff_base_ms: config.backoff_base_ms,
-            reset_timeout: Duration::from_millis(config.backoff_timeout_ms),
-            run,
-            timer,
-        }
-    }
-
-    fn start(&mut self) {
-        self.timestamp = self.timer.now();
-    }
-
-    async fn wait(&mut self) {
-        let now = self.timer.now();
-        let duration = now.duration_since(self.timestamp);
-        if duration > self.reset_timeout {
-            self.counter = 0;
-        } else {
-            self.run
-                .select(self.timer.sleep(Duration::from_millis(
-                    self.backoff_base_ms * 2u64.pow(self.counter),
-                )))
-                .await;
-            self.counter += 1;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,7 +203,6 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Instant;
-    use sysinfo::{PidExt, ProcessRefreshKind};
     use tokio::sync::broadcast;
     use tokio::time::Duration;
 
@@ -589,34 +534,6 @@ mod tests {
             lines.push(line);
         }
         assert_eq!(vec!["babel log\n"], lines);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_kill_remnants() -> Result<()> {
-        let test_env = setup_test_env()?;
-        let mut cmd = Command::new(&test_env.babel_path);
-        cmd.args(["a", "b", "c"]);
-        let child = cmd.spawn()?;
-        let pid = child.id().unwrap();
-        wait_for_babel(test_env.ctrl_file.clone()).await;
-        let mut sys = System::new();
-        sys.refresh_processes();
-        let ps = sys.processes();
-        kill_remnants(&test_env.babel_path.to_string_lossy(), &["a", "b", "c"], ps);
-        let is_process_running = |pid| {
-            let mut sys = System::new();
-            sys.refresh_process_specifics(Pid::from_u32(pid), ProcessRefreshKind::new())
-                .then(|| sys.process(Pid::from_u32(pid)).map(|proc| proc.status()))
-                .flatten()
-                .map_or(false, |status| status != sysinfo::ProcessStatus::Zombie)
-        };
-        tokio::time::timeout(Duration::from_secs(60), async {
-            while is_process_running(pid) {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        })
-        .await?;
         Ok(())
     }
 }
