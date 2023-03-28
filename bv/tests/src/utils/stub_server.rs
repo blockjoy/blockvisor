@@ -7,7 +7,7 @@ use tonic::{Request, Response, Status};
 pub struct StubHostsServer {}
 
 #[tonic::async_trait]
-impl pb::hosts_server::Hosts for StubHostsServer {
+impl pb::host_service_server::HostService for StubHostsServer {
     async fn provision(
         &self,
         request: Request<pb::ProvisionHostRequest>,
@@ -29,13 +29,13 @@ impl pb::hosts_server::Hosts for StubHostsServer {
         }
     }
 
-    async fn info_update(
+    async fn update(
         &self,
-        request: Request<pb::HostInfoUpdateRequest>,
-    ) -> Result<Response<pb::HostInfoUpdateResponse>, Status> {
+        request: Request<pb::HostUpdateRequest>,
+    ) -> Result<Response<pb::HostUpdateResponse>, Status> {
         let host = request.into_inner();
 
-        let reply = pb::HostInfoUpdateResponse {
+        let reply = pb::HostUpdateResponse {
             messages: vec![],
             origin_request_id: host.request_id,
         };
@@ -59,21 +59,21 @@ impl pb::hosts_server::Hosts for StubHostsServer {
 }
 
 pub struct StubNodesServer {
-    pub updates: Arc<Mutex<Vec<pb::node_info::ContainerStatus>>>,
+    pub updates: Arc<Mutex<Vec<pb::node::ContainerStatus>>>,
 }
 
 #[tonic::async_trait]
-impl pb::nodes_server::Nodes for StubNodesServer {
-    async fn info_update(
+impl pb::node_service_server::NodeService for StubNodesServer {
+    async fn update(
         &self,
-        request: Request<pb::NodeInfoUpdateRequest>,
+        request: Request<pb::NodeUpdateRequest>,
     ) -> Result<Response<()>, Status> {
         let req = request.into_inner();
-        let status = req.info.unwrap().container_status.unwrap();
+        let status = req.container_status.unwrap();
         self.updates
             .lock()
             .await
-            .push(pb::node_info::ContainerStatus::from_i32(status).unwrap());
+            .push(pb::node::ContainerStatus::from_i32(status).unwrap());
         Ok(Response::new(()))
     }
 }

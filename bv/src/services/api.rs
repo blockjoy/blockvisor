@@ -14,7 +14,8 @@ use base64::Engine;
 use metrics::{register_counter, Counter};
 use pb::{
     commands_client::CommandsClient, discovery_client::DiscoveryClient,
-    metrics_service_client::MetricsServiceClient, node_command::Command, nodes_client::NodesClient,
+    metrics_service_client::MetricsServiceClient, node_command::Command,
+    node_service_client::NodeServiceClient,
 };
 use std::{
     fmt::Debug,
@@ -281,12 +282,8 @@ async fn process_node_command<P: Pal + Debug>(
                 API_UPGRADE_COUNTER.increment(1);
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
-            Command::Update(pb::NodeInfoUpdate {
-                name,
-                self_update,
-                properties,
-            }) => {
-                nodes.update(node_id, name, self_update, properties).await?;
+            Command::Update(pb::NodeUpdate { self_update }) => {
+                nodes.update(node_id, self_update).await?;
                 API_UPDATE_COUNTER.increment(1);
                 API_UPDATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
@@ -306,13 +303,13 @@ async fn process_node_command<P: Pal + Debug>(
 
 pub struct NodesService {
     token: String,
-    client: NodesClient<Channel>,
+    client: NodeServiceClient<Channel>,
 }
 
 impl NodesService {
     pub async fn connect(config: Config) -> Result<Self> {
         let url = config.blockjoy_api_url;
-        let client = NodesClient::connect(url.clone())
+        let client = NodeServiceClient::connect(url.clone())
             .await
             .with_context(|| format!("Failed to connect to nodes service at {url}"))?;
 
@@ -323,14 +320,8 @@ impl NodesService {
     }
 
     #[instrument(skip(self))]
-    pub async fn send_node_update(&mut self, update: pb::NodeInfo) -> Result<()> {
-        let req = pb::NodeInfoUpdateRequest {
-            request_id: Some(Uuid::new_v4().to_string()),
-            info: Some(update),
-        };
-        self.client
-            .info_update(with_auth(req.clone(), &self.token))
-            .await?;
+    pub async fn send_node_update(&mut self, update: pb::NodeUpdateRequest) -> Result<()> {
+        self.client.update(with_auth(update, &self.token)).await?;
         Ok(())
     }
 }
@@ -389,9 +380,9 @@ impl From<pb::ContainerImage> for NodeImage {
 
 impl TryFrom<Policy> for firewall::Policy {
     type Error = anyhow::Error;
-    fn try_from(value: Policy) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: Policy) -> Result<Self, Self::Error> {
         Ok(match value {
-            Policy::UndefinedPolicy => {
+            Policy::Unspecified => {
                 bail!("Invalid Policy")
             }
             Policy::Allow => firewall::Policy::Allow,
@@ -403,15 +394,15 @@ impl TryFrom<Policy> for firewall::Policy {
 
 fn try_policy(value: i32) -> Result<firewall::Policy> {
     Policy::from_i32(value)
-        .unwrap_or(Policy::UndefinedPolicy)
+        .unwrap_or(Policy::Unspecified)
         .try_into()
 }
 
 impl TryFrom<Direction> for firewall::Direction {
     type Error = anyhow::Error;
-    fn try_from(value: Direction) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: Direction) -> Result<Self, Self::Error> {
         Ok(match value {
-            Direction::UndefinedDirection => {
+            Direction::Unspecified => {
                 bail!("Invalid Direction")
             }
             Direction::In => firewall::Direction::In,
@@ -422,18 +413,19 @@ impl TryFrom<Direction> for firewall::Direction {
 
 impl TryFrom<Protocol> for firewall::Protocol {
     type Error = anyhow::Error;
-    fn try_from(value: Protocol) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: Protocol) -> Result<Self, Self::Error> {
         Ok(match value {
-            Protocol::Both => firewall::Protocol::Both,
+            Protocol::Unspecified => bail!("Invalid Protocol"),
             Protocol::Tcp => firewall::Protocol::Tcp,
             Protocol::Udp => firewall::Protocol::Udp,
+            Protocol::Both => firewall::Protocol::Both,
         })
     }
 }
 
 impl TryFrom<NodeFirewallUpdate> for firewall::Config {
     type Error = anyhow::Error;
-    fn try_from(update: NodeFirewallUpdate) -> std::result::Result<Self, Self::Error> {
+    fn try_from(update: NodeFirewallUpdate) -> Result<Self, Self::Error> {
         Ok(Self {
             enabled: update.enabled,
             default_in: try_policy(update.default_in)?,
@@ -446,7 +438,7 @@ impl TryFrom<NodeFirewallUpdate> for firewall::Config {
                         name: rule.name,
                         policy: try_policy(rule.policy)?,
                         direction: Direction::from_i32(rule.direction)
-                            .unwrap_or(Direction::UndefinedDirection)
+                            .ok_or_else(|| anyhow!("Invalid Protocol"))?
                             .try_into()?,
                         protocol: Some(
                             Protocol::from_i32(rule.policy)

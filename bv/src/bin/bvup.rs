@@ -67,30 +67,35 @@ async fn main() -> Result<()> {
         let ip = get_ip_address(&cmd_args.ifa).with_context(|| "failed to get ip address")?;
         let host_info = get_host_info();
 
-        let info = pb::HostInfo {
-            id: None,
-            name: host_info.name,
-            version: Some(crate_version!().to_string()),
-            location: None,
-            cpu_count: host_info.cpu_count,
-            mem_size: host_info.mem_size,
-            disk_size: host_info.disk_size,
-            os: host_info.os,
-            os_version: host_info.os_version,
-            ip: Some(ip),
-            ip_range_to: None,
-            ip_range_from: None,
-            ip_gateway: None,
-        };
         let create = pb::ProvisionHostRequest {
-            request_id: Some(Uuid::new_v4().to_string()),
+            request_id: Uuid::new_v4().to_string(),
             otp: cmd_args.otp.unwrap(),
-            info: Some(info),
             status: pb::ConnectionStatus::Online.into(),
+            name: host_info
+                .name
+                .ok_or_else(|| anyhow!("host_info.name is required sadly, sort it out"))?,
+            version: crate_version!().to_string(),
+            cpu_count: host_info
+                .cpu_count
+                .ok_or_else(|| anyhow!("host_info.cpu_count is required sadly, sort it out"))?,
+            mem_size_bytes: host_info
+                .mem_size
+                .ok_or_else(|| anyhow!("host_info.mem_size is required sadly, sort it out"))?,
+            disk_size_bytes: host_info
+                .disk_size
+                .ok_or_else(|| anyhow!("host_info.disk_size is required sadly, sort it out"))?,
+            os: host_info
+                .os
+                .ok_or_else(|| anyhow!("host_info.os is required sadly, sort it out"))?,
+            os_version: host_info
+                .os_version
+                .ok_or_else(|| anyhow!("host_info.os_version is required sadly, sort it out"))?,
+            ip,
         };
 
         let mut client =
-            pb::hosts_client::HostsClient::connect(cmd_args.blockjoy_api_url.clone()).await?;
+            pb::host_service_client::HostServiceClient::connect(cmd_args.blockjoy_api_url.clone())
+                .await?;
 
         let host = client.provision(create).await?.into_inner();
 

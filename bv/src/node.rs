@@ -3,7 +3,7 @@ use crate::{
     node_connection::NodeConnection,
     node_data::{NodeData, NodeImage, NodeStatus},
     pal::{NetInterface, Pal},
-    services::{api::pb::Parameter, cookbook::CookbookService},
+    services::cookbook::CookbookService,
     utils::{get_process_pid, run_cmd},
     with_retry, BV_VAR_PATH,
 };
@@ -406,25 +406,10 @@ impl<P: Pal + Debug> Node<P> {
         self.data.delete(&self.paths.registry).await
     }
 
-    pub async fn update(
-        &mut self,
-        name: Option<String>,
-        self_update: Option<bool>,
-        properties: Vec<Parameter>,
-    ) -> Result<()> {
+    pub async fn update(&mut self, self_update: Option<bool>) -> Result<()> {
         // If the fields we receive are populated, we update the node data.
-        if let Some(name) = name {
-            // TODO: we need to remove it from protos
-            if self.data.name == name {
-                warn!("Cannot change node name to `{name}`, operation is not supported");
-            }
-        }
         if let Some(self_update) = self_update {
             self.data.self_update = self_update;
-        }
-        if !properties.is_empty() {
-            // TODO change API to send Option<Vec<Parameter>> to allow setting empty properties
-            self.data.properties = properties.into_iter().map(|p| (p.name, p.value)).collect();
         }
         self.data.save(&self.paths.registry).await
     }

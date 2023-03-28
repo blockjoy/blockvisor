@@ -48,7 +48,7 @@ async fn test_bvup_and_reset() {
     let server_future = async {
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(pb::hosts_server::HostsServer::new(server))
+            .add_service(pb::host_service_server::HostServiceServer::new(server))
             .serve("0.0.0.0:8082".to_socket_addrs().unwrap().next().unwrap())
             .await
             .unwrap()
@@ -102,7 +102,6 @@ async fn test_bvup_and_reset() {
 #[serial]
 async fn test_bv_service_e2e() {
     use blockvisord::config::Config;
-    use serde_json::json;
     use uuid::Uuid;
 
     let request_id = Uuid::new_v4().to_string();
@@ -123,14 +122,9 @@ async fn test_bv_service_e2e() {
             fields: vec![],
             pagination: None,
         }),
-        user: Some(ui_pb::User {
-            id: None,
-            email: Some(email.to_string()),
-            first_name: Some("first".to_string()),
-            last_name: Some("last".to_string()),
-            created_at: None,
-            updated_at: None,
-        }),
+        email: email.to_string(),
+        first_name: "first".to_string(),
+        last_name: "last".to_string(),
         password: password.to_string(),
         password_confirmation: password.to_string(),
     };
@@ -184,17 +178,9 @@ async fn test_bv_service_e2e() {
 
     let provision_create = ui_pb::CreateHostProvisionRequest {
         meta: Some(ui_pb::RequestMeta::default()),
-        host_provision: Some(ui_pb::HostProvision {
-            id: None,
-            host_id: None,
-            created_at: None,
-            claimed_at: None,
-            install_cmd: Some("install cmd".to_string()),
-            ip_gateway: "216.18.214.193".to_string(),
-            ip_range_from: "216.18.214.195".to_string(),
-            ip_range_to: "216.18.214.206".to_string(),
-            org_id: None,
-        }),
+        ip_gateway: "216.18.214.193".to_string(),
+        ip_range_from: "216.18.214.195".to_string(),
+        ip_range_to: "216.18.214.206".to_string(),
     };
     let provision: ui_pb::CreateHostProvisionResponse = client
         .create(with_auth(provision_create, &auth_token, &refresh_token))
@@ -258,37 +244,20 @@ async fn test_bv_service_e2e() {
 
     let node_create = ui_pb::CreateNodeRequest {
         meta: Some(ui_pb::RequestMeta::default()),
-        node: Some(ui_pb::Node {
-            id: None,
-            org_id: Some(org_id.clone()),
-            host_id: Some(host_id.to_string()),
-            host_name: None,
-            blockchain_id: Some(blockchain_id.to_string()),
-            name: None,
-            groups: vec![],
-            version: Some("0.0.1".to_string()),
-            ip: None,
-            r#type: Some(
-                json!({"id": 3, "properties": [{"name": "TESTING_PARAM","label":"label","description":"description","ui_type":"unknown","disabled":false,"required":true,"value": "anything"}]})
-                    .to_string(),
-            ), // validator
-            address: None,
-            wallet_address: None,
-            block_height: None,
-            node_data: None,
-            created_at: None,
-            updated_at: None,
-            status: Some(ui_pb::node::NodeStatus::Provisioning.into()),
-            sync_status: None,
-            staking_status: None,
-            ip_gateway: None,
-            self_update: Some(false),
-            network: Some("".to_string()),
-            blockchain_name: Some("aetherium".to_string()),
-            created_by: None,
-            created_by_name: None,
-            created_by_email: None,
-        }),
+        org_id: org_id.clone(),
+        blockchain_id: blockchain_id.to_string(),
+        version: Some("0.0.1".to_string()),
+        r#type: ui_pb::node::NodeType::Validator.into(),
+        properties: vec![ui_pb::node::NodeProperty {
+            name: "TESTING_PARAM".to_string(),
+            label: "testeronis".to_string(),
+            description: "this param is for testing".to_string(),
+            ui_type: "like I said, for testing".to_string(),
+            disabled: false,
+            required: true,
+            value: Some("I guess just some test value".to_string()),
+        }],
+        network: "".to_string(),
     };
     let node: ui_pb::CreateNodeResponse = node_client
         .create(with_auth(node_create, &auth_token, &refresh_token))

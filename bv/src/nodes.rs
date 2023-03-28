@@ -19,11 +19,7 @@ use crate::{
     node::Node,
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     node_metrics, render,
-    services::{
-        api::{pb, pb::Parameter},
-        cookbook::CookbookService,
-        keyfiles::KeyService,
-    },
+    services::{api::pb, cookbook::CookbookService, keyfiles::KeyService},
     BV_VAR_PATH,
 };
 
@@ -257,20 +253,14 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn update(
-        &self,
-        id: Uuid,
-        name: Option<String>,
-        self_update: Option<bool>,
-        properties: Vec<Parameter>,
-    ) -> Result<()> {
+    pub async fn update(&self, id: Uuid, self_update: Option<bool>) -> Result<()> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
             .ok_or_else(|| id_not_found(id))?
             .write()
             .await;
-        node.update(name, self_update, properties).await
+        node.update(self_update).await
     }
 
     #[instrument(skip(self))]

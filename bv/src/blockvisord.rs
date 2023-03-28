@@ -248,15 +248,17 @@ where
                 }
 
                 let container_status = match status {
-                    NodeStatus::Running => pb::node_info::ContainerStatus::Running,
-                    NodeStatus::Stopped => pb::node_info::ContainerStatus::Stopped,
-                    NodeStatus::Failed => pb::node_info::ContainerStatus::UndefinedContainerStatus,
+                    NodeStatus::Running => pb::node::ContainerStatus::Running,
+                    NodeStatus::Stopped => pb::node::ContainerStatus::Stopped,
+                    NodeStatus::Failed => pb::node::ContainerStatus::Unspecified,
                 };
-                let update = pb::NodeInfo {
+                let update = pb::NodeUpdateRequest {
+                    request_id: Uuid::new_v4().to_string(),
                     id: node_id.to_string(),
-                    address: address.clone(),
+                    ip: None,
+                    self_update: None,
                     container_status: Some(container_status.into()),
-                    ..Default::default()
+                    address: address.clone(),
                 };
 
                 if Self::send_node_info_update(config.clone(), update)
@@ -337,7 +339,10 @@ where
     }
 
     // Send node info update to control plane
-    async fn send_node_info_update(config: SharedConfig, update: pb::NodeInfo) -> Result<()> {
+    async fn send_node_info_update(
+        config: SharedConfig,
+        update: pb::NodeUpdateRequest,
+    ) -> Result<()> {
         let mut client = api::NodesService::connect(config.read().await)
             .await
             .with_context(|| "Error connecting to api".to_string())?;

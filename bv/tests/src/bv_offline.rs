@@ -16,7 +16,7 @@ use blockvisord::{
     set_bv_status, utils, BV_VAR_PATH,
 };
 use bv_utils::run_flag::RunFlag;
-use pb::node_info::ContainerStatus;
+use pb::node::ContainerStatus;
 use serde_json::json;
 use std::{net::ToSocketAddrs, sync::Arc};
 use sysinfo::{Pid, PidExt, ProcessExt, ProcessRefreshKind, System, SystemExt};
@@ -526,7 +526,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         Server::builder()
             .max_concurrent_streams(1)
             .add_service(pb::commands_server::CommandsServer::new(commands_server))
-            .add_service(pb::nodes_server::NodesServer::new(nodes_server))
+            .add_service(pb::node_service_server::NodeServiceServer::new(
+                nodes_server,
+            ))
             .serve("0.0.0.0:8089".to_socket_addrs().unwrap().next().unwrap())
             .await
             .unwrap()

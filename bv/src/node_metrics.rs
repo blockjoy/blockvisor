@@ -123,7 +123,7 @@ where
 /// logging them, we ignore these failures.
 impl From<Metrics> for pb::NodeMetricsRequest {
     fn from(metrics: Metrics) -> Self {
-        use crate::services::api::pb::node_info::{ApplicationStatus, StakingStatus, SyncStatus};
+        use crate::services::api::pb::node::{ApplicationStatus, StakingStatus, SyncStatus};
 
         let metrics = metrics
             .0
