@@ -438,11 +438,11 @@ impl TryFrom<NodeFirewallUpdate> for firewall::Config {
                         name: rule.name,
                         policy: try_policy(rule.policy)?,
                         direction: Direction::from_i32(rule.direction)
-                            .ok_or_else(|| anyhow!("Invalid Protocol"))?
+                            .ok_or_else(|| anyhow!("Invalid Direction"))?
                             .try_into()?,
                         protocol: Some(
                             Protocol::from_i32(rule.policy)
-                                .unwrap_or(Protocol::Both)
+                                .ok_or_else(|| anyhow!("Invalid Protocol"))?
                                 .try_into()?,
                         ),
                         ips: rule.ips,
