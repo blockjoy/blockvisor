@@ -16,10 +16,23 @@ use tokio::{
 use tokio_stream::Stream;
 use tonic::Status;
 
-/// Kill
-pub fn kill_remnants(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
-    let remnants: Vec<_> = ps
-        .iter()
+/// Kill all processes that match `cmd` and passed `args`.
+pub fn kill_all(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
+    let remnants: Vec<_> = find_process(cmd, args, ps);
+
+    for (_, proc) in remnants {
+        proc.kill();
+        proc.wait();
+    }
+}
+
+/// Find all processes that match `cmd` and passed `args`.
+pub fn find_process<'a>(
+    cmd: &'a str,
+    args: &'a [&str],
+    ps: &'a HashMap<Pid, Process>,
+) -> Vec<(&'a Pid, &'a Process)> {
+    ps.iter()
         .filter(|(_, process)| {
             let proc_call = process.cmd();
             if let Some(proc_cmd) = proc_call.first() {
@@ -34,12 +47,7 @@ pub fn kill_remnants(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
                 false
             }
         })
-        .collect();
-
-    for (_, proc) in remnants {
-        proc.kill();
-        proc.wait();
-    }
+        .collect()
 }
 
 /// Restart backoff procedure helper.
@@ -242,7 +250,7 @@ mod tests {
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
-        kill_remnants(&cmd_path.to_string_lossy(), &["a", "b", "c"], ps);
+        kill_all(&cmd_path.to_string_lossy(), &["a", "b", "c"], ps);
         let is_process_running = |pid| {
             let mut sys = System::new();
             sys.refresh_process_specifics(Pid::from_u32(pid), ProcessRefreshKind::new())

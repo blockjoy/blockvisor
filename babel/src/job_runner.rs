@@ -7,7 +7,7 @@ use crate::utils::LimitStatus;
 /// Backoff timeout and retry count are reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::{
     job_data::JobData,
-    utils::{kill_remnants, Backoff},
+    utils::{kill_all, Backoff},
 };
 use babel_api::config::{JobStatus, RestartConfig, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
@@ -23,6 +23,7 @@ use tracing::{debug, error, info, warn};
 
 pub struct JobRunner<T> {
     jobs_dir: PathBuf,
+    name: String,
     job_data: JobData,
     timer: T,
     log_buffer: LogBuffer,
@@ -120,6 +121,7 @@ impl<T: AsyncTimer> JobRunner<T> {
 
         Ok(JobRunner {
             jobs_dir: jobs_dir.to_path_buf(),
+            name,
             job_data,
             timer,
             log_buffer,
@@ -128,8 +130,7 @@ impl<T: AsyncTimer> JobRunner<T> {
 
     pub async fn run(mut self, mut run: RunFlag) {
         self.kill_all_remnants();
-        self.set_status(JobStatus::Running(None));
-        if let Err(err) = self.job_data.save(&self.jobs_dir) {
+        if let Err(err) = self.job_data.save(&self.jobs_dir, &self.name) {
             error!("failed to save job data: {err}")
         }
         if let Err(status) = self.try_run_job(run.clone()).await {
@@ -140,7 +141,7 @@ impl<T: AsyncTimer> JobRunner<T> {
 
     fn set_status(&mut self, value: JobStatus) {
         self.job_data.status = value.clone();
-        if let Err(err) = self.job_data.save(&self.jobs_dir) {
+        if let Err(err) = self.job_data.save(&self.jobs_dir, &self.name) {
             error!("job status changed to {value:?}, but failed to save job data: {err}")
         }
     }
@@ -148,7 +149,7 @@ impl<T: AsyncTimer> JobRunner<T> {
     /// Run and restart job child process until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(&mut self, mut run: RunFlag) -> Result<(), JobStatus> {
-        let job_name = &self.job_data.name;
+        let job_name = &self.name;
         let mut cmd = Command::new("sh");
         cmd.args(["-c", &self.job_data.config.body])
             .stdout(Stdio::piped())
@@ -190,7 +191,7 @@ impl<T: AsyncTimer> JobRunner<T> {
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
-        kill_remnants("sh", &["-c", &self.job_data.config.body], ps);
+        kill_all("sh", &["-c", &self.job_data.config.body], ps);
     }
 }
 
@@ -332,7 +333,6 @@ mod tests {
             writeln!(cmd_file, "echo 'cmd log'")?;
         }
         let data = JobData {
-            name: job_name.clone(),
             config: JobConfig {
                 body: cmd_path.to_string_lossy().to_string(),
                 restart: RestartPolicy::Always(RestartConfig {
@@ -345,7 +345,7 @@ mod tests {
             },
             status: JobStatus::Pending,
         };
-        data.save(&jobs_dir)?;
+        data.save(&jobs_dir, &job_name)?;
 
         let mut timer_mock = MockAsyncTimer::new();
         let now = std::time::Instant::now();

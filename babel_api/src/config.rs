@@ -71,7 +71,7 @@ pub enum RestartPolicy {
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
     Pending,
-    Running(Option<String>), // may optionally contain progress message
+    Running,
     Finished {
         exit_code: Option<i32>,
         message: String,

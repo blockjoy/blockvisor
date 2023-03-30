@@ -1,3 +1,4 @@
+use crate::jobs_manager::JobsManagerClient;
 use crate::ufw_wrapper::apply_firewall_config;
 use crate::utils;
 use async_trait::async_trait;
@@ -24,13 +25,14 @@ const DATA_DRIVE_PATH: &str = "/dev/vdb";
 /// It stores CRC32 checksum of the binary file.
 pub type JobRunnerLock = Arc<RwLock<Option<u32>>>;
 
-pub struct BabelService {
+pub struct BabelService<J> {
     inner: reqwest::Client,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: PathBuf,
+    jobs_manager: J,
 }
 
-impl std::ops::Deref for BabelService {
+impl<J> std::ops::Deref for BabelService<J> {
     type Target = reqwest::Client;
 
     fn deref(&self) -> &Self::Target {
@@ -39,7 +41,9 @@ impl std::ops::Deref for BabelService {
 }
 
 #[async_trait]
-impl babel_api::babel_server::Babel for BabelService {
+impl<J: JobsManagerClient + Sync + Send + 'static> babel_api::babel_server::Babel
+    for BabelService<J>
+{
     async fn setup_firewall(
         &self,
         request: Request<babel_api::config::firewall::Config>,
@@ -171,24 +175,38 @@ impl babel_api::babel_server::Babel for BabelService {
         let mut lock = self.job_runner_lock.write().await;
         let checksum = utils::save_bin_stream(&self.job_runner_bin_path, &mut stream)
             .await
-            .map_err(|e| Status::internal(format!("upload_job_runner failed with {e}")))?;
+            .map_err(|err| Status::internal(format!("upload_job_runner failed: {err}")))?;
         lock.replace(checksum);
         Ok(Response::new(()))
     }
 
     async fn start_job(
         &self,
-        _request: Request<(String, JobConfig)>,
+        request: Request<(String, JobConfig)>,
     ) -> Result<Response<()>, Status> {
-        unimplemented!();
+        let (name, config) = request.into_inner();
+        self.jobs_manager
+            .start(&name, config)
+            .await
+            .map_err(|err| Status::internal(format!("start_job failed: {err}")))?;
+        Ok(Response::new(()))
     }
 
-    async fn stop_job(&self, _request: Request<String>) -> Result<Response<()>, Status> {
-        unimplemented!();
+    async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status> {
+        self.jobs_manager
+            .stop(&request.into_inner())
+            .await
+            .map_err(|err| Status::internal(format!("stop_job failed: {err}")))?;
+        Ok(Response::new(()))
     }
 
-    async fn job_status(&self, _request: Request<String>) -> Result<Response<JobStatus>, Status> {
-        unimplemented!();
+    async fn job_status(&self, request: Request<String>) -> Result<Response<JobStatus>, Status> {
+        let status = self
+            .jobs_manager
+            .status(&request.into_inner())
+            .await
+            .map_err(|err| Status::internal(format!("job_status failed: {err}")))?;
+        Ok(Response::new(status))
     }
 
     async fn blockchain_jrpc(
@@ -223,8 +241,12 @@ fn to_blockchain_err(err: eyre::Error) -> Status {
     Status::internal(err.to_string())
 }
 
-impl BabelService {
-    pub fn new(job_runner_lock: JobRunnerLock, job_runner_bin_path: PathBuf) -> Result<Self> {
+impl<J> BabelService<J> {
+    pub fn new(
+        job_runner_lock: JobRunnerLock,
+        job_runner_bin_path: PathBuf,
+        job_manager: J,
+    ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .build()?;
@@ -232,6 +254,7 @@ impl BabelService {
             inner: client,
             job_runner_lock,
             job_runner_bin_path,
+            jobs_manager: job_manager,
         })
     }
 
@@ -304,17 +327,30 @@ mod tests {
     use babel_api::babel_server::Babel;
     use babel_api::config::{JrpcResponse, MethodResponseFormat, RestResponse, ShResponse};
     use httpmock::prelude::*;
+    use mockall::*;
     use std::collections::HashMap;
     use tokio::net::UnixStream;
     use tokio_stream::wrappers::UnixListenerStream;
     use tonic::transport::{Channel, Endpoint, Server, Uri};
+
+    mock! {
+        pub JobsManager {}
+
+        #[async_trait]
+        impl JobsManagerClient for JobsManager {
+            async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
+            async fn stop(&self, name: &str) -> Result<()>;
+            async fn status(&self, name: &str) -> Result<JobStatus>;
+        }
+    }
 
     async fn babel_server(
         job_runner_lock: JobRunnerLock,
         job_runner_bin_path: PathBuf,
         uds_stream: UnixListenerStream,
     ) -> Result<()> {
-        let babel_service = BabelService::new(job_runner_lock, job_runner_bin_path)?;
+        let babel_service =
+            BabelService::new(job_runner_lock, job_runner_bin_path, MockJobsManager::new())?;
         Server::builder()
             .max_concurrent_streams(1)
             .add_service(babel_api::babel_server::BabelServer::new(babel_service))
@@ -360,8 +396,12 @@ mod tests {
         })
     }
 
-    fn build_babel_service_with_defaults() -> Result<BabelService> {
-        BabelService::new(Arc::new(Default::default()), Default::default())
+    fn build_babel_service_with_defaults() -> Result<BabelService<MockJobsManager>> {
+        BabelService::new(
+            Arc::new(Default::default()),
+            Default::default(),
+            MockJobsManager::new(),
+        )
     }
 
     #[tokio::test]
@@ -640,7 +680,11 @@ mod tests {
         let job_runner_bin_path = TempDir::new().unwrap().join("job_runner");
         let job_runner_lock = Arc::new(RwLock::new(None));
 
-        let service = BabelService::new(job_runner_lock.clone(), job_runner_bin_path)?;
+        let service = BabelService::new(
+            job_runner_lock.clone(),
+            job_runner_bin_path,
+            MockJobsManager::new(),
+        )?;
 
         assert_eq!(
             babel_api::BinaryStatus::Missing,

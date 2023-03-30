@@ -1,5 +1,6 @@
 use babel::babel_service::JobRunnerLock;
-use babel::{babel_service, logging, utils};
+use babel::job_data::JOBS_DIR;
+use babel::{babel_service, jobs_manager, logging, utils};
 use bv_utils::run_flag::RunFlag;
 use eyre::Context;
 use std::path::Path;
@@ -27,15 +28,31 @@ async fn main() -> eyre::Result<()> {
         utils::file_checksum(&JOB_RUNNER_BIN_PATH).await.ok(),
     ));
 
-    let run = RunFlag::run_until_ctrlc();
-    serve(run, job_runner_lock).await?;
+    let (client, manager) =
+        jobs_manager::create(&JOBS_DIR, job_runner_lock.clone(), &JOB_RUNNER_BIN_PATH)?;
 
+    let mut run = RunFlag::run_until_ctrlc();
+    let manager_handle = tokio::spawn(manager.run(run.clone()));
+    serve(run.clone(), job_runner_lock, client).await?;
+    if run.load() {
+        // make sure to stop manager gracefully
+        // in case of abnormal server shutdown
+        run.stop();
+        manager_handle.await?;
+    }
     Ok(())
 }
 
-async fn serve(mut run: RunFlag, job_runner_lock: JobRunnerLock) -> eyre::Result<()> {
-    let babel_service =
-        babel_service::BabelService::new(job_runner_lock, JOB_RUNNER_BIN_PATH.to_path_buf())?;
+async fn serve(
+    mut run: RunFlag,
+    job_runner_lock: JobRunnerLock,
+    jobs_manager: jobs_manager::Client,
+) -> eyre::Result<()> {
+    let babel_service = babel_service::BabelService::new(
+        job_runner_lock,
+        JOB_RUNNER_BIN_PATH.to_path_buf(),
+        jobs_manager,
+    )?;
     let listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_BABEL_PORT)
         .with_context(|| "failed to bind to vsock")?;
 
