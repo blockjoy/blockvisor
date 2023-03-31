@@ -1,4 +1,5 @@
 use crate::{
+    async_pid_watch::AsyncPidWatch,
     babel_service::JobRunnerLock,
     job_data::JobData,
     utils::{find_process, kill_all},
@@ -7,6 +8,7 @@ use async_trait::async_trait;
 use babel_api::config::{JobConfig, JobStatus};
 use bv_utils::run_flag::RunFlag;
 use eyre::{bail, Context, ContextCompat, Report, Result};
+use futures::{stream::FuturesUnordered, StreamExt};
 use std::{
     collections::HashMap,
     fs::read_dir,
@@ -14,10 +16,9 @@ use std::{
     sync::Arc,
 };
 use sysinfo::{Pid, PidExt, Process, System, SystemExt};
-use tokio::sync::MutexGuard;
 use tokio::{
     select,
-    sync::{watch, Mutex},
+    sync::{watch, Mutex, MutexGuard},
 };
 
 pub fn create(
@@ -164,19 +165,40 @@ impl Monitor {
         let mut sys = System::new();
         while run.load() {
             sys.refresh_processes();
-            self.update_jobs(sys.processes()).await;
-            select!(
-                // _ = job_futures.next() => {} TODO wake when any of job processes ends
-                _ = self.change_rx.changed() => {}
-                _ = run.wait() => {}
-            );
+            if let Ok(async_pids) = self.update_jobs(sys.processes()).await {
+                if async_pids.is_empty() {
+                    // no jobs :( - just wait for change
+                    select!(
+                        _ = self.change_rx.changed() => {}
+                        _ = run.wait() => {}
+                    );
+                } else {
+                    let mut futures = FuturesUnordered::new();
+                    for apid in &async_pids {
+                        futures.push(apid.watch());
+                    }
+                    select!(
+                        _ = futures.next() => {}
+                        _ = self.change_rx.changed() => {}
+                        _ = run.wait() => {}
+                    );
+                }
+            } // refresh process and update_jobs again in case of error
         }
     }
 
-    async fn update_jobs(&mut self, ps: &HashMap<Pid, Process>) {
+    async fn update_jobs(&mut self, ps: &HashMap<Pid, Process>) -> Result<Vec<AsyncPidWatch>> {
         let mut jobs = self.jobs_registry.lock().await;
         self.update_active_jobs(ps, &mut jobs).await;
         self.check_inactive_jobs(&mut jobs).await;
+
+        let mut async_pids = vec![];
+        for (_, job) in jobs.iter() {
+            if let Job::Active(pid) = job {
+                async_pids.push(AsyncPidWatch::new(*pid)?);
+            }
+        }
+        Ok(async_pids)
     }
 
     async fn update_active_jobs(
@@ -269,13 +291,12 @@ fn deps_finished(
     deps: &HashMap<String, Job>,
     needs: &mut [String],
 ) -> Result<bool, Report> {
-    needs.iter().fold(Ok(true), |deps_finished, needed_name| {
-        let deps_finished = deps_finished?;
+    for needed_name in needs {
         match deps
             .get(needed_name)
             .with_context(|| format!("job '{name}' needs '{needed_name}', but it is not defined"))?
         {
-            Job::Active(_) => Ok(false),
+            Job::Active(_) => return Ok(false),
             Job::Inactive(JobData {
                 status: JobStatus::Stopped,
                 ..
@@ -286,14 +307,15 @@ fn deps_finished(
                         exit_code: Some(0), ..
                     },
                 ..
-            }) => Ok(deps_finished),
+            }) => {}
             Job::Inactive(JobData {
                 status: JobStatus::Finished { exit_code, message },
                 ..
             }) => bail!(
                 "job '{name}' needs '{needed_name}', but it failed with {exit_code:?} - {message}"
             ),
-            Job::Inactive(JobData { .. }) => Ok(false),
+            Job::Inactive(JobData { .. }) => return Ok(false),
         }
-    })
+    }
+    Ok(true)
 }

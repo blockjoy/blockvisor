@@ -1,3 +1,4 @@
+pub mod async_pid_watch;
 pub mod babel_service;
 pub mod babelsup_service;
 pub mod job_data;

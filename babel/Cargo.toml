@@ -45,6 +45,7 @@ tracing-subscriber = {version = "0.3.16", features = ["env-filter", "fmt", "std"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-vsock = {version = "0.4.0", features = ["tonic-conn"]}
+libc = "0.2.78"
 
 [dev-dependencies]
 assert_fs = "1"

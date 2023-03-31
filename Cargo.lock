@@ -329,6 +329,7 @@ dependencies = [
  "gjson",
  "httpmock",
  "lazy_static",
+ "libc",
  "mockall",
  "reqwest",
  "serde",
