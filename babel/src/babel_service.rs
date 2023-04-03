@@ -29,6 +29,7 @@ pub struct BabelService<J> {
     inner: reqwest::Client,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: PathBuf,
+    /// jobs manager client used to work with jobs
     jobs_manager: J,
 }
 
@@ -245,7 +246,7 @@ impl<J> BabelService<J> {
     pub fn new(
         job_runner_lock: JobRunnerLock,
         job_runner_bin_path: PathBuf,
-        job_manager: J,
+        jobs_manager: J,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
@@ -254,7 +255,7 @@ impl<J> BabelService<J> {
             inner: client,
             job_runner_lock,
             job_runner_bin_path,
-            jobs_manager: job_manager,
+            jobs_manager,
         })
     }
 

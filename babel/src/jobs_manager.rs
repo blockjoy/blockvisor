@@ -1,56 +1,63 @@
+/// Jobs Manager consists of two parts:
+/// .1 Client - allow asynchronous operations on jobs: start, stop and get status
+/// .2 Monitor - background worker that monitor job runners and take proper actions when some job runner ends
+/// It also start/stop requested jobs.
 use crate::{
     async_pid_watch::AsyncPidWatch,
     babel_service::JobRunnerLock,
-    job_data::JobData,
-    utils::{find_process, kill_all},
+    jobs,
+    jobs::{Job, JobState, Jobs, JobsData, JobsRegistry, CONFIG_SUBDIR, STATUS_SUBDIR},
+    utils::{find_processes, kill_all_processes},
 };
 use async_trait::async_trait;
-use babel_api::config::{JobConfig, JobStatus};
+use babel_api::config::{JobConfig, JobStatus, RestartPolicy};
 use bv_utils::run_flag::RunFlag;
 use eyre::{bail, Context, ContextCompat, Report, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::{
-    collections::HashMap,
-    fs::read_dir,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::HashMap, fs, fs::read_dir, path::Path, sync::Arc};
 use sysinfo::{Pid, PidExt, Process, System, SystemExt};
 use tokio::{
     select,
-    sync::{watch, Mutex, MutexGuard},
+    sync::{watch, Mutex},
 };
+use tracing::error;
 
 pub fn create(
     jobs_dir: &Path,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: &Path,
 ) -> Result<(Client, Monitor)> {
-    if !jobs_dir.exists() {
-        std::fs::create_dir_all(jobs_dir)?;
+    let jobs_config_dir = jobs_dir.join(CONFIG_SUBDIR);
+    if !jobs_config_dir.exists() {
+        fs::create_dir_all(jobs_config_dir)?;
+    }
+    let jobs_status_dir = jobs_dir.join(STATUS_SUBDIR);
+    if !jobs_status_dir.exists() {
+        fs::create_dir_all(jobs_status_dir)?;
     }
     let jobs_registry = Arc::new(Mutex::new(load_jobs(jobs_dir, job_runner_bin_path)?));
-    let (change_tx, change_rx) = watch::channel(());
+    let (job_added_tx, job_added_rx) = watch::channel(());
     Ok((
         Client {
-            jobs_dir: jobs_dir.to_path_buf(),
             jobs_registry: jobs_registry.clone(),
             job_runner_bin_path: job_runner_bin_path.to_string_lossy().to_string(),
-            change_tx,
+            job_added_tx,
         },
         Monitor {
-            jobs_dir: jobs_dir.to_path_buf(),
             jobs_registry,
             job_runner_lock,
             job_runner_bin_path: job_runner_bin_path.to_string_lossy().to_string(),
-            change_rx,
+            job_added_rx,
         },
     ))
 }
 
-fn load_jobs(jobs_dir: &Path, job_runner_bin_path: &Path) -> Result<HashMap<String, Job>> {
+fn load_jobs(jobs_dir: &Path, job_runner_bin_path: &Path) -> Result<Jobs> {
     let mut jobs = HashMap::new();
-    let dir = read_dir(jobs_dir).with_context(|| "failed to read jobs from dir {jobs_dir}")?;
+    let jobs_data = JobsData::new(jobs_dir);
+    let jobs_config_dir = jobs_dir.join(CONFIG_SUBDIR);
+    let dir = read_dir(&jobs_config_dir)
+        .with_context(|| format!("failed to read jobs from dir {}", jobs_config_dir.display()))?;
     let mut sys = System::new();
     sys.refresh_processes();
     let ps = sys.processes();
@@ -60,16 +67,33 @@ fn load_jobs(jobs_dir: &Path, job_runner_bin_path: &Path) -> Result<HashMap<Stri
             .path();
         if let Some(name) = path.file_stem() {
             let name = name.to_string_lossy().to_string();
-            if let Some((pid, _)) =
-                find_process(&job_runner_bin_path.to_string_lossy(), &[&name], ps).first()
-            {
-                jobs.insert(name.clone(), Job::Active(**pid));
-            } else {
-                jobs.insert(name, Job::Inactive(JobData::load(&path)?));
+            match jobs::load_config(&path) {
+                Ok(config) => {
+                    let state = if let Some((pid, _)) =
+                        find_processes(&job_runner_bin_path.to_string_lossy(), &[&name], ps).next()
+                    {
+                        JobState::Active(*pid)
+                    } else {
+                        JobState::Inactive(
+                            jobs_data.load_status(&name).unwrap_or(JobStatus::Pending),
+                        )
+                    };
+                    jobs.insert(name, Job { state, config });
+                }
+                Err(err) => {
+                    // invalid job config file log error, remove invalid file and go to next one
+                    error!(
+                        "invalid job '{}' config file {}, load failed with: {}",
+                        name,
+                        path.display(),
+                        err
+                    );
+                    let _ = fs::remove_file(path);
+                }
             }
         }
     }
-    Ok(jobs)
+    Ok((jobs, jobs_data))
 }
 
 #[async_trait]
@@ -79,57 +103,59 @@ pub trait JobsManagerClient {
     async fn status(&self, name: &str) -> Result<JobStatus>;
 }
 
-#[derive(Clone)]
-enum Job {
-    Active(Pid),
-    Inactive(JobData),
-}
-type JobsRegistry = Arc<Mutex<HashMap<String, Job>>>;
-
 pub struct Client {
-    jobs_dir: PathBuf,
     jobs_registry: JobsRegistry,
     job_runner_bin_path: String,
-    change_tx: watch::Sender<()>,
+    job_added_tx: watch::Sender<()>,
 }
 
 #[async_trait]
 impl JobsManagerClient for Client {
     async fn start(&self, name: &str, config: JobConfig) -> Result<()> {
-        let mut jobs = self.jobs_registry.lock().await;
-        if let Some(Job::Active(_)) = jobs.get(name) {
-            bail!("can't start, job '{name}' is already running")
+        let mut lock = self.jobs_registry.lock().await;
+        let (jobs, jobs_data) = &mut *lock;
+        if let Some(Job {
+            state: JobState::Active(_),
+            config: old_config,
+        }) = jobs.get(name)
+        {
+            if config != *old_config {
+                bail!("can't start, job '{name}' is already running with different config")
+            }
         }
-        let data = JobData {
-            config,
-            status: JobStatus::Pending,
-        };
-        data.save(&self.jobs_dir, name)
-            .with_context(|| format!("failed to start job {name}, can't save job data to file"))?;
-        jobs.insert(name.to_string(), Job::Inactive(data));
-        let _ = self.change_tx.send(());
+
+        jobs_data.clear_status(name);
+        jobs_data.save_config(&config, name).with_context(|| {
+            format!("failed to start job {name}, can't save job config to file")
+        })?;
+        jobs.insert(
+            name.to_string(),
+            Job {
+                state: JobState::Inactive(JobStatus::Pending),
+                config,
+            },
+        );
+        let _ = self.job_added_tx.send(());
         Ok(())
     }
 
     async fn stop(&self, name: &str) -> Result<()> {
-        if let Some(job) = self.jobs_registry.lock().await.get_mut(name) {
-            match job {
-                Job::Active(_) => {
+        let mut lock = self.jobs_registry.lock().await;
+        let (jobs, jobs_data) = &mut *lock;
+        if let Some(job) = jobs.get_mut(name) {
+            match &mut job.state {
+                JobState::Active(_) => {
                     let mut sys = System::new();
                     sys.refresh_processes();
                     let ps = sys.processes();
-                    kill_all(&self.job_runner_bin_path, &[name], ps);
-                    let mut data = JobData::load(&JobData::file_path(name, &self.jobs_dir))
-                        .with_context(|| {
-                            format!("failed to stop job {name}, can't load job data from file")
-                        })?;
-                    data.set_status(JobStatus::Stopped, &self.jobs_dir, name)?;
-                    *job = Job::Inactive(data);
+                    kill_all_processes(&self.job_runner_bin_path, &[name], ps);
+                    job.state = JobState::Inactive(JobStatus::Stopped);
                 }
-                Job::Inactive(data) => {
-                    data.set_status(JobStatus::Stopped, &self.jobs_dir, name)?;
+                JobState::Inactive(status) => {
+                    *status = JobStatus::Stopped;
                 }
             }
+            jobs_data.save_status(&JobStatus::Stopped, name)?;
         } else {
             bail!("can't stop, job '{name}' not found")
         }
@@ -137,27 +163,29 @@ impl JobsManagerClient for Client {
     }
 
     async fn status(&self, name: &str) -> Result<JobStatus> {
+        let lock = self.jobs_registry.lock().await;
+        let (jobs, _) = &*lock;
         Ok(
-            if let Job::Inactive(data) = self
-                .jobs_registry
-                .lock()
-                .await
+            if let Job {
+                state: JobState::Inactive(status),
+                ..
+            } = jobs
                 .get(name)
                 .with_context(|| format!("unknown status, job '{name}' not found"))?
             {
-                data.status.clone()
+                status.clone()
             } else {
                 JobStatus::Running
             },
         )
     }
 }
+
 pub struct Monitor {
-    jobs_dir: PathBuf,
     jobs_registry: JobsRegistry,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: String,
-    change_rx: watch::Receiver<()>,
+    job_added_rx: watch::Receiver<()>,
 }
 
 impl Monitor {
@@ -167,19 +195,17 @@ impl Monitor {
             sys.refresh_processes();
             if let Ok(async_pids) = self.update_jobs(sys.processes()).await {
                 if async_pids.is_empty() {
-                    // no jobs :( - just wait for change
+                    // no jobs :( - just wait for job to be added
                     select!(
-                        _ = self.change_rx.changed() => {}
+                        _ = self.job_added_rx.changed() => {}
                         _ = run.wait() => {}
                     );
                 } else {
-                    let mut futures = FuturesUnordered::new();
-                    for apid in &async_pids {
-                        futures.push(apid.watch());
-                    }
+                    let mut futures: FuturesUnordered<_> =
+                        async_pids.iter().map(|a| a.watch()).collect();
                     select!(
                         _ = futures.next() => {}
-                        _ = self.change_rx.changed() => {}
+                        _ = self.job_added_rx.changed() => {}
                         _ = run.wait() => {}
                     );
                 }
@@ -188,13 +214,18 @@ impl Monitor {
     }
 
     async fn update_jobs(&mut self, ps: &HashMap<Pid, Process>) -> Result<Vec<AsyncPidWatch>> {
-        let mut jobs = self.jobs_registry.lock().await;
-        self.update_active_jobs(ps, &mut jobs).await;
-        self.check_inactive_jobs(&mut jobs).await;
+        let mut lock = self.jobs_registry.lock().await;
+        let (jobs, jobs_data) = &mut *lock;
+        self.update_active_jobs(ps, jobs, jobs_data).await;
+        self.check_inactive_jobs(jobs, jobs_data).await;
 
         let mut async_pids = vec![];
-        for (_, job) in jobs.iter() {
-            if let Job::Active(pid) = job {
+        for job in jobs.values() {
+            if let Job {
+                state: JobState::Active(pid),
+                ..
+            } = job
+            {
                 async_pids.push(AsyncPidWatch::new(*pid)?);
             }
         }
@@ -204,82 +235,108 @@ impl Monitor {
     async fn update_active_jobs(
         &self,
         ps: &HashMap<Pid, Process>,
-        jobs: &mut MutexGuard<'_, HashMap<String, Job>>,
+        jobs: &mut HashMap<String, Job>,
+        jobs_data: &JobsData,
     ) {
         for (name, job) in jobs.iter_mut() {
-            if let Job::Active(job_pid) = job {
-                if !ps.iter().any(|(pid, _)| pid == job_pid) {
-                    *job = self.handle_stopped_job(name).await;
+            if let Job {
+                state: JobState::Active(job_pid),
+                ..
+            } = job
+            {
+                if !ps.keys().any(|pid| pid == job_pid) {
+                    job.state = self
+                        .handle_stopped_job(name, &job.config.restart, jobs_data)
+                        .await;
                 }
             }
         }
     }
 
-    async fn check_inactive_jobs(&self, jobs: &mut MutexGuard<'_, HashMap<String, Job>>) {
+    async fn check_inactive_jobs(&self, jobs: &mut HashMap<String, Job>, jobs_data: &JobsData) {
         let deps = jobs.clone();
         for (name, job) in jobs.iter_mut() {
-            if let Job::Inactive(JobData {
+            if let Job {
+                state: JobState::Inactive(status),
                 config: JobConfig { needs, .. },
-                status,
-            }) = job
+            } = job
             {
                 if *status == JobStatus::Pending {
-                    let deps_finished = deps_finished(name, &deps, needs);
-                    match deps_finished {
-                        Ok(true) => {
-                            match self.start_job(name).await {
-                                Ok(pid) => *job = Job::Active(pid),
-                                Err(err) => {
-                                    *status = JobStatus::Finished {
-                                        exit_code: None,
-                                        message: format!("failed to start job {name}: {err}"),
-                                    }
-                                }
-                            };
-                        }
+                    match deps_finished(name, &deps, needs) {
+                        Ok(true) => job.state = self.start_job(name, jobs_data).await,
+                        Ok(false) => {}
                         Err(err) => {
                             *status = JobStatus::Finished {
                                 exit_code: None,
                                 message: err.to_string(),
                             };
+                            if let Err(err) = jobs_data.save_status(status, name) {
+                                // if we can't save save status for some reason, just log
+                                error!("failed to save failed job {name} status: {err}");
+                            }
                         }
-                        Ok(false) => {}
                     }
                 }
             }
         }
     }
 
-    async fn handle_stopped_job(&self, name: &str) -> Job {
-        let mut data = JobData::load(&JobData::file_path(name, &self.jobs_dir))
-            .unwrap_or_else(|err|panic!("can't load job '{name}' data from file after it stopped - this should never happen - panic! Cause: {err}"));
-        if let JobStatus::Finished { .. } = data.status {
-            Job::Inactive(data)
+    async fn handle_stopped_job(
+        &self,
+        name: &str,
+        restart_policy: &RestartPolicy,
+        jobs_data: &JobsData,
+    ) -> JobState {
+        let status = jobs_data.load_status(name).unwrap_or_else(|err| {
+            let message =
+                format!("can't load job '{name}' status from file after it stopped, with: {err}");
+            error!(message);
+            match restart_policy {
+                RestartPolicy::Never => JobStatus::Finished {
+                    exit_code: None,
+                    message,
+                },
+                _ => JobStatus::Running,
+            }
+        });
+        if let JobStatus::Finished { .. } = status {
+            JobState::Inactive(status)
         } else {
             // job process ended, but job was not finished - try restart
-            match self.start_job(name).await {
-                Ok(pid) => Job::Active(pid),
-                Err(err) => {
-                    data.status = JobStatus::Finished {
-                        exit_code: None,
-                        message: format!("failed to restart job {name}: {err}"),
-                    };
-                    Job::Inactive(data)
+            self.start_job(name, jobs_data).await
+        }
+    }
+
+    async fn start_job(&self, name: &str, jobs_data: &JobsData) -> JobState {
+        jobs_data.clear_status(name);
+        match self.start_job_runner(name).await {
+            Ok(pid) => JobState::Active(pid),
+            Err(err) => {
+                let status = JobStatus::Finished {
+                    exit_code: None,
+                    message: format!("failed to start job {name}: {err}"),
+                };
+                match jobs_data.save_status(&status, name) {
+                    Ok(()) => JobState::Inactive(status),
+                    Err(_) => {
+                        error!("failed to save failed job {name} status: {err}");
+                        JobState::Inactive(JobStatus::Pending)
+                    }
                 }
             }
         }
     }
 
-    async fn start_job(&self, name: &str) -> Result<Pid> {
+    async fn start_job_runner(&self, name: &str) -> Result<Pid> {
         // make sure job runner binary is not currently updated
         let lock = self.job_runner_lock.read().await;
         if lock.is_some() {
             let child = tokio::process::Command::new(&self.job_runner_bin_path)
                 .args([&name])
                 .spawn()?;
-            Ok(Pid::from_u32(child.id().with_context(|| {
-                format!("can't get PID of started job '{name}'")
-            })?))
+            // it is save to unwrap() here, id() returns None only if
+            // "the child has been polled to completion"
+            Ok(Pid::from_u32(child.id().unwrap()))
         } else {
             bail!("missing job runner binary");
         }
@@ -292,29 +349,21 @@ fn deps_finished(
     needs: &mut [String],
 ) -> Result<bool, Report> {
     for needed_name in needs {
-        match deps
+        match &deps
             .get(needed_name)
             .with_context(|| format!("job '{name}' needs '{needed_name}', but it is not defined"))?
+            .state
         {
-            Job::Active(_) => return Ok(false),
-            Job::Inactive(JobData {
-                status: JobStatus::Stopped,
-                ..
-            }) => bail!("job '{name}' needs '{needed_name}', but it was stopped"),
-            Job::Inactive(JobData {
-                status:
-                    JobStatus::Finished {
-                        exit_code: Some(0), ..
-                    },
-                ..
+            JobState::Inactive(JobStatus::Finished {
+                exit_code: Some(0), ..
             }) => {}
-            Job::Inactive(JobData {
-                status: JobStatus::Finished { exit_code, message },
-                ..
-            }) => bail!(
+            JobState::Inactive(JobStatus::Finished { exit_code, message }) => bail!(
                 "job '{name}' needs '{needed_name}', but it failed with {exit_code:?} - {message}"
             ),
-            Job::Inactive(JobData { .. }) => return Ok(false),
+            JobState::Inactive(JobStatus::Stopped) => {
+                bail!("job '{name}' needs '{needed_name}', but it was stopped")
+            }
+            _ => return Ok(false),
         }
     }
     Ok(true)

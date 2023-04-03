@@ -17,8 +17,8 @@ use tokio_stream::Stream;
 use tonic::Status;
 
 /// Kill all processes that match `cmd` and passed `args`.
-pub fn kill_all(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
-    let remnants: Vec<_> = find_process(cmd, args, ps);
+pub fn kill_all_processes(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
+    let remnants = find_processes(cmd, args, ps);
 
     for (_, proc) in remnants {
         proc.kill();
@@ -27,27 +27,25 @@ pub fn kill_all(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
 }
 
 /// Find all processes that match `cmd` and passed `args`.
-pub fn find_process<'a>(
+pub fn find_processes<'a>(
     cmd: &'a str,
     args: &'a [&str],
     ps: &'a HashMap<Pid, Process>,
-) -> Vec<(&'a Pid, &'a Process)> {
-    ps.iter()
-        .filter(|(_, process)| {
-            let proc_call = process.cmd();
-            if let Some(proc_cmd) = proc_call.first() {
-                if proc_cmd == "/bin/sh" {
-                    // if first element is shell call, just ignore it and treat second as cmd, rest are arguments
-                    proc_call.len() > 1 && cmd == proc_call[1] && args == proc_call[2..].to_vec()
-                } else {
-                    // first element is cmd, rest are arguments
-                    cmd == proc_cmd && args == proc_call[1..].to_vec()
-                }
+) -> impl Iterator<Item = (&'a Pid, &'a Process)> {
+    ps.iter().filter(move |(_, process)| {
+        let proc_call = process.cmd();
+        if let Some(proc_cmd) = proc_call.first() {
+            if proc_cmd == "/bin/sh" {
+                // if first element is shell call, just ignore it and treat second as cmd, rest are arguments
+                proc_call.len() > 1 && cmd == proc_call[1] && args == proc_call[2..].to_vec()
             } else {
-                false
+                // first element is cmd, rest are arguments
+                cmd == proc_cmd && args == proc_call[1..].to_vec()
             }
-        })
-        .collect()
+        } else {
+            false
+        }
+    })
 }
 
 /// Restart backoff procedure helper.
@@ -250,7 +248,7 @@ mod tests {
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
-        kill_all(&cmd_path.to_string_lossy(), &["a", "b", "c"], ps);
+        kill_all_processes(&cmd_path.to_string_lossy(), &["a", "b", "c"], ps);
         let is_process_running = |pid| {
             let mut sys = System::new();
             sys.refresh_process_specifics(Pid::from_u32(pid), ProcessRefreshKind::new())

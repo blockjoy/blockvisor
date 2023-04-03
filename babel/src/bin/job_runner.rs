@@ -1,5 +1,5 @@
-use babel::job_data::JOBS_DIR;
 use babel::job_runner::JobRunner;
+use babel::jobs;
 use babel::log_buffer::LogBuffer;
 use babel::logging;
 use bv_utils::run_flag::RunFlag;
@@ -44,7 +44,13 @@ async fn main() -> eyre::Result<()> {
         }
     };
     join!(
-        JobRunner::new(bv_utils::timer::SysTimer, &JOBS_DIR, job_name, log_buffer)?.run(run),
+        JobRunner::new(
+            bv_utils::timer::SysTimer,
+            &jobs::JOBS_DIR,
+            job_name,
+            log_buffer
+        )?
+        .run(run),
         log_handler
     );
 

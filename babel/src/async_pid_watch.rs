@@ -41,6 +41,9 @@ impl AsRawFd for NonBlockingPidFd {
 }
 
 /// Remember to close file descriptor.
+/// # Safety
+///
+/// `libc::close()` is independent so it is safe to close FD that was potentially closed.
 impl Drop for NonBlockingPidFd {
     fn drop(&mut self) {
         unsafe { libc::close(self.0) };
@@ -49,7 +52,11 @@ impl Drop for NonBlockingPidFd {
 
 /// Set flag to O_NONBLOCK, which should be equal to PIDFD_NONBLOCK
 /// supported since Linux 5.10, see: https://man7.org/linux/man-pages/man2/pidfd_open.2.html
-fn pidfd_open(pid: libc::pid_t) -> io::Result<RawFd> {
+/// # Safety
+///
+/// This function open files descriptor that must be closed with `libc::close()`.
+/// It shall be used only with `NonBlockingPidFd` which close on drop.
+fn pidfd_open(pid: pid_t) -> io::Result<RawFd> {
     let ret = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, libc::O_NONBLOCK) };
     if ret == -1 {
         Err(io::Error::last_os_error())

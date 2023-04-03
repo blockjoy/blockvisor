@@ -1,17 +1,18 @@
-use crate::log_buffer::LogBuffer;
-use crate::utils::LimitStatus;
 /// This module implements job runner for for long running jobs. This includes long initialization tasks
 /// and blockchain entrypoints as well, dependent on restart policy. It spawn child process as defined in
 /// given config and watch it. Stopped child (whatever reason) is respawned according to given config,
 /// with exponential backoff timeout and max retries (if configured).
 /// Backoff timeout and retry count are reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::{
-    job_data::JobData,
-    utils::{kill_all, Backoff},
+    jobs,
+    jobs::{CONFIG_SUBDIR, STATUS_SUBDIR},
+    log_buffer::LogBuffer,
+    utils::LimitStatus,
+    utils::{kill_all_processes, Backoff},
 };
-use babel_api::config::{JobStatus, RestartConfig, RestartPolicy};
+use babel_api::config::{JobConfig, JobStatus, RestartConfig, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use eyre::{Context, Result};
+use eyre::Result;
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
@@ -24,7 +25,7 @@ use tracing::{debug, error, info, warn};
 pub struct JobRunner<T> {
     jobs_dir: PathBuf,
     name: String,
-    job_data: JobData,
+    job_config: JobConfig,
     timer: T,
     log_buffer: LogBuffer,
 }
@@ -111,18 +112,15 @@ impl<'a, T: AsyncTimer> JobBackoff<'a, T> {
 
 impl<T: AsyncTimer> JobRunner<T> {
     pub fn new(timer: T, jobs_dir: &Path, name: String, log_buffer: LogBuffer) -> Result<Self> {
-        let job_data = JobData::load(&JobData::file_path(&name, jobs_dir)).with_context(|| {
-            format!(
-                "failed to load job '{}' data from {}",
-                name,
-                jobs_dir.display()
-            )
-        })?;
+        let job_config = jobs::load_config(&jobs::config_file_path(
+            &name,
+            &jobs_dir.join(CONFIG_SUBDIR),
+        ))?;
 
         Ok(JobRunner {
             jobs_dir: jobs_dir.to_path_buf(),
             name,
-            job_data,
+            job_config,
             timer,
             log_buffer,
         })
@@ -130,19 +128,13 @@ impl<T: AsyncTimer> JobRunner<T> {
 
     pub async fn run(mut self, mut run: RunFlag) {
         self.kill_all_remnants();
-        if let Err(err) = self.job_data.save(&self.jobs_dir, &self.name) {
-            error!("failed to save job data: {err}")
-        }
         if let Err(status) = self.try_run_job(run.clone()).await {
-            self.set_status(status);
+            if let Err(err) =
+                jobs::save_status(&status, &self.name, &self.jobs_dir.join(STATUS_SUBDIR))
+            {
+                error!("job status changed to {status:?}, but failed to save job data: {err}")
+            }
             run.stop();
-        }
-    }
-
-    fn set_status(&mut self, value: JobStatus) {
-        self.job_data.status = value.clone();
-        if let Err(err) = self.job_data.save(&self.jobs_dir, &self.name) {
-            error!("job status changed to {value:?}, but failed to save job data: {err}")
         }
     }
 
@@ -151,10 +143,10 @@ impl<T: AsyncTimer> JobRunner<T> {
     async fn try_run_job(&mut self, mut run: RunFlag) -> Result<(), JobStatus> {
         let job_name = &self.name;
         let mut cmd = Command::new("sh");
-        cmd.args(["-c", &self.job_data.config.body])
+        cmd.args(["-c", &self.job_config.body])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut backoff = JobBackoff::new(&self.timer, run.clone(), &self.job_data.config.restart);
+        let mut backoff = JobBackoff::new(&self.timer, run.clone(), &self.job_config.restart);
         while run.load() {
             backoff.start();
             match cmd.spawn() {
@@ -191,7 +183,7 @@ impl<T: AsyncTimer> JobRunner<T> {
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
-        kill_all("sh", &["-c", &self.job_data.config.body], ps);
+        kill_all_processes("sh", &["-c", &self.job_config.body], ps);
     }
 }
 
@@ -318,7 +310,8 @@ mod tests {
         let job_name = "job_name".to_string();
         let tmp_root = TempDir::new()?.to_path_buf();
         let jobs_dir = tmp_root.join("jobs");
-        fs::create_dir_all(&jobs_dir)?;
+        fs::create_dir_all(&jobs_dir.join(CONFIG_SUBDIR))?;
+        fs::create_dir_all(&jobs_dir.join(STATUS_SUBDIR))?;
         let test_run = RunFlag::default();
         let log_buffer = LogBuffer::new(16);
         let mut log_rx = log_buffer.subscribe();
@@ -332,20 +325,17 @@ mod tests {
             writeln!(cmd_file, "#!/bin/sh")?;
             writeln!(cmd_file, "echo 'cmd log'")?;
         }
-        let data = JobData {
-            config: JobConfig {
-                body: cmd_path.to_string_lossy().to_string(),
-                restart: RestartPolicy::Always(RestartConfig {
-                    backoff_timeout_ms: 1000,
-                    backoff_base_ms: 100,
-                    max_retries: Some(3),
-                }),
-                needs: vec![],
-                callback: "".to_string(),
-            },
-            status: JobStatus::Pending,
+        let config = JobConfig {
+            body: cmd_path.to_string_lossy().to_string(),
+            restart: RestartPolicy::Always(RestartConfig {
+                backoff_timeout_ms: 1000,
+                backoff_base_ms: 100,
+                max_retries: Some(3),
+            }),
+            needs: vec![],
+            callback: "".to_string(),
         };
-        data.save(&jobs_dir, &job_name)?;
+        jobs::save_config(&config, &job_name, &jobs_dir.join(CONFIG_SUBDIR))?;
 
         let mut timer_mock = MockAsyncTimer::new();
         let now = std::time::Instant::now();
@@ -355,9 +345,12 @@ mod tests {
             .run(test_run)
             .await;
 
-        let data = JobData::load(&JobData::file_path(&job_name, &jobs_dir))?;
+        let status = jobs::load_status(&jobs::status_file_path(
+            &job_name,
+            &jobs_dir.join(STATUS_SUBDIR),
+        ))?;
         assert_eq!(
-            data.status,
+            status,
             JobStatus::Finished {
                 exit_code: Some(0),
                 message: "Job 'job_name' finished with Ok(ExitStatus(unix_wait_status(0)))"

@@ -2,7 +2,7 @@
 /// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
 /// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::log_buffer::LogBuffer;
-use crate::utils::{kill_all, Backoff};
+use crate::utils::{kill_all_processes, Backoff};
 use babel_api::config::{Entrypoint, SupervisorConfig};
 use bv_utils::run_flag::RunFlag;
 use bv_utils::timer::AsyncTimer;
@@ -108,9 +108,9 @@ impl<T: AsyncTimer> Supervisor<T> {
         let mut sys = System::new();
         sys.refresh_processes();
         let ps = sys.processes();
-        kill_all(&self.babel_path.to_string_lossy(), &[], ps);
+        kill_all_processes(&self.babel_path.to_string_lossy(), &[], ps);
         for entry_point in &self.config.entry_point {
-            kill_all("sh", &["-c", &entry_point.body], ps);
+            kill_all_processes("sh", &["-c", &entry_point.body], ps);
         }
     }
 

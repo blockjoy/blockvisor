@@ -55,27 +55,40 @@ pub struct RestartConfig {
     pub backoff_timeout_ms: u64,
     /// base time (in miliseconds) for backof, multiplied by consecutive power of 2 each time
     pub backoff_base_ms: u64,
-    /// maximum number of retries
+    /// maximum number of retries, or `None` if there is no such limit
     pub max_retries: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum RestartPolicy {
+    /// Indicates that this job will never be restarted, whether succeeded or not - appropriate for jobs
+    /// that can't be simply restarted on failure (e.g. need some manual actions).
     Never,
+    /// Job is always restarted - equivalent to entrypoint.
     Always(RestartConfig),
+    /// Job is restarted only if `exit_code != 0`.
     OnFailure(RestartConfig),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
+    /// The current job was requested to start, but the process has not been launched yet.
+    /// It was not picked by the JobRunner yet, or needs another job to be finished first.
+    /// Every job starts with this state.
     Pending,
+    /// The JobRunner actually picked that job.
     Running,
+    /// Job finished - successfully or not. It means that the JobRunner won't try to restart that job anymore.
     Finished {
+        /// Job `sh` script exit code, if any. `None` always means some error, usually before the process
+        /// was even started (e.g. needed job failed).  
         exit_code: Option<i32>,
+        /// Error description or empty if successful.
         message: String,
     },
+    /// Job was explicitly stopped.
     Stopped,
 }
 

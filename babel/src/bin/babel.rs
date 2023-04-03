@@ -1,10 +1,9 @@
-use babel::babel_service::JobRunnerLock;
-use babel::job_data::JOBS_DIR;
-use babel::{babel_service, jobs_manager, logging, utils};
+use babel::{
+    babel_service, babel_service::JobRunnerLock, jobs::JOBS_DIR, jobs_manager, logging, utils,
+};
 use bv_utils::run_flag::RunFlag;
 use eyre::Context;
-use std::path::Path;
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 use tokio::sync::RwLock;
 use tonic::transport::Server;
 use tracing::info;
@@ -33,14 +32,14 @@ async fn main() -> eyre::Result<()> {
 
     let mut run = RunFlag::run_until_ctrlc();
     let manager_handle = tokio::spawn(manager.run(run.clone()));
-    serve(run.clone(), job_runner_lock, client).await?;
+    let res = serve(run.clone(), job_runner_lock, client).await;
     if run.load() {
         // make sure to stop manager gracefully
         // in case of abnormal server shutdown
         run.stop();
         manager_handle.await?;
     }
-    Ok(())
+    res
 }
 
 async fn serve(
