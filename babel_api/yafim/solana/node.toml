@@ -16,8 +16,8 @@ cmds = [
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
   "sudo apt update",
   "sudo apt upgrade -y",
-  "sh -c \"$(curl -sSfL https://release.solana.com/v1.15.2/install)\"",
-  "solana --version",
+  "bash -c \"$(curl -sSfL https://release.solana.com/v1.15.2/install)\"",
+  "cp root/.local/share/solana/install/active_release/bin/* /usr/local/bin/",
 
 ]
 

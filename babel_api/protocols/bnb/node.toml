@@ -29,11 +29,44 @@ disk_size_gb = 2000
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
-data_directory_mount_point = "/blockjoy/miner/data"
+data_directory_mount_point = "/blockjoy/bnb/data"
+
 
     [[supervisor.entry_point]]
-    name = "todo"
-    body = ""
+    name = "solana-node"
+    body = """
+    test -f /blockjoy/.init && \
+    geth --config babelref:'supervisor.data_directory_mount_point'/config.toml --datadir babelref:'supervisor.data_directory_mount_point'/node  --cache 8000 --rpc.allow-unprotected-txs --txlookuplimit 0 --tries-verify-mode none
+    """
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+wget $(curl -s https://api.github.com/repos/bnb-chain/bsc/releases/latest |grep browser_ |grep mainnet |cut -d: -f2-3) 2>&1 | logger -t babel.init && \
+unzip mainnet.zip && mv genesis.json config.toml babelref:'supervisor.data_directory_mount_point' 2>&1 | logger -t babel.init && \
+LATEST_CHAINDATA_SNAPSHOT=$(curl -s https://github.com/bnb-chain/bsc-snapshots |grep -e "geth-.*.tar\.lz4"|cut -d\" -f4) 2>&1 | logger -t babel.init && \
+echo "These 2 process below takes a lot of time, need to run it with nohup?" 2>&1 | logger -t babel.init && \
+mkdir -p babelref:'supervisor.data_directory_mount_point'/node 2>&1 | logger -t babel.init && \
+wget -O babelref:'supervisor.data_directory_mount_point'/node/geth.tar.lz4 $LATEST_CHAINDATA_SNAPSHOT 2>&1 | logger -t babel.init && \
+tar -I lz4 -xvf babelref:'supervisor.data_directory_mount_point'/node/geth.tar.lz4 2>&1 | logger -t babel.init && \
+touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+echo -n "Cancelled"
+"""
+
+    [methods.response]
+    status = 200
 
 [[methods]]
 name = "height"

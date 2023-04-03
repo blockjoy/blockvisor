@@ -29,11 +29,49 @@ disk_size_gb = 1500
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
-data_directory_mount_point = "/blockjoy/miner/data"
+data_directory_mount_point = "/blockjoy/solana/data"
+
 
     [[supervisor.entry_point]]
-    name = "todo"
-    body = ""
+    name = "solana-node"
+    body = """
+    test -f /blockjoy/.init && \
+    solana-validator \
+    --identity babelref:'supervisor.data_directory_mount_point'/validator-keypair.json \
+    --vote-account babelref:'supervisor.data_directory_mount_point'/vote-account-keypair.json \
+    --rpc-port 8899 \
+    --entrypoint entrypoint.{{NETWORK}}.solana.com:8001 \
+    --limit-ledger-size \
+    --log babelref:'supervisor.data_directory_mount_point'/solana-validator.log
+    """
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+solana config set --url babelref:'nets.{{NETWORK}}.url' 2>&1 | logger -t babel.init && \
+solana-keygen new -o babelref:'supervisor.data_directory_mount_point'/validator-keypair.json  2>&1 | logger -t babel.init && \
+solana-keygen new -o babelref:'supervisor.data_directory_mount_point'/authorized-withdrawer-keypair.json  2>&1 | logger -t babel.init && \
+solana-keygen new -o babelref:'supervisor.data_directory_mount_point'/vote-account-keypair.json  2>&1 | logger -t babel.init && \
+solana create-vote-account babelref:'supervisor.data_directory_mount_point'/vote-account-keypair.json babelref:'supervisor.data_directory_mount_point'/validator-keypair.json babelref:'supervisor.data_directory_mount_point'/authorized-withdrawer-keypair.json  2>&1 | logger -t babel.init && \
+touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+echo -n "Cancelled"
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
 
 [[methods]]
 name = "height"
@@ -64,12 +102,21 @@ method = "getHealth"
 
 [nets.mainnet]
 net_type = "main"
-url = "https://rpc.ankr.com/solana"
+url = "api.mainnet-beta.solana.com"
+metrics_db = "mainnet-beta"
+metrics_user = "mainnet-beta_write"
+metrics_password = "password"
 
 [nets.testnet]
 net_type = "test"
 url = "https://api.testnet.solana.com"
+metrics_db = "tds"
+metrics_user = "testnet_write"
+metrics_password = "c4fa841aa918bf8274e3e2a44d77568d9861b3ea"
 
 [nets.devnet]
 net_type = "dev"
 url = "https://api.devnet.solana.com"
+metrics_db = "devnet"
+metrics_user = "scratch_writer"
+metrics_password = "topsecret"

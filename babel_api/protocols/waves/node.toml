@@ -1,0 +1,68 @@
+[env]
+path_append = "/blockjoy/bin/"
+
+[config]
+protocol = "waves"
+node_type = "validator"
+node_version = "1.4.13"
+min_babel_version = "0.0.1" 
+description = "waves blockchain validator"
+api_host = "http://localhost:6870/"
+ports = [6870]
+
+[requirements]
+vcpu_count = 2
+mem_size_mb = 4096
+disk_size_gb = 100
+
+[supervisor]
+backoff_timeout_ms = 60000
+backoff_base_ms = 100
+log_buffer_capacity_ln = 1000
+data_directory_mount_point = "/blockjoy/miner/data"
+
+    [[supervisor.entry_point]]
+    name = "todo"
+    body = ""
+
+[[methods]]
+name = "height"
+transport = "rest"
+method = "/blocks/height"
+
+    [methods.response]
+    status = 200
+    field = "height"
+    format = "json"
+
+[[methods]]
+name = "address"
+transport = "rest"
+method = "/addresses"
+
+    [methods.response]
+    status = 200
+    field = "result" 
+    format = "json"
+
+[[methods]]
+name = "status"
+transport = "rest"
+method = "/activation/status"
+
+    [methods.response]
+    status = 200
+    field = "features.nodeStatus"
+    format = "json"
+
+[nets.mainnet]
+net_type = "main"
+url = "http://blockchain.wavesnodes.com/blockchain_last.tar"
+
+[nets.testnet]
+net_type = "test"
+url = "http://blockchain-testnet.wavesnodes.com/blockchain_last.tar"
+
+[nets.stagenet]
+net_type = "test"
+url = "http://blockchain-stagenet.wavesnodes.com/blockchain_last.tar"

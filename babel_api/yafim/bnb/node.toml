@@ -26,9 +26,6 @@ cmds = [
   "apt install unzip -y",
   "bash -c \"wget $(curl -s https://api.github.com/repos/bnb-chain/bsc/releases/latest |grep browser_ |grep geth_linux |cut -d: -f2-3)\"",
   "mv geth_linux /usr/bin/geth && chmod -v u+x /usr/bin/geth",
-  "bash -c \"wget $(curl -s https://api.github.com/repos/bnb-chain/bsc/releases/latest |grep browser_ |grep mainnet |cut -d: -f2-3)\"",
-  "unzip mainnet.zip",
-  #"./geth --config ./config.toml --datadir ./node  --cache 8000 --rpc.allow-unprotected-txs --txlookuplimit 0",
 ] 
 
 [build_machine]

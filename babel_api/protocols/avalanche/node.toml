@@ -66,6 +66,31 @@ method = "platform.getBlockchainStatus"
     field = "result.status"
     # status_enum = { syncing = "Syncing", follower = "Created"}
 
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+    octez-node config init --data-dir /blockjoy/tezos/data --network={{NETWORK}} --history-mode=babelref:'nets.{{NETWORK}}.history' && \
+    octez-node config update --config-file=/blockjoy/tezos/data/config.json --data-dir=/blockjoy/tezos/data --rpc-addr="localhost:8732" && \
+    touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+echo -n "Cancelled"
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
 [nets.mainnet]
 net_type = "main"
 url = "https://api.avax.network/ext/bc/C/rpc"

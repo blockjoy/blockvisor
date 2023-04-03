@@ -19,15 +19,8 @@ cmds = [
   "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
   "wget -O ./osmosisd https://github.com/osmosis-labs/osmosis/releases/download/v14.0.1/osmosisd-14.0.1-linux-amd64",
+  "go install github.com/cosmos/cosmos-sdk/cosmovisor/cmd/cosmovisor@v1.0.0",
   "chmod +x ./osmosisd && cp ./osmosisd /usr/bin/",
-  #"osmosisd init YOUR_MONIKER --chain-id osmosis-1",
-  #"wget -O genesis.json https://snapshots.polkachu.com/genesis/osmosis/genesis.json --inet4-only",
-  #"mv genesis.json ~/.osmosisd/config",
-  #"sed -i 's/seeds = ""/seeds = "ade4d8bc8cbe014af6ebdf3cb7b1e9ad36f412c0@seeds.polkachu.com:12556"/' ~/.osmosisd/config/config.toml",
-  #"mkdir -p ~/.osmosisd/cosmovisor/genesis/bin",
-  #"mkdir -p ~/.osmosisd/cosmovisor/upgrades",
-  #"cp /usr/bin/osmosisd ~/.osmosisd/cosmovisor/genesis/bin",
-  # Download Osmosis Snapshot 11GB https://polkachu.com/tendermint_snapshots/osmosis
   
 ] 
 

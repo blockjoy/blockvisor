@@ -29,11 +29,46 @@ disk_size_gb = 1000
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
-data_directory_mount_point = "/blockjoy/miner/data"
+data_directory_mount_point = "/blockjoy/osmosis"
 
     [[supervisor.entry_point]]
-    name = "todo"
-    body = ""
+    name = "osmosis-node"
+    body = """
+    test -f /blockjoy/.init && \
+    DAEMON_NAME=osmosisd DAEMON_HOME=babelref:'supervisor.data_directory_mount_point' DAEMON_ALLOW_DOWNLOAD_BINARIES=false DAEMON_RESTART_AFTER_UPGRADE=true cosmovisor start
+    """
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+osmosisd init blockhoy-osmosis-node-$(date -I) --home babelref:'supervisor.data_directory_mount_point' --chain-id osmosis-1 2>&1 | logger -t babel.init && \
+mkdir -p babelref:'supervisor.data_directory_mount_point'/cosmovisor/genesis/bin  && mkdir -p babelref:'supervisor.data_directory_mount_point'/cosmovisor/upgrades 2>&1 | logger -t babel.init && \
+wget -O babelref:'supervisor.data_directory_mount_point'/config/genesis.json https://snapshots.polkachu.com/genesis/osmosis/genesis.json --inet4-only  2>&1 | logger -t babel.init && \
+# GET LATEST PEERS?
+#sed -i 's/seeds = ""/seeds = "ade4d8bc8cbe014af6ebdf3cb7b1e9ad36f412c0@seeds.polkachu.com:12556"/' ~/.osmosisd/config/config.toml  2>&1 | logger -t babel.init && \
+cp /usr/bin/osmosisd babelref:'supervisor.data_directory_mount_point'/cosmovisor/genesis/bin  2>&1 | logger -t babel.init && \
+LATEST_SNAPSHOT=$(curl -s https://polkachu.com/tendermint_snapshots/osmosis |grep -e "href.*snapshots/osmosis.*.tar\.lz4"|cut -d\" -f2)
+wget -O babelref:'supervisor.data_directory_mount_point'/osmosis.tar.lz4 $LATEST_SNAPSHOT 2>&1 | logger -t babel.init && \
+tar -I lz4 -xvf babelref:'supervisor.data_directory_mount_point'/osmosis.tar.lz4  2>&1 | logger -t babel.init && \
+touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+echo -n "Cancelled"
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
 
 [[methods]]
 name = "height"

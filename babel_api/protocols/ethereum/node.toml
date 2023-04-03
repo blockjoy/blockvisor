@@ -94,8 +94,6 @@ name = "init"
 transport = "sh"
 body = """
 ! test -f /blockjoy/.init && \
-    echo {{VOTING-PWD}} > /blockjoy/secret && \
-    lighthouse --network {{NETWORK}} --datadir /blockjoy/data/lighthouse account validator import --directory /opt/secrets --reuse-password --password-file /blockjoy/secret && \
     touch /blockjoy/.init
 """
 

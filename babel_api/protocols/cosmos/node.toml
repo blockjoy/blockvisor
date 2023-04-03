@@ -29,11 +29,51 @@ disk_size_gb = 2000
 backoff_timeout_ms = 60000
 backoff_base_ms = 100
 log_buffer_capacity_ln = 1000
-data_directory_mount_point = "/blockjoy/miner/data"
+data_directory_mount_point = "/blockjoy/cosmos/"
+
 
     [[supervisor.entry_point]]
-    name = "todo"
-    body = ""
+    name = "cosmos-node"
+    body = """
+    test -f /blockjoy/.init && \
+    gaiad start --home babelref:'supervisor.data_directory_mount_point' --x-crisis-skip-assert-invariants
+    """
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+
+mkdir babelref:'supervisor.data_directory_mount_point'/config -p 2>&1 | logger -t babel.init && \
+wget -O babelref:'supervisor.data_directory_mount_point'/genesis.cosmoshub.json.gz  https://raw.githubusercontent.com/cosmos/{{NETWORK}}/master/genesis/babelref:'nets.{{NETWORK}}.genesis_file_name'.gz 2>&1 | logger -t babel.init && \
+gunzip babelref:'supervisor.data_directory_mount_point'/genesis.cosmoshub.json.gz 2>&1 | logger -t babel.init && \
+gaiad init cosmos-node --home babelref:'supervisor.data_directory_mount_point' --chain-id babelref:'nets.{{NETWORK}}.chain_id' 2>&1 | logger -t babel.init && \
+mv babelref:'supervisor.data_directory_mount_point'/genesis.cosmoshub.json babelref:'supervisor.data_directory_mount_point'/config/genesis.json 2>&1 | logger -t babel.init && \
+export URL=`curl -L https://quicksync.io/cosmos.json|jq -r '.[] |select(.file=="cosmoshub-4-babelref:'nets.{{NETWORK}}.chain_state'")|.url'` 2>&1 | logger -t babel.init && \
+echo $URL 2>&1 | logger -t babel.init && \
+cd babelref:'supervisor.data_directory_mount_point' $URL 2>&1 | logger -t babel.init && \
+aria2c -x5 $URL 2>&1 | logger -t babel.init && \
+lz4 -c -d `basename $URL` | tar xf - 2>&1 | logger -t babel.init && \
+curl https://quicksync.io/addrbook.cosmos.json > babelref:'supervisor.data_directory_mount_point'/config/addrbook.json 2>&1 | logger -t babel.init && \
+
+touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+echo -n "Cancelled"
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
 
 [[methods]]
 name = "height"
@@ -74,7 +114,13 @@ method = "genesis"
 [nets.mainnet]
 net_type = "main"
 url = "https://rpc.cosmos.network:26657"
+genesis_file_name = "genesis.cosmoshub-4.json"
+chain_id = "cosmoshub-4"
+chain_state = "pruned""
 
 [nets.testnet]
 net_type = "test"
 url = "https://cosmos-testnet-rpc.allthatnode.com:26657"
+genesis_file_name = ""
+chain_id = ""
+chain_state = """

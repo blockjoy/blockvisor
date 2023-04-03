@@ -28,10 +28,11 @@ cmds = [
   "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
   "rm /etc/resolv.conf",
   "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
-  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
-# Genesis file to download https://github.com/Fantom-foundation/lachesis_launch/blob/master/docs/genesis-files.md
- #"nohup ./opera --genesis mainnet-109331-pruned-mpt.g --nousb \
- # --db.preset ldb-1 &"
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+  "bash -c "curl -s https://download.fantom.network |grep -E 'mainnet.*.g'|cut -d\" -f2|grep -v md5|head -1 > ~/latest_mainnet_file\"",
+  #"bash -c \"$(curl -s https://download.fantom.network |grep -E '(testnet.*.g)'|cut -d\" -f2|grep -v md5|head -1 > ~/latest_testnet_file)\"",
+  #"sed -i -e \"/mainnet_genesis_file_name = \"\"/ s/= .*/= \"$(cat ~/latest_mainnet_file)\"/\" /etc/babel.conf",
+  #"sed -i -e \"/testnet_genesis_file_name = \"\"/ s/= .*/= \"$(curl -s https://download.fantom.network |grep -E '(testnet.*.g)'|cut -d\" -f2|grep -v md5|head -1)\"/\" /etc/babel.conf\"",
 ] 
 
 [build_machine]
