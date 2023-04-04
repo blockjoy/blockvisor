@@ -333,7 +333,6 @@ mod tests {
                 max_retries: Some(3),
             }),
             needs: vec![],
-            callback: "".to_string(),
         };
         jobs::save_config(&config, &job_name, &jobs_dir.join(CONFIG_SUBDIR))?;
 

@@ -21,19 +21,19 @@ pub type JobsRegistry = Arc<Mutex<Jobs>>;
 
 pub type Jobs = (HashMap<String, Job>, JobsData);
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct JobsData {
     jobs_config_dir: PathBuf,
     jobs_status_dir: PathBuf,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum JobState {
     Active(Pid),
     Inactive(JobStatus),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Job {
     pub state: JobState,
     pub config: JobConfig,
@@ -100,6 +100,6 @@ impl JobsData {
     }
 
     pub fn load_status(&self, name: &str) -> Result<JobStatus> {
-        load_status(&status_file_path(name, &self.jobs_config_dir))
+        load_status(&status_file_path(name, &self.jobs_status_dir))
     }
 }

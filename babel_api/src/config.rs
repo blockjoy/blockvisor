@@ -46,7 +46,6 @@ pub struct JobConfig {
     pub body: String,
     pub restart: RestartPolicy,
     pub needs: Vec<String>,
-    pub callback: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
