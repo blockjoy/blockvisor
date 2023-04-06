@@ -36,6 +36,14 @@ pub struct SupervisorConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BabelConfig {
+    /// Path to mount data drive to
+    pub data_directory_mount_point: String,
+    /// capacity of log buffer (in lines)
+    pub log_buffer_capacity_ln: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Entrypoint {
     pub name: String,
     pub body: String,

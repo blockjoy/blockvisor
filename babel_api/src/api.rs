@@ -1,5 +1,7 @@
-use crate::config;
-use crate::config::SupervisorConfig;
+use crate::{
+    config,
+    config::{BabelConfig, SupervisorConfig},
+};
 use serde::{Deserialize, Serialize};
 use strum_macros::Display;
 
@@ -44,10 +46,10 @@ pub enum Binary {
 
 #[tonic_rpc::tonic_rpc(bincode)]
 pub trait Babel {
+    /// Initial Babel setup that must be run on node startup Mount data directory.
+    fn setup_babel(config: BabelConfig);
     /// Setup firewall according to given configuration.
     fn setup_firewall(config: config::firewall::Config);
-    /// Mount data directory.
-    fn mount_data_directory(data_directory_mount_point: String);
     /// Download key files from locations specified in `keys` section of Babel config.
     fn download_keys(config: config::KeysConfig) -> Vec<BlockchainKey>;
     /// Upload files into locations specified in `keys` section of Babel config.
@@ -89,6 +91,10 @@ pub trait Babel {
         /// These are the configuration options for parsing the response.
         response: config::ShResponse,
     ) -> String;
+
+    /// Get logs gathered from jobs.
+    #[server_streaming]
+    fn get_logs() -> String;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -96,4 +102,9 @@ pub struct BlockchainKey {
     pub name: String,
     #[serde(with = "serde_bytes")]
     pub content: Vec<u8>,
+}
+
+#[tonic_rpc::tonic_rpc(bincode)]
+pub trait LogsCollector {
+    fn send_log(log: String);
 }

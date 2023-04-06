@@ -42,8 +42,8 @@ impl LogBuffer {
         T: AsyncRead + Send + Unpin + 'static,
         U: AsyncRead + Send + Unpin + 'static,
     {
-        let stdout_task = self.attach_stream(stdout);
-        let stderr_task = self.attach_stream(stderr);
+        let stdout_task = self.attach_stream(stdout, entry_name.to_string());
+        let stderr_task = self.attach_stream(stderr, entry_name.to_string());
         let entry_name = entry_name.to_string();
         tokio::spawn(async move {
             match (stdout_task, stderr_task) {
@@ -68,6 +68,7 @@ impl LogBuffer {
     fn attach_stream<T: AsyncRead + Send + Unpin + 'static>(
         &self,
         stream: Option<T>,
+        entry_name: String,
     ) -> Option<JoinHandle<()>> {
         stream.map(|stream| {
             let tx = self.tx.clone();
@@ -82,7 +83,12 @@ impl LogBuffer {
                         }
                         Ok(0) => break,
                         Ok(_) => {
-                            let _ = tx.send(line);
+                            let _ = tx.send(format!(
+                                "{}|{}|{}",
+                                chrono::Local::now(),
+                                entry_name,
+                                line
+                            ));
                         }
                     }
                 }
@@ -131,10 +137,17 @@ mod tests {
             .unwrap();
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {
-            lines.push(line);
+            lines.push(line.split_once("|").unwrap().1.to_string());
         }
         assert_eq!(
-            vec!["one\n", "two\n", "three\n", "err1\n", "err2\n", "err3\n"],
+            vec![
+                "name1|one\n",
+                "name1|two\n",
+                "name1|three\n",
+                "name1|err1\n",
+                "name1|err2\n",
+                "name1|err3\n"
+            ],
             lines
         );
     }
@@ -159,12 +172,20 @@ mod tests {
         let mut lines = Vec::default();
         loop {
             match rx.try_recv() {
-                Ok(line) => lines.push(line),
+                Ok(line) => lines.push(line.split_once("|").unwrap().1.to_string()),
                 Err(error::TryRecvError::Lagged(_)) => {}
                 Err(_) => break,
             }
         }
         // four items expected since capacity is rounded up to next power of 2
-        assert_eq!(vec!["two\n", "three\n", "four\n", "five\n"], lines);
+        assert_eq!(
+            vec![
+                "name1|two\n",
+                "name1|three\n",
+                "name1|four\n",
+                "name1|five\n"
+            ],
+            lines
+        );
     }
 }

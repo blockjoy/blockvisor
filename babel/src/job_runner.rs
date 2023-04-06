@@ -356,10 +356,10 @@ mod tests {
                     .to_string()
             }
         );
-        assert_eq!(log_rx.recv().await?, "cmd log\n"); // first start
-        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 1
-        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 2
-        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 3
+        assert!(log_rx.recv().await?.ends_with("|job_name|cmd log\n")); // first start
+        assert!(log_rx.recv().await?.ends_with("|job_name|cmd log\n")); // retry 1
+        assert!(log_rx.recv().await?.ends_with("|job_name|cmd log\n")); // retry 2
+        assert!(log_rx.recv().await?.ends_with("|job_name|cmd log\n")); // retry 3
         log_rx.try_recv().unwrap_err();
         Ok(())
     }

@@ -194,7 +194,7 @@ mod tests {
         Ok(())
     }
 
-    fn test_client(tmp_root: &Path) -> Result<BabelSupClient<Channel>> {
+    fn test_client(tmp_root: &Path) -> BabelSupClient<Channel> {
         let socket_path = tmp_root.join("test_socket");
         let channel = Endpoint::from_static("http://[::]:50052")
             .timeout(Duration::from_secs(1))
@@ -202,7 +202,7 @@ mod tests {
             .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
                 UnixStream::connect(socket_path.clone())
             }));
-        Ok(BabelSupClient::new(channel))
+        BabelSupClient::new(channel)
     }
 
     struct TestEnv {
@@ -218,7 +218,7 @@ mod tests {
         fs::create_dir_all(&tmp_root)?;
         let babel_path = tmp_root.join("babel");
         let babelsup_cfg_path = tmp_root.join("babelsup.conf");
-        let client = test_client(&tmp_root)?;
+        let client = test_client(&tmp_root);
         let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(
             tmp_root.join("test_socket"),
         )?);

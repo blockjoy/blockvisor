@@ -1,39 +1,83 @@
-use crate::jobs_manager::JobsManagerClient;
-use crate::ufw_wrapper::apply_firewall_config;
-use crate::utils;
+use crate::{jobs_manager::JobsManagerClient, ufw_wrapper::apply_firewall_config, utils};
 use async_trait::async_trait;
-use babel_api::config::{JobConfig, JobStatus};
-use babel_api::BlockchainKey;
-use eyre::{bail, Result};
+use babel_api::{
+    config::{BabelConfig, JobConfig, JobStatus},
+    BlockchainKey,
+};
+use eyre::{bail, eyre, Report, Result};
 use serde_json::json;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::{path::Path, time::Duration};
-use tokio::sync::RwLock;
+use std::{
+    mem,
+    ops::{Deref, DerefMut},
+    path::Path,
+    path::PathBuf,
+    process::Output,
+    sync::Arc,
+    time::Duration,
+};
+use thiserror::Error;
 use tokio::{
     fs,
     fs::{DirBuilder, File},
     io::AsyncWriteExt,
+    sync::{broadcast, oneshot, Mutex, RwLock},
 };
 use tonic::{Request, Response, Status, Streaming};
 
 const WILDCARD_KEY_NAME: &str = "*";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const DATA_DRIVE_PATH: &str = "/dev/vdb";
 
 /// Lock used to avoid reading job runner binary while it is modified.
 /// It stores CRC32 checksum of the binary file.
 pub type JobRunnerLock = Arc<RwLock<Option<u32>>>;
 
-pub struct BabelService<J> {
+pub type LogsTx = oneshot::Sender<broadcast::Sender<String>>;
+pub type LogsRx = broadcast::Receiver<String>;
+
+#[derive(Error, Debug)]
+pub enum MountError {
+    #[error("drive {data_drive_path} already mounted into {data_directory_mount_point}")]
+    AlreadyMounted {
+        data_drive_path: String,
+        data_directory_mount_point: String,
+    },
+    #[error("failed to mount {data_drive_path} into {data_directory_mount_point} with: {out:?}")]
+    MountFailed {
+        data_drive_path: String,
+        data_directory_mount_point: String,
+        out: Output,
+    },
+    #[error("failed to mount {data_drive_path} into {data_directory_mount_point} with: {err}")]
+    Internal {
+        data_drive_path: String,
+        data_directory_mount_point: String,
+        err: Report,
+    },
+}
+
+/// Trait that allows to inject custom mount implementation.
+#[async_trait]
+pub trait MountDataDrive {
+    async fn mount_data_drive(&self, data_directory_mount_point: &str) -> Result<(), MountError>;
+}
+
+pub enum BabelSetup {
+    Uninitialized(LogsTx),
+    Ready(LogsRx),
+}
+
+pub struct BabelService<J, M> {
     inner: reqwest::Client,
+    setup: Arc<Mutex<BabelSetup>>,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: PathBuf,
     /// jobs manager client used to work with jobs
     jobs_manager: J,
+    babel_cfg_path: PathBuf,
+    mnt: M,
 }
 
-impl<J> std::ops::Deref for BabelService<J> {
+impl<J, M> Deref for BabelService<J, M> {
     type Target = reqwest::Client;
 
     fn deref(&self) -> &Self::Target {
@@ -42,9 +86,42 @@ impl<J> std::ops::Deref for BabelService<J> {
 }
 
 #[async_trait]
-impl<J: JobsManagerClient + Sync + Send + 'static> babel_api::babel_server::Babel
-    for BabelService<J>
+impl<J: JobsManagerClient + Sync + Send + 'static, M: MountDataDrive + Sync + Send + 'static>
+    babel_api::babel_server::Babel for BabelService<J, M>
 {
+    async fn setup_babel(&self, request: Request<BabelConfig>) -> Result<Response<()>, Status> {
+        let mut setup = self.setup.lock().await;
+        if let BabelSetup::Uninitialized(_) = setup.deref() {
+            let config = request.into_inner();
+
+            self.save_babel_conf(&config).await?;
+
+            // mount data drive
+            self.mnt
+                .mount_data_drive(&config.data_directory_mount_point)
+                .await
+                .map_err(|err| match err {
+                    MountError::AlreadyMounted { .. } => {
+                        Status::already_exists(eyre!("{err}").to_string())
+                    }
+                    _ => Status::internal(eyre!("{err}").to_string()),
+                })?;
+
+            // setup logs_server
+            let (logs_broadcast_tx, logs_rx) = broadcast::channel(config.log_buffer_capacity_ln);
+            if let BabelSetup::Uninitialized(logs_tx) =
+                mem::replace(setup.deref_mut(), BabelSetup::Ready(logs_rx))
+            {
+                logs_tx
+                    .send(logs_broadcast_tx)
+                    .map_err(|_| Status::internal("failed to setup logs_server"))?;
+            } else {
+                unreachable!()
+            }
+        }
+        Ok(Response::new(()))
+    }
+
     async fn setup_firewall(
         &self,
         request: Request<babel_api::config::firewall::Config>,
@@ -55,27 +132,6 @@ impl<J: JobsManagerClient + Sync + Send + 'static> babel_api::babel_server::Babe
                 Status::internal(format!("failed to apply firewall config with: {err}"))
             })?;
         Ok(Response::new(()))
-    }
-
-    async fn mount_data_directory(&self, request: Request<String>) -> Result<Response<()>, Status> {
-        let data_directory_mount_point = request.into_inner();
-        // We assume that root drive will become /dev/vda, and data drive will become /dev/vdb inside VM
-        // However, this can be a wrong assumption ¯\_(ツ)_/¯:
-        // https://github.com/firecracker-microvm/firecracker-containerd/blob/main/docs/design-approaches.md#block-devices
-        let out = utils::mount_drive(DATA_DRIVE_PATH, &data_directory_mount_point)
-            .await
-            .map_err(|err| Status::internal(format!("failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point} with: {err}")))?;
-        match out.status.code() {
-            Some(0) => Ok(Response::new(())),
-            Some(32) if String::from_utf8_lossy(&out.stderr).contains("already mounted") => {
-                Err(Status::already_exists(format!(
-                    "drive {DATA_DRIVE_PATH} already mounted into {data_directory_mount_point} "
-                )))
-            }
-            _ => Err(Status::internal(format!(
-                "failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point} with: {out:?}"
-            ))),
-        }
     }
 
     async fn download_keys(
@@ -236,27 +292,71 @@ impl<J: JobsManagerClient + Sync + Send + 'static> babel_api::babel_server::Babe
             self.handle_sh(request).await.map_err(to_blockchain_err)?,
         ))
     }
+
+    type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
+
+    async fn get_logs(
+        &self,
+        _request: Request<()>,
+    ) -> Result<Response<Self::GetLogsStream>, Status> {
+        let mut logs = Vec::default();
+        if let BabelSetup::Ready(rx) = self.setup.lock().await.deref_mut() {
+            loop {
+                match rx.try_recv() {
+                    Ok(log) => logs.push(Ok(log)),
+                    Err(broadcast::error::TryRecvError::Lagged(_)) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+        let stream = tokio_stream::iter(logs);
+        Ok(Response::new(stream))
+    }
 }
 
 fn to_blockchain_err(err: eyre::Error) -> Status {
     Status::internal(err.to_string())
 }
 
-impl<J> BabelService<J> {
-    pub fn new(
+impl<J, M> BabelService<J, M> {
+    pub async fn new(
         job_runner_lock: JobRunnerLock,
         job_runner_bin_path: PathBuf,
         jobs_manager: J,
+        babel_cfg_path: PathBuf,
+        mnt: M,
+        setup: BabelSetup,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .build()?;
+
         Ok(Self {
             inner: client,
+            setup: Arc::new(Mutex::new(setup)),
             job_runner_lock,
             job_runner_bin_path,
             jobs_manager,
+            babel_cfg_path,
+            mnt,
         })
+    }
+
+    async fn save_babel_conf(&self, config: &BabelConfig) -> Result<(), Status> {
+        // write config to file in case of babel crash (will be restarted by babelsup)
+        let cfg_str = serde_json::to_string(config)
+            .map_err(|err| Status::internal(format!("failed to serialize babel config: {err}")))?;
+        let _ = fs::remove_file(&self.babel_cfg_path).await;
+        fs::write(&self.babel_cfg_path, &cfg_str)
+            .await
+            .map_err(|err| {
+                Status::internal(format!(
+                    "failed to save babel config into {}: {}",
+                    &self.babel_cfg_path.to_string_lossy(),
+                    err
+                ))
+            })?;
+        Ok(())
     }
 
     async fn handle_jrpc(
@@ -327,6 +427,7 @@ mod tests {
     use babel_api::babel_client::BabelClient;
     use babel_api::babel_server::Babel;
     use babel_api::config::{JrpcResponse, MethodResponseFormat, RestResponse, ShResponse};
+    use futures::StreamExt;
     use httpmock::prelude::*;
     use mockall::*;
     use std::collections::HashMap;
@@ -345,13 +446,33 @@ mod tests {
         }
     }
 
+    struct DummyMnt;
+    #[async_trait]
+    impl MountDataDrive for DummyMnt {
+        async fn mount_data_drive(
+            &self,
+            _data_directory_mount_point: &str,
+        ) -> Result<(), MountError> {
+            Ok(())
+        }
+    }
+
     async fn babel_server(
         job_runner_lock: JobRunnerLock,
         job_runner_bin_path: PathBuf,
         uds_stream: UnixListenerStream,
+        babel_cfg_path: PathBuf,
+        setup: BabelSetup,
     ) -> Result<()> {
-        let babel_service =
-            BabelService::new(job_runner_lock, job_runner_bin_path, MockJobsManager::new())?;
+        let babel_service = BabelService::new(
+            job_runner_lock,
+            job_runner_bin_path,
+            MockJobsManager::new(),
+            babel_cfg_path,
+            DummyMnt,
+            setup,
+        )
+        .await?;
         Server::builder()
             .max_concurrent_streams(1)
             .add_service(babel_api::babel_server::BabelServer::new(babel_service))
@@ -375,34 +496,53 @@ mod tests {
         job_runner_bin_path: PathBuf,
         job_runner_lock: JobRunnerLock,
         client: BabelClient<Channel>,
+        logs_rx: oneshot::Receiver<broadcast::Sender<String>>,
     }
 
     fn setup_test_env() -> Result<TestEnv> {
         let tmp_root = TempDir::new()?.to_path_buf();
         std::fs::create_dir_all(&tmp_root)?;
-        let path = tmp_root.join("job_runner");
+        let job_runner_path = tmp_root.join("job_runner");
+        let babel_cfg_path = tmp_root.join("babel.cfg");
         let lock = Arc::new(RwLock::new(None));
         let client = test_client(&tmp_root)?;
         let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(
             tmp_root.join("test_socket"),
         )?);
         let job_runner_lock = lock.clone();
-        let job_runner_bin_path = path.clone();
-        tokio::spawn(async move { babel_server(lock, path, uds_stream).await });
+        let job_runner_bin_path = job_runner_path.clone();
+        let (logs_tx, logs_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            babel_server(
+                lock,
+                job_runner_path,
+                uds_stream,
+                babel_cfg_path,
+                BabelSetup::Uninitialized(logs_tx),
+            )
+            .await
+        });
 
         Ok(TestEnv {
             job_runner_bin_path,
             job_runner_lock,
             client,
+            logs_rx,
         })
     }
 
-    fn build_babel_service_with_defaults() -> Result<BabelService<MockJobsManager>> {
+    async fn build_babel_service_with_defaults() -> Result<BabelService<MockJobsManager, DummyMnt>>
+    {
+        let (_tx, rx) = broadcast::channel(1);
         BabelService::new(
             Arc::new(Default::default()),
             Default::default(),
             MockJobsManager::new(),
+            Default::default(),
+            DummyMnt,
+            BabelSetup::Ready(rx),
         )
+        .await
     }
 
     #[tokio::test]
@@ -410,7 +550,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let tmp_dir_str = format!("{}", tmp_dir.to_string_lossy());
 
-        let service = build_babel_service_with_defaults()?;
+        let service = build_babel_service_with_defaults().await?;
         let cfg = HashMap::from([
             ("first".to_string(), format!("{tmp_dir_str}/first/key")),
             ("second".to_string(), format!("{tmp_dir_str}/second/key")),
@@ -490,7 +630,7 @@ mod tests {
             WILDCARD_KEY_NAME.to_string(),
             format!("{tmp_dir_str}/star/"),
         )]);
-        let service = build_babel_service_with_defaults()?;
+        let service = build_babel_service_with_defaults().await?;
 
         println!("upload unknown keys");
         let output = service
@@ -540,7 +680,7 @@ mod tests {
                 }));
         });
 
-        let service = build_babel_service_with_defaults()?;
+        let service = build_babel_service_with_defaults().await?;
         let output = service
             .blockchain_jrpc(Request::new((
                 format!("http://{}", server.address()),
@@ -569,7 +709,7 @@ mod tests {
                 .json_body(json!({"result": [1, 2, 3]}));
         });
 
-        let service = build_babel_service_with_defaults()?;
+        let service = build_babel_service_with_defaults().await?;
         let output = service
             .blockchain_rest(Request::new((
                 format!("http://{}/items", server.address()),
@@ -598,7 +738,7 @@ mod tests {
                 .json_body(json!({"result": [1, 2, 3]}));
         });
 
-        let service = build_babel_service_with_defaults()?;
+        let service = build_babel_service_with_defaults().await?;
         let output = service
             .blockchain_rest(Request::new((
                 format!("http://{}/items", server.address()),
@@ -618,7 +758,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sh() -> Result<()> {
-        let service = build_babel_service_with_defaults()?;
+        let service = build_babel_service_with_defaults().await?;
 
         let output = service
             .blockchain_sh(Request::new((
@@ -681,11 +821,16 @@ mod tests {
         let job_runner_bin_path = TempDir::new().unwrap().join("job_runner");
         let job_runner_lock = Arc::new(RwLock::new(None));
 
+        let (_, rx) = broadcast::channel(1);
         let service = BabelService::new(
             job_runner_lock.clone(),
             job_runner_bin_path,
             MockJobsManager::new(),
-        )?;
+            Default::default(),
+            DummyMnt,
+            BabelSetup::Ready(rx),
+        )
+        .await?;
 
         assert_eq!(
             babel_api::BinaryStatus::Missing,
@@ -710,6 +855,48 @@ mod tests {
                 .await?
                 .into_inner()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_logs() -> Result<()> {
+        let mut test_env = setup_test_env()?;
+
+        let mut stream = test_env.client.get_logs(()).await?.into_inner();
+
+        let mut logs = Vec::<String>::default();
+        while let Some(Ok(log)) = stream.next().await {
+            logs.push(log);
+        }
+
+        assert_eq!(Vec::<String>::default(), logs);
+
+        test_env
+            .client
+            .setup_babel(BabelConfig {
+                data_directory_mount_point: "".to_string(),
+                log_buffer_capacity_ln: 10,
+            })
+            .await?;
+        let logs_tx = test_env.logs_rx.await?;
+        logs_tx
+            .send("log1".to_string())
+            .expect("failed to send log");
+        logs_tx
+            .send("log2".to_string())
+            .expect("failed to send log");
+        logs_tx
+            .send("log3".to_string())
+            .expect("failed to send log");
+
+        let mut stream = test_env.client.get_logs(()).await?.into_inner();
+
+        let mut logs = Vec::<String>::default();
+        while let Some(Ok(log)) = stream.next().await {
+            logs.push(log);
+        }
+
+        assert_eq!(vec!["log1", "log2", "log3"], logs);
         Ok(())
     }
 }

@@ -488,11 +488,18 @@ mod tests {
 
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {
-            lines.push(line);
+            lines.push(line.split_once("|").unwrap().1.to_string());
         }
         lines.sort();
+
         assert_eq!(
-            vec!["babel log\n", "test\n", "test\n", "test\n", "test\n"],
+            vec![
+                "babel|babel log\n",
+                "echo|test\n",
+                "echo|test\n",
+                "echo|test\n",
+                "echo|test\n"
+            ],
             lines
         );
         Ok(())
@@ -531,9 +538,9 @@ mod tests {
 
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {
-            lines.push(line);
+            lines.push(line.split_once("|").unwrap().1.to_string());
         }
-        assert_eq!(vec!["babel log\n"], lines);
+        assert_eq!(vec!["babel|babel log\n"], lines);
         Ok(())
     }
 }

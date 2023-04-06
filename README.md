@@ -58,8 +58,12 @@ used during debugging issues, not printed by default
 ### Node
 - `/usr/bin/babel`
 - `/usr/bin/babelsup`
+- `/usr/bin/babel_job_runner`
+- `/etc/babelsup.conf`
 - `/etc/babel.conf`
 - `/etc/systemd/system/babelsup.service`
+- `/var/lib/babel/jobs`
+- `/var/lib/babel/logs.socket`
 
 ### Bundle
 - `bundle/installer`
