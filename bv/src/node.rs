@@ -7,7 +7,6 @@ use crate::{
     utils::{get_process_pid, run_cmd},
     with_retry, BV_VAR_PATH,
 };
-
 use anyhow::{bail, Context, Result};
 use babel_api::config::firewall;
 use chrono::{DateTime, Utc};
@@ -135,19 +134,29 @@ impl<P: Pal + Debug> Node<P> {
                 // for the nodes to come online. For that reason we restrict the allowed delay
                 // further down.
                 debug!("connecting to babel ...");
-                let node_conn = Self::connect(
+                let node_conn = match Self::connect(
                     &paths.chroot,
                     pal.babel_path(),
                     node_id,
                     NODE_RECONNECT_TIMEOUT,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    warn!(
-                        "failed to reestablished babel connection to running node {node_id}: {err}",
-                    );
-                    NodeConnection::closed(&paths.chroot, node_id)
-                });
+                {
+                    Ok(mut node_conn) => {
+                        if let Err(err) =
+                            Self::check_job_runner(&mut node_conn, pal.job_runner_path()).await
+                        {
+                            warn!("failed to check/update job runner on running node {node_id}: {err}");
+                            NodeConnection::closed(&paths.chroot, node_id)
+                        } else {
+                            node_conn
+                        }
+                    }
+                    Err(err) => {
+                        warn!("failed to reestablish babel connection to running node {node_id}: {err}");
+                        NodeConnection::closed(&paths.chroot, node_id)
+                    }
+                };
                 (Some(pid), node_conn)
             }
             Err(_) => (None, NodeConnection::closed(&paths.chroot, node_id)),
@@ -210,6 +219,8 @@ impl<P: Pal + Debug> Node<P> {
         .await?;
         let babelsup_client = self.babel_engine.node_conn.babelsup_client().await?;
         with_retry!(babelsup_client.setup_supervisor(self.data.babel_conf.supervisor.clone()))?;
+        Self::check_job_runner(&mut self.babel_engine.node_conn, self.pal.job_runner_path())
+            .await?;
         if let Some(firewall_config) = &self.data.babel_conf.firewall {
             let babel_client = self.babel_engine.node_conn.babel_client().await?;
             with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
@@ -285,7 +296,8 @@ impl<P: Pal + Debug> Node<P> {
         max_delay: Duration,
     ) -> Result<NodeConnection> {
         let mut connection = NodeConnection::try_open(chroot_path, node_id, max_delay).await?;
-        let (babel_bin, checksum) = Self::load_babel_bin(babel_path).await?;
+        // check and update babel
+        let (babel_bin, checksum) = Self::load_bin(babel_path).await?;
         let client = connection.babelsup_client().await?;
         let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
         if babel_status != babel_api::BinaryStatus::Ok {
@@ -295,10 +307,25 @@ impl<P: Pal + Debug> Node<P> {
         Ok(connection)
     }
 
-    async fn load_babel_bin(babel_path: &Path) -> Result<(Vec<babel_api::Binary>, u32)> {
-        let file = File::open(babel_path)
+    async fn check_job_runner(
+        connection: &mut NodeConnection,
+        job_runner_path: &Path,
+    ) -> Result<()> {
+        // check and update job_runner
+        let (babel_bin, checksum) = Self::load_bin(job_runner_path).await?;
+        let client = connection.babel_client().await?;
+        let job_runner_status = with_retry!(client.check_job_runner(checksum))?.into_inner();
+        if job_runner_status != babel_api::BinaryStatus::Ok {
+            info!("Invalid or missing JobRunner service on VM, installing new one");
+            with_retry!(client.upload_job_runner(tokio_stream::iter(babel_bin.clone())))?;
+        }
+        Ok(())
+    }
+
+    async fn load_bin(bin_path: &Path) -> Result<(Vec<babel_api::Binary>, u32)> {
+        let file = File::open(bin_path)
             .await
-            .with_context(|| format!("failed to load babel binary {}", babel_path.display()))?;
+            .with_context(|| format!("failed to load binary {}", bin_path.display()))?;
         let mut reader = BufReader::new(file);
         let mut buf = [0; 16384];
         let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
