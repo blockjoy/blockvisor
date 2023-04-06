@@ -138,6 +138,7 @@ impl babel_service::MountDataDrive for Mnt {
 }
 
 async fn serve_logs(mut run: RunFlag, logs_service: LogsService) -> eyre::Result<()> {
+    let _ = fs::remove_file(*BABEL_LOGS_UDS_PATH).await;
     let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(*BABEL_LOGS_UDS_PATH)?);
 
     Server::builder()

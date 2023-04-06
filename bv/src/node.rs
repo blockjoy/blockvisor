@@ -8,7 +8,9 @@ use crate::{
     with_retry, BV_VAR_PATH,
 };
 use anyhow::{bail, Context, Result};
-use babel_api::config::firewall;
+use babel_api::config::{
+    firewall, BabelConfig, Entrypoint, JobConfig, RestartConfig, RestartPolicy,
+};
 use chrono::{DateTime, Utc};
 use firec::{config::JailerMode, Machine};
 use std::{
@@ -218,12 +220,50 @@ impl<P: Pal + Debug> Node<P> {
         )
         .await?;
         let babelsup_client = self.babel_engine.node_conn.babelsup_client().await?;
-        with_retry!(babelsup_client.setup_supervisor(self.data.babel_conf.supervisor.clone()))?;
+        let mut supervisor_config = self.data.babel_conf.supervisor.clone();
+        supervisor_config.entry_point.clear();
+        // create dummy entrypoint for babelsup, otherwise it will complain
+        supervisor_config.entry_point.push(Entrypoint {
+            name: "dummy_entrypoint".to_string(),
+            body: "sleep infinity".to_string(),
+        });
+        supervisor_config.data_directory_mount_point.clear();
+        with_retry!(babelsup_client.setup_supervisor(supervisor_config.clone()))?;
         Self::check_job_runner(&mut self.babel_engine.node_conn, self.pal.job_runner_path())
             .await?;
+        let babel_client = self.babel_engine.node_conn.babel_client().await?;
+        babel_client
+            .setup_babel(BabelConfig {
+                data_directory_mount_point: self
+                    .data
+                    .babel_conf
+                    .supervisor
+                    .data_directory_mount_point
+                    .clone(),
+                log_buffer_capacity_ln: self.data.babel_conf.supervisor.log_buffer_capacity_ln,
+            })
+            .await?;
         if let Some(firewall_config) = &self.data.babel_conf.firewall {
-            let babel_client = self.babel_engine.node_conn.babel_client().await?;
             with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
+        }
+        Ok(())
+    }
+
+    /// Starts entrypoints node - shall be called after `init()`.
+    #[instrument(skip(self))]
+    pub async fn start_entrypoints(&mut self) -> Result<()> {
+        let babel_client = self.babel_engine.node_conn.babel_client().await?;
+        for entrypoint in &self.data.babel_conf.supervisor.entry_point {
+            let job_config = JobConfig {
+                body: entrypoint.body.clone(),
+                restart: RestartPolicy::Always(RestartConfig {
+                    backoff_timeout_ms: self.data.babel_conf.supervisor.backoff_timeout_ms,
+                    backoff_base_ms: self.data.babel_conf.supervisor.backoff_base_ms,
+                    max_retries: None,
+                }),
+                needs: vec![],
+            };
+            with_retry!(babel_client.start_job((entrypoint.name.clone(), job_config.clone())))?;
         }
         Ok(())
     }

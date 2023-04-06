@@ -419,7 +419,7 @@ mod tests {
             tokio::spawn(self.monitor.take().unwrap().run(self.run.clone()))
         }
 
-        fn create_infinit_job_runner(&self) -> Result<()> {
+        fn create_infinite_job_runner(&self) -> Result<()> {
             let mut job_runner = fs::OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -581,7 +581,7 @@ mod tests {
             "finished_job",
         )?;
         jobs_data.save_config(&config, "active_job")?;
-        test_env.create_infinit_job_runner()?;
+        test_env.create_infinite_job_runner()?;
         let mut job = Command::new(&test_env.test_job_runner_path)
             .args(["active_job"])
             .spawn()?;
@@ -663,7 +663,7 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_dependencies() -> Result<()> {
         let mut test_env = TestEnv::setup()?;
-        test_env.create_infinit_job_runner()?;
+        test_env.create_infinite_job_runner()?;
         test_env
             .client
             .start(
@@ -747,7 +747,7 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_failed_dependency() -> Result<()> {
         let mut test_env = TestEnv::setup()?;
-        test_env.create_infinit_job_runner()?;
+        test_env.create_infinite_job_runner()?;
         test_env
             .client
             .start("test_job", dummy_job_config())
@@ -807,7 +807,7 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_restart_crashed_job() -> Result<()> {
         let mut test_env = TestEnv::setup()?;
-        test_env.create_infinit_job_runner()?;
+        test_env.create_infinite_job_runner()?;
         let monitor_handle = test_env.spawn_monitor();
 
         test_env

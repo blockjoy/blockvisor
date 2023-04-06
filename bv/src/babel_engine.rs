@@ -206,9 +206,9 @@ impl BabelEngine {
         self.capabilities().contains(&method.to_owned())
     }
 
-    /// Returns the list of logs from blockchain entry_points.
+    /// Returns the list of logs from blockchain jobs.
     pub async fn get_logs(&mut self) -> Result<Vec<String>> {
-        let client = self.node_conn.babelsup_client().await?;
+        let client = self.node_conn.babel_client().await?;
         let mut resp = with_retry!(client.get_logs(()))?.into_inner();
         let mut logs = Vec::<String>::default();
         while let Some(Ok(log)) = resp.next().await {
