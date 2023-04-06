@@ -144,7 +144,7 @@ body = "echo 'noop for testing'"
 [[methods]]
 name = "stop_babelsup"
 transport = "sh"
-body = "systemctl stop babelsup && killall babel"
+body = "systemctl stop babelsup && for pid in `ps -e|grep babel| awk '{print $1}'`; do kill -9 $pid; done"
 
     [methods.response]
     status = 200

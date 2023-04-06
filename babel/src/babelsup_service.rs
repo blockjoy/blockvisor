@@ -1,16 +1,18 @@
 use crate::{supervisor, utils};
 use async_trait::async_trait;
 use babel_api::config::SupervisorConfig;
-use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::{fs, mem};
-use tokio::sync::{broadcast, Mutex};
+use std::{
+    fs, mem,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    sync::Arc,
+};
+use tokio::sync::Mutex;
 use tonic::{Request, Response, Status, Streaming};
 
-pub enum SupervisorSetup {
-    LogsRx(broadcast::Receiver<String>),
-    SetupTx(supervisor::SupervisorSetupTx),
+pub enum SupervisorStatus {
+    Ready,
+    Uninitialized(supervisor::SupervisorConfigTx),
 }
 
 /// Trait that allows to inject custom actions performed on Supervisor config setup.
@@ -19,40 +21,17 @@ pub trait SupervisorConfigObserver {
     async fn supervisor_config_set(&self, cfg: &SupervisorConfig) -> eyre::Result<()>;
 }
 
-pub struct BabelSupService<T> {
-    sup_setup: Arc<Mutex<SupervisorSetup>>,
+pub struct BabelSupService {
+    status: Arc<Mutex<SupervisorStatus>>,
     babel_change_tx: supervisor::BabelChangeTx,
     babel_bin_path: PathBuf,
     supervisor_cfg_path: PathBuf,
-    supervisor_cfg_observer: T,
 }
 
 #[tonic::async_trait]
-impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::babel_sup_server::BabelSup
-    for BabelSupService<T>
-{
+impl babel_api::babel_sup_server::BabelSup for BabelSupService {
     async fn get_version(&self, _request: Request<()>) -> Result<Response<String>, Status> {
         Ok(Response::new(env!("CARGO_PKG_VERSION").to_string()))
-    }
-
-    type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
-
-    async fn get_logs(
-        &self,
-        _request: Request<()>,
-    ) -> Result<Response<Self::GetLogsStream>, Status> {
-        let mut logs = Vec::default();
-        if let SupervisorSetup::LogsRx(rx) = self.sup_setup.lock().await.deref_mut() {
-            loop {
-                match rx.try_recv() {
-                    Ok(log) => logs.push(Ok(log)),
-                    Err(broadcast::error::TryRecvError::Lagged(_)) => {}
-                    Err(_) => break,
-                }
-            }
-        }
-        let stream = tokio_stream::iter(logs);
-        Ok(Response::new(stream))
     }
 
     async fn check_babel(
@@ -91,54 +70,46 @@ impl<T: SupervisorConfigObserver + Sync + Send + 'static> babel_api::babel_sup_s
         &self,
         request: Request<SupervisorConfig>,
     ) -> Result<Response<()>, Status> {
-        let mut sup_setup = self.sup_setup.lock().await;
-        if let SupervisorSetup::SetupTx(_) = sup_setup.deref() {
+        let mut status = self.status.lock().await;
+        if let SupervisorStatus::Uninitialized(_) = status.deref() {
             let cfg = request.into_inner();
             let cfg_str = serde_json::to_string(&cfg).map_err(|err| {
                 Status::internal(format!("failed to serialize supervisor config: {err}"))
             })?;
             let _ = fs::remove_file(&self.supervisor_cfg_path);
-            fs::write(&self.supervisor_cfg_path, &cfg_str).map_err(|err| {
+            fs::write(&self.supervisor_cfg_path, cfg_str).map_err(|err| {
                 Status::internal(format!(
                     "failed to save supervisor config into {}: {}",
                     &self.supervisor_cfg_path.to_string_lossy(),
                     err
                 ))
             })?;
-            self.supervisor_cfg_observer
-                .supervisor_config_set(&cfg)
-                .await
-                .map_err(|err| Status::internal(format!("{err}")))?;
-            let setup = supervisor::SupervisorSetup::new(cfg);
-            let logs_tx = SupervisorSetup::LogsRx(setup.log_buffer.subscribe());
-            if let SupervisorSetup::SetupTx(sup_setup_tx) =
-                mem::replace(sup_setup.deref_mut(), logs_tx)
+            if let SupervisorStatus::Uninitialized(sup_config_tx) =
+                mem::replace(status.deref_mut(), SupervisorStatus::Ready)
             {
-                sup_setup_tx
-                    .send(setup)
+                sup_config_tx
+                    .send(cfg)
                     .map_err(|_| Status::internal("failed to setup supervisor"))?;
             } else {
-                panic!()
+                unreachable!()
             }
         }
         Ok(Response::new(()))
     }
 }
 
-impl<T: SupervisorConfigObserver> BabelSupService<T> {
+impl BabelSupService {
     pub fn new(
-        sup_setup: SupervisorSetup,
+        status: SupervisorStatus,
         babel_change_tx: supervisor::BabelChangeTx,
         babel_bin_path: PathBuf,
         supervisor_cfg_path: PathBuf,
-        supervisor_cfg_observer: T,
     ) -> Self {
         Self {
-            sup_setup: Arc::new(Mutex::new(sup_setup)),
+            status: Arc::new(Mutex::new(status)),
             babel_change_tx,
             babel_bin_path,
             supervisor_cfg_path,
-            supervisor_cfg_observer,
         }
     }
 }
@@ -152,7 +123,6 @@ mod tests {
     use babel_api::babel_sup_server::BabelSup;
     use babel_api::config::{Entrypoint, SupervisorConfig};
     use eyre::Result;
-    use futures::StreamExt;
     use std::fs;
     use std::path::Path;
     use std::time::Duration;
@@ -161,29 +131,15 @@ mod tests {
     use tokio_stream::wrappers::UnixListenerStream;
     use tonic::transport::{Channel, Endpoint, Server, Uri};
 
-    struct DummyObserver;
-
-    #[async_trait]
-    impl SupervisorConfigObserver for DummyObserver {
-        async fn supervisor_config_set(&self, _cfg: &SupervisorConfig) -> Result<()> {
-            Ok(())
-        }
-    }
-
     async fn sup_server(
         babel_path: PathBuf,
         babelsup_cfg_path: PathBuf,
-        sup_setup: SupervisorSetup,
+        sup_status: SupervisorStatus,
         babel_change_tx: supervisor::BabelChangeTx,
         uds_stream: UnixListenerStream,
     ) -> Result<()> {
-        let sup_service = BabelSupService::new(
-            sup_setup,
-            babel_change_tx,
-            babel_path,
-            babelsup_cfg_path,
-            DummyObserver,
-        );
+        let sup_service =
+            BabelSupService::new(sup_status, babel_change_tx, babel_path, babelsup_cfg_path);
         Server::builder()
             .max_concurrent_streams(1)
             .add_service(babel_api::babel_sup_server::BabelSupServer::new(
@@ -208,7 +164,7 @@ mod tests {
     struct TestEnv {
         babel_path: PathBuf,
         babelsup_cfg_path: PathBuf,
-        sup_setup_rx: supervisor::SupervisorSetupRx,
+        sup_config_rx: supervisor::SupervisorConfigRx,
         babel_change_rx: BabelChangeRx,
         client: BabelSupClient<Channel>,
     }
@@ -223,14 +179,14 @@ mod tests {
             tmp_root.join("test_socket"),
         )?);
         let (babel_change_tx, babel_change_rx) = watch::channel(None);
-        let (sup_setup_tx, sup_setup_rx) = oneshot::channel();
+        let (sup_config_tx, sup_config_rx) = oneshot::channel();
         let babel_bin_path = babel_path.clone();
         let babelsup_config_path = babelsup_cfg_path.clone();
         tokio::spawn(async move {
             sup_server(
                 babel_bin_path,
                 babelsup_config_path,
-                SupervisorSetup::SetupTx(sup_setup_tx),
+                SupervisorStatus::Uninitialized(sup_config_tx),
                 babel_change_tx,
                 uds_stream,
             )
@@ -240,7 +196,7 @@ mod tests {
         Ok(TestEnv {
             babel_path,
             babelsup_cfg_path,
-            sup_setup_rx,
+            sup_config_rx,
             babel_change_rx,
             client,
         })
@@ -290,15 +246,14 @@ mod tests {
     #[tokio::test]
     async fn test_check_babel() -> Result<()> {
         let babel_bin_path = TempDir::new().unwrap().join("babel");
-        let (sup_setup_tx, _) = oneshot::channel();
+        let (sup_config_tx, _) = oneshot::channel();
 
         let (babel_change_tx, _) = watch::channel(None);
         let sup_service = BabelSupService::new(
-            SupervisorSetup::SetupTx(sup_setup_tx),
+            SupervisorStatus::Uninitialized(sup_config_tx),
             babel_change_tx,
             babel_bin_path.clone(),
             Default::default(),
-            DummyObserver,
         );
 
         assert_eq!(
@@ -310,13 +265,12 @@ mod tests {
         );
 
         let (babel_change_tx, _) = watch::channel(Some(321));
-        let (sup_setup_tx, _) = oneshot::channel();
+        let (sup_config_tx, _) = oneshot::channel();
         let sup_service = BabelSupService::new(
-            SupervisorSetup::SetupTx(sup_setup_tx),
+            SupervisorStatus::Uninitialized(sup_config_tx),
             babel_change_tx,
             babel_bin_path.clone(),
             Default::default(),
-            DummyObserver,
         );
 
         assert_eq!(
@@ -333,53 +287,6 @@ mod tests {
                 .await?
                 .into_inner()
         );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_logs() -> Result<()> {
-        let mut test_env = setup_test_env()?;
-
-        let mut stream = test_env.client.get_logs(()).await?.into_inner();
-
-        let mut logs = Vec::<String>::default();
-        while let Some(Ok(log)) = stream.next().await {
-            logs.push(log);
-        }
-
-        assert_eq!(Vec::<String>::default(), logs);
-
-        test_env
-            .client
-            .setup_supervisor(SupervisorConfig {
-                log_buffer_capacity_ln: 10,
-                entry_point: vec![Entrypoint {
-                    name: "echo".to_owned(),
-                    body: "echo".to_owned(),
-                }],
-
-                ..Default::default()
-            })
-            .await?;
-        let logs_tx = test_env.sup_setup_rx.await?.log_buffer;
-        logs_tx
-            .send("log1".to_string())
-            .expect("failed to send log");
-        logs_tx
-            .send("log2".to_string())
-            .expect("failed to send log");
-        logs_tx
-            .send("log3".to_string())
-            .expect("failed to send log");
-
-        let mut stream = test_env.client.get_logs(()).await?.into_inner();
-
-        let mut logs = Vec::<String>::default();
-        while let Some(Ok(log)) = stream.next().await {
-            logs.push(log);
-        }
-
-        assert_eq!(vec!["log1", "log2", "log3"], logs);
         Ok(())
     }
 
@@ -401,7 +308,7 @@ mod tests {
             config,
             serde_json::from_str(&fs::read_to_string(test_env.babelsup_cfg_path)?)?
         );
-        assert_eq!(config, test_env.sup_setup_rx.try_recv()?.config);
+        assert_eq!(config, test_env.sup_config_rx.try_recv()?);
         Ok(())
     }
 }

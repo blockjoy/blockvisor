@@ -143,10 +143,7 @@ impl JobsManagerClient for Client {
         if let Some(job) = jobs.get_mut(name) {
             match &mut job.state {
                 JobState::Active(_) => {
-                    let mut sys = System::new();
-                    sys.refresh_processes();
-                    let ps = sys.processes();
-                    kill_all_processes(&self.job_runner_bin_path, &[name], ps);
+                    kill_all_processes(&self.job_runner_bin_path, &[name]);
                     job.state = JobState::Inactive(JobStatus::Stopped);
                 }
                 JobState::Inactive(status) => {
@@ -443,10 +440,7 @@ mod tests {
         }
 
         fn kill_job(&self, name: &str) {
-            let mut sys = System::new();
-            sys.refresh_processes();
-            let ps = sys.processes();
-            kill_all_processes(&self.test_job_runner_path.to_string_lossy(), &[name], ps);
+            kill_all_processes(&self.test_job_runner_path.to_string_lossy(), &[name]);
         }
     }
 

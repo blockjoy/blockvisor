@@ -8,7 +8,7 @@ use std::{
     process::Output,
     time::{Duration, Instant},
 };
-use sysinfo::{Pid, Process, ProcessExt};
+use sysinfo::{Pid, Process, ProcessExt, System, SystemExt};
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
@@ -17,8 +17,10 @@ use tokio_stream::Stream;
 use tonic::Status;
 
 /// Kill all processes that match `cmd` and passed `args`.
-pub fn kill_all_processes(cmd: &str, args: &[&str], ps: &HashMap<Pid, Process>) {
-    let remnants = find_processes(cmd, args, ps);
+pub fn kill_all_processes(cmd: &str, args: &[&str]) {
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let remnants = find_processes(cmd, args, sys.processes());
 
     for (_, proc) in remnants {
         proc.kill();
@@ -245,10 +247,7 @@ mod tests {
         let child = cmd.spawn()?;
         let pid = child.id().unwrap();
         wait_for_process(&ctrl_file).await;
-        let mut sys = System::new();
-        sys.refresh_processes();
-        let ps = sys.processes();
-        kill_all_processes(&cmd_path.to_string_lossy(), &["a", "b", "c"], ps);
+        kill_all_processes(&cmd_path.to_string_lossy(), &["a", "b", "c"]);
         let is_process_running = |pid| {
             let mut sys = System::new();
             sys.refresh_process_specifics(Pid::from_u32(pid), ProcessRefreshKind::new())

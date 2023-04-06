@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use babel::{
     babel_service,
-    babel_service::{BabelSetup, MountDataDrive, MountError},
+    babel_service::{BabelStatus, MountDataDrive, MountError},
     jobs::JOBS_DIR,
     jobs_manager, logging,
     logs_service::LogsService,
@@ -47,7 +47,7 @@ async fn main() -> eyre::Result<()> {
 
     let mnt = Mnt;
     let (logs_tx, logs_rx) = oneshot::channel();
-    let setup = if let Ok(config) = load_config().await {
+    let status = if let Ok(config) = load_config().await {
         match mnt
             .mount_data_drive(&config.data_directory_mount_point)
             .await
@@ -60,9 +60,9 @@ async fn main() -> eyre::Result<()> {
         logs_tx
             .send(logs_broadcast_tx)
             .map_err(|_| anyhow!("failed to setup logs_server"))?;
-        BabelSetup::Ready(logs_rx)
+        BabelStatus::Ready(logs_rx)
     } else {
-        BabelSetup::Uninitialized(logs_tx)
+        BabelStatus::Uninitialized(logs_tx)
     };
 
     let babel_service = babel_service::BabelService::new(
@@ -71,7 +71,7 @@ async fn main() -> eyre::Result<()> {
         client,
         BABEL_CONFIG_PATH.to_path_buf(),
         mnt,
-        setup,
+        status,
     )
     .await?;
 

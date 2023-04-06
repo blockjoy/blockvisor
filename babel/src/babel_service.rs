@@ -61,14 +61,14 @@ pub trait MountDataDrive {
     async fn mount_data_drive(&self, data_directory_mount_point: &str) -> Result<(), MountError>;
 }
 
-pub enum BabelSetup {
+pub enum BabelStatus {
     Uninitialized(LogsTx),
     Ready(LogsRx),
 }
 
 pub struct BabelService<J, M> {
     inner: reqwest::Client,
-    setup: Arc<Mutex<BabelSetup>>,
+    status: Arc<Mutex<BabelStatus>>,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: PathBuf,
     /// jobs manager client used to work with jobs
@@ -90,8 +90,8 @@ impl<J: JobsManagerClient + Sync + Send + 'static, M: MountDataDrive + Sync + Se
     babel_api::babel_server::Babel for BabelService<J, M>
 {
     async fn setup_babel(&self, request: Request<BabelConfig>) -> Result<Response<()>, Status> {
-        let mut setup = self.setup.lock().await;
-        if let BabelSetup::Uninitialized(_) = setup.deref() {
+        let mut status = self.status.lock().await;
+        if let BabelStatus::Uninitialized(_) = status.deref() {
             let config = request.into_inner();
 
             self.save_babel_conf(&config).await?;
@@ -109,8 +109,8 @@ impl<J: JobsManagerClient + Sync + Send + 'static, M: MountDataDrive + Sync + Se
 
             // setup logs_server
             let (logs_broadcast_tx, logs_rx) = broadcast::channel(config.log_buffer_capacity_ln);
-            if let BabelSetup::Uninitialized(logs_tx) =
-                mem::replace(setup.deref_mut(), BabelSetup::Ready(logs_rx))
+            if let BabelStatus::Uninitialized(logs_tx) =
+                mem::replace(status.deref_mut(), BabelStatus::Ready(logs_rx))
             {
                 logs_tx
                     .send(logs_broadcast_tx)
@@ -300,7 +300,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, M: MountDataDrive + Sync + Se
         _request: Request<()>,
     ) -> Result<Response<Self::GetLogsStream>, Status> {
         let mut logs = Vec::default();
-        if let BabelSetup::Ready(rx) = self.setup.lock().await.deref_mut() {
+        if let BabelStatus::Ready(rx) = self.status.lock().await.deref_mut() {
             loop {
                 match rx.try_recv() {
                     Ok(log) => logs.push(Ok(log)),
@@ -325,7 +325,7 @@ impl<J, M> BabelService<J, M> {
         jobs_manager: J,
         babel_cfg_path: PathBuf,
         mnt: M,
-        setup: BabelSetup,
+        status: BabelStatus,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
@@ -333,7 +333,7 @@ impl<J, M> BabelService<J, M> {
 
         Ok(Self {
             inner: client,
-            setup: Arc::new(Mutex::new(setup)),
+            status: Arc::new(Mutex::new(status)),
             job_runner_lock,
             job_runner_bin_path,
             jobs_manager,
@@ -462,7 +462,7 @@ mod tests {
         job_runner_bin_path: PathBuf,
         uds_stream: UnixListenerStream,
         babel_cfg_path: PathBuf,
-        setup: BabelSetup,
+        setup: BabelStatus,
     ) -> Result<()> {
         let babel_service = BabelService::new(
             job_runner_lock,
@@ -518,7 +518,7 @@ mod tests {
                 job_runner_path,
                 uds_stream,
                 babel_cfg_path,
-                BabelSetup::Uninitialized(logs_tx),
+                BabelStatus::Uninitialized(logs_tx),
             )
             .await
         });
@@ -540,7 +540,7 @@ mod tests {
             MockJobsManager::new(),
             Default::default(),
             DummyMnt,
-            BabelSetup::Ready(rx),
+            BabelStatus::Ready(rx),
         )
         .await
     }
@@ -828,7 +828,7 @@ mod tests {
             MockJobsManager::new(),
             Default::default(),
             DummyMnt,
-            BabelSetup::Ready(rx),
+            BabelStatus::Ready(rx),
         )
         .await?;
 

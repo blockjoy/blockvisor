@@ -18,7 +18,6 @@ use std::{
     process::Stdio,
     time::Duration,
 };
-use sysinfo::{System, SystemExt};
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 
@@ -127,7 +126,9 @@ impl<T: AsyncTimer> JobRunner<T> {
     }
 
     pub async fn run(mut self, mut run: RunFlag) {
-        self.kill_all_remnants();
+        // Check if there are no remnant child process after previous run.
+        // If so, just kill it.
+        kill_all_processes("sh", &["-c", &self.job_config.body]);
         if let Err(status) = self.try_run_job(run.clone()).await {
             if let Err(err) =
                 jobs::save_status(&status, &self.name, &self.jobs_dir.join(STATUS_SUBDIR))
@@ -175,15 +176,6 @@ impl<T: AsyncTimer> JobRunner<T> {
             }
         }
         Ok(())
-    }
-
-    /// Check if there are no remnant child process after previous run.
-    /// If so, just kill it.
-    fn kill_all_remnants(&self) {
-        let mut sys = System::new();
-        sys.refresh_processes();
-        let ps = sys.processes();
-        kill_all_processes("sh", &["-c", &self.job_config.body], ps);
     }
 }
 
