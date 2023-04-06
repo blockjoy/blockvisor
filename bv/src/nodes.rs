@@ -249,6 +249,7 @@ impl<P: Pal + Debug> Nodes<P> {
             };
 
             node.babel_engine.init(secret_keys).await?;
+            node.start_entrypoints().await?;
             // We save the `running` status only after all of the previous steps have succeeded.
             node.set_expected_status(NodeStatus::Running).await?;
             node.set_started_at(Some(Utc::now())).await?;
