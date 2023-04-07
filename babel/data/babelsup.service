@@ -11,6 +11,7 @@ Environment="RUST_LOG=debug"
 ExecStart=/usr/bin/babelsup
 TimeoutStopSec=15
 Restart=always
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target
