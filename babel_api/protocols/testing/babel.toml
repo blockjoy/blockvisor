@@ -144,7 +144,7 @@ body = "echo 'noop for testing'"
 [[methods]]
 name = "stop_babelsup"
 transport = "sh"
-body = "systemctl stop babelsup"
+body = "systemctl stop babelsup && killall babel"
 
     [methods.response]
     status = 200
