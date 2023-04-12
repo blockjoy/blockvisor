@@ -243,9 +243,11 @@ impl<P: Pal + Debug> Node<P> {
                 log_buffer_capacity_ln: self.data.babel_conf.supervisor.log_buffer_capacity_ln,
             })
             .await?;
-        if let Some(firewall_config) = &self.data.babel_conf.firewall {
-            with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
+        let mut firewall_config = self.data.babel_conf.firewall.clone().unwrap_or_default();
+        if let Some(mut rules) = self.data.firewall_rules.clone() {
+            firewall_config.rules.append(&mut rules);
         }
+        with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
         Ok(())
     }
 
@@ -487,11 +489,13 @@ impl<P: Pal + Debug> Node<P> {
         self.data.save(&self.paths.registry).await
     }
 
-    pub async fn firewall_update(&mut self, config: firewall::Config) -> Result<()> {
-        babel_api::check_firewall_config(&config)?;
+    pub async fn firewall_rules_update(&mut self, rules: Vec<firewall::Rule>) -> Result<()> {
+        babel_api::check_firewall_rules(&rules)?;
+        let mut config = self.data.babel_conf.firewall.clone().unwrap_or_default();
+        config.rules.append(&mut rules.clone());
         let babel_client = self.babel_engine.node_conn.babel_client().await?;
         with_retry!(babel_client.setup_firewall(config.clone()))?;
-        self.data.babel_conf.firewall = Some(config);
+        self.data.firewall_rules = Some(rules);
         self.data.save(&self.paths.registry).await
     }
 

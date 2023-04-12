@@ -65,42 +65,58 @@ struct RuleArgs<'a> {
     direction: &'a str,
     protocol: &'a str,
     ips: &'a str,
-    port: String,
+    port: Option<String>, // no port means - no port argument passed at all i.e. rule apply for all ports
     name: &'a str,
 }
 
 impl<'a> RuleArgs<'a> {
-    fn from_rules(rules: &'a Vec<Rule>) -> Vec<Self> {
+    fn from_rules(rules: &'a [Rule]) -> Vec<Self> {
         let mut rule_args = Vec::default();
-        for rule in rules {
+        for rule in rules.iter().rev() {
             let proto = rule.protocol.as_ref();
-            for port in &rule.ports {
+            if rule.ports.is_empty() {
                 rule_args.push(Self {
-                    policy: variant_to_string(&rule.policy),
+                    policy: variant_to_string(&rule.action),
                     direction: variant_to_string(&rule.direction),
                     protocol: variant_to_string(proto.unwrap_or(&Protocol::Both)),
                     ips: rule.ips.as_ref().map_or("any", |ip| ip.as_str()),
-                    port: port.to_string(),
+                    port: None,
                     name: rule.name.as_str(),
                 });
+            } else {
+                for port in &rule.ports {
+                    rule_args.push(Self {
+                        policy: variant_to_string(&rule.action),
+                        direction: variant_to_string(&rule.direction),
+                        protocol: variant_to_string(proto.unwrap_or(&Protocol::Both)),
+                        ips: rule.ips.as_ref().map_or("any", |ip| ip.as_str()),
+                        port: Some(port.to_string()),
+                        name: rule.name.as_str(),
+                    });
+                }
             }
         }
         rule_args
     }
 
-    fn into(&self) -> [&str; 10] {
-        [
+    fn into(&self) -> Vec<&str> {
+        let mut args = vec![
             self.policy,
             self.direction,
             "proto",
             self.protocol,
             "from",
             self.ips,
-            "port",
-            self.port.as_str(),
-            "comment",
-            self.name,
-        ]
+        ];
+        if let Some(port) = &self.port {
+            args.push("port");
+            args.push(port.as_str());
+        }
+        if !self.name.is_empty() {
+            args.push("comment");
+            args.push(self.name);
+        }
+        args
     }
 }
 
@@ -117,7 +133,7 @@ async fn dry_run(runner: &impl UfwRunner, args: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use babel_api::config::firewall::{Direction, Policy};
+    use babel_api::config::firewall::{Action, Direction};
     use mockall::*;
 
     mock! {
@@ -141,8 +157,8 @@ mod tests {
     async fn test_run_failed() -> Result<()> {
         let config = Config {
             enabled: false,
-            default_in: Policy::Allow,
-            default_out: Policy::Allow,
+            default_in: Action::Allow,
+            default_out: Action::Allow,
             rules: vec![],
         };
         let mut mock_runner = MockTestRunner::new();
@@ -166,8 +182,8 @@ mod tests {
     async fn test_disable() -> Result<()> {
         let config = Config {
             enabled: false,
-            default_in: Policy::Allow,
-            default_out: Policy::Allow,
+            default_in: Action::Allow,
+            default_out: Action::Allow,
             rules: vec![],
         };
         let mut mock_runner = MockTestRunner::new();
@@ -181,8 +197,8 @@ mod tests {
     async fn test_no_rules() -> Result<()> {
         let config = Config {
             enabled: true,
-            default_in: Policy::Deny,
-            default_out: Policy::Allow,
+            default_in: Action::Deny,
+            default_out: Action::Allow,
             rules: vec![],
         };
         let mut mock_runner = MockTestRunner::new();
@@ -199,12 +215,12 @@ mod tests {
     async fn test_with_rules() -> Result<()> {
         let config = Config {
             enabled: true,
-            default_in: Policy::Deny,
-            default_out: Policy::Reject,
+            default_in: Action::Deny,
+            default_out: Action::Reject,
             rules: vec![
                 Rule {
                     name: "rule A".to_string(),
-                    policy: Policy::Allow,
+                    action: Action::Allow,
                     direction: Direction::Out,
                     protocol: None,
                     ips: None,
@@ -212,19 +228,27 @@ mod tests {
                 },
                 Rule {
                     name: "rule B".to_string(),
-                    policy: Policy::Allow,
+                    action: Action::Allow,
                     direction: Direction::In,
                     protocol: Some(Protocol::Tcp),
                     ips: Some("ip.is.validated.before".to_string()),
                     ports: vec![144, 77],
                 },
                 Rule {
-                    name: "empty rule".to_string(),
-                    policy: Policy::Allow,
+                    name: "no ports".to_string(),
+                    action: Action::Allow,
                     direction: Direction::Out,
                     protocol: None,
                     ips: None,
                     ports: vec![],
+                },
+                Rule {
+                    name: "".to_string(),
+                    action: Action::Allow,
+                    direction: Direction::Out,
+                    protocol: None,
+                    ips: None,
+                    ports: vec![7],
                 },
             ],
         };
@@ -241,8 +265,20 @@ mod tests {
                 "any",
                 "port",
                 "7",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "out",
+                "proto",
+                "both",
+                "from",
+                "any",
                 "comment",
-                "rule A",
+                "no ports",
             ],
         );
         expect_with_args(
@@ -275,6 +311,22 @@ mod tests {
                 "77",
                 "comment",
                 "rule B",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "out",
+                "proto",
+                "both",
+                "from",
+                "any",
+                "port",
+                "7",
+                "comment",
+                "rule A",
             ],
         );
 
@@ -285,8 +337,12 @@ mod tests {
 
         expect_with_args(
             &mut mock_runner,
+            &["allow", "out", "proto", "both", "from", "any", "port", "7"],
+        );
+        expect_with_args(
+            &mut mock_runner,
             &[
-                "allow", "out", "proto", "both", "from", "any", "port", "7", "comment", "rule A",
+                "allow", "out", "proto", "both", "from", "any", "comment", "no ports",
             ],
         );
         expect_with_args(
@@ -317,6 +373,12 @@ mod tests {
                 "77",
                 "comment",
                 "rule B",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow", "out", "proto", "both", "from", "any", "port", "7", "comment", "rule A",
             ],
         );
 

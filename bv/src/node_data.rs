@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use babel_api::config::Babel;
+use babel_api::config::{firewall, Babel};
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
@@ -49,6 +49,7 @@ pub struct NodeData<N> {
     pub self_update: bool,
     pub image: NodeImage,
     pub network_interface: N,
+    pub firewall_rules: Option<Vec<firewall::Rule>>,
     pub babel_conf: Babel,
     #[serde(default)]
     pub properties: NodeProperties,

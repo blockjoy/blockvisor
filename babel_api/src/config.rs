@@ -254,7 +254,7 @@ pub mod firewall {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Rule {
         pub name: String,
-        pub policy: Policy,
+        pub action: Action,
         pub direction: Direction,
         pub protocol: Option<Protocol>,
         pub ips: Option<String>,
@@ -264,14 +264,25 @@ pub mod firewall {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Config {
         pub enabled: bool,
-        pub default_in: Policy,
-        pub default_out: Policy,
+        pub default_in: Action,
+        pub default_out: Action,
         pub rules: Vec<Rule>,
+    }
+
+    impl Default for Config {
+        fn default() -> Self {
+            Self {
+                enabled: true,
+                default_in: firewall::Action::Deny,
+                default_out: firewall::Action::Allow,
+                rules: vec![],
+            }
+        }
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "kebab-case")]
-    pub enum Policy {
+    pub enum Action {
         Allow,
         Deny,
         Reject,

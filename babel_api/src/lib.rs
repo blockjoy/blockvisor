@@ -13,13 +13,13 @@ pub fn check_babel_config(babel: &config::Babel) -> Result<()> {
         bail!("Required minimum babel version is `{min_babel_version}`, running is `{version}`");
     }
     if let Some(firewall) = &babel.firewall {
-        check_firewall_config(firewall)?;
+        check_firewall_rules(&firewall.rules)?;
     }
     Ok(())
 }
 
-pub fn check_firewall_config(firewall: &config::firewall::Config) -> Result<()> {
-    for rule in &firewall.rules {
+pub fn check_firewall_rules(rules: &[config::firewall::Rule]) -> Result<()> {
+    for rule in rules {
         match &rule.ips {
             Some(ip) if !IpCidr::is_ip_cidr(ip) => bail!(
                 "invalid ip address '{}' in firewall rule '{}'",

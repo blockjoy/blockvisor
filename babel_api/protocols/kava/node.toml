@@ -17,7 +17,7 @@ default_out = "allow"
 
     [[firewall.rules]]
     name = "Allowed incoming traffic on port"
-    policy = "allow"
+    action = "allow"
     direction = "in"
     ports = [26656, 8545]
 

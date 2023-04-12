@@ -1,7 +1,8 @@
-use crate::services::api::pb::{Direction, NodeFirewallUpdate, Policy, Protocol};
+use crate::services::api::pb::{Action, Direction, Protocol, Rule};
 use crate::{
     config::Config,
     node_data::NodeImage,
+    nodes,
     nodes::Nodes,
     pal::Pal,
     server::bv_pb,
@@ -51,8 +52,6 @@ lazy_static::lazy_static! {
     pub static ref API_UPGRADE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.upgrade.ms");
     pub static ref API_UPDATE_COUNTER: Counter = register_counter!("api.commands.update.calls");
     pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
-    pub static ref API_FIREWALL_UPDATE_COUNTER: Counter = register_counter!("api.commands.firewall_update.calls");
-    pub static ref API_FIREWALL_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.firewall_update.ms");
 }
 
 #[derive(Clone)]
@@ -246,8 +245,28 @@ async fn process_node_command<P: Pal + Debug>(
                     .into_iter()
                     .map(|p| (p.name, p.value))
                     .collect();
+                let rules = if args.rules.is_empty() {
+                    None
+                } else {
+                    Some(
+                        args.rules
+                            .into_iter()
+                            .map(|rule| rule.try_into())
+                            .collect::<Result<Vec<_>>>()?,
+                    )
+                };
                 nodes
-                    .create(node_id, args.name, image, args.ip, args.gateway, properties)
+                    .create(
+                        node_id,
+                        nodes::NodeConfig {
+                            name: args.name,
+                            image,
+                            ip: args.ip,
+                            gateway: args.gateway,
+                            rules,
+                            properties,
+                        },
+                    )
                     .await?;
                 API_CREATE_COUNTER.increment(1);
                 API_CREATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
@@ -282,18 +301,22 @@ async fn process_node_command<P: Pal + Debug>(
                 API_UPGRADE_COUNTER.increment(1);
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
-            Command::Update(pb::NodeUpdate { self_update }) => {
+            Command::Update(pb::NodeUpdate { self_update, rules }) => {
                 nodes.update(node_id, self_update).await?;
+                nodes
+                    .firewall_rules_update(
+                        node_id,
+                        rules
+                            .into_iter()
+                            .map(|rule| rule.try_into())
+                            .collect::<Result<Vec<_>>>()?,
+                    )
+                    .await?;
                 API_UPDATE_COUNTER.increment(1);
                 API_UPDATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::InfoGet(_) => unimplemented!(),
             Command::Generic(_) => unimplemented!(),
-            Command::FirewallUpdate(update) => {
-                nodes.firewall_update(node_id, update.try_into()?).await?;
-                API_FIREWALL_UPDATE_COUNTER.increment(1);
-                API_FIREWALL_UPDATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
-            }
         },
         None => bail!("Node command is `None`"),
     };
@@ -378,23 +401,23 @@ impl From<pb::ContainerImage> for NodeImage {
     }
 }
 
-impl TryFrom<Policy> for firewall::Policy {
+impl TryFrom<Action> for firewall::Action {
     type Error = anyhow::Error;
-    fn try_from(value: Policy) -> Result<Self, Self::Error> {
+    fn try_from(value: Action) -> Result<Self, Self::Error> {
         Ok(match value {
-            Policy::Unspecified => {
-                bail!("Invalid Policy")
+            Action::Unspecified => {
+                bail!("Invalid Action")
             }
-            Policy::Allow => firewall::Policy::Allow,
-            Policy::Deny => firewall::Policy::Deny,
-            Policy::Reject => firewall::Policy::Reject,
+            Action::Allow => firewall::Action::Allow,
+            Action::Deny => firewall::Action::Deny,
+            Action::Reject => firewall::Action::Reject,
         })
     }
 }
 
-fn try_policy(value: i32) -> Result<firewall::Policy> {
-    Policy::from_i32(value)
-        .unwrap_or(Policy::Unspecified)
+fn try_action(value: i32) -> Result<firewall::Action> {
+    Action::from_i32(value)
+        .unwrap_or(Action::Unspecified)
         .try_into()
 }
 
@@ -423,33 +446,22 @@ impl TryFrom<Protocol> for firewall::Protocol {
     }
 }
 
-impl TryFrom<NodeFirewallUpdate> for firewall::Config {
+impl TryFrom<Rule> for firewall::Rule {
     type Error = anyhow::Error;
-    fn try_from(update: NodeFirewallUpdate) -> Result<Self, Self::Error> {
+    fn try_from(rule: Rule) -> Result<Self, Self::Error> {
         Ok(Self {
-            enabled: update.enabled,
-            default_in: try_policy(update.default_in)?,
-            default_out: try_policy(update.default_out)?,
-            rules: update
-                .rules
-                .into_iter()
-                .map(|rule| {
-                    Ok(firewall::Rule {
-                        name: rule.name,
-                        policy: try_policy(rule.policy)?,
-                        direction: Direction::from_i32(rule.direction)
-                            .ok_or_else(|| anyhow!("Invalid Direction"))?
-                            .try_into()?,
-                        protocol: Some(
-                            Protocol::from_i32(rule.policy)
-                                .ok_or_else(|| anyhow!("Invalid Protocol"))?
-                                .try_into()?,
-                        ),
-                        ips: rule.ips,
-                        ports: rule.ports.into_iter().map(|p| p as u16).collect(),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?,
+            name: rule.name,
+            action: try_action(rule.action)?,
+            direction: Direction::from_i32(rule.direction)
+                .ok_or_else(|| anyhow!("Invalid Direction"))?
+                .try_into()?,
+            protocol: Some(
+                Protocol::from_i32(rule.action)
+                    .ok_or_else(|| anyhow!("Invalid Protocol"))?
+                    .try_into()?,
+            ),
+            ips: rule.ips,
+            ports: rule.ports.into_iter().map(|p| p as u16).collect(),
         })
     }
 }

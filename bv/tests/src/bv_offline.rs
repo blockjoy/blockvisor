@@ -286,6 +286,14 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     ip: "216.18.214.195".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
+                    rules: vec![pb::Rule {
+                        name: "Rule X".to_string(),
+                        action: pb::Action::Allow as i32,
+                        direction: pb::Direction::In as i32,
+                        protocol: Some(pb::Protocol::Tcp as i32),
+                        ips: Some("192.167.0.1/24".to_string()),
+                        ports: vec![8080, 8000],
+                    }],
                     properties: vec![pb::Parameter {
                         name: "TESTING_PARAM".to_string(),
                         value: "anything".to_string(),
@@ -313,6 +321,14 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     ip: "216.18.214.196".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
+                    rules: vec![pb::Rule {
+                        name: "Rule X".to_string(),
+                        action: pb::Action::Allow as i32,
+                        direction: pb::Direction::In as i32,
+                        protocol: Some(pb::Protocol::Tcp as i32),
+                        ips: Some("192.167.0.1/24".to_string()),
+                        ports: vec![8080, 8000],
+                    }],
                     properties: vec![pb::Parameter {
                         name: "TESTING_PARAM".to_string(),
                         value: "anything".to_string(),
@@ -340,6 +356,14 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     ip: "216.18.214.197".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
+                    rules: vec![pb::Rule {
+                        name: "Rule X".to_string(),
+                        action: pb::Action::Allow as i32,
+                        direction: pb::Direction::In as i32,
+                        protocol: Some(pb::Protocol::Tcp as i32),
+                        ips: Some("192.167.0.1/24".to_string()),
+                        ports: vec![8080, 8000],
+                    }],
                     properties: vec![pb::Parameter {
                         name: "TESTING_PARAM".to_string(),
                         value: "anything".to_string(),
@@ -367,6 +391,14 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     ip: "216.18.214.195".to_string(),
                     gateway: "216.18.214.193".to_string(),
                     self_update: false,
+                    rules: vec![pb::Rule {
+                        name: "Rule X".to_string(),
+                        action: pb::Action::Allow as i32,
+                        direction: pb::Direction::In as i32,
+                        protocol: Some(pb::Protocol::Tcp as i32),
+                        ips: Some("192.167.0.1/24".to_string()),
+                        ports: vec![8080, 8000],
+                    }],
                     properties: vec![pb::Parameter {
                         name: "TESTING_PARAM".to_string(),
                         value: "anything".to_string(),
@@ -451,28 +483,24 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 })),
             })),
         },
-        // update firewall with invalid rules
+        // update with invalid rules
         pb::Command {
             r#type: Some(pb::command::Type::Node(pb::NodeCommand {
                 node_id: id.clone(),
                 api_command_id: command_id.clone(),
                 created_at: None,
                 host_id: host_id.clone(),
-                command: Some(pb::node_command::Command::FirewallUpdate(
-                    pb::NodeFirewallUpdate {
-                        enabled: true,
-                        default_in: pb::Policy::Deny as i32,
-                        default_out: pb::Policy::Allow as i32,
-                        rules: vec![pb::Rule {
-                            name: "Rule B".to_string(),
-                            policy: pb::Policy::Allow as i32,
-                            direction: pb::Direction::In as i32,
-                            protocol: None,
-                            ips: Some("invalid_ip".to_string()),
-                            ports: vec![8080],
-                        }],
-                    },
-                )),
+                command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
+                    self_update: None,
+                    rules: vec![pb::Rule {
+                        name: "Rule B".to_string(),
+                        action: pb::Action::Allow as i32,
+                        direction: pb::Direction::In as i32,
+                        protocol: None,
+                        ips: Some("invalid_ip".to_string()),
+                        ports: vec![8080],
+                    }],
+                })),
             })),
         },
         // update firewall rules
@@ -482,21 +510,17 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 api_command_id: command_id.clone(),
                 created_at: None,
                 host_id: host_id.clone(),
-                command: Some(pb::node_command::Command::FirewallUpdate(
-                    pb::NodeFirewallUpdate {
-                        enabled: true,
-                        default_in: pb::Policy::Deny as i32,
-                        default_out: pb::Policy::Allow as i32,
-                        rules: vec![pb::Rule {
-                            name: "Rule A".to_string(),
-                            policy: pb::Policy::Allow as i32,
-                            direction: pb::Direction::In as i32,
-                            protocol: Some(pb::Protocol::Tcp as i32),
-                            ips: Some("192.168.0.1/24".to_string()),
-                            ports: vec![8080, 8000],
-                        }],
-                    },
-                )),
+                command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
+                    self_update: None,
+                    rules: vec![pb::Rule {
+                        name: "Rule A".to_string(),
+                        action: pb::Action::Allow as i32,
+                        direction: pb::Direction::In as i32,
+                        protocol: Some(pb::Protocol::Tcp as i32),
+                        ips: Some("192.168.0.1/24".to_string()),
+                        ports: vec![8080, 8000],
+                    }],
+                })),
             })),
         },
         // delete

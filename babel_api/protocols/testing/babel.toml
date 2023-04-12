@@ -16,14 +16,14 @@ default_out = "allow"  #ufw default allow outgoing
 
     [[firewall.rules]]
     name = "Allowed incoming tcp traffic on port"
-    policy = "allow"
+    action = "allow"
     direction = "in"
     protocol = "tcp"
     ports = [24567] #ufw allow in proto tcp port 24567
 
     [[firewall.rules]]
     name = "Allowed incoming udp traffic on ip and port"
-    policy = "allow"
+    action = "allow"
     direction = "in"
     protocol = "udp"
     ip = "192.168.0.1"

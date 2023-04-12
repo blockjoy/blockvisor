@@ -67,6 +67,16 @@ pub struct Nodes<P: Pal + Debug> {
     pal: Arc<P>,
 }
 
+#[derive(Debug)]
+pub struct NodeConfig {
+    pub name: String,
+    pub image: NodeImage,
+    pub ip: String,
+    pub gateway: String,
+    pub rules: Option<Vec<firewall::Rule>>,
+    pub properties: NodeProperties,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 struct CommonData {
     machine_index: u32,
@@ -74,30 +84,24 @@ struct CommonData {
 
 impl<P: Pal + Debug> Nodes<P> {
     #[instrument(skip(self))]
-    pub async fn create(
-        &self,
-        id: Uuid,
-        name: String,
-        image: NodeImage,
-        ip: String,
-        gateway: String,
-        properties: NodeProperties,
-    ) -> Result<()> {
+    pub async fn create(&self, id: Uuid, config: NodeConfig) -> Result<()> {
         if self.nodes.read().await.contains_key(&id) {
             warn!("Node with id `{id}` exists");
             return Ok(());
         }
 
-        if self.node_ids.read().await.contains_key(&name) {
-            bail!("Node with name `{name}` exists");
+        if self.node_ids.read().await.contains_key(&config.name) {
+            bail!("Node with name `{}` exists", config.name);
         }
 
-        let ip = ip
+        let ip = config
+            .ip
             .parse()
-            .with_context(|| format!("invalid ip {ip} for node {id}"))?;
-        let gateway = gateway
+            .with_context(|| format!("invalid ip {} for node {}", config.ip, id))?;
+        let gateway = config
+            .gateway
             .parse()
-            .with_context(|| format!("invalid gateway {gateway} for node {id}"))?;
+            .with_context(|| format!("invalid gateway {} for node {}", config.gateway, id))?;
 
         for n in self.nodes.read().await.values() {
             if n.read().await.data.network_interface.ip() == &ip {
@@ -105,17 +109,17 @@ impl<P: Pal + Debug> Nodes<P> {
             }
         }
 
-        let mut babel_conf = self.fetch_image_data(&image).await?;
+        let mut babel_conf = self.fetch_image_data(&config.image).await?;
         babel_api::check_babel_config(&babel_conf)?;
         let conf = toml::Value::try_from(&babel_conf)?;
         babel_conf.supervisor.entry_point =
-            render_entry_points(babel_conf.supervisor.entry_point, &properties, &conf)?;
+            render_entry_points(babel_conf.supervisor.entry_point, &config.properties, &conf)?;
 
         let network_interface = self.create_network_interface(ip, gateway).await?;
 
         let node_data_cache = NodeDataCache {
-            name: name.clone(),
-            image: image.clone(),
+            name: config.name.clone(),
+            image: config.image.clone(),
             ip: network_interface.ip().to_string(),
             gateway: network_interface.gateway().to_string(),
             started_at: None,
@@ -123,20 +127,21 @@ impl<P: Pal + Debug> Nodes<P> {
 
         let node_data = NodeData {
             id,
-            name: name.clone(),
-            image,
+            name: config.name.clone(),
+            image: config.image,
             expected_status: NodeStatus::Stopped,
             started_at: None,
             network_interface,
             babel_conf,
             self_update: false,
-            properties,
+            properties: config.properties,
+            firewall_rules: config.rules,
         };
         self.save().await?;
 
         let node = Node::create(self.pal.clone(), node_data).await?;
         self.nodes.write().await.insert(id, RwLock::new(node));
-        self.node_ids.write().await.insert(name, id);
+        self.node_ids.write().await.insert(config.name, id);
         self.node_data_cache
             .write()
             .await
@@ -311,14 +316,14 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn firewall_update(&self, id: Uuid, config: firewall::Config) -> Result<()> {
+    pub async fn firewall_rules_update(&self, id: Uuid, rules: Vec<firewall::Rule>) -> Result<()> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
             .ok_or_else(|| id_not_found(id))?
             .write()
             .await;
-        node.firewall_update(config).await
+        node.firewall_rules_update(rules).await
     }
 
     #[instrument(skip(self))]
@@ -777,6 +782,7 @@ mod tests {
             },
             babel_conf,
             self_update: false,
+            firewall_rules: None,
             properties: HashMap::from([
                 ("raw".to_string(), "raw".to_string()),
                 ("json".to_string(), "json".to_string()),

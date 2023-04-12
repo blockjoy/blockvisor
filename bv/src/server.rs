@@ -6,6 +6,7 @@ use crate::pal::{NetInterface, Pal};
 use crate::{
     get_bv_status,
     node_data::{NodeImage, NodeStatus},
+    nodes,
     nodes::Nodes,
     set_bv_status,
 };
@@ -82,11 +83,14 @@ where
         self.nodes
             .create(
                 id,
-                request.name,
-                image,
-                request.ip,
-                request.gateway,
-                properties,
+                nodes::NodeConfig {
+                    name: request.name,
+                    image,
+                    ip: request.ip,
+                    gateway: request.gateway,
+                    rules: None,
+                    properties,
+                },
             )
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
