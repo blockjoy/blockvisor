@@ -1,5 +1,11 @@
 pub mod api;
+pub mod babel;
+pub mod babelsup;
 pub mod config;
+pub mod engine;
+pub mod metadata;
+pub mod plugin;
+pub mod utils;
 
 use anyhow::{bail, Result};
 pub use api::*;
