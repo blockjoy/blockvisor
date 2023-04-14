@@ -205,7 +205,7 @@ impl NodeClient {
             .into_inner()
             .capabilities
             .into_iter()
-            .reduce(|msg, cap| msg + "\n" + &cap)
+            .reduce(|msg, cap| msg + "\n" + cap.as_str())
             .unwrap_or_default();
         Ok(caps)
     }

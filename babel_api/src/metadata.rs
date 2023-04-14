@@ -1,7 +1,33 @@
+use anyhow::{bail, Result};
+use cidr_utils::cidr::IpCidr;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub type KeysConfig = HashMap<String, String>;
+
+pub fn check_metadata(meta: &BlockchainMetadata) -> Result<()> {
+    let version = env!("CARGO_PKG_VERSION");
+    let min_babel_version = meta.min_babel_version.as_str();
+    if version < min_babel_version {
+        bail!("Required minimum babel version is `{min_babel_version}`, running is `{version}`");
+    }
+    check_firewall_rules(&meta.firewall.rules)?;
+    Ok(())
+}
+
+pub fn check_firewall_rules(rules: &[firewall::Rule]) -> Result<()> {
+    for rule in rules {
+        match &rule.ips {
+            Some(ip) if !IpCidr::is_ip_cidr(ip) => bail!(
+                "invalid ip address '{}' in firewall rule '{}'",
+                ip,
+                rule.name
+            ),
+            _ => {}
+        }
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
