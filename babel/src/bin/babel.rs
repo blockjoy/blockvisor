@@ -142,6 +142,36 @@ impl babel_service::BabelPal for Pal {
             .map_err(|err| anyhow!("hostnamectl error: {err}"))?;
         Ok(())
     }
+
+    /// Create and add a swap file inside VM
+    ///
+    /// Based on this tutorial:
+    /// https://www.digitalocean.com/community/tutorials/how-to-add-swap-space-on-ubuntu-20-04
+    async fn add_swap_file(&self, swap_size_mb: usize) -> eyre::Result<()> {
+        let path = "/swapfile";
+        let swappiness = 10;
+        let pressure = 50;
+        let _ = tokio::fs::remove_file(path).await;
+        run_cmd("fallocate", ["-l", &format!("{swap_size_mb}M"), path])
+            .await
+            .map_err(|err| anyhow!("fallocate error: {err}"))?;
+        run_cmd("chmod", ["600", path])
+            .await
+            .map_err(|err| anyhow!("chmod error: {err}"))?;
+        run_cmd("mkswap", [path])
+            .await
+            .map_err(|err| anyhow!("mkswap error: {err}"))?;
+        run_cmd("swapon", [path])
+            .await
+            .map_err(|err| anyhow!("swapon error: {err}"))?;
+        run_cmd("sysctl", [&format!("vm.swappiness={swappiness}")])
+            .await
+            .map_err(|err| anyhow!("sysctl error: {err}"))?;
+        run_cmd("sysctl", [&format!("vm.vfs_cache_pressure={pressure}")])
+            .await
+            .map_err(|err| anyhow!("sysctl error: {err}"))?;
+        Ok(())
+    }
 }
 
 async fn serve_logs(mut run: RunFlag, logs_service: LogsService) -> eyre::Result<()> {

@@ -60,6 +60,7 @@ pub enum MountError {
 pub trait BabelPal {
     async fn mount_data_drive(&self, data_directory_mount_point: &str) -> Result<(), MountError>;
     async fn set_hostname(&self, hostname: &str) -> Result<()>;
+    async fn add_swap_file(&self, swap_size_mb: usize) -> Result<()>;
 }
 
 pub enum BabelStatus {
@@ -99,6 +100,12 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             let (hostname, config) = request.into_inner();
 
             self.save_babel_conf(&config).await?;
+
+            // TODO: pass swap file size as parameter from metadata
+            self.pal
+                .add_swap_file(1024)
+                .await
+                .map_err(|err| Status::internal(format!("failed to add swap file with: {err}")))?;
 
             self.pal
                 .set_hostname(&hostname)
@@ -466,6 +473,10 @@ mod tests {
         }
 
         async fn set_hostname(&self, _hostname: &str) -> eyre::Result<()> {
+            Ok(())
+        }
+
+        async fn add_swap_file(&self, _swap_size_mb: usize) -> eyre::Result<()> {
             Ok(())
         }
     }
