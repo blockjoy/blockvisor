@@ -16,7 +16,6 @@ use blockvisord::{
     set_bv_status, utils, BV_VAR_PATH,
 };
 use bv_utils::{cmd::run_cmd, run_flag::RunFlag};
-use pb::node::ContainerStatus;
 use std::{net::ToSocketAddrs, sync::Arc};
 use sysinfo::{Pid, PidExt, ProcessExt, ProcessRefreshKind, System, SystemExt};
 use tokio::{
