@@ -257,11 +257,13 @@ impl<P: Pal + Debug> Node<P> {
         }
 
         // setup firewall
-        let mut firewall_config = self.data.babel_conf.firewall.clone().unwrap_or_default();
-        if let Some(mut rules) = self.data.firewall_rules.clone() {
-            firewall_config.rules.append(&mut rules);
+        // note: in older images, there is no firewall config, and there is no `ufw` installed
+        if let Some(mut firewall_config) = self.data.babel_conf.firewall.clone() {
+            if let Some(mut rules) = self.data.firewall_rules.clone() {
+                firewall_config.rules.append(&mut rules);
+            }
+            with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
         }
-        with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
 
         Ok(())
     }
