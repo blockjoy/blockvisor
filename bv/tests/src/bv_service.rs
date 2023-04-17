@@ -8,14 +8,6 @@ use std::{fs, net::ToSocketAddrs, path::Path};
 use tokio::time::{sleep, Duration};
 use tonic::{transport::Server, Request};
 
-pub mod ui_pb {
-    tonic::include_proto!("blockjoy.api.ui_v1");
-}
-
-fn get_first_message(meta: Option<ui_pb::ResponseMeta>) -> String {
-    meta.unwrap().messages.first().unwrap().clone()
-}
-
 fn with_auth<T>(inner: T, auth_token: &str, refresh_token: &str) -> Request<T> {
     let mut request = Request::new(inner);
     request.metadata_mut().insert(
@@ -48,7 +40,7 @@ async fn test_bvup_and_reset() {
     let server_future = async {
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(pb::host_service_server::HostServiceServer::new(server))
+            .add_service(pb::hosts_server::HostsServer::new(server))
             .serve("0.0.0.0:8082".to_socket_addrs().unwrap().next().unwrap())
             .await
             .unwrap()
@@ -102,61 +94,44 @@ async fn test_bvup_and_reset() {
 #[serial]
 async fn test_bv_service_e2e() {
     use blockvisord::config::Config;
-    use uuid::Uuid;
-
-    let request_id = Uuid::new_v4().to_string();
 
     let url = "http://localhost:8080";
     let email = "user1@example.com";
     let password = "user1pass";
 
-    let mut client = ui_pb::user_service_client::UserServiceClient::connect(url)
-        .await
-        .unwrap();
+    let mut client = pb::users_client::UsersClient::connect(url).await.unwrap();
 
     println!("create user");
-    let create_user = ui_pb::CreateUserRequest {
-        meta: Some(ui_pb::RequestMeta {
-            id: Some(request_id.clone()),
-            token: None,
-            fields: vec![],
-            pagination: None,
-        }),
+    let create_user = pb::CreateUserRequest {
         email: email.to_string(),
         first_name: "first".to_string(),
         last_name: "last".to_string(),
         password: password.to_string(),
         password_confirmation: password.to_string(),
     };
-    let user: ui_pb::CreateUserResponse = client.create(create_user).await.unwrap().into_inner();
-    println!("user created: {user:?}");
-    assert_eq!(user.meta.as_ref().unwrap().origin_request_id, request_id);
-    let user_id = get_first_message(user.meta);
-    let id = Uuid::parse_str(&user_id).unwrap();
+    let resp: pb::CreateUserResponse = client.create(create_user).await.unwrap().into_inner();
+    println!("user created: {resp:?}");
+    let user_id = resp.user.unwrap().id.parse().unwrap();
 
     println!("confirm user");
-    let mut client =
-        ui_pb::authentication_service_client::AuthenticationServiceClient::connect(url)
-            .await
-            .unwrap();
-    let confirm_user = ui_pb::ConfirmRegistrationRequest {
-        meta: Some(ui_pb::RequestMeta::default()),
-    };
-    let refresh_token = token::TokenGenerator::create_refresh(id, "23942390".to_string());
+    let mut client = pb::authentication_client::AuthenticationClient::connect(url)
+        .await
+        .unwrap();
+    let confirm_user = pb::ConfirmRegistrationRequest {};
+    let refresh_token = token::TokenGenerator::create_refresh(user_id, "23942390".to_string());
     let register_token =
-        token::TokenGenerator::create_register(id, "23ß357320".to_string(), email.to_string());
+        token::TokenGenerator::create_register(user_id, "23ß357320".to_string(), email.to_string());
     client
         .confirm(with_auth(confirm_user, &register_token, &refresh_token))
         .await
         .unwrap();
 
     println!("login user");
-    let login_user = ui_pb::LoginUserRequest {
-        meta: Some(ui_pb::RequestMeta::default()),
+    let login_user = pb::LoginUserRequest {
         email: email.to_string(),
         password: password.to_string(),
     };
-    let login: ui_pb::LoginUserResponse = client.login(login_user).await.unwrap().into_inner();
+    let login: pb::LoginUserResponse = client.login(login_user).await.unwrap().into_inner();
     println!("user login: {login:?}");
     let login_token = login.token.unwrap().value;
     let login_auth: token::AuthClaim =
@@ -165,7 +140,7 @@ async fn test_bv_service_e2e() {
     let org_id = login_data.get("org_id").unwrap();
 
     let auth_token = token::TokenGenerator::create_auth(
-        id,
+        user_id,
         "1245456".to_string(),
         org_id.clone(),
         email.to_string(),
@@ -186,23 +161,22 @@ async fn test_bv_service_e2e() {
         .stdout(predicate::str::contains("INSERT"));
 
     println!("create host provision");
-    let mut client = ui_pb::host_provision_service_client::HostProvisionServiceClient::connect(url)
+    let mut client = pb::host_provisions_client::HostProvisionsClient::connect(url)
         .await
         .unwrap();
 
-    let provision_create = ui_pb::CreateHostProvisionRequest {
-        meta: Some(ui_pb::RequestMeta::default()),
+    let provision_create = pb::CreateHostProvisionRequest {
         ip_gateway: "216.18.214.193".to_string(),
         ip_range_from: "216.18.214.195".to_string(),
         ip_range_to: "216.18.214.206".to_string(),
     };
-    let provision: ui_pb::CreateHostProvisionResponse = client
+    let response: pb::CreateHostProvisionResponse = client
         .create(with_auth(provision_create, &auth_token, &refresh_token))
         .await
         .unwrap()
         .into_inner();
-    println!("host provision: {provision:?}");
-    let otp = get_first_message(provision.meta);
+    println!("host provision: {response:?}");
+    let otp = response.host_provision.unwrap().id;
 
     println!("bvup");
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
@@ -236,33 +210,27 @@ async fn test_bv_service_e2e() {
     test_env::bv_run(&["start"], "blockvisor service started successfully", None);
 
     println!("get blockchain id");
-    let mut client = ui_pb::blockchain_service_client::BlockchainServiceClient::connect(url)
+    let mut client = pb::blockchains_client::BlockchainsClient::connect(url)
         .await
         .unwrap();
 
-    let list_blockchains = ui_pb::ListBlockchainsRequest {
-        meta: Some(ui_pb::RequestMeta::default()),
-    };
-    let list: ui_pb::ListBlockchainsResponse = client
+    let list_blockchains = pb::ListBlockchainsRequest {};
+    let list: pb::ListBlockchainsResponse = client
         .list(with_auth(list_blockchains, &auth_token, &refresh_token))
         .await
         .unwrap()
         .into_inner();
     let blockchain = list.blockchains.first().unwrap();
-    println!("got blockchain: {:?}", &blockchain);
-    let blockchain_id = blockchain.id.as_ref().unwrap();
+    println!("got blockchain: {:?}", blockchain);
 
-    let mut node_client = ui_pb::node_service_client::NodeServiceClient::connect(url)
-        .await
-        .unwrap();
+    let mut node_client = pb::nodes_client::NodesClient::connect(url).await.unwrap();
 
-    let node_create = ui_pb::CreateNodeRequest {
-        meta: Some(ui_pb::RequestMeta::default()),
+    let node_create = pb::CreateNodeRequest {
         org_id: org_id.clone(),
-        blockchain_id: blockchain_id.to_string(),
+        blockchain_id: blockchain.id.clone(),
         version: Some("0.0.1".to_string()),
-        r#type: ui_pb::node::NodeType::Validator.into(),
-        properties: vec![ui_pb::node::NodeProperty {
+        node_type: pb::node::NodeType::Validator.into(),
+        properties: vec![pb::node::NodeProperty {
             name: "TESTING_PARAM".to_string(),
             label: "testeronis".to_string(),
             description: "this param is for testing".to_string(),
@@ -273,48 +241,46 @@ async fn test_bv_service_e2e() {
         }],
         network: "".to_string(),
     };
-    let node: ui_pb::CreateNodeResponse = node_client
+    let resp: pb::CreateNodeResponse = node_client
         .create(with_auth(node_create, &auth_token, &refresh_token))
         .await
         .unwrap()
         .into_inner();
-    println!("created node: {node:?}");
-    let node_id = get_first_message(node.meta);
+    println!("created node: {resp:?}");
+    let node_id = resp.node.unwrap().id;
 
     sleep(Duration::from_secs(30)).await;
 
     println!("list created node, should be auto-started");
     test_env::bv_run(&["node", "status", &node_id], "Running", None);
 
-    let mut client = ui_pb::command_service_client::CommandServiceClient::connect(url)
+    let mut client = pb::commands_client::CommandsClient::connect(url)
         .await
         .unwrap();
 
     println!("check node keys");
     test_env::bv_run(&["node", "keys", &node_id], "first", None);
 
-    let node_stop = ui_pb::CommandRequest {
-        meta: Some(ui_pb::RequestMeta::default()),
-        id: host_id.to_string(),
-        params: vec![ui_pb::Parameter {
-            name: "resource_id".to_string(),
-            value: node_id.clone(),
-        }],
+    let node_stop = pb::CreateCommandRequest {
+        command: Some(pb::create_command_request::Command::StopNode(
+            pb::StopNodeCommand {
+                node_id: node_id.clone(),
+            },
+        )),
     };
-    let command: ui_pb::CommandResponse = client
-        .stop_node(with_auth(node_stop, &auth_token, &refresh_token))
+    let resp: pb::CreateCommandResponse = client
+        .create(with_auth(node_stop, &auth_token, &refresh_token))
         .await
         .unwrap()
         .into_inner();
-    println!("executed stop node command: {command:?}");
+    println!("executed stop node command: {resp:?}");
 
     sleep(Duration::from_secs(15)).await;
 
     println!("get node status");
     test_env::bv_run(&["node", "status", &node_id], "Stopped", None);
 
-    let node_delete = ui_pb::DeleteNodeRequest {
-        meta: Some(ui_pb::RequestMeta::default()),
+    let node_delete = pb::DeleteNodeRequest {
         id: node_id.clone(),
     };
     node_client

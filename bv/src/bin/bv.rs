@@ -62,11 +62,9 @@ async fn main() -> Result<()> {
                 let host_id = config.id;
 
                 let delete = pb::DeleteHostRequest {
-                    request_id: Uuid::new_v4().to_string(),
-                    host_id: host_id.clone(),
+                    id: host_id.clone(),
                 };
-                let mut client =
-                    pb::host_service_client::HostServiceClient::connect(url.clone()).await?;
+                let mut client = pb::hosts_client::HostsClient::connect(url.clone()).await?;
                 println!("Deleting host `{host_id}` from API `{url}`");
                 client.delete(delete).await?;
 

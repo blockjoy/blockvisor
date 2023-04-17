@@ -5,7 +5,6 @@ use blockvisord::{
     services::api::pb,
 };
 use clap::{crate_version, ArgGroup, Parser};
-use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]
@@ -67,23 +66,22 @@ async fn main() -> Result<()> {
         let ip = get_ip_address(&cmd_args.ifa).with_context(|| "failed to get ip address")?;
         let host_info = HostInfo::collect()?;
 
-        let create = pb::ProvisionHostRequest {
-            request_id: Uuid::new_v4().to_string(),
+        let mut create = pb::ProvisionHostRequest {
             otp: cmd_args.otp.unwrap(),
-            status: pb::ConnectionStatus::Online.into(),
+            status: 0,
             name: host_info.name,
             version: crate_version!().to_string(),
-            cpu_count: host_info.cpu_count as i64,
-            mem_size_bytes: host_info.mem_size as i64,
-            disk_size_bytes: host_info.disk_size as i64,
+            cpu_count: host_info.cpu_count.try_into().unwrap(),
+            mem_size_bytes: host_info.mem_size.try_into().unwrap(),
+            disk_size_bytes: host_info.disk_size.try_into().unwrap(),
             os: host_info.os,
             os_version: host_info.os_version,
             ip,
         };
+        create.set_status(pb::provision_host_request::ConnectionStatus::Online);
 
         let mut client =
-            pb::host_service_client::HostServiceClient::connect(cmd_args.blockjoy_api_url.clone())
-                .await?;
+            pb::hosts_client::HostsClient::connect(cmd_args.blockjoy_api_url.clone()).await?;
 
         let host = client.provision(create).await?.into_inner();
 

@@ -136,7 +136,7 @@ where
 /// logging them, we ignore these failures.
 impl From<Metrics> for pb::NodeMetricsRequest {
     fn from(metrics: Metrics) -> Self {
-        use crate::services::api::pb::node::{ApplicationStatus, StakingStatus, SyncStatus};
+        use crate::services::api::pb::node::{NodeStatus, StakingStatus, SyncStatus};
 
         let metrics = metrics
             .0
@@ -145,14 +145,11 @@ impl From<Metrics> for pb::NodeMetricsRequest {
                 let application_status = v.application_status.and_then(|s| {
                     // TODO: maybe we need to do something smarter here
                     // to conform with new proto definitions
-                    ApplicationStatus::from_str_name(&s)
-                        .or_else(|| {
-                            ApplicationStatus::from_str_name(&format!(
-                                "APPLICATION_STATUS_{}",
-                                s.to_uppercase()
-                            ))
-                        })
-                        .ok_or_else(|| warn!("Could not parse `{s}` as application status"))
+                    let fallback =
+                        || NodeStatus::from_str_name(&format!("NODE_STATUS_{}", s.to_uppercase()));
+                    NodeStatus::from_str_name(&s)
+                        .or_else(fallback)
+                        .ok_or_else(|| warn!("Could not parse `{s}` as node status"))
                         .ok()
                 });
                 let sync_status = v.sync_status.and_then(|s| {

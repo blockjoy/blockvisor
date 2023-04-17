@@ -7,10 +7,6 @@ use bv_utils::run_flag::RunFlag;
 use predicates::prelude::*;
 use std::path::Path;
 
-pub mod ui_pb {
-    tonic::include_proto!("blockjoy.api.ui_v1");
-}
-
 #[test]
 fn test_bvup_unknown_otp() {
     let tmp_dir = TempDir::new().unwrap();

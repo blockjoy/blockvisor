@@ -14,9 +14,8 @@ use babel_api::config::firewall;
 use base64::Engine;
 use metrics::{register_counter, Counter};
 use pb::{
-    commands_client::CommandsClient, discovery_client::DiscoveryClient,
-    metrics_service_client::MetricsServiceClient, node_command::Command,
-    node_service_client::NodeServiceClient,
+    commands_client::CommandsClient, discovery_client::DiscoveryClient, metrics_client,
+    node_command::Command, nodes_client,
 };
 use std::{
     fmt::Debug,
@@ -31,7 +30,7 @@ use uuid::Uuid;
 
 #[allow(clippy::large_enum_variant)]
 pub mod pb {
-    tonic::include_proto!("blockjoy.api.v1");
+    tonic::include_proto!("v1");
 }
 
 const STATUS_OK: i32 = 0;
@@ -57,7 +56,7 @@ lazy_static::lazy_static! {
 #[derive(Clone)]
 pub struct AuthToken(pub String);
 
-pub type MetricsClient = MetricsServiceClient<InterceptedService<Channel, AuthToken>>;
+pub type MetricsClient = metrics_client::MetricsClient<InterceptedService<Channel, AuthToken>>;
 
 impl Interceptor for AuthToken {
     fn call(&mut self, request: Request<()>) -> Result<Request<()>, Status> {
@@ -75,7 +74,7 @@ impl Interceptor for AuthToken {
 
 impl MetricsClient {
     pub fn with_auth(channel: Channel, token: AuthToken) -> Self {
-        MetricsServiceClient::with_interceptor(channel, token)
+        metrics_client::MetricsClient::with_interceptor(channel, token)
     }
 }
 
@@ -129,9 +128,9 @@ impl CommandsService {
         for command in commands {
             info!("Processing command: {command:?}");
 
-            match command.r#type {
-                Some(pb::command::Type::Node(node_command)) => {
-                    let command_id = node_command.api_command_id.clone();
+            match command.command {
+                Some(pb::command::Command::Node(node_command)) => {
+                    let command_id = command.id.clone();
                     // check for bv health status
                     let service_status = get_bv_status().await;
                     if service_status != bv_pb::ServiceStatus::Ok {
@@ -156,10 +155,10 @@ impl CommandsService {
                         }
                     }
                 }
-                Some(pb::command::Type::Host(host_command)) => {
+                Some(pb::command::Command::Host(_)) => {
                     let msg = "Command type `Host` not supported".to_string();
                     error!("Error processing command: {msg}");
-                    let command_id = host_command.api_command_id;
+                    let command_id = command.id;
                     self.send_command_update(command_id, Some(STATUS_ERROR), Some(msg))
                         .await?;
                 }
@@ -181,7 +180,7 @@ impl CommandsService {
         exit_code: Option<i32>,
         response: Option<String>,
     ) -> Result<()> {
-        let req = pb::CommandInfo {
+        let req = pb::UpdateCommandRequest {
             id: command_id,
             response,
             exit_code,
@@ -314,7 +313,6 @@ async fn process_node_command<P: Pal + Debug>(
                 API_UPDATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::InfoGet(_) => unimplemented!(),
-            Command::Generic(_) => unimplemented!(),
         },
         None => bail!("Node command is `None`"),
     };
@@ -324,13 +322,13 @@ async fn process_node_command<P: Pal + Debug>(
 
 pub struct NodesService {
     token: String,
-    client: NodeServiceClient<Channel>,
+    client: nodes_client::NodesClient<Channel>,
 }
 
 impl NodesService {
     pub async fn connect(config: Config) -> Result<Self> {
         let url = config.blockjoy_api_url;
-        let client = NodeServiceClient::connect(url.clone())
+        let client = nodes_client::NodesClient::connect(url.clone())
             .await
             .with_context(|| format!("Failed to connect to nodes service at {url}"))?;
 
@@ -341,7 +339,7 @@ impl NodesService {
     }
 
     #[instrument(skip(self))]
-    pub async fn send_node_update(&mut self, update: pb::NodeUpdateRequest) -> Result<()> {
+    pub async fn send_node_update(&mut self, update: pb::UpdateNodeRequest) -> Result<()> {
         self.client.update(with_auth(update, &self.token)).await?;
         Ok(())
     }
@@ -367,9 +365,10 @@ impl DiscoveryService {
 
     #[instrument(skip(self))]
     pub async fn get_services(&mut self) -> Result<ServicesResponse> {
+        let request = pb::ServicesRequest {};
         Ok(self
             .client
-            .services(with_auth((), &self.token))
+            .services(with_auth(request, &self.token))
             .await?
             .into_inner())
     }
@@ -393,9 +392,17 @@ impl From<pb::ContainerImage> for NodeImage {
     fn from(image: pb::ContainerImage) -> Self {
         Self {
             protocol: image.protocol.to_lowercase(),
-            node_type: image.node_type.to_lowercase(),
+            node_type: image.node_type().to_string(),
             node_version: image.node_version.to_lowercase(),
         }
+    }
+}
+
+impl std::fmt::Display for pb::node::NodeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = self.as_str_name();
+        let s = s.strip_prefix("NODE_TYPE_").unwrap_or(s).to_lowercase();
+        write!(f, "{s}")
     }
 }
 

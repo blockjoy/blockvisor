@@ -1,17 +1,19 @@
-use blockvisord::services::api::pb;
 use blockvisord::services::api::pb::ServicesResponse;
+use blockvisord::services::api::pb::{self, UpdateNodeResponse};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
+type Result<T> = std::result::Result<Response<T>, Status>;
+
 pub struct StubHostsServer {}
 
 #[tonic::async_trait]
-impl pb::host_service_server::HostService for StubHostsServer {
+impl pb::hosts_server::Hosts for StubHostsServer {
     async fn provision(
         &self,
         request: Request<pb::ProvisionHostRequest>,
-    ) -> Result<Response<pb::ProvisionHostResponse>, Status> {
+    ) -> Result<pb::ProvisionHostResponse> {
         let host = request.into_inner();
         if host.otp != "UNKNOWN" {
             let host_id = "497d13b1-ddbe-4ee7-bfc7-752c7b710afe".to_string();
@@ -19,8 +21,6 @@ impl pb::host_service_server::HostService for StubHostsServer {
             let reply = pb::ProvisionHostResponse {
                 host_id,
                 token: "awesome-token".to_owned(),
-                messages: vec![],
-                origin_request_id: host.request_id,
             };
 
             Ok(Response::new(reply))
@@ -29,32 +29,28 @@ impl pb::host_service_server::HostService for StubHostsServer {
         }
     }
 
-    async fn update(
-        &self,
-        request: Request<pb::HostUpdateRequest>,
-    ) -> Result<Response<pb::HostUpdateResponse>, Status> {
-        let host = request.into_inner();
-
-        let reply = pb::HostUpdateResponse {
-            messages: vec![],
-            origin_request_id: host.request_id,
-        };
+    async fn update(&self, _: Request<pb::UpdateHostRequest>) -> Result<pb::UpdateHostResponse> {
+        let reply = pb::UpdateHostResponse {};
 
         Ok(Response::new(reply))
     }
 
-    async fn delete(
-        &self,
-        request: Request<pb::DeleteHostRequest>,
-    ) -> Result<Response<pb::DeleteHostResponse>, Status> {
-        let host = request.into_inner();
-
-        let reply = pb::DeleteHostResponse {
-            messages: vec![],
-            origin_request_id: host.request_id,
-        };
+    async fn delete(&self, _: Request<pb::DeleteHostRequest>) -> Result<pb::DeleteHostResponse> {
+        let reply = pb::DeleteHostResponse {};
 
         Ok(Response::new(reply))
+    }
+
+    async fn get(&self, _: Request<pb::GetHostRequest>) -> Result<pb::GetHostResponse> {
+        unimplemented!("Sod off I'm just a test server")
+    }
+
+    async fn list(&self, _: Request<pb::ListHostsRequest>) -> Result<pb::ListHostsResponse> {
+        unimplemented!("Sod off I'm just a test server")
+    }
+
+    async fn create(&self, _: Request<pb::CreateHostRequest>) -> Result<pb::CreateHostResponse> {
+        unimplemented!("Sod off I'm just a test server")
     }
 }
 
@@ -63,52 +59,74 @@ pub struct StubNodesServer {
 }
 
 #[tonic::async_trait]
-impl pb::node_service_server::NodeService for StubNodesServer {
+impl pb::nodes_server::Nodes for StubNodesServer {
     async fn update(
         &self,
-        request: Request<pb::NodeUpdateRequest>,
-    ) -> Result<Response<()>, Status> {
+        request: Request<pb::UpdateNodeRequest>,
+    ) -> Result<pb::UpdateNodeResponse> {
         let req = request.into_inner();
         let status = req.container_status.unwrap();
         self.updates
             .lock()
             .await
             .push(pb::node::ContainerStatus::from_i32(status).unwrap());
-        Ok(Response::new(()))
+        Ok(Response::new(UpdateNodeResponse {}))
+    }
+
+    async fn get(&self, _: Request<pb::GetNodeRequest>) -> Result<pb::GetNodeResponse> {
+        unimplemented!("Sod off I'm just a test server")
+    }
+
+    async fn list(&self, _: Request<pb::ListNodesRequest>) -> Result<pb::ListNodesResponse> {
+        unimplemented!("Sod off I'm just a test server")
+    }
+
+    async fn create(&self, _: Request<pb::CreateNodeRequest>) -> Result<pb::CreateNodeResponse> {
+        unimplemented!("Sod off I'm just a test server")
+    }
+
+    async fn delete(&self, _: Request<pb::DeleteNodeRequest>) -> Result<pb::DeleteNodeResponse> {
+        unimplemented!("Sod off I'm just a test server")
     }
 }
 
 pub struct StubCommandsServer {
     pub commands: Arc<Mutex<Vec<pb::Command>>>,
-    pub updates: Arc<Mutex<Vec<pb::CommandInfo>>>,
+    pub updates: Arc<Mutex<Vec<pb::UpdateCommandRequest>>>,
 }
 
 #[tonic::async_trait]
 impl pb::commands_server::Commands for StubCommandsServer {
     async fn pending(
         &self,
-        _request: Request<pb::PendingCommandsRequest>,
-    ) -> Result<Response<pb::CommandResponse>, Status> {
-        let reply = pb::CommandResponse {
-            commands: self.commands.lock().await.to_vec(),
+        _: Request<pb::PendingCommandsRequest>,
+    ) -> Result<pb::PendingCommandsResponse> {
+        let reply = pb::PendingCommandsResponse {
+            commands: std::mem::take(&mut *self.commands.lock().await),
         };
-        self.commands.lock().await.clear();
 
         Ok(Response::new(reply))
     }
 
-    async fn get(
-        &self,
-        _request: Request<pb::CommandInfo>,
-    ) -> Result<Response<pb::Command>, Status> {
+    async fn get(&self, _: Request<pb::GetCommandRequest>) -> Result<pb::GetCommandResponse> {
         unimplemented!()
     }
 
-    async fn update(&self, request: Request<pb::CommandInfo>) -> Result<Response<()>, Status> {
+    async fn create(
+        &self,
+        _: Request<pb::CreateCommandRequest>,
+    ) -> Result<pb::CreateCommandResponse> {
+        unimplemented!()
+    }
+
+    async fn update(
+        &self,
+        request: Request<pb::UpdateCommandRequest>,
+    ) -> Result<pb::UpdateCommandResponse> {
         let req = request.into_inner();
         self.updates.lock().await.push(req);
-
-        Ok(Response::new(()))
+        let resp = pb::UpdateCommandResponse { command: None }; // tests lol
+        Ok(Response::new(resp))
     }
 }
 
@@ -116,7 +134,7 @@ pub struct StubDiscoveryService;
 
 #[tonic::async_trait]
 impl pb::discovery_server::Discovery for StubDiscoveryService {
-    async fn services(&self, _: Request<()>) -> Result<Response<ServicesResponse>, Status> {
+    async fn services(&self, _: Request<pb::ServicesRequest>) -> Result<pb::ServicesResponse> {
         Ok(Response::new(ServicesResponse {
             key_service_url: "key_service_url".to_string(),
             registry_url: "registry_url".to_string(),

@@ -33,8 +33,7 @@ impl KeyService {
     }
 
     pub async fn download_keys(&mut self, node_id: Uuid) -> Result<Vec<pb::Keyfile>> {
-        let req = pb::KeyFilesGetRequest {
-            request_id: Uuid::new_v4().to_string(),
+        let req: pb::GetKeyFilesRequest = pb::GetKeyFilesRequest {
             node_id: node_id.to_string(),
         };
         let resp = with_retry!(self.client.get(with_auth(req.clone(), &self.token)))?.into_inner();
@@ -43,12 +42,11 @@ impl KeyService {
     }
 
     pub async fn upload_keys(&mut self, node_id: Uuid, keys: Vec<pb::Keyfile>) -> Result<()> {
-        let req = pb::KeyFilesSaveRequest {
-            request_id: Uuid::new_v4().to_string(),
+        let req = pb::CreateKeyFilesRequest {
             node_id: node_id.to_string(),
             key_files: keys,
         };
-        with_retry!(self.client.save(with_auth(req.clone(), &self.token)))?;
+        with_retry!(self.client.create(with_auth(req.clone(), &self.token)))?;
 
         Ok(())
     }

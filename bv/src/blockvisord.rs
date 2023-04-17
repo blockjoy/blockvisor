@@ -274,14 +274,14 @@ where
                     NodeStatus::Stopped => pb::node::ContainerStatus::Stopped,
                     NodeStatus::Failed => pb::node::ContainerStatus::Unspecified,
                 };
-                let update = pb::NodeUpdateRequest {
-                    request_id: Uuid::new_v4().to_string(),
+                let mut update = pb::UpdateNodeRequest {
                     id: node_id.to_string(),
-                    ip: None,
-                    self_update: None,
-                    container_status: Some(container_status.into()),
+                    container_status: None, // We use the setter to set this field for type-safety
                     address: address.clone(),
+                    version: None,
+                    self_update: None,
                 };
+                update.set_container_status(container_status);
 
                 if Self::send_node_info_update(config.clone(), update)
                     .await
@@ -377,7 +377,7 @@ where
     // Send node info update to control plane
     async fn send_node_info_update(
         config: SharedConfig,
-        update: pb::NodeUpdateRequest,
+        update: pb::UpdateNodeRequest,
     ) -> Result<()> {
         let mut client = api::NodesService::connect(config.read().await)
             .await
