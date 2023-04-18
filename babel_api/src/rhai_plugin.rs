@@ -501,6 +501,7 @@ const METADATA = #{
     babel_config: #{
         data_directory_mount_point: "/mnt/data/",
         log_buffer_capacity_ln: 1024,
+        swap_size_mb: 1024,
     },
     firewall: #{
         enabled: true,
@@ -575,6 +576,7 @@ const METADATA = #{
             babel_config: BabelConfig {
                 data_directory_mount_point: "/mnt/data/".to_string(),
                 log_buffer_capacity_ln: 1024,
+                swap_size_mb: 1024,
             },
             firewall: firewall::Config {
                 enabled: true,
