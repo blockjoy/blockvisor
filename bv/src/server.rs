@@ -45,9 +45,8 @@ where
         &self,
         _request: Request<bv_pb::HealthRequest>,
     ) -> Result<Response<bv_pb::HealthResponse>, Status> {
-        let reply = bv_pb::HealthResponse {
-            status: get_bv_status().await as i32,
-        };
+        let mut reply = bv_pb::HealthResponse { status: 0 };
+        reply.set_status(get_bv_status().await);
         Ok(Response::new(reply))
     }
 
