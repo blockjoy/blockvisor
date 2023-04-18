@@ -60,8 +60,10 @@ pub struct BlockchainMetadata {
 pub struct BabelConfig {
     /// Path to mount data drive to
     pub data_directory_mount_point: String,
-    /// capacity of log buffer (in lines)
+    /// Capacity of log buffer (in lines)
     pub log_buffer_capacity_ln: usize,
+    /// Size of swap file created on the node, in MB
+    pub swap_size_mb: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -69,7 +71,7 @@ pub struct BabelConfig {
 pub struct Requirements {
     /// Virtual cores to share with VM
     pub vcpu_count: usize,
-    /// RAM allocated to VM
+    /// RAM allocated to VM in MB
     pub mem_size_mb: usize,
     /// Size of data drive for storing blockchain data (not to be confused with OS drive)
     pub disk_size_gb: usize,
