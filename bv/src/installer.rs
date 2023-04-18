@@ -249,11 +249,11 @@ impl<T: Timer, S: BvService> Installer<T, S> {
                     .start_update(bv_pb::StartUpdateRequest::default()))
                 {
                     Ok(resp) => {
-                        let status = resp.into_inner().status;
-                        if status == bv_pb::ServiceStatus::Updating as i32 {
+                        let status = resp.into_inner().status();
+                        if status == bv_pb::ServiceStatus::Updating {
                             break;
                         } else if expired() {
-                            bail!("prepare running BV for update failed, BV start_update respond with {status}");
+                            bail!("prepare running BV for update failed, BV start_update respond with {status:?}");
                         }
                     }
                     Err(err) => {
@@ -346,11 +346,13 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         loop {
             match with_retry!(self.bv_client.health(bv_pb::HealthRequest::default())) {
                 Ok(resp) => {
-                    let status = resp.into_inner().status;
-                    if status == bv_pb::ServiceStatus::Ok as i32 {
+                    let status = resp.into_inner().status();
+                    if status == bv_pb::ServiceStatus::Ok {
                         break;
                     } else if expired() {
-                        bail!("installed BV health check failed, BV health respond with {status}");
+                        bail!(
+                            "installed BV health check failed, BV health respond with {status:?}"
+                        );
                     }
                 }
                 Err(err) => {

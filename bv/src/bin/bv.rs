@@ -269,16 +269,17 @@ impl NodeClient {
                 let nodes = self.fetch_nodes().await?;
                 let mut nodes = nodes
                     .iter()
-                    .filter(|n| (!running || (n.status == bv_pb::NodeStatus::Running as i32)))
+                    .filter(|n| (!running || (n.status() == bv_pb::NodeStatus::Running)))
                     .peekable();
                 if nodes.peek().is_some() {
                     let mut table = vec![];
                     for node in nodes.cloned() {
+                        let status = node.status();
                         table.push(PrettyTableRow {
                             id: node.id,
                             name: node.name,
                             image: fmt_opt(node.image),
-                            status: bv_pb::NodeStatus::from_i32(node.status).unwrap(),
+                            status,
                             ip: node.ip,
                             uptime: fmt_opt(node.uptime),
                         })
