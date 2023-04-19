@@ -552,7 +552,7 @@ impl<P: Pal + Debug> Node<P> {
         DirBuilder::new().recursive(true).create(data_dir).await?;
         let path = data_dir.join(DATA_FILE);
 
-        let gb = &format!("{disk_size_gb}G");
+        let gb = &format!("{disk_size_gb}GB");
         run_cmd(
             "fallocate",
             [OsStr::new("-l"), OsStr::new(gb), path.as_os_str()],

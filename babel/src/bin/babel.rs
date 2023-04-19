@@ -152,7 +152,7 @@ impl babel_service::BabelPal for Pal {
         let swappiness = 10;
         let pressure = 50;
         let _ = tokio::fs::remove_file(path).await;
-        run_cmd("fallocate", ["-l", &format!("{swap_size_mb}M"), path])
+        run_cmd("fallocate", ["-l", &format!("{swap_size_mb}MB"), path])
             .await
             .map_err(|err| anyhow!("fallocate error: {err}"))?;
         run_cmd("chmod", ["600", path])
