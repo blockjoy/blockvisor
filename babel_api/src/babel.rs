@@ -2,11 +2,13 @@ use crate::engine::{JobConfig, JobStatus};
 use crate::metadata::{firewall, BabelConfig, KeysConfig};
 use crate::utils::{Binary, BinaryStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[tonic_rpc::tonic_rpc(bincode)]
 pub trait Babel {
     /// Initial Babel setup that must be run on node startup Mount data directory.
-    fn setup_babel(config: BabelConfig);
+    fn setup_babel(hostname: String, config: BabelConfig);
     /// Setup firewall according to given configuration.
     fn setup_firewall(config: firewall::Config);
     /// Download key files from locations specified in `keys` section of Babel config.
@@ -44,6 +46,18 @@ pub trait Babel {
         /// These are the arguments to the sh command that is executed for this `Method`.
         body: String,
     ) -> String;
+
+    /// This function renders configuration template with provided `params`.
+    /// It assume that file pointed by `template` argument exists.
+    /// File pointed by `output` path will be overwritten if exists.
+    fn render_template(
+        /// Path to template file.
+        template: PathBuf,
+        /// Path to rendered config file.
+        output: PathBuf,
+        /// Parameters to be applied on template.
+        params: HashMap<String, String>,
+    );
 
     /// Get logs gathered from jobs.
     #[server_streaming]

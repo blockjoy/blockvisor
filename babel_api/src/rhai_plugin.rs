@@ -12,92 +12,126 @@ use rhai::{
 };
 use std::{collections::HashMap, path::Path, sync::Arc};
 
-pub struct RhaiPlugin {
-    rhai_engine: rhai::Engine,
+#[derive(Debug)]
+pub struct RhaiPlugin<E> {
+    babel_engine: Arc<E>,
     ast: rhai::AST,
+    rhai_engine: rhai::Engine,
 }
 
-pub fn new<E: Engine + Sync + Send + 'static>(script: &str, babel_engine: E) -> Result<RhaiPlugin> {
-    // register all Babel engine methods
-    let babel_engine = Arc::new(babel_engine);
-    let mut rhai_engine = rhai::Engine::new();
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn(
-        "start_job",
-        move |job_name: ImmutableString, job_config: Dynamic| {
-            into_rhai_result(babel.start_job(job_name.as_str(), from_dynamic(&job_config)?))
-        },
-    );
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn("stop_job", move |job_name: ImmutableString| {
-        into_rhai_result(babel.stop_job(job_name.as_str()))
-    });
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn("job_status", move |job_name: ImmutableString| {
-        to_dynamic(into_rhai_result(babel.job_status(job_name.as_str()))?)
-    });
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn(
-        "run_jrpc",
-        move |host: ImmutableString, method: ImmutableString| {
-            into_rhai_result(babel.run_jrpc(host.as_str(), method.as_str()))
-        },
-    );
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn("run_rest", move |url: ImmutableString| {
-        into_rhai_result(babel.run_rest(url.as_str()))
-    });
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn("run_sh", move |body: ImmutableString| {
-        into_rhai_result(babel.run_sh(body.as_str()))
-    });
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn("sanitize_sh_param", move |param: ImmutableString| {
-        into_rhai_result(babel.sanitize_sh_param(param.as_str()))
-    });
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn(
-        "render_template",
-        move |template: ImmutableString, output: ImmutableString, params: rhai::Map| {
-            into_rhai_result(
-                babel.render_template(
-                    Path::new(&template.to_string()),
-                    Path::new(&output.to_string()),
-                    params
-                        .into_iter()
-                        .map(|(k, v)| (k.to_string(), v.to_string()))
-                        .collect(),
-                ),
+impl<E: Engine + Sync + Send + 'static> Clone for RhaiPlugin<E> {
+    fn clone(&self) -> Self {
+        let mut clone = Self {
+            babel_engine: self.babel_engine.clone(),
+            rhai_engine: rhai::Engine::new(),
+            ast: self.ast.clone(),
+        };
+        clone.init_rhai_engine();
+        clone
+    }
+}
+
+impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
+    pub fn new(script: &str, babel_engine: E) -> Result<Self> {
+        let rhai_engine = rhai::Engine::new();
+        // compile script to AST
+        let ast = rhai_engine.compile(script)?;
+        let mut plugin = RhaiPlugin {
+            babel_engine: Arc::new(babel_engine),
+            rhai_engine,
+            ast,
+        };
+        plugin.init_rhai_engine();
+        Ok(plugin)
+    }
+
+    /// register all Babel engine methods
+    fn init_rhai_engine(&mut self) {
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn(
+            "start_job",
+            move |job_name: ImmutableString, job_config: Dynamic| {
+                into_rhai_result(
+                    babel_engine.start_job(job_name.as_str(), from_dynamic(&job_config)?),
+                )
+            },
+        );
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("stop_job", move |job_name: ImmutableString| {
+                into_rhai_result(babel_engine.stop_job(job_name.as_str()))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("job_status", move |job_name: ImmutableString| {
+                to_dynamic(into_rhai_result(
+                    babel_engine.job_status(job_name.as_str()),
+                )?)
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn(
+            "run_jrpc",
+            move |host: ImmutableString, method: ImmutableString| {
+                into_rhai_result(babel_engine.run_jrpc(host.as_str(), method.as_str()))
+            },
+        );
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("run_rest", move |url: ImmutableString| {
+                into_rhai_result(babel_engine.run_rest(url.as_str()))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("run_sh", move |body: ImmutableString| {
+                into_rhai_result(babel_engine.run_sh(body.as_str()))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("sanitize_sh_param", move |param: ImmutableString| {
+                into_rhai_result(babel_engine.sanitize_sh_param(param.as_str()))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn(
+            "render_template",
+            move |template: ImmutableString, output: ImmutableString, params: rhai::Map| {
+                into_rhai_result(
+                    babel_engine.render_template(
+                        Path::new(&template.to_string()),
+                        Path::new(&output.to_string()),
+                        params
+                            .into_iter()
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                            .collect(),
+                    ),
+                )
+            },
+        );
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn("node_params", move || {
+            rhai::Map::from_iter(
+                babel_engine
+                    .node_params()
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into())),
             )
-        },
-    );
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn("node_params", move || {
-        rhai::Map::from_iter(
-            babel
-                .node_params()
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into())),
-        )
-    });
-    let babel = babel_engine.clone();
-    rhai_engine.register_fn("save_data", move |value: ImmutableString| {
-        into_rhai_result(babel.save_data(value.as_str()))
-    });
-    let babel = babel_engine;
-    rhai_engine.register_fn("load_data", move || into_rhai_result(babel.load_data()));
+        });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("save_data", move |value: ImmutableString| {
+                into_rhai_result(babel_engine.save_data(value.as_str()))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn("load_data", move || {
+            into_rhai_result(babel_engine.load_data())
+        });
 
-    // register other utils
-    rhai_engine.register_fn("parse_json", move |json: ImmutableString| {
-        rhai::Engine::new().parse_json(json, true)
-    });
+        // register other utils
+        self.rhai_engine
+            .register_fn("parse_json", move |json: ImmutableString| {
+                rhai::Engine::new().parse_json(json, true)
+            });
+    }
 
-    // compile script to AST
-    let ast = rhai_engine.compile(script)?;
-    Ok(RhaiPlugin { rhai_engine, ast })
-}
-
-impl RhaiPlugin {
     fn call_fn<P: rhai::FuncArgs, R: Clone + Send + Sync + 'static>(
         &self,
         name: &str,
@@ -110,7 +144,7 @@ impl RhaiPlugin {
     }
 }
 
-impl Plugin for RhaiPlugin {
+impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     fn metadata(&self) -> Result<BlockchainMetadata> {
         let mut vars = self.ast.iter_literal_variables(true, false);
         if let Some((_, _, dynamic)) = vars.find(|(name, _, _)| name == &"METADATA") {
@@ -237,7 +271,7 @@ mod tests {
             // no params
         }
 "#;
-        let plugin = new(script, MockBabelEngine::new())?;
+        let plugin = RhaiPlugin::new(script, MockBabelEngine::new())?;
         let mut expected_capabilities = vec![
             "function_A".to_string(),
             "function_b".to_string(),
@@ -304,7 +338,7 @@ mod tests {
             .expect_save_data()
             .with(predicate::eq("keys generated"))
             .return_once(|_| Ok(()));
-        let plugin = new(script, babel)?;
+        let plugin = RhaiPlugin::new(script, babel)?.clone(); // call clone() to make sure it works as well
         plugin.init(&HashMap::from_iter([(
             "key1".to_string(),
             "key1_value".to_string(),
@@ -420,7 +454,7 @@ mod tests {
             .expect_load_data()
             .return_once(|| Ok("loaded data".to_string()));
 
-        let plugin = new(script, babel)?;
+        let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
             r#"json_as_param|#{"finished": #{"exit_code": 1, "message": "error msg"}}|jrpc_response|rest_response|sh_response|sh_sanitized|{"key_A":"value_A"}|loaded data"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
@@ -448,7 +482,7 @@ mod tests {
         babel
             .expect_load_data()
             .return_once(|| bail!("some Rust error"));
-        let plugin = new(script, babel)?;
+        let plugin = RhaiPlugin::new(script, babel)?;
         assert!(plugin
             .call_custom_method("custom_method_with_exception", "")
             .unwrap_err()
@@ -616,7 +650,7 @@ const METADATA = #{
                 ("key_B_name".to_string(), "key B Value".to_string()),
             ])),
         };
-        let plugin = new(meta_rhai, MockBabelEngine::new())?;
+        let plugin = RhaiPlugin::new(meta_rhai, MockBabelEngine::new())?;
         assert_eq!(meta_rust, plugin.metadata()?);
         Ok(())
     }
