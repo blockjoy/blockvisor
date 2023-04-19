@@ -143,14 +143,17 @@ impl babel_service::BabelPal for Pal {
         Ok(())
     }
 
-    /// Create and add a swap file inside VM
+    /// Set a swap file inside VM
+    ///
+    /// Swap file location is `/swapfile`. If swap file exists, it will be turned off and recreated
     ///
     /// Based on this tutorial:
     /// https://www.digitalocean.com/community/tutorials/how-to-add-swap-space-on-ubuntu-20-04
-    async fn add_swap_file(&self, swap_size_mb: usize) -> eyre::Result<()> {
+    async fn set_swap_file(&self, swap_size_mb: usize) -> eyre::Result<()> {
         let path = "/swapfile";
         let swappiness = 10;
         let pressure = 50;
+        let _ = run_cmd("swapoff", [path]).await;
         let _ = tokio::fs::remove_file(path).await;
         run_cmd("fallocate", ["-l", &format!("{swap_size_mb}MB"), path])
             .await
