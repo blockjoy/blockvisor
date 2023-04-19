@@ -507,3 +507,363 @@ fn escape_sh_char(c: char) -> Result<String> {
         c => bail!("Shell unsafe character detected: {c}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils;
+    use crate::utils::tests::test_channel;
+    use assert_fs::TempDir;
+    use babel_api::engine::{Engine, RestartPolicy};
+    use babel_api::{babel::BlockchainKey, metadata::BabelConfig};
+    use mockall::*;
+    use tonic::{Request, Response, Streaming};
+
+    mock! {
+        pub BabelService {}
+
+        #[tonic::async_trait]
+        impl babel_api::babel::babel_server::Babel for BabelService {
+            async fn setup_babel(
+                &self,
+                request: Request<(String, BabelConfig)>,
+            ) -> Result<Response<()>, Status>;
+            async fn setup_firewall(
+                &self,
+                request: Request<babel_api::metadata::firewall::Config>,
+            ) -> Result<Response<()>, Status>;
+            async fn download_keys(
+                &self,
+                request: Request<babel_api::metadata::KeysConfig>,
+            ) -> Result<Response<Vec<BlockchainKey>>, Status>;
+            async fn upload_keys(
+                &self,
+                request: Request<(babel_api::metadata::KeysConfig, Vec<BlockchainKey>)>,
+            ) -> Result<Response<String>, Status>;
+            async fn check_job_runner(
+                &self,
+                request: Request<u32>,
+            ) -> Result<Response<babel_api::utils::BinaryStatus>, Status>;
+            async fn upload_job_runner(
+                &self,
+                request: Request<Streaming<babel_api::utils::Binary>>,
+            ) -> Result<Response<()>, Status>;
+            async fn start_job(
+                &self,
+                request: Request<(String, JobConfig)>,
+            ) -> Result<Response<()>, Status>;
+            async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
+            async fn job_status(&self, request: Request<String>) -> Result<Response<JobStatus>, Status>;
+            async fn run_jrpc(
+                &self,
+                request: Request<(String, String)>,
+            ) -> Result<Response<String>, Status>;
+            async fn run_rest(
+                &self,
+                request: Request<String>,
+            ) -> Result<Response<String>, Status>;
+            async fn run_sh(
+                &self,
+                request: Request<String>,
+            ) -> Result<Response<String>, Status>;
+            async fn render_template(
+                &self,
+                request: Request<(PathBuf, PathBuf, HashMap<String, String>)>,
+            ) -> Result<Response<()>, Status>;
+            type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
+            async fn get_logs(
+                &self,
+                _request: Request<()>,
+            ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
+        }
+    }
+
+    #[derive(Clone)]
+    struct DummyPlugin {
+        engine: super::Engine,
+    }
+
+    impl Plugin for DummyPlugin {
+        fn metadata(&self) -> Result<babel_api::metadata::BlockchainMetadata> {
+            self.engine.run_sh("metadata")?;
+            bail!("no metadata") // test also some error propagation
+        }
+        fn capabilities(&self) -> Vec<String> {
+            self.engine.run_sh("capabilities").unwrap();
+            vec!["some_method".to_string()]
+        }
+        fn has_capability(&self, _name: &str) -> bool {
+            self.engine.run_sh("has_capability").unwrap();
+            true
+        }
+        fn init(&self, secret_keys: &HashMap<String, String>) -> Result<()> {
+            self.engine.render_template(
+                Path::new("template"),
+                Path::new("config"),
+                secret_keys.clone(),
+            )?;
+            Ok(())
+        }
+        fn height(&self) -> Result<u64> {
+            self.engine.run_sh("height")?;
+            Ok(7)
+        }
+        fn block_age(&self) -> Result<u64> {
+            self.engine.run_sh("block_age")?;
+            Ok(77)
+        }
+        fn name(&self) -> Result<String> {
+            self.engine.run_sh("dummy_name")
+        }
+        fn address(&self) -> Result<String> {
+            self.engine.run_sh("dummy address")
+        }
+        fn consensus(&self) -> Result<bool> {
+            self.engine.run_sh("consensus")?;
+            Ok(true)
+        }
+        fn application_status(&self) -> Result<ApplicationStatus> {
+            self.engine.run_sh("application_status")?;
+            Ok(ApplicationStatus::Disabled)
+        }
+        fn sync_status(&self) -> Result<SyncStatus> {
+            self.engine.run_sh("sync_status")?;
+            Ok(SyncStatus::Syncing)
+        }
+        fn staking_status(&self) -> Result<StakingStatus> {
+            self.engine.run_sh("staking_status")?;
+            Ok(StakingStatus::Staked)
+        }
+        fn generate_keys(&self) -> Result<()> {
+            self.engine.run_sh("generate_keys")?;
+            Ok(())
+        }
+        fn call_custom_method(&self, name: &str, param: &str) -> Result<String> {
+            self.engine.start_job(
+                name,
+                JobConfig {
+                    body: param.to_string(),
+                    restart: RestartPolicy::Never,
+                    needs: vec![],
+                },
+            )?;
+            self.engine.stop_job(name)?;
+            self.engine.job_status(name)?;
+            self.engine.run_jrpc(name, param)?;
+            self.engine.run_rest(name)?;
+            self.engine.render_template(
+                Path::new(name),
+                Path::new(param),
+                self.engine.node_params(),
+            )?;
+            self.engine.save_data("custom plugin data")?;
+            self.engine.load_data()
+        }
+    }
+
+    struct TestConnection {
+        client: BabelClient<Channel>,
+    }
+
+    #[async_trait]
+    impl BabelConnection for TestConnection {
+        async fn babel_client(&mut self) -> Result<&mut BabelClient<Channel>> {
+            Ok(&mut self.client)
+        }
+
+        fn mark_broken(&mut self) {}
+    }
+
+    /// Common staff to setup for all tests like sut (BabelEngine in that case),
+    /// path to root dir used in test, instance of AsyncPanicChecker to make sure that all panics
+    /// from other threads will be propagated.
+    struct TestEnv {
+        tmp_root: PathBuf,
+        data_path: PathBuf,
+        engine: BabelEngine<TestConnection, DummyPlugin>,
+        _async_panic_checker: utils::tests::AsyncPanicChecker,
+    }
+
+    impl TestEnv {
+        fn new() -> Result<Self> {
+            let tmp_root = TempDir::new()?.to_path_buf();
+            fs::create_dir_all(&tmp_root)?;
+            let data_path = tmp_root.join("data");
+            let connection = TestConnection {
+                client: babel_api::babel::babel_client::BabelClient::new(test_channel(&tmp_root)),
+            };
+            let engine = BabelEngine::new(
+                Uuid::new_v4(),
+                connection,
+                |engine| DummyPlugin { engine },
+                HashMap::from_iter([("some_key".to_string(), "some value".to_string())]),
+                data_path.clone(),
+            )?;
+
+            Ok(Self {
+                tmp_root,
+                data_path,
+                engine,
+                _async_panic_checker: Default::default(),
+            })
+        }
+
+        fn start_test_server(&self, babel_mock: MockBabelService) -> utils::tests::TestServer {
+            utils::tests::start_test_server(
+                self.tmp_root.join("test_socket"),
+                babel_api::babel::babel_server::BabelServer::new(babel_mock),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn test_async_bridge_to_babel() -> Result<()> {
+        let mut test_env = TestEnv::new()?;
+        let mut babel_mock = MockBabelService::new();
+        // from init
+        babel_mock
+            .expect_render_template()
+            .withf(|req| {
+                let (template, out, params) = req.get_ref();
+                template == Path::new("template")
+                    && out == Path::new("config")
+                    && params["secret_key"].as_bytes() == [1, 2, 3]
+                    && params["some_key"] == "some value"
+            })
+            .return_once(|_| Ok(Response::new(())));
+        // from custom_method
+        babel_mock
+            .expect_start_job()
+            .withf(|req| {
+                let (name, config) = req.get_ref();
+                name == "name" && config.body == "param"
+            })
+            .return_once(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_stop_job()
+            .withf(|req| req.get_ref() == "name")
+            .return_once(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_job_status()
+            .withf(|req| req.get_ref() == "name")
+            .return_once(|_| Ok(Response::new(JobStatus::Running)));
+        babel_mock
+            .expect_run_jrpc()
+            .withf(|req| {
+                let (name, param) = req.get_ref();
+                name == "name" && param == "param"
+            })
+            .return_once(|_| Ok(Response::new("any".to_string())));
+        babel_mock
+            .expect_run_rest()
+            .withf(|req| req.get_ref() == "name")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_render_template()
+            .withf(|req| {
+                let (template, out, params) = req.get_ref();
+                template == Path::new("name")
+                    && out == Path::new("param")
+                    && params["some_key"] == "some value"
+            })
+            .return_once(|_| Ok(Response::new(())));
+
+        // others
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "height")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "block_age")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "dummy_name")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "dummy address")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "consensus")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "application_status")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "sync_status")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "staking_status")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "capabilities")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "has_capability")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "metadata")
+            .return_once(|req| Ok(Response::new(req.into_inner())));
+
+        let babel_server = test_env.start_test_server(babel_mock);
+
+        test_env
+            .engine
+            .init(HashMap::from_iter([(
+                "secret_key".to_string(),
+                vec![1, 2, 3],
+            )]))
+            .await?;
+        assert_eq!(
+            "custom plugin data",
+            test_env
+                .engine
+                .call_method::<String>("name", "param")
+                .await?
+        );
+        assert_eq!(
+            "custom plugin data",
+            fs::read_to_string(test_env.data_path)?
+        );
+        assert_eq!(7, test_env.engine.height().await?);
+        assert_eq!(77, test_env.engine.block_age().await?);
+        assert_eq!("dummy_name", test_env.engine.name().await?);
+        assert_eq!("dummy address", test_env.engine.address().await?);
+        assert!(test_env.engine.consensus().await?);
+        assert_eq!(
+            ApplicationStatus::Disabled,
+            test_env.engine.application_status().await?
+        );
+        assert_eq!(SyncStatus::Syncing, test_env.engine.sync_status().await?);
+        assert_eq!(
+            StakingStatus::Staked,
+            test_env.engine.staking_status().await?
+        );
+        assert_eq!(
+            vec!["some_method".to_string()],
+            test_env.engine.capabilities().await?
+        );
+        assert_eq!(true, test_env.engine.has_capability("some method").await?);
+        assert_eq!(
+            "no metadata",
+            test_env
+                .engine
+                .upload_keys(vec![])
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        babel_server.assert().await;
+
+        Ok(())
+    }
+}
