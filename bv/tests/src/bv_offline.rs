@@ -591,8 +591,8 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         pb::node::ContainerStatus::Running,
         pb::node::ContainerStatus::Upgraded,
     ];
-    for (idx, expected) in expected_updates.into_iter().enumerate() {
-        assert_eq!(nodes_updates.lock().await[idx], expected);
+    for (actual, ref expected) in nodes_updates.lock().await.iter().zip(expected_updates) {
+        assert_eq!(actual, expected);
     }
 
     println!("got commands updates: {:?}", commands_updates.lock().await);
@@ -624,8 +624,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         (&command_id, None, Some(0)),
         (&command_id, None, Some(0)),
     ];
-    for (idx, expected) in expected_updates.into_iter().enumerate() {
-        let actual = &commands_updates.lock().await[idx];
+    for (actual, ref expected) in commands_updates.lock().await.iter().zip(expected_updates) {
         assert_eq!(&actual.id, expected.0);
         assert_eq!(actual.response.as_deref(), expected.1);
         assert_eq!(actual.exit_code, expected.2);
