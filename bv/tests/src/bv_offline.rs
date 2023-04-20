@@ -571,29 +571,29 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
 
     println!("check received updates");
     println!("got nodes updates: {:?}", nodes_updates.lock().await);
-    // let expected_updates = vec![
-    //     ContainerStatus::Creating,
-    //     ContainerStatus::Stopped,
-    //     ContainerStatus::Starting,
-    //     ContainerStatus::Running,
-    //     ContainerStatus::Stopping,
-    //     ContainerStatus::Stopped,
-    //     ContainerStatus::Starting,
-    //     ContainerStatus::Running,
-    //     ContainerStatus::Stopping,
-    //     ContainerStatus::Stopped,
-    //     ContainerStatus::Starting,
-    //     ContainerStatus::Running,
-    //     ContainerStatus::Upgrading,
-    //     ContainerStatus::Stopping,
-    //     ContainerStatus::Stopped,
-    //     ContainerStatus::Starting,
-    //     ContainerStatus::Running,
-    //     ContainerStatus::Upgraded,
-    // ];
-    // for (idx, expected) in expected_updates.into_iter().enumerate() {
-    //     assert_eq!(nodes_updates.lock().await[idx], expected);
-    // }
+    let expected_updates = vec![
+        pb::node::ContainerStatus::Creating,
+        pb::node::ContainerStatus::Stopped,
+        pb::node::ContainerStatus::Starting,
+        pb::node::ContainerStatus::Running,
+        pb::node::ContainerStatus::Stopping,
+        pb::node::ContainerStatus::Stopped,
+        pb::node::ContainerStatus::Starting,
+        pb::node::ContainerStatus::Running,
+        pb::node::ContainerStatus::Stopping,
+        pb::node::ContainerStatus::Stopped,
+        pb::node::ContainerStatus::Starting,
+        pb::node::ContainerStatus::Running,
+        pb::node::ContainerStatus::Upgrading,
+        pb::node::ContainerStatus::Stopping,
+        pb::node::ContainerStatus::Stopped,
+        pb::node::ContainerStatus::Starting,
+        pb::node::ContainerStatus::Running,
+        pb::node::ContainerStatus::Upgraded,
+    ];
+    for (idx, expected) in expected_updates.into_iter().enumerate() {
+        assert_eq!(nodes_updates.lock().await[idx], expected);
+    }
 
     println!("got commands updates: {:?}", commands_updates.lock().await);
     let expected_updates = vec![
