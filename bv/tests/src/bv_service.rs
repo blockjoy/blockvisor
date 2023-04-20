@@ -234,7 +234,7 @@ async fn test_bv_service_e2e() {
             name: "TESTING_PARAM".to_string(),
             label: "testeronis".to_string(),
             description: "this param is for testing".to_string(),
-            ui_type: "like I said, for testing".to_string(),
+            ui_type: pb::UiType::Text.into(),
             disabled: false,
             required: true,
             value: Some("I guess just some test value".to_string()),
