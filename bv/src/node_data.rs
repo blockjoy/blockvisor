@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use babel_api::config::{firewall, Babel};
+use babel_api::metadata::{firewall, Requirements};
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
@@ -47,10 +47,12 @@ pub struct NodeData<N> {
     /// Whether or not this node should check for updates and then update itself
     #[serde(default)]
     pub self_update: bool,
+    #[serde(default)]
+    pub initialized: bool,
     pub image: NodeImage,
     pub network_interface: N,
-    pub firewall_rules: Option<Vec<firewall::Rule>>,
-    pub babel_conf: Babel,
+    pub requirements: Requirements,
+    pub firewall_rules: Vec<firewall::Rule>,
     #[serde(default)]
     pub properties: NodeProperties,
 }
@@ -60,14 +62,14 @@ impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
         info!("Reading nodes config file: {}", path.display());
         fs::read_to_string(&path)
             .await
-            .and_then(|s| toml::from_str::<Self>(&s).map_err(Into::into))
+            .and_then(|s| serde_json::from_str::<Self>(&s).map_err(Into::into))
             .with_context(|| format!("Failed to read node file `{}`", path.display()))
     }
 
     pub async fn save(&self, registry_config_dir: &Path) -> Result<()> {
         let path = self.file_path(registry_config_dir);
         info!("Writing node config: {}", path.display());
-        let config = toml::to_string(self)?;
+        let config = serde_json::to_string(self)?;
         fs::write(&path, &*config).await?;
 
         Ok(())
@@ -84,7 +86,7 @@ impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
     }
 
     fn file_path(&self, registry_config_dir: &Path) -> PathBuf {
-        let filename = format!("{}.toml", self.id);
+        let filename = format!("{}.json", self.id);
         registry_config_dir.join(filename)
     }
 }

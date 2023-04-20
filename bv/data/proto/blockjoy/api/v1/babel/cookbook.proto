@@ -12,8 +12,8 @@ enum StatusName {
   Stable = 3;
 }
 
-/* Message type used for identifying a specific configuration */
-message ConfigIdentifier {
+/* Message type used for identifying a specific plugin */
+message PluginIdentifier {
   /* snake_cased name of the blockchain */
   string protocol = 1;
   /* snake_cased name of the node type */
@@ -29,10 +29,10 @@ message BundleIdentifier {
   string version = 1;
 }
 
-message Configuration {
-  ConfigIdentifier identifier = 1;
-  /* Configuration file contents */
-  bytes toml_content = 2;
+message Plugin {
+  PluginIdentifier identifier = 1;
+  /* Plugin script contents */
+  bytes rhai_content = 2;
 }
 
 message ArchiveLocation {
@@ -46,7 +46,7 @@ message BabelVersionsRequest {
 }
 
 message BabelVersionsResponse {
-  repeated ConfigIdentifier identifiers = 1;
+  repeated PluginIdentifier identifiers = 1;
 }
 
 message BundleVersionsRequest {
@@ -59,20 +59,20 @@ message BundleVersionsResponse {
 
 /* Babel cookbook service */
 service CookBookService {
-  /* Retrieve configuration for specific version and state */
-  rpc RetrieveConfiguration(ConfigIdentifier) returns (Configuration) {}
+  /* Retrieve plugin for specific version and state */
+  rpc RetrievePlugin(PluginIdentifier) returns (Plugin) {}
   /* Retrieve image for specific version and state */
-  rpc RetrieveImage(ConfigIdentifier) returns (ArchiveLocation) {}
+  rpc RetrieveImage(PluginIdentifier) returns (ArchiveLocation) {}
   /* Retrieve kernel file for specific version and state */
-  rpc RetrieveKernel(ConfigIdentifier) returns (ArchiveLocation) {}
+  rpc RetrieveKernel(PluginIdentifier) returns (ArchiveLocation) {}
   /* List all available babel versions */
   rpc ListBabelVersions(BabelVersionsRequest) returns (BabelVersionsResponse) {}
-  /* Promote/Demote configuration/image to the desired state */
-  rpc AddStage(ConfigIdentifier) returns (google.protobuf.Empty) {}
-  /* Disable configuration in the desired state */
-  rpc RemoveStage(ConfigIdentifier) returns (google.protobuf.Empty) {}
-  /* Delete configuration/image from storage */
-  rpc Delete(ConfigIdentifier) returns (google.protobuf.Empty) {}
+  /* Promote/Demote plugin/image to the desired state */
+  rpc AddStage(PluginIdentifier) returns (google.protobuf.Empty) {}
+  /* Disable plugin in the desired state */
+  rpc RemoveStage(PluginIdentifier) returns (google.protobuf.Empty) {}
+  /* Delete plugin/image from storage */
+  rpc Delete(PluginIdentifier) returns (google.protobuf.Empty) {}
 }
 
 /* Retrieve manage BVD bundles */
@@ -83,7 +83,7 @@ service BundleService {
   rpc ListBundleVersions(BundleVersionsRequest) returns (BundleVersionsResponse) {}
   /* Promote/Demote bundle to the desired state */
   rpc AddStage(BundleIdentifier) returns (google.protobuf.Empty) {}
-  /* Disable configuration in the desired state */
+  /* Disable bundle in the desired state */
   rpc RemoveStage(BundleIdentifier) returns (google.protobuf.Empty) {}
   /* Delete bundle from storage */
   rpc Delete(BundleIdentifier) returns (google.protobuf.Empty) {}

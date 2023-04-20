@@ -8,7 +8,7 @@ use blockvisord::{
     pretty_table::{PrettyTable, PrettyTableRow},
     server::{
         bv_pb::blockvisor_client::BlockvisorClient,
-        bv_pb::{self, BlockchainRequestParams, Node, Parameter},
+        bv_pb::{self, Node, Parameter},
     },
     services::{api::pb, cookbook::CookbookService},
 };
@@ -414,22 +414,13 @@ impl NodeClient {
             NodeCommand::Run {
                 id_or_name,
                 method,
-                params,
+                param,
             } => {
                 let node_id = self.resolve_id_or_name(&id_or_name).await?;
-                let params: HashMap<String, Vec<String>> = params
-                    .as_deref()
-                    // If params were provided, we json-deserialize them
-                    .map(serde_json::from_str)
-                    .transpose()?
-                    .unwrap_or_default();
                 let req = bv_pb::BlockchainRequest {
                     method,
                     node_id: node_id.to_string(),
-                    params: params
-                        .into_iter()
-                        .map(|(name, param)| (name, BlockchainRequestParams { param }))
-                        .collect(),
+                    param: param.unwrap_or_default(),
                 };
                 match self.client.blockchain(req).await {
                     Ok(result) => println!("{}", result.into_inner().value),

@@ -7,7 +7,6 @@ use crate::{
     utils, with_retry, BV_VAR_PATH,
 };
 use anyhow::{anyhow, Context, Result};
-use babel_api::config::Babel;
 use std::path::{Path, PathBuf};
 use tokio::{
     fs::{self, DirBuilder, File},
@@ -24,7 +23,7 @@ pub const IMAGES_DIR: &str = "images";
 const BABEL_ARCHIVE_IMAGE_NAME: &str = "blockjoy.gz";
 const BABEL_IMAGE_NAME: &str = "blockjoy";
 const KERNEL_ARCHIVE_NAME: &str = "kernel.gz";
-const BABEL_CONFIG_NAME: &str = "babel.toml";
+pub const BABEL_PLUGIN_NAME: &str = "babel.rhai";
 
 pub struct CookbookService {
     token: String,
@@ -79,19 +78,20 @@ impl CookbookService {
     }
 
     #[instrument(skip(self))]
-    pub async fn download_babel_config(&mut self, image: &NodeImage) -> Result<()> {
-        info!("Downloading config...");
-        let babel: cb_pb::Configuration = with_retry!(self
+    pub async fn download_babel_plugin(&mut self, image: &NodeImage) -> Result<()> {
+        info!("Downloading plugin...");
+        let rhai_content = with_retry!(self
             .client
-            .retrieve_configuration(with_auth(image.clone().into(), &self.token)))?
-        .into_inner();
+            .retrieve_plugin(with_auth(image.clone().into(), &self.token)))?
+        .into_inner()
+        .rhai_content;
 
         let folder = Self::get_image_download_folder_path(&self.bv_root, image);
         DirBuilder::new().recursive(true).create(&folder).await?;
-        let path = folder.join(BABEL_CONFIG_NAME);
+        let path = folder.join(BABEL_PLUGIN_NAME);
         let mut f = File::create(path).await?;
-        f.write_all(&babel.toml_content).await?;
-        debug!("Done downloading config");
+        f.write_all(&rhai_content).await?;
+        debug!("Done downloading plugin");
 
         Ok(())
     }
@@ -139,17 +139,6 @@ impl CookbookService {
         Ok(())
     }
 
-    #[instrument]
-    pub async fn get_babel_config(bv_root: &Path, image: &NodeImage) -> Result<Babel> {
-        info!("Reading babel config...");
-
-        let folder = Self::get_image_download_folder_path(bv_root, image);
-        let path = folder.join(BABEL_CONFIG_NAME);
-        let config = fs::read_to_string(path).await?;
-
-        Ok(toml::from_str(&config)?)
-    }
-
     pub fn get_image_download_folder_path(bv_root: &Path, image: &NodeImage) -> PathBuf {
         bv_root
             .join(BV_VAR_PATH)
@@ -164,18 +153,18 @@ impl CookbookService {
 
         let root = folder.join(ROOT_FS_FILE);
         let kernel = folder.join(KERNEL_FILE);
-        let config = folder.join(BABEL_CONFIG_NAME);
-        if !root.exists() || !kernel.exists() || !config.exists() {
+        let plugin = folder.join(BABEL_PLUGIN_NAME);
+        if !root.exists() || !kernel.exists() || !plugin.exists() {
             return Ok(false);
         }
 
         Ok(fs::metadata(root).await?.len() > 0
             && fs::metadata(kernel).await?.len() > 0
-            && fs::metadata(config).await?.len() > 0)
+            && fs::metadata(plugin).await?.len() > 0)
     }
 }
 
-impl From<NodeImage> for cb_pb::ConfigIdentifier {
+impl From<NodeImage> for cb_pb::PluginIdentifier {
     fn from(image: NodeImage) -> Self {
         Self {
             protocol: image.protocol,

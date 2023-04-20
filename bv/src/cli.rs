@@ -176,9 +176,9 @@ pub enum NodeCommand {
         /// The method that should be called. This should be one of the methods listed when
         /// `bv node capabilities <id_or_name>` is ran.
         method: String,
-        /// The payload that should be passed to the endpoint. This should be a json encoded blob.
+        /// The payload that should be passed to the endpoint. This should be a string.
         #[clap(long)]
-        params: Option<String>,
+        param: Option<String>,
     },
 
     /// Collect metrics defining the current state of the node.

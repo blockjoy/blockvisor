@@ -8,7 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use rhai;
 use rhai::{
     serde::{from_dynamic, to_dynamic},
-    Dynamic, ImmutableString,
+    Dynamic, ImmutableString, AST,
 };
 use std::{collections::HashMap, path::Path, sync::Arc};
 
@@ -28,6 +28,22 @@ impl<E: Engine + Sync + Send + 'static> Clone for RhaiPlugin<E> {
         };
         clone.init_rhai_engine();
         clone
+    }
+}
+
+pub fn read_metadata(script: &str) -> Result<BlockchainMetadata> {
+    find_metadata_in_ast(&rhai::Engine::new().compile(script)?)
+}
+
+fn find_metadata_in_ast(ast: &AST) -> Result<BlockchainMetadata> {
+    let mut vars = ast.iter_literal_variables(true, false);
+    if let Some((_, _, dynamic)) = vars.find(|(name, _, _)| name == &"METADATA") {
+        let meta: BlockchainMetadata = from_dynamic(&dynamic)
+            .with_context(|| "Invalid Rhai script - failed to deserialize METADATA")?;
+        check_metadata(&meta)?;
+        Ok(meta)
+    } else {
+        Err(anyhow!("Invalid Rhai script - missing METADATA constant"))
     }
 }
 
@@ -146,15 +162,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
 
 impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     fn metadata(&self) -> Result<BlockchainMetadata> {
-        let mut vars = self.ast.iter_literal_variables(true, false);
-        if let Some((_, _, dynamic)) = vars.find(|(name, _, _)| name == &"METADATA") {
-            let meta: BlockchainMetadata = from_dynamic(&dynamic)
-                .with_context(|| "Invalid Rhai script - failed to deserialize METADATA")?;
-            check_metadata(&meta)?;
-            Ok(meta)
-        } else {
-            Err(anyhow!("Invalid Rhai script - missing METADATA constant"))
-        }
+        find_metadata_in_ast(&self.ast)
     }
 
     fn capabilities(&self) -> Vec<String> {

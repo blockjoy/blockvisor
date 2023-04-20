@@ -1,10 +1,11 @@
 //! Here we have the code related to the metrics for nodes. We
 
-use crate::babel_engine::BabelEngine;
+use crate::node::BabelEngine;
 use crate::node_data::NodeStatus;
 use crate::nodes::Nodes;
 use crate::pal::Pal;
 use crate::services::api::pb;
+use babel_api::plugin::{ApplicationStatus, StakingStatus, SyncStatus};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -27,10 +28,10 @@ pub struct Metrics(HashMap<NodeId, Metric>);
 pub struct Metric {
     pub height: Option<u64>,
     pub block_age: Option<u64>,
-    pub staking_status: Option<String>,
+    pub staking_status: Option<StakingStatus>,
     pub consensus: Option<bool>,
-    pub application_status: Option<String>,
-    pub sync_status: Option<String>,
+    pub application_status: Option<ApplicationStatus>,
+    pub sync_status: Option<SyncStatus>,
 }
 
 impl Metrics {
@@ -74,26 +75,24 @@ pub async fn collect_metrics<P: Pal + Debug + 'static>(nodes: Arc<Nodes<P>>) -> 
 
 /// Returns the metric for a single node.
 pub async fn collect_metric(babel_engine: &mut BabelEngine) -> Metric {
-    use babel_api::BabelMethod;
-
-    let capabilities = babel_engine.capabilities();
-    let height = match capabilities.contains(&BabelMethod::Height.to_string()) {
+    let capabilities = babel_engine.capabilities().await.unwrap_or_default();
+    let height = match capabilities.contains(&"height".to_string()) {
         true => timeout(babel_engine.height()).await.ok(),
         false => None,
     };
-    let block_age = match capabilities.contains(&BabelMethod::BlockAge.to_string()) {
+    let block_age = match capabilities.contains(&"block_age".to_string()) {
         true => timeout(babel_engine.block_age()).await.ok(),
         false => None,
     };
-    let staking_status = match capabilities.contains(&BabelMethod::StakingStatus.to_string()) {
+    let staking_status = match capabilities.contains(&"staking_status".to_string()) {
         true => timeout(babel_engine.staking_status()).await.ok(),
         false => None,
     };
-    let consensus = match capabilities.contains(&BabelMethod::Consensus.to_string()) {
+    let consensus = match capabilities.contains(&"consensus".to_string()) {
         true => timeout(babel_engine.consensus()).await.ok(),
         false => None,
     };
-    let sync_status = match capabilities.contains(&BabelMethod::SyncStatus.to_string()) {
+    let sync_status = match capabilities.contains(&"sync_status".to_string()) {
         true => timeout(babel_engine.sync_status()).await.ok(),
         false => None,
     };
@@ -136,53 +135,76 @@ where
 /// logging them, we ignore these failures.
 impl From<Metrics> for pb::NodeMetricsRequest {
     fn from(metrics: Metrics) -> Self {
-        use crate::services::api::pb::node::{NodeStatus, StakingStatus, SyncStatus};
-
         let metrics = metrics
             .0
             .into_iter()
             .map(|(k, v)| {
-                let application_status = v.application_status.and_then(|s| {
-                    // TODO: maybe we need to do something smarter here
-                    // to conform with new proto definitions
-                    let fallback =
-                        || NodeStatus::from_str_name(&format!("NODE_STATUS_{}", s.to_uppercase()));
-                    NodeStatus::from_str_name(&s)
-                        .or_else(fallback)
-                        .ok_or_else(|| warn!("Could not parse `{s}` as node status"))
-                        .ok()
-                });
-                let sync_status = v.sync_status.and_then(|s| {
-                    SyncStatus::from_str_name(&s)
-                        .or_else(|| {
-                            SyncStatus::from_str_name(&format!("SYNC_STATUS_{}", s.to_uppercase()))
-                        })
-                        .ok_or_else(|| warn!("Could not parse `{s}` as sync status"))
-                        .ok()
-                });
-                let staking_status = v.staking_status.and_then(|s| {
-                    StakingStatus::from_str_name(&s)
-                        .or_else(|| {
-                            StakingStatus::from_str_name(&format!(
-                                "STAKING_STATUS_{}",
-                                s.to_uppercase()
-                            ))
-                        })
-                        .ok_or_else(|| warn!("Could not parse `{s}` as staking status"))
-                        .ok()
-                });
-
-                let metrics = pb::NodeMetrics {
+                let mut metrics = pb::NodeMetrics {
                     height: v.height,
                     block_age: v.block_age,
-                    staking_status: staking_status.map(Into::into),
+                    staking_status: None,
                     consensus: v.consensus,
-                    application_status: application_status.map(Into::into),
-                    sync_status: sync_status.map(Into::into),
+                    application_status: None,
+                    sync_status: None,
                 };
+                if let Some(v) = v.staking_status.map(Into::into) {
+                    metrics.set_staking_status(v);
+                }
+                if let Some(v) = v.application_status.map(Into::into) {
+                    metrics.set_application_status(v);
+                }
+                if let Some(v) = v.sync_status.map(Into::into) {
+                    metrics.set_sync_status(v);
+                }
                 (k.to_string(), metrics)
             })
             .collect();
         Self { metrics }
+    }
+}
+
+impl From<StakingStatus> for pb::node::StakingStatus {
+    fn from(value: StakingStatus) -> Self {
+        match value {
+            StakingStatus::Follower => pb::node::StakingStatus::Follower,
+            StakingStatus::Staked => pb::node::StakingStatus::Staked,
+            StakingStatus::Staking => pb::node::StakingStatus::Staking,
+            StakingStatus::Validating => pb::node::StakingStatus::Validating,
+            StakingStatus::Consensus => pb::node::StakingStatus::Consensus,
+            StakingStatus::Unstaked => pb::node::StakingStatus::Unstaked,
+        }
+    }
+}
+
+impl From<ApplicationStatus> for pb::node::NodeStatus {
+    fn from(value: ApplicationStatus) -> Self {
+        match value {
+            ApplicationStatus::Provisioning => pb::node::NodeStatus::Provisioning,
+            ApplicationStatus::Broadcasting => pb::node::NodeStatus::Broadcasting,
+            ApplicationStatus::Cancelled => pb::node::NodeStatus::Cancelled,
+            ApplicationStatus::Delegating => pb::node::NodeStatus::Delegating,
+            ApplicationStatus::Delinquent => pb::node::NodeStatus::Delinquent,
+            ApplicationStatus::Disabled => pb::node::NodeStatus::Disabled,
+            ApplicationStatus::Earning => pb::node::NodeStatus::Earning,
+            ApplicationStatus::Electing => pb::node::NodeStatus::Electing,
+            ApplicationStatus::Elected => pb::node::NodeStatus::Elected,
+            ApplicationStatus::Exported => pb::node::NodeStatus::Exported,
+            ApplicationStatus::Ingesting => pb::node::NodeStatus::Ingesting,
+            ApplicationStatus::Mining => pb::node::NodeStatus::Mining,
+            ApplicationStatus::Minting => pb::node::NodeStatus::Minting,
+            ApplicationStatus::Processing => pb::node::NodeStatus::Processing,
+            ApplicationStatus::Relaying => pb::node::NodeStatus::Relaying,
+            ApplicationStatus::Removed => pb::node::NodeStatus::Removed,
+            ApplicationStatus::Removing => pb::node::NodeStatus::Removing,
+        }
+    }
+}
+
+impl From<SyncStatus> for pb::node::SyncStatus {
+    fn from(value: SyncStatus) -> Self {
+        match value {
+            SyncStatus::Syncing => pb::node::SyncStatus::Synced,
+            SyncStatus::Synced => pb::node::SyncStatus::Synced,
+        }
     }
 }

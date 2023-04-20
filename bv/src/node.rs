@@ -1,15 +1,18 @@
 use crate::{
-    babel_engine::BabelEngine,
-    node_connection::NodeConnection,
+    babel_engine,
+    node_connection::{BabelConnection, NodeConnection},
     node_data::{NodeData, NodeImage, NodeStatus},
     pal::{NetInterface, Pal},
-    services::cookbook::CookbookService,
+    services::cookbook::{CookbookService, BABEL_PLUGIN_NAME},
     utils::get_process_pid,
     with_retry, BV_VAR_PATH,
 };
 use anyhow::{bail, Context, Result};
-use babel_api::config::{
-    firewall, BabelConfig, Entrypoint, JobConfig, RestartConfig, RestartPolicy,
+use babel_api::{
+    babelsup::SupervisorConfig,
+    metadata::{firewall, BlockchainMetadata},
+    rhai_plugin,
+    rhai_plugin::RhaiPlugin,
 };
 use bv_utils::cmd::run_cmd;
 use chrono::{DateTime, Utc};
@@ -21,9 +24,9 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::io::{AsyncReadExt, BufReader};
 use tokio::{
     fs::{self, DirBuilder, File},
+    io::{AsyncReadExt, BufReader},
     time::Instant,
 };
 use tracing::{debug, error, info, instrument, warn};
@@ -46,15 +49,22 @@ const MAX_KERNEL_ARGS_LEN: usize = 1024;
 const MAX_START_TRIES: usize = 3;
 const MAX_STOP_TRIES: usize = 3;
 const MAX_RECONNECT_TRIES: usize = 3;
+const SUPERVISOR_CONFIG: SupervisorConfig = SupervisorConfig {
+    backoff_timeout_ms: 3000,
+    backoff_base_ms: 200,
+};
 
 pub fn build_registry_dir(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR)
 }
 
+pub type BabelEngine = babel_engine::BabelEngine<NodeConnection, RhaiPlugin<babel_engine::Engine>>;
+
 #[derive(Debug)]
 pub struct Node<P: Pal> {
     pub data: NodeData<<P as Pal>::NetInterface>,
     pub babel_engine: BabelEngine,
+    metadata: BlockchainMetadata,
     machine: Machine<'static>,
     paths: Paths,
     pal: Arc<P>,
@@ -73,12 +83,14 @@ struct Paths {
     bv_root: PathBuf,
     chroot: PathBuf,
     data_dir: PathBuf,
-    registry: PathBuf,
     data: PathBuf,
+    plugin_data: PathBuf,
+    registry: PathBuf,
 }
 
 impl Paths {
-    fn build(bv_root: &Path, id: &Uuid) -> Self {
+    fn build(bv_root: &Path, id: Uuid) -> Self {
+        let registry = build_registry_dir(bv_root);
         Self {
             bv_root: bv_root.to_path_buf(),
             chroot: bv_root.join(BV_VAR_PATH),
@@ -87,9 +99,14 @@ impl Paths {
                 .join(FC_BIN_NAME)
                 .join(id.to_string())
                 .join("root"),
-            registry: build_registry_dir(bv_root),
             data: bv_root.join(BV_VAR_PATH).join(DATA_FILE),
+            plugin_data: registry.join(format!("{id}.data")),
+            registry,
         }
+    }
+
+    fn script_file_path(registry_config_dir: &Path, id: Uuid) -> PathBuf {
+        registry_config_dir.join(format!("{id}.rhai"))
     }
 }
 
@@ -99,10 +116,13 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn create(pal: Arc<P>, data: NodeData<<P as Pal>::NetInterface>) -> Result<Self> {
         info!("Creating node with data: {data:?}");
         let node_id = data.id;
-        let paths = Paths::build(pal.bv_root(), &data.id);
+        let paths = Paths::build(pal.bv_root(), node_id);
+
+        let (script, metadata) = Self::copy_and_check_plugin(&paths, node_id, &data.image).await?;
+
         let _ = tokio::fs::remove_dir_all(&paths.data_dir).await;
         let config = Self::create_config(&paths, &data).await?;
-        Self::create_data_image(&paths, data.babel_conf.requirements.disk_size_gb).await?;
+        Self::create_data_image(&paths, data.requirements.disk_size_gb).await?;
         let machine = Machine::create(config).await?;
 
         data.save(&paths.registry).await?;
@@ -110,12 +130,14 @@ impl<P: Pal + Debug> Node<P> {
         let babel_engine = BabelEngine::new(
             node_id,
             NodeConnection::closed(&paths.chroot, node_id),
-            data.babel_conf.clone(),
+            |engine| RhaiPlugin::new(&script, engine),
             data.properties.clone(),
-        );
+            paths.plugin_data.clone(),
+        )?;
         Ok(Self {
             data,
             babel_engine,
+            metadata,
             machine,
             paths,
             pal,
@@ -127,7 +149,11 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(data))]
     pub async fn attach(pal: Arc<P>, data: NodeData<<P as Pal>::NetInterface>) -> Result<Self> {
         info!("Attaching to node with data: {data:?}");
-        let paths = Paths::build(pal.bv_root(), &data.id);
+        let paths = Paths::build(pal.bv_root(), data.id);
+
+        let script = fs::read_to_string(&Paths::script_file_path(&paths.registry, data.id)).await?;
+        let metadata = rhai_plugin::read_metadata(&script)?;
+
         let config = Self::create_config(&paths, &data).await?;
         let node_id = data.id;
         let cmd = node_id.to_string();
@@ -168,12 +194,14 @@ impl<P: Pal + Debug> Node<P> {
         let babel_engine = BabelEngine::new(
             node_id,
             node_conn,
-            data.babel_conf.clone(),
+            |engine| RhaiPlugin::new(&script, engine),
             data.properties.clone(),
-        );
+            paths.plugin_data.clone(),
+        )?;
         Ok(Self {
             data,
             babel_engine,
+            metadata,
             machine,
             paths,
             pal,
@@ -195,6 +223,12 @@ impl<P: Pal + Debug> Node<P> {
 
         self.copy_os_image(image).await?;
 
+        let (script, metadata) =
+            Self::copy_and_check_plugin(&self.paths, self.data.id, &self.data.image).await?;
+        self.metadata = metadata;
+        self.babel_engine
+            .update_plugin(|engine| RhaiPlugin::new(&script, engine))?;
+
         self.data.image = image.clone();
         self.data.save(&self.paths.registry).await
     }
@@ -214,41 +248,25 @@ impl<P: Pal + Debug> Node<P> {
             self.machine.start().await?;
         }
         let id = self.id();
-        self.babel_engine.node_conn = Self::connect(
+        self.babel_engine.babel_connection = Self::connect(
             &self.paths.chroot,
             self.pal.babel_path(),
             id,
             NODE_START_TIMEOUT,
         )
         .await?;
-        let babelsup_client = self.babel_engine.node_conn.babelsup_client().await?;
-        let mut supervisor_config = self.data.babel_conf.supervisor.clone();
-        supervisor_config.entry_point.clear();
-        // create dummy entrypoint for babelsup, otherwise it will complain
-        supervisor_config.entry_point.push(Entrypoint {
-            name: "dummy_entrypoint".to_string(),
-            body: "sleep infinity".to_string(),
-        });
-        supervisor_config.data_directory_mount_point.clear();
-        with_retry!(babelsup_client.setup_supervisor(supervisor_config.clone()))?;
-        Self::check_job_runner(&mut self.babel_engine.node_conn, self.pal.job_runner_path())
-            .await?;
+        let babelsup_client = self.babel_engine.babel_connection.babelsup_client().await?;
+        with_retry!(babelsup_client.setup_supervisor(SUPERVISOR_CONFIG))?;
+        Self::check_job_runner(
+            &mut self.babel_engine.babel_connection,
+            self.pal.job_runner_path(),
+        )
+        .await?;
 
         // setup babel
-        let babel_client = self.babel_engine.node_conn.babel_client().await?;
+        let babel_client = self.babel_engine.babel_connection.babel_client().await?;
         match babel_client
-            .setup_babel((
-                id.to_string(),
-                BabelConfig {
-                    data_directory_mount_point: self
-                        .data
-                        .babel_conf
-                        .supervisor
-                        .data_directory_mount_point
-                        .clone(),
-                    log_buffer_capacity_ln: self.data.babel_conf.supervisor.log_buffer_capacity_ln,
-                },
-            ))
+            .setup_babel((id.to_string(), self.metadata.babel_config.clone()))
             .await
         {
             Ok(_) => {}
@@ -257,33 +275,12 @@ impl<P: Pal + Debug> Node<P> {
         }
 
         // setup firewall
-        // note: in older images, there is no firewall config, and there is no `ufw` installed
-        if let Some(mut firewall_config) = self.data.babel_conf.firewall.clone() {
-            if let Some(mut rules) = self.data.firewall_rules.clone() {
-                firewall_config.rules.append(&mut rules);
-            }
-            with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
-        }
+        let mut firewall_config = self.metadata.firewall.clone();
+        firewall_config
+            .rules
+            .append(&mut self.data.firewall_rules.clone());
+        with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
 
-        Ok(())
-    }
-
-    /// Starts entrypoints node - shall be called after `init()`.
-    #[instrument(skip(self))]
-    pub async fn start_entrypoints(&mut self) -> Result<()> {
-        let babel_client = self.babel_engine.node_conn.babel_client().await?;
-        for entrypoint in &self.data.babel_conf.supervisor.entry_point {
-            let job_config = JobConfig {
-                body: entrypoint.body.clone(),
-                restart: RestartPolicy::Always(RestartConfig {
-                    backoff_timeout_ms: self.data.babel_conf.supervisor.backoff_timeout_ms,
-                    backoff_base_ms: self.data.babel_conf.supervisor.backoff_base_ms,
-                    max_retries: None,
-                }),
-                needs: vec![],
-            };
-            with_retry!(babel_client.start_job((entrypoint.name.clone(), job_config.clone())))?;
-        }
         Ok(())
     }
 
@@ -305,8 +302,8 @@ impl<P: Pal + Debug> Node<P> {
         };
         if machine_status == self.data.expected_status {
             if machine_status == NodeStatus::Running
-                && (self.babel_engine.node_conn.is_closed()
-                    || self.babel_engine.node_conn.is_broken())
+                && (self.babel_engine.babel_connection.is_closed()
+                    || self.babel_engine.babel_connection.is_broken())
             {
                 // node is running, but there is no babel connection or is broken for some reason
                 NodeStatus::Failed
@@ -359,7 +356,7 @@ impl<P: Pal + Debug> Node<P> {
         let (babel_bin, checksum) = Self::load_bin(babel_path).await?;
         let client = connection.babelsup_client().await?;
         let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
-        if babel_status != babel_api::BinaryStatus::Ok {
+        if babel_status != babel_api::utils::BinaryStatus::Ok {
             info!("Invalid or missing Babel service on VM, installing new one");
             with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
         }
@@ -374,14 +371,14 @@ impl<P: Pal + Debug> Node<P> {
         let (babel_bin, checksum) = Self::load_bin(job_runner_path).await?;
         let client = connection.babel_client().await?;
         let job_runner_status = with_retry!(client.check_job_runner(checksum))?.into_inner();
-        if job_runner_status != babel_api::BinaryStatus::Ok {
+        if job_runner_status != babel_api::utils::BinaryStatus::Ok {
             info!("Invalid or missing JobRunner service on VM, installing new one");
             with_retry!(client.upload_job_runner(tokio_stream::iter(babel_bin.clone())))?;
         }
         Ok(())
     }
 
-    async fn load_bin(bin_path: &Path) -> Result<(Vec<babel_api::Binary>, u32)> {
+    async fn load_bin(bin_path: &Path) -> Result<(Vec<babel_api::utils::Binary>, u32)> {
         let file = File::open(bin_path)
             .await
             .with_context(|| format!("failed to load binary {}", bin_path.display()))?;
@@ -389,16 +386,16 @@ impl<P: Pal + Debug> Node<P> {
         let mut buf = [0; 16384];
         let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
         let mut digest = crc.digest();
-        let mut babel_bin = Vec::<babel_api::Binary>::default();
+        let mut babel_bin = Vec::<babel_api::utils::Binary>::default();
         while let Ok(size) = reader.read(&mut buf[..]).await {
             if size == 0 {
                 break;
             }
             digest.update(&buf[0..size]);
-            babel_bin.push(babel_api::Binary::Bin(buf[0..size].to_vec()));
+            babel_bin.push(babel_api::utils::Binary::Bin(buf[0..size].to_vec()));
         }
         let checksum = digest.finalize();
-        babel_bin.push(babel_api::Binary::Checksum(checksum));
+        babel_bin.push(babel_api::utils::Binary::Checksum(checksum));
         Ok((babel_bin, checksum))
     }
 
@@ -422,7 +419,7 @@ impl<P: Pal + Debug> Node<P> {
         let id = self.id();
         self.recovery_counters.reconnect += 1;
         info!("Recovery: fix broken connection to node with ID `{id}`");
-        if let Err(e) = self.babel_engine.node_conn.connection_test().await {
+        if let Err(e) = self.babel_engine.babel_connection.connection_test().await {
             warn!("Recovery: reconnect to node with ID `{id}` failed: {e}");
             if self.recovery_counters.reconnect >= MAX_RECONNECT_TRIES {
                 info!("Recovery: restart broken node with ID `{id}`");
@@ -438,7 +435,7 @@ impl<P: Pal + Debug> Node<P> {
                     self.started_node_recovery().await?;
                 }
             }
-        } else if self.babel_engine.node_conn.is_closed() {
+        } else if self.babel_engine.babel_connection.is_closed() {
             // node wasn't fully started so proceed with other stuff
             self.started_node_recovery().await?;
         } else {
@@ -486,7 +483,7 @@ impl<P: Pal + Debug> Node<P> {
                 firec::MachineState::SHUTOFF => break,
             }
         }
-        self.babel_engine.node_conn = NodeConnection::closed(&self.paths.chroot, self.id());
+        self.babel_engine.babel_connection = NodeConnection::closed(&self.paths.chroot, self.id());
 
         Ok(())
     }
@@ -498,21 +495,21 @@ impl<P: Pal + Debug> Node<P> {
         self.data.delete(&self.paths.registry).await
     }
 
-    pub async fn update(&mut self, self_update: Option<bool>) -> Result<()> {
+    pub async fn update(
+        &mut self,
+        self_update: Option<bool>,
+        rules: Vec<firewall::Rule>,
+    ) -> Result<()> {
         // If the fields we receive are populated, we update the node data.
         if let Some(self_update) = self_update {
             self.data.self_update = self_update;
         }
-        self.data.save(&self.paths.registry).await
-    }
-
-    pub async fn firewall_rules_update(&mut self, rules: Vec<firewall::Rule>) -> Result<()> {
-        babel_api::check_firewall_rules(&rules)?;
-        let mut config = self.data.babel_conf.firewall.clone().unwrap_or_default();
-        config.rules.append(&mut rules.clone());
-        let babel_client = self.babel_engine.node_conn.babel_client().await?;
-        with_retry!(babel_client.setup_firewall(config.clone()))?;
-        self.data.firewall_rules = Some(rules);
+        babel_api::metadata::check_firewall_rules(&rules)?;
+        let mut firewall = self.metadata.firewall.clone();
+        firewall.rules.append(&mut rules.clone());
+        let babel_client = self.babel_engine.babel_connection.babel_client().await?;
+        with_retry!(babel_client.setup_firewall(firewall.clone()))?;
+        self.data.firewall_rules = rules;
         self.data.save(&self.paths.registry).await
     }
 
@@ -594,8 +591,8 @@ impl<P: Pal + Debug> Node<P> {
             .build()
             // Machine configuration.
             .machine_cfg()
-            .vcpu_count(data.babel_conf.requirements.vcpu_count)
-            .mem_size_mib(data.babel_conf.requirements.mem_size_mb as i64)
+            .vcpu_count(data.requirements.vcpu_count)
+            .mem_size_mib(data.requirements.mem_size_mb as i64)
             .build()
             // Add root drive.
             .add_drive("root", root_fs_path)
@@ -613,5 +610,23 @@ impl<P: Pal + Debug> Node<P> {
             .build();
 
         Ok(config)
+    }
+
+    /// copy plugin script into nodes registry and read metadata form it
+    async fn copy_and_check_plugin(
+        paths: &Paths,
+        id: Uuid,
+        image: &NodeImage,
+    ) -> Result<(String, BlockchainMetadata)> {
+        let script_path = Paths::script_file_path(&paths.registry, id);
+        fs::copy(
+            CookbookService::get_image_download_folder_path(&paths.bv_root, image)
+                .join(BABEL_PLUGIN_NAME),
+            &script_path,
+        )
+        .await?;
+        let script = fs::read_to_string(&script_path).await?;
+        let metadata = rhai_plugin::read_metadata(&script)?;
+        Ok((script, metadata))
     }
 }

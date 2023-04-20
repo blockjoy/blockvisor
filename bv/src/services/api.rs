@@ -10,7 +10,7 @@ use crate::{
     {get_bv_status, with_retry},
 };
 use anyhow::{anyhow, bail, Context, Result};
-use babel_api::config::firewall;
+use babel_api::metadata::firewall;
 use base64::Engine;
 use metrics::{register_counter, Counter};
 use pb::{
@@ -242,16 +242,11 @@ async fn process_node_command<P: Pal + Debug>(
                     .into_iter()
                     .map(|p| (p.name, p.value))
                     .collect();
-                let rules = if args.rules.is_empty() {
-                    None
-                } else {
-                    Some(
-                        args.rules
-                            .into_iter()
-                            .map(|rule| rule.try_into())
-                            .collect::<Result<Vec<_>>>()?,
-                    )
-                };
+                let rules = args
+                    .rules
+                    .into_iter()
+                    .map(|rule| rule.try_into())
+                    .collect::<Result<Vec<_>>>()?;
                 nodes
                     .create(
                         node_id,
@@ -299,10 +294,10 @@ async fn process_node_command<P: Pal + Debug>(
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Update(pb::NodeUpdate { self_update, rules }) => {
-                nodes.update(node_id, self_update).await?;
                 nodes
-                    .firewall_rules_update(
+                    .update(
                         node_id,
+                        self_update,
                         rules
                             .into_iter()
                             .map(|rule| rule.try_into())

@@ -1,7 +1,8 @@
 use crate::{node::VSOCK_PATH, with_retry};
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use babel_api::babel_client::BabelClient;
-use babel_api::babel_sup_client::BabelSupClient;
+use async_trait::async_trait;
+use babel_api::babel::babel_client::BabelClient;
+use babel_api::babelsup::babel_sup_client::BabelSupClient;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::{
@@ -16,10 +17,19 @@ use uuid::Uuid;
 pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
-const GRPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-const GRPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECTION_SWITCH_TIMEOUT: Duration = Duration::from_secs(1);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Abstract Babel connection for better testing.
+#[async_trait]
+pub trait BabelConnection {
+    /// This function gets RPC client connected to babel.
+    async fn babel_client(&mut self) -> Result<&mut BabelClient<Channel>>;
+    /// Mark connection as broken, which meant it will be reestablished on next `babel_client` call.
+    fn mark_broken(&mut self);
+}
 
 #[derive(Debug)]
 pub enum NodeConnectionState {
@@ -47,11 +57,6 @@ impl NodeConnection {
         matches!(self.state, NodeConnectionState::Closed)
     }
 
-    /// Mark connection as broken, which meant it will be reestablished on next `*_client` call.
-    pub fn mark_broken(&mut self) {
-        self.state = NodeConnectionState::Broken;
-    }
-
     pub fn is_broken(&self) -> bool {
         matches!(self.state, NodeConnectionState::Broken)
     }
@@ -76,8 +81,31 @@ impl NodeConnection {
         Ok(())
     }
 
-    /// This function gets gRPC client connected to babel. It reconnect to babelsup if necessary.
-    pub async fn babel_client(&mut self) -> Result<&mut BabelClient<Channel>> {
+    /// This function gets gRPC client connected to babelsup. It reconnect to babelsup if necessary.
+    pub async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient<Channel>> {
+        match &mut self.state {
+            NodeConnectionState::Closed => {
+                bail!("Cannot change port to babelsup: node connection is closed")
+            }
+            NodeConnectionState::Babel { .. } | NodeConnectionState::Broken => {
+                debug!("Reconnecting to babelsup");
+                self.state = NodeConnectionState::BabelSup(
+                    connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?,
+                );
+            }
+            NodeConnectionState::BabelSup { .. } => {}
+        };
+        if let NodeConnectionState::BabelSup(client) = &mut self.state {
+            Ok(client)
+        } else {
+            unreachable!()
+        }
+    }
+}
+#[async_trait]
+impl BabelConnection for NodeConnection {
+    /// This function gets RPC client connected to babel. It reconnect to babel if necessary.
+    async fn babel_client(&mut self) -> Result<&mut BabelClient<Channel>> {
         match &mut self.state {
             NodeConnectionState::Closed => {
                 bail!("Cannot change port to babel: node connection is closed")
@@ -102,27 +130,12 @@ impl NodeConnection {
         }
     }
 
-    /// This function gets gRPC client connected to babelsup. It reconnect to babelsup if necessary.
-    pub async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient<Channel>> {
-        match &mut self.state {
-            NodeConnectionState::Closed => {
-                bail!("Cannot change port to babelsup: node connection is closed")
-            }
-            NodeConnectionState::Babel { .. } | NodeConnectionState::Broken => {
-                debug!("Reconnecting to babelsup");
-                self.state = NodeConnectionState::BabelSup(
-                    connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?,
-                );
-            }
-            NodeConnectionState::BabelSup { .. } => {}
-        };
-        if let NodeConnectionState::BabelSup(client) = &mut self.state {
-            Ok(client)
-        } else {
-            unreachable!()
-        }
+    /// Mark connection as broken, which meant it will be reestablished on next `*_client` call.
+    fn mark_broken(&mut self) {
+        self.state = NodeConnectionState::Broken;
     }
 }
+
 fn build_socket_path(chroot_path: &Path, node_id: Uuid) -> PathBuf {
     chroot_path
         .join("firecracker")
@@ -222,8 +235,8 @@ async fn create_channel(
 ) -> Result<Channel> {
     let socket_path = socket_path.to_owned();
     Ok(Endpoint::from_static("http://[::]:50052")
-        .timeout(GRPC_REQUEST_TIMEOUT)
-        .connect_timeout(GRPC_CONNECT_TIMEOUT)
+        .timeout(RPC_REQUEST_TIMEOUT)
+        .connect_timeout(RPC_CONNECT_TIMEOUT)
         .connect_with_connector(tower::service_fn(move |_: Uri| {
             let socket_path = socket_path.clone();
             async move { open_stream(socket_path, vsock_port, max_delay).await }

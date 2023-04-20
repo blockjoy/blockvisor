@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
-use babel_api::config::{firewall, Babel, Entrypoint};
+use babel_api::metadata::{firewall, Requirements};
+use babel_api::rhai_plugin;
 use chrono::{DateTime, Utc};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
@@ -14,11 +15,12 @@ use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::pal::{NetInterface, Pal};
+use crate::services::cookbook::BABEL_PLUGIN_NAME;
 use crate::{
     config::SharedConfig,
     node::{build_registry_dir, Node},
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
-    node_metrics, render,
+    node_metrics,
     services::{api::pb, cookbook::CookbookService, keyfiles::KeyService},
     BV_VAR_PATH,
 };
@@ -73,7 +75,7 @@ pub struct NodeConfig {
     pub image: NodeImage,
     pub ip: String,
     pub gateway: String,
-    pub rules: Option<Vec<firewall::Rule>>,
+    pub rules: Vec<firewall::Rule>,
     pub properties: NodeProperties,
 }
 
@@ -109,12 +111,10 @@ impl<P: Pal + Debug> Nodes<P> {
             }
         }
 
-        let mut babel_conf = self.fetch_image_data(&config.image).await?;
-        babel_api::check_babel_config(&babel_conf)?;
-        let conf = toml::Value::try_from(&babel_conf)?;
-        babel_conf.supervisor.entry_point =
-            render_entry_points(babel_conf.supervisor.entry_point, &config.properties, &conf)?;
-
+        let requirements = self
+            .fetch_image_data(&config.image)
+            .await
+            .with_context(|| "fetch image data failed")?;
         let network_interface = self.create_network_interface(ip, gateway).await?;
 
         let node_data_cache = NodeDataCache {
@@ -132,10 +132,11 @@ impl<P: Pal + Debug> Nodes<P> {
             expected_status: NodeStatus::Stopped,
             started_at: None,
             network_interface,
-            babel_conf,
+            requirements,
             self_update: false,
             properties: config.properties,
             firewall_rules: config.rules,
+            initialized: false,
         };
         self.save().await?;
 
@@ -154,8 +155,7 @@ impl<P: Pal + Debug> Nodes<P> {
     #[instrument(skip(self))]
     pub async fn upgrade(&self, id: Uuid, image: NodeImage) -> Result<()> {
         if image != self.image(id).await? {
-            let babel_config = self.fetch_image_data(&image).await?;
-            babel_api::check_babel_config(&babel_config)?;
+            let new_requirements = self.fetch_image_data(&image).await?;
 
             let nodes_lock = self.nodes.read().await;
             let mut node = nodes_lock
@@ -174,10 +174,9 @@ impl<P: Pal + Debug> Nodes<P> {
             if image.node_type != data.image.node_type {
                 bail!("Cannot upgrade node type to `{}`", image.node_type);
             }
-            if data.babel_conf.requirements.vcpu_count != babel_config.requirements.vcpu_count
-                || data.babel_conf.requirements.mem_size_mb != babel_config.requirements.mem_size_mb
-                || data.babel_conf.requirements.disk_size_gb
-                    != babel_config.requirements.disk_size_gb
+            if data.requirements.vcpu_count != new_requirements.vcpu_count
+                || data.requirements.mem_size_mb != new_requirements.mem_size_mb
+                || data.requirements.disk_size_gb != new_requirements.disk_size_gb
             {
                 bail!("Cannot upgrade node requirements");
             }
@@ -198,7 +197,7 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    async fn fetch_image_data(&self, image: &NodeImage) -> Result<Babel> {
+    async fn fetch_image_data(&self, image: &NodeImage) -> Result<Requirements> {
         if !CookbookService::is_image_cache_valid(self.pal.bv_root(), image)
             .await
             .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
@@ -207,13 +206,15 @@ impl<P: Pal + Debug> Nodes<P> {
                 CookbookService::connect(self.pal.bv_root().to_path_buf(), &self.api_config)
                     .await?;
 
-            cookbook_service.download_babel_config(image).await?;
+            cookbook_service.download_babel_plugin(image).await?;
             cookbook_service.download_image(image).await?;
             cookbook_service.download_kernel(image).await?;
         }
-
-        let babel = CookbookService::get_babel_config(self.pal.bv_root(), image).await?;
-        Ok(babel)
+        info!("Reading blockchain requirements...");
+        let folder = CookbookService::get_image_download_folder_path(self.pal.bv_root(), image);
+        let path = folder.join(BABEL_PLUGIN_NAME);
+        let script = fs::read_to_string(path).await?;
+        Ok(rhai_plugin::read_metadata(&script)?.requirements)
     }
 
     #[instrument(skip(self))]
@@ -245,16 +246,19 @@ impl<P: Pal + Debug> Nodes<P> {
             node.start().await?;
             debug!("Node started");
 
-            let secret_keys = match self.exchange_keys(node).await {
-                Ok(secret_keys) => secret_keys,
-                Err(e) => {
-                    error!("Failed to retrieve keys when starting node: `{e}`");
-                    HashMap::new()
-                }
-            };
+            if !node.data.initialized {
+                let secret_keys = match self.exchange_keys(node).await {
+                    Ok(secret_keys) => secret_keys,
+                    Err(e) => {
+                        error!("Failed to retrieve keys when starting node: `{e}`");
+                        HashMap::new()
+                    }
+                };
 
-            node.babel_engine.init(secret_keys).await?;
-            node.start_entrypoints().await?;
+                node.babel_engine.init(secret_keys).await?;
+                node.data.initialized = true;
+                node.data.save(self.pal.bv_root()).await?;
+            }
             // We save the `running` status only after all of the previous steps have succeeded.
             node.set_expected_status(NodeStatus::Running).await?;
             node.set_started_at(Some(Utc::now())).await?;
@@ -263,14 +267,19 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn update(&self, id: Uuid, self_update: Option<bool>) -> Result<()> {
+    pub async fn update(
+        &self,
+        id: Uuid,
+        self_update: Option<bool>,
+        rules: Vec<firewall::Rule>,
+    ) -> Result<()> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
             .ok_or_else(|| id_not_found(id))?
             .write()
             .await;
-        node.update(self_update).await
+        node.update(self_update, rules).await
     }
 
     #[instrument(skip(self))]
@@ -298,7 +307,7 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn keys(&self, id: Uuid) -> Result<Vec<babel_api::BlockchainKey>> {
+    pub async fn keys(&self, id: Uuid) -> Result<Vec<babel_api::babel::BlockchainKey>> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
@@ -311,35 +320,23 @@ impl<P: Pal + Debug> Nodes<P> {
     #[instrument(skip(self))]
     pub async fn capabilities(&self, id: Uuid) -> Result<Vec<String>> {
         let nodes = self.nodes.read().await;
-        let node = nodes.get(&id).ok_or_else(|| id_not_found(id))?.read().await;
-        Ok(node.babel_engine.capabilities())
+        let mut node = nodes
+            .get(&id)
+            .ok_or_else(|| id_not_found(id))?
+            .write()
+            .await;
+        node.babel_engine.capabilities().await
     }
 
     #[instrument(skip(self))]
-    pub async fn firewall_rules_update(&self, id: Uuid, rules: Vec<firewall::Rule>) -> Result<()> {
+    pub async fn call_method(&self, id: Uuid, method: &str, param: &str) -> Result<String> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
             .ok_or_else(|| id_not_found(id))?
             .write()
             .await;
-        node.firewall_rules_update(rules).await
-    }
-
-    #[instrument(skip(self))]
-    pub async fn call_method(
-        &self,
-        id: Uuid,
-        method: &str,
-        params: HashMap<String, Vec<String>>,
-    ) -> Result<String> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| id_not_found(id))?
-            .write()
-            .await;
-        node.babel_engine.call_method(method, params).await
+        node.babel_engine.call_method(method, param).await
     }
 
     #[instrument(skip(self))]
@@ -474,7 +471,7 @@ impl<P: Pal + Debug> Nodes<P> {
         // Keys present in API, but not on Node, will be sent to Node
         let keys1: Vec<_> = api_keys_set
             .difference(&node_keys_set)
-            .map(|n| babel_api::BlockchainKey {
+            .map(|n| babel_api::babel::BlockchainKey {
                 name: n.to_string(),
                 content: api_keys.get(*n).unwrap().to_vec(), // checked
             })
@@ -498,9 +495,7 @@ impl<P: Pal + Debug> Nodes<P> {
         // Generate keys if we should (and can)
         if api_keys_set.is_empty()
             && node_keys_set.is_empty()
-            && node
-                .babel_engine
-                .has_capability(&babel_api::BabelMethod::GenerateKeys.to_string())
+            && node.babel_engine.has_capability("generate_keys").await?
         {
             node.babel_engine.generate_keys().await?;
             let gen_keys: Vec<_> = node
@@ -588,6 +583,13 @@ impl<P: Pal + Debug> Nodes<P> {
             .context("failed to read nodes registry entry")?
         {
             let path = entry.path();
+            if path
+                .extension()
+                .and_then(|v| if "json" == v { Some(()) } else { None })
+                .is_none()
+            {
+                continue; // ignore other files in registry dir
+            }
             match NodeData::load(&path)
                 .and_then(|data| async { Node::attach(pal.clone(), data).await })
                 .await
@@ -650,148 +652,5 @@ impl<P: Pal + Debug> Nodes<P> {
             ))?;
 
         Ok(iface)
-    }
-}
-
-fn render_entry_points(
-    mut entry_points: Vec<Entrypoint>,
-    params: &NodeProperties,
-    conf: &toml::Value,
-) -> Result<Vec<Entrypoint>> {
-    let params = params
-        .iter()
-        .map(|(k, v)| (k.clone(), vec![v.clone()]))
-        .collect();
-    for item in &mut entry_points {
-        item.body = render::render_with(&item.body, &params, conf, render::render_sh_param)?;
-    }
-    Ok(entry_points)
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{linux_platform, utils};
-
-    use super::*;
-    use babel_api::config::{Method, MethodResponseFormat, Requirements, ShResponse};
-    use std::collections::BTreeMap;
-    use std::str::FromStr;
-
-    #[test]
-    fn test_render_entry_point_args() -> Result<()> {
-        let conf = toml::toml!(
-        [aa]
-        bb = "cc"
-        );
-        let entrypoints = vec![
-            Entrypoint {
-                name: "cmd1".to_string(),
-                body:"first_parametrized_{{PARAM1}}_argument second_parametrized_{{PARAM1}}_{{PARAM2}}_argument third_parammy_babelref:'aa.{{PARAM_BB}}'_argument".to_string(),
-            },
-            Entrypoint {
-                name: "cmd2".to_owned(),
-                body: "{{PARAM1}} and {{PARAM2}} twice {{PARAM1}} and none{a}".to_owned(),
-            },
-        ];
-        let node_props = HashMap::from([
-            ("PARAM1".to_string(), "://Value.1,-_Q".to_string()),
-            ("PARAM2".to_string(), "Value.2,-_Q".to_string()),
-            ("PARAM3".to_string(), "!Invalid_but_not_used".to_string()),
-            ("PARAM_BB".to_string(), "bb".to_string()),
-        ]);
-        assert_eq!(
-            vec![
-                Entrypoint {
-                    name: "cmd1".to_string(),
-                    body: r#"first_parametrized_"://Value.1,-_Q"_argument second_parametrized_"://Value.1,-_Q"_"Value.2,-_Q"_argument third_parammy_cc_argument"#.to_string(),
-                },
-                Entrypoint {
-                    name: "cmd2".to_owned(),
-                    body: r#""://Value.1,-_Q" and "Value.2,-_Q" twice "://Value.1,-_Q" and none{a}"#.to_owned(),
-                }
-            ],
-            render_entry_points(entrypoints.clone(), &node_props, &conf)?
-        );
-
-        let mut invalid_props = node_props.clone();
-        invalid_props.get_mut("PARAM1").unwrap().push('@');
-        render_entry_points(entrypoints.clone(), &invalid_props, &conf).unwrap_err();
-
-        let mut missing_props = node_props;
-        missing_props.remove("PARAM1");
-        render_entry_points(entrypoints, &missing_props, &conf).unwrap_err();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_smoke_node_data_serialization() -> Result<()> {
-        let babel_conf = Babel {
-            export: None,
-            env: None,
-            config: utils::tests::default_config(),
-            requirements: Requirements {
-                vcpu_count: 0,
-                mem_size_mb: 0,
-                disk_size_gb: 0,
-            },
-            nets: Default::default(),
-            supervisor: Default::default(),
-            firewall: None,
-            keys: None,
-            methods: BTreeMap::from([
-                (
-                    "raw".to_string(),
-                    Method::Sh {
-                        name: "raw".to_string(),
-                        body: "echo make a toast".to_string(),
-                        response: ShResponse {
-                            status: 101,
-                            format: MethodResponseFormat::Raw,
-                        },
-                    },
-                ),
-                (
-                    "json".to_string(),
-                    Method::Sh {
-                        name: "json".to_string(),
-                        body: "echo \\\"make a toast\\\"".to_string(),
-                        response: ShResponse {
-                            status: 102,
-                            format: MethodResponseFormat::Json,
-                        },
-                    },
-                ),
-            ]),
-        };
-
-        let node = NodeData {
-            id: Uuid::new_v4(),
-            name: "name".to_string(),
-            image: NodeImage {
-                protocol: "".to_string(),
-                node_type: "".to_string(),
-                node_version: "".to_string(),
-            },
-            expected_status: NodeStatus::Stopped,
-            started_at: None,
-            network_interface: linux_platform::LinuxNetInterface {
-                name: "".to_string(),
-                ip: IpAddr::from_str("1.1.1.1")?,
-                gateway: IpAddr::from_str("1.1.1.1")?,
-            },
-            babel_conf,
-            self_update: false,
-            firewall_rules: None,
-            properties: HashMap::from([
-                ("raw".to_string(), "raw".to_string()),
-                ("json".to_string(), "json".to_string()),
-            ]),
-        };
-
-        let serialized = toml::to_string(&node)?;
-        let _deserialized: NodeData<linux_platform::LinuxNetInterface> =
-            toml::from_str(&serialized)?;
-        Ok(())
     }
 }

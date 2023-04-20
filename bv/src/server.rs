@@ -87,7 +87,7 @@ where
                     image,
                     ip: request.ip,
                     gateway: request.gateway,
-                    rules: None,
+                    rules: vec![],
                     properties,
                 },
             )
@@ -345,14 +345,9 @@ where
         let request = request.into_inner();
         let id = helpers::parse_uuid(request.node_id)?;
 
-        let params = request
-            .params
-            .into_iter()
-            .map(|(k, v)| (k, v.param))
-            .collect();
         let value = self
             .nodes
-            .call_method(id, &request.method, params)
+            .call_method(id, &request.method, &request.param)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
 
@@ -377,10 +372,10 @@ where
         Ok(Response::new(bv_pb::GetNodeMetricsResponse {
             height: metrics.height,
             block_age: metrics.block_age,
-            staking_status: metrics.staking_status,
+            staking_status: metrics.staking_status.map(|value| format!("{value:?}")),
             consensus: metrics.consensus,
-            application_status: metrics.application_status,
-            sync_status: metrics.sync_status,
+            application_status: metrics.application_status.map(|value| format!("{value:?}")),
+            sync_status: metrics.sync_status.map(|value| format!("{value:?}")),
         }))
     }
 }

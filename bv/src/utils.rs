@@ -144,48 +144,10 @@ pub fn semver_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
-/// Walks down a toml tree represented by a `toml::Value`. The path that is walked is specified by
-/// the `path` argument.
-/// ```rs
-/// let path = "some.seg.ment.list".split('.');
-/// let val: toml::Value = toml::toml!(
-/// [some]
-/// [some.seg]
-/// [some.seg.ment]
-/// list = "all the way down here."
-/// );
-/// assert_eq!("all the way down here.", walk(&val, path).unwrap().as_str().unwrap());
-/// ```
-fn walk_toml_tree<'a>(
-    value: &'a toml::Value,
-    mut path: impl Iterator<Item = &'a str>,
-) -> Option<&toml::Value> {
-    match path.next() {
-        Some(seg) => walk_toml_tree(value.get(seg)?, path),
-        None => Some(value),
-    }
-}
-
-/// Get a Babel config value string specified by `path` argument.
-/// Path are '.' separated names of sub nodes in the config structure tree.
-/// See `walk_toml_tree()` for more.
-pub fn get_config_value_by_path(value: &toml::Value, path: &str) -> Option<String> {
-    walk_toml_tree(value, path.split('.')).map(|v| {
-        if let toml::Value::String(v) = v {
-            v.clone()
-        } else {
-            v.to_string()
-        }
-    })
-}
-
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use babel_api::config::{Babel, NetConfiguration, NetType, Requirements};
     use http::{Request, Response};
     use hyper::Body;
-    use std::collections::HashMap;
     use std::convert::Infallible;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::AtomicBool;
@@ -199,71 +161,6 @@ pub mod tests {
     use tonic::codegen::Service;
     use tonic::transport::{Channel, Endpoint, NamedService, Server, Uri};
 
-    #[test]
-    fn test_get_config_value_by_path() -> Result<()> {
-        let babel_conf = Babel {
-            export: None,
-            env: None,
-            config: default_config(),
-            requirements: Requirements {
-                vcpu_count: 7,
-                mem_size_mb: 0,
-                disk_size_gb: 0,
-            },
-            nets: HashMap::from([
-                (
-                    "mainnet".to_string(),
-                    NetConfiguration {
-                        url: "".to_string(),
-                        net_type: NetType::Main,
-                        meta: HashMap::from([(
-                            "blockchain_custom".to_string(),
-                            "blockchain_custom.mainnet_Value".to_string(),
-                        )]),
-                    },
-                ),
-                (
-                    "testnet".to_string(),
-                    NetConfiguration {
-                        url: "".to_string(),
-                        net_type: NetType::Test,
-                        meta: HashMap::from([(
-                            "blockchain_custom".to_string(),
-                            "blockchain_custom_testnet.Value".to_string(),
-                        )]),
-                    },
-                ),
-            ]),
-            supervisor: Default::default(),
-            firewall: None,
-            keys: None,
-            methods: Default::default(),
-        };
-        let babel_conf = toml::Value::try_from(babel_conf).unwrap();
-
-        assert_eq!(
-            "blockchain_custom.mainnet_Value",
-            get_config_value_by_path(&babel_conf, "nets.mainnet.blockchain_custom").unwrap()
-        );
-        assert_eq!(
-            "7",
-            get_config_value_by_path(&babel_conf, "requirements.vcpu_count").unwrap()
-        );
-        assert!(get_config_value_by_path(&babel_conf, "some.invalid_field").is_none());
-        Ok(())
-    }
-
-    pub fn default_config() -> babel_api::Config {
-        babel_api::Config {
-            min_babel_version: "".to_string(),
-            node_version: "".to_string(),
-            protocol: "".to_string(),
-            node_type: "".to_string(),
-            description: None,
-            api_host: None,
-        }
-    }
-
     pub fn test_channel(tmp_root: &Path) -> Channel {
         let socket_path = tmp_root.join("test_socket");
         Endpoint::from_static("http://[::]:50052")
@@ -272,21 +169,6 @@ pub mod tests {
             .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
                 UnixStream::connect(socket_path.clone())
             }))
-    }
-
-    #[test]
-    fn test_walk_toml_tree() {
-        let path = "some.seg.ment.list".split('.');
-        let val: toml::Value = toml::toml!(
-        [some]
-        [some.seg]
-        [some.seg.ment]
-        list = "all the way down here."
-        );
-        assert_eq!(
-            "all the way down here.",
-            walk_toml_tree(&val, path).unwrap().as_str().unwrap()
-        );
     }
 
     /// Helper struct that adds a panic hook and checks if it was called on `Drop`.
