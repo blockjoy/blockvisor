@@ -13,13 +13,9 @@ fn main() {
                 "discovery.proto",
                 "host_provision.proto",
                 "host.proto",
-                "invitation.proto",
                 "key_file.proto",
                 "metrics.proto",
                 "mqtt.proto",
-                "node.proto",
-                "organization.proto",
-                "user.proto",
                 // Internal API
                 "blockvisor_service.proto",
             ],

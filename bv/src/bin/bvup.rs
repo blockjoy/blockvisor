@@ -66,10 +66,8 @@ async fn main() -> Result<()> {
         let ip = get_ip_address(&cmd_args.ifa).with_context(|| "failed to get ip address")?;
         let host_info = HostInfo::collect()?;
 
-        const NO_OTP: &str = "Passing in an otp is required to do init, consider passing --opt \
-                              <your opt> or using --skip-init";
         let mut create = pb::ProvisionHostRequest {
-            otp: cmd_args.otp.ok_or_else(|| anyhow!(NO_OTP))?,
+            otp: cmd_args.otp.unwrap(),
             status: 0, // We use the setter to set this field for type-safety
             name: host_info.name,
             version: crate_version!().to_string(),
