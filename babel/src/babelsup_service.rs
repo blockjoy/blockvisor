@@ -1,6 +1,6 @@
 use crate::{supervisor, utils};
 use async_trait::async_trait;
-use babel_api::config::SupervisorConfig;
+use babel_api::babelsup::SupervisorConfig;
 use std::{
     fs, mem,
     ops::{Deref, DerefMut},
@@ -29,7 +29,7 @@ pub struct BabelSupService {
 }
 
 #[tonic::async_trait]
-impl babel_api::babel_sup_server::BabelSup for BabelSupService {
+impl babel_api::babelsup::babel_sup_server::BabelSup for BabelSupService {
     async fn get_version(&self, _request: Request<()>) -> Result<Response<String>, Status> {
         Ok(Response::new(env!("CARGO_PKG_VERSION").to_string()))
     }
@@ -37,24 +37,24 @@ impl babel_api::babel_sup_server::BabelSup for BabelSupService {
     async fn check_babel(
         &self,
         request: Request<u32>,
-    ) -> Result<Response<babel_api::BinaryStatus>, Status> {
+    ) -> Result<Response<babel_api::utils::BinaryStatus>, Status> {
         let expected_checksum = request.into_inner();
         let babel_status = match *self.babel_change_tx.borrow() {
             Some(checksum) => {
                 if checksum == expected_checksum {
-                    babel_api::BinaryStatus::Ok
+                    babel_api::utils::BinaryStatus::Ok
                 } else {
-                    babel_api::BinaryStatus::ChecksumMismatch
+                    babel_api::utils::BinaryStatus::ChecksumMismatch
                 }
             }
-            None => babel_api::BinaryStatus::Missing,
+            None => babel_api::utils::BinaryStatus::Missing,
         };
         Ok(Response::new(babel_status))
     }
 
     async fn start_new_babel(
         &self,
-        request: Request<Streaming<babel_api::Binary>>,
+        request: Request<Streaming<babel_api::utils::Binary>>,
     ) -> Result<Response<()>, Status> {
         let mut stream = request.into_inner();
         let checksum = utils::save_bin_stream(&self.babel_bin_path, &mut stream)
@@ -119,9 +119,9 @@ mod tests {
     use super::*;
     use crate::supervisor::BabelChangeRx;
     use assert_fs::TempDir;
-    use babel_api::babel_sup_client::BabelSupClient;
-    use babel_api::babel_sup_server::BabelSup;
-    use babel_api::config::{Entrypoint, SupervisorConfig};
+    use babel_api::babelsup::{
+        babel_sup_client::BabelSupClient, babel_sup_server::BabelSup, SupervisorConfig,
+    };
     use eyre::Result;
     use std::fs;
     use std::path::Path;
@@ -142,7 +142,7 @@ mod tests {
             BabelSupService::new(sup_status, babel_change_tx, babel_path, babelsup_cfg_path);
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(babel_api::babel_sup_server::BabelSupServer::new(
+            .add_service(babel_api::babelsup::babel_sup_server::BabelSupServer::new(
                 sup_service,
             ))
             .serve_with_incoming(uds_stream)
@@ -207,9 +207,9 @@ mod tests {
         let mut test_env = setup_test_env()?;
 
         let incomplete_babel_bin = vec![
-            babel_api::Binary::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
-            babel_api::Binary::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
-            babel_api::Binary::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
+            babel_api::utils::Binary::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
+            babel_api::utils::Binary::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
+            babel_api::utils::Binary::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
         ];
 
         test_env
@@ -220,7 +220,7 @@ mod tests {
         assert!(!test_env.babel_change_rx.has_changed()?);
 
         let mut invalid_babel_bin = incomplete_babel_bin.clone();
-        invalid_babel_bin.push(babel_api::Binary::Checksum(123));
+        invalid_babel_bin.push(babel_api::utils::Binary::Checksum(123));
         test_env
             .client
             .start_new_babel(tokio_stream::iter(invalid_babel_bin))
@@ -229,7 +229,7 @@ mod tests {
         assert!(!test_env.babel_change_rx.has_changed()?);
 
         let mut babel_bin = incomplete_babel_bin.clone();
-        babel_bin.push(babel_api::Binary::Checksum(4135829304));
+        babel_bin.push(babel_api::utils::Binary::Checksum(4135829304));
         test_env
             .client
             .start_new_babel(tokio_stream::iter(babel_bin))
@@ -257,7 +257,7 @@ mod tests {
         );
 
         assert_eq!(
-            babel_api::BinaryStatus::Missing,
+            babel_api::utils::BinaryStatus::Missing,
             sup_service
                 .check_babel(Request::new(123))
                 .await?
@@ -274,14 +274,14 @@ mod tests {
         );
 
         assert_eq!(
-            babel_api::BinaryStatus::ChecksumMismatch,
+            babel_api::utils::BinaryStatus::ChecksumMismatch,
             sup_service
                 .check_babel(Request::new(123))
                 .await?
                 .into_inner()
         );
         assert_eq!(
-            babel_api::BinaryStatus::Ok,
+            babel_api::utils::BinaryStatus::Ok,
             sup_service
                 .check_babel(Request::new(321))
                 .await?
@@ -295,13 +295,8 @@ mod tests {
         let mut test_env = setup_test_env()?;
 
         let config = SupervisorConfig {
-            log_buffer_capacity_ln: 10,
-            entry_point: vec![Entrypoint {
-                name: "echo".to_owned(),
-                body: "echo".to_owned(),
-            }],
-
-            ..Default::default()
+            backoff_timeout_ms: 100,
+            backoff_base_ms: 10,
         };
         test_env.client.setup_supervisor(config.clone()).await?;
         assert_eq!(

@@ -1,7 +1,7 @@
 use babel::babelsup_service::SupervisorStatus;
 use babel::{babelsup_service, utils};
 use babel::{logging, supervisor};
-use babel_api::config::SupervisorConfig;
+use babel_api::babelsup::SupervisorConfig;
 use bv_utils::run_flag::RunFlag;
 use eyre::{anyhow, Context};
 use std::path::Path;
@@ -82,7 +82,7 @@ async fn serve(
 
     Server::builder()
         .max_concurrent_streams(2)
-        .add_service(babel_api::babel_sup_server::BabelSupServer::new(
+        .add_service(babel_api::babelsup::babel_sup_server::BabelSupServer::new(
             babelsup_service,
         ))
         .serve_with_incoming_shutdown(listener.incoming(), run.wait())

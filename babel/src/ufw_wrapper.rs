@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use babel_api::config::firewall::{Config, Protocol, Rule};
+use babel_api::metadata::firewall::{Config, Protocol, Rule};
 use eyre::{bail, Result};
 use serde_variant::to_variant_name;
 
@@ -133,7 +133,7 @@ async fn dry_run(runner: &impl UfwRunner, args: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use babel_api::config::firewall::{Action, Direction};
+    use babel_api::metadata::firewall::{Action, Direction};
     use mockall::*;
 
     mock! {

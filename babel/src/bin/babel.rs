@@ -7,7 +7,7 @@ use babel::{
     logs_service::LogsService,
     utils, BABEL_LOGS_UDS_PATH,
 };
-use babel_api::config::BabelConfig;
+use babel_api::metadata::BabelConfig;
 use bv_utils::{cmd::run_cmd, run_flag::RunFlag};
 use eyre::{anyhow, bail, Context};
 use std::{path::Path, sync::Arc};
@@ -88,7 +88,9 @@ async fn main() -> eyre::Result<()> {
 
     let res = Server::builder()
         .max_concurrent_streams(2)
-        .add_service(babel_api::babel_server::BabelServer::new(babel_service))
+        .add_service(babel_api::babel::babel_server::BabelServer::new(
+            babel_service,
+        ))
         .serve_with_incoming_shutdown(vsock_listener.incoming(), run.wait())
         .await;
     if run.load() {
@@ -182,9 +184,9 @@ async fn serve_logs(mut run: RunFlag, logs_service: LogsService) -> eyre::Result
     let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(*BABEL_LOGS_UDS_PATH)?);
 
     Server::builder()
-        .add_service(babel_api::logs_collector_server::LogsCollectorServer::new(
-            logs_service,
-        ))
+        .add_service(
+            babel_api::babel::logs_collector_server::LogsCollectorServer::new(logs_service),
+        )
         .serve_with_incoming_shutdown(uds_stream, run.wait())
         .await?;
     Ok(())

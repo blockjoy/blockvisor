@@ -148,7 +148,7 @@ pub async fn file_checksum(path: &Path) -> eyre::Result<u32> {
 }
 
 /// Write binary stream into the file.
-pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::Binary, Status>> + Unpin>(
+pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::utils::Binary, Status>> + Unpin>(
     bin_path: &Path,
     stream: &mut S,
 ) -> eyre::Result<u32> {
@@ -165,13 +165,13 @@ pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::Binary, Status>>
     let mut expected_checksum = None;
     while let Some(part) = stream.next().await {
         match part? {
-            babel_api::Binary::Bin(bin) => {
+            babel_api::utils::Binary::Bin(bin) => {
                 writer
                     .write(&bin)
                     .await
                     .with_context(|| "failed to save binary")?;
             }
-            babel_api::Binary::Checksum(checksum) => {
+            babel_api::utils::Binary::Checksum(checksum) => {
                 expected_checksum = Some(checksum);
             }
         }
@@ -271,11 +271,13 @@ mod tests {
         let file_path = tmp_dir.join("test_file");
 
         let incomplete_bin = vec![
-            Ok(babel_api::Binary::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10])),
-            Ok(babel_api::Binary::Bin(vec![
+            Ok(babel_api::utils::Binary::Bin(vec![
+                1, 2, 3, 4, 6, 7, 8, 9, 10,
+            ])),
+            Ok(babel_api::utils::Binary::Bin(vec![
                 11, 12, 13, 14, 16, 17, 18, 19, 20,
             ])),
-            Ok(babel_api::Binary::Bin(vec![
+            Ok(babel_api::utils::Binary::Bin(vec![
                 21, 22, 23, 24, 26, 27, 28, 29, 30,
             ])),
         ];
@@ -284,12 +286,12 @@ mod tests {
             .await
             .unwrap_err();
         let mut invalid_bin = incomplete_bin.clone();
-        invalid_bin.push(Ok(babel_api::Binary::Checksum(123)));
+        invalid_bin.push(Ok(babel_api::utils::Binary::Checksum(123)));
         let _ = save_bin_stream(&file_path, &mut tokio_stream::iter(invalid_bin.clone()))
             .await
             .unwrap_err();
         let mut correct_bin = incomplete_bin.clone();
-        correct_bin.push(Ok(babel_api::Binary::Checksum(4135829304)));
+        correct_bin.push(Ok(babel_api::utils::Binary::Checksum(4135829304)));
         assert_eq!(
             4135829304,
             save_bin_stream(&file_path, &mut tokio_stream::iter(correct_bin.clone())).await?

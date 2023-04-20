@@ -18,7 +18,7 @@ impl LogsService {
 }
 
 #[tonic::async_trait]
-impl babel_api::logs_collector_server::LogsCollector for LogsService {
+impl babel_api::babel::logs_collector_server::LogsCollector for LogsService {
     async fn send_log(&self, request: Request<String>) -> Result<Response<()>, Status> {
         let log = request.into_inner();
         let _ = self.logs_tx.send(log);

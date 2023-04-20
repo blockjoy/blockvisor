@@ -10,7 +10,7 @@ use crate::{
     utils::LimitStatus,
     utils::{kill_all_processes, Backoff},
 };
-use babel_api::config::{JobConfig, JobStatus, RestartConfig, RestartPolicy};
+use babel_api::engine::{JobConfig, JobStatus, RestartConfig, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::Result;
 use std::{
@@ -183,7 +183,7 @@ impl<T: AsyncTimer> JobRunner<T> {
 mod tests {
     use super::*;
     use assert_fs::TempDir;
-    use babel_api::config::JobConfig;
+    use babel_api::engine::JobConfig;
     use bv_utils::timer::MockAsyncTimer;
     use std::fs;
     use std::{io::Write, os::unix::fs::OpenOptionsExt};

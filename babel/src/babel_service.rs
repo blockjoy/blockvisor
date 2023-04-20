@@ -1,11 +1,13 @@
 use crate::{jobs_manager::JobsManagerClient, ufw_wrapper::apply_firewall_config, utils};
 use async_trait::async_trait;
 use babel_api::{
-    config::{BabelConfig, JobConfig, JobStatus},
-    BlockchainKey,
+    babel::BlockchainKey,
+    engine::{JobConfig, JobStatus},
+    metadata::{firewall, BabelConfig, KeysConfig},
 };
 use eyre::{bail, eyre, Report, Result};
 use serde_json::json;
+use std::collections::HashMap;
 use std::{
     mem,
     ops::{Deref, DerefMut},
@@ -89,7 +91,7 @@ impl<J, P> Deref for BabelService<J, P> {
 
 #[async_trait]
 impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + 'static>
-    babel_api::babel_server::Babel for BabelService<J, P>
+    babel_api::babel::babel_server::Babel for BabelService<J, P>
 {
     async fn setup_babel(
         &self,
@@ -101,9 +103,8 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 
             self.save_babel_conf(&config).await?;
 
-            // TODO: pass swap file size as parameter from metadata
             self.pal
-                .set_swap_file(1024)
+                .set_swap_file(config.swap_size_mb)
                 .await
                 .map_err(|err| Status::internal(format!("failed to add swap file with: {err}")))?;
 
@@ -139,7 +140,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 
     async fn setup_firewall(
         &self,
-        request: Request<babel_api::config::firewall::Config>,
+        request: Request<firewall::Config>,
     ) -> Result<Response<()>, Status> {
         apply_firewall_config(request.into_inner())
             .await
@@ -151,7 +152,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 
     async fn download_keys(
         &self,
-        request: Request<babel_api::config::KeysConfig>,
+        request: Request<KeysConfig>,
     ) -> Result<Response<Vec<BlockchainKey>>, Status> {
         let mut results = vec![];
 
@@ -173,7 +174,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 
     async fn upload_keys(
         &self,
-        request: Request<(babel_api::config::KeysConfig, Vec<BlockchainKey>)>,
+        request: Request<(KeysConfig, Vec<BlockchainKey>)>,
     ) -> Result<Response<String>, Status> {
         let (config, keys) = request.into_inner();
         if keys.is_empty() {
@@ -228,19 +229,19 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
     async fn check_job_runner(
         &self,
         request: Request<u32>,
-    ) -> Result<Response<babel_api::BinaryStatus>, Status> {
+    ) -> Result<Response<babel_api::utils::BinaryStatus>, Status> {
         let expected_checksum = request.into_inner();
         let job_runner_status = match *self.job_runner_lock.read().await {
-            Some(checksum) if checksum == expected_checksum => babel_api::BinaryStatus::Ok,
-            Some(_) => babel_api::BinaryStatus::ChecksumMismatch,
-            None => babel_api::BinaryStatus::Missing,
+            Some(checksum) if checksum == expected_checksum => babel_api::utils::BinaryStatus::Ok,
+            Some(_) => babel_api::utils::BinaryStatus::ChecksumMismatch,
+            None => babel_api::utils::BinaryStatus::Missing,
         };
         Ok(Response::new(job_runner_status))
     }
 
     async fn upload_job_runner(
         &self,
-        request: Request<Streaming<babel_api::Binary>>,
+        request: Request<Streaming<babel_api::utils::Binary>>,
     ) -> Result<Response<()>, Status> {
         let mut stream = request.into_inner();
         // block using job runner binary
@@ -281,31 +282,33 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(status))
     }
 
-    async fn blockchain_jrpc(
+    async fn run_jrpc(
         &self,
-        request: Request<(String, String, babel_api::config::JrpcResponse)>,
+        request: Request<(String, String)>,
     ) -> Result<Response<String>, Status> {
         Ok(Response::new(
             self.handle_jrpc(request).await.map_err(to_blockchain_err)?,
         ))
     }
 
-    async fn blockchain_rest(
-        &self,
-        request: Request<(String, babel_api::config::RestResponse)>,
-    ) -> Result<Response<String>, Status> {
+    async fn run_rest(&self, request: Request<String>) -> Result<Response<String>, Status> {
         Ok(Response::new(
             self.handle_rest(request).await.map_err(to_blockchain_err)?,
         ))
     }
 
-    async fn blockchain_sh(
-        &self,
-        request: Request<(String, babel_api::config::ShResponse)>,
-    ) -> Result<Response<String>, Status> {
+    async fn run_sh(&self, request: Request<String>) -> Result<Response<String>, Status> {
         Ok(Response::new(
             self.handle_sh(request).await.map_err(to_blockchain_err)?,
         ))
+    }
+
+    async fn render_template(
+        &self,
+        _request: Request<(PathBuf, PathBuf, HashMap<String, String>)>,
+    ) -> Result<Response<()>, Status> {
+        // TODO imlement me
+        todo!()
     }
 
     type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
@@ -374,47 +377,24 @@ impl<J, P> BabelService<J, P> {
         Ok(())
     }
 
-    async fn handle_jrpc(
-        &self,
-        request: Request<(String, String, babel_api::config::JrpcResponse)>,
-    ) -> Result<String> {
-        let (host, method, response) = request.into_inner();
-        let text: String = self
+    async fn handle_jrpc(&self, request: Request<(String, String)>) -> Result<String> {
+        let (host, method) = request.into_inner();
+        Ok(self
             .post(host)
             .json(&json!({ "jsonrpc": "2.0", "id": 0, "method": method }))
             .send()
             .await?
             .text()
-            .await?;
-        let value = if let Some(field) = &response.field {
-            tracing::debug!("Retrieving field `{field}` from the body `{text}`");
-            gjson::get(&text, field).to_string()
-        } else {
-            text
-        };
-        Ok(value)
+            .await?)
     }
 
-    async fn handle_rest(
-        &self,
-        request: Request<(String, babel_api::config::RestResponse)>,
-    ) -> Result<String> {
-        let (url, response) = request.into_inner();
-        let text = self.get(url).send().await?.text().await?;
-        let value = match &response.field {
-            Some(field) => gjson::get(&text, field).to_string(),
-            None => text,
-        };
-        Ok(value)
+    async fn handle_rest(&self, request: Request<String>) -> Result<String> {
+        let url = request.into_inner();
+        Ok(self.get(url).send().await?.text().await?)
     }
 
-    async fn handle_sh(
-        &self,
-        request: Request<(String, babel_api::config::ShResponse)>,
-    ) -> Result<String> {
-        use babel_api::config::MethodResponseFormat::*;
-
-        let (body, response) = request.into_inner();
+    async fn handle_sh(&self, request: Request<String>) -> Result<String> {
+        let body = request.into_inner();
         let args = vec!["-c", &body];
         let output = tokio::process::Command::new("sh")
             .args(args)
@@ -424,14 +404,7 @@ impl<J, P> BabelService<J, P> {
         if !output.status.success() {
             bail!("Failed to run command `{body}`, got output `{output:?}`")
         }
-
-        match response.format {
-            Json => {
-                let content: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-                Ok(serde_json::to_string(&content)?)
-            }
-            Raw => Ok(String::from_utf8_lossy(&output.stdout).to_string()),
-        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 }
 
@@ -439,9 +412,7 @@ impl<J, P> BabelService<J, P> {
 mod tests {
     use super::*;
     use assert_fs::TempDir;
-    use babel_api::babel_client::BabelClient;
-    use babel_api::babel_server::Babel;
-    use babel_api::config::{JrpcResponse, MethodResponseFormat, RestResponse, ShResponse};
+    use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
     use futures::StreamExt;
     use httpmock::prelude::*;
     use mockall::*;
@@ -499,7 +470,9 @@ mod tests {
         .await?;
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(babel_api::babel_server::BabelServer::new(babel_service))
+            .add_service(babel_api::babel::babel_server::BabelServer::new(
+                babel_service,
+            ))
             .serve_with_incoming(uds_stream)
             .await?;
         Ok(())
@@ -706,19 +679,18 @@ mod tests {
 
         let service = build_babel_service_with_defaults().await?;
         let output = service
-            .blockchain_jrpc(Request::new((
+            .run_jrpc(Request::new((
                 format!("http://{}", server.address()),
                 "info_get".to_string(),
-                JrpcResponse {
-                    code: 101,
-                    field: Some("result.info.height".to_string()),
-                },
             )))
             .await?
             .into_inner();
 
         mock.assert();
-        assert_eq!(output, "123");
+        assert_eq!(
+            output,
+            r#"{"id":0,"jsonrpc":"2.0","result":{"info":{"address":"abc","height":123}}}"#
+        );
         Ok(())
     }
 
@@ -735,19 +707,12 @@ mod tests {
 
         let service = build_babel_service_with_defaults().await?;
         let output = service
-            .blockchain_rest(Request::new((
-                format!("http://{}/items", server.address()),
-                RestResponse {
-                    status: 101,
-                    field: Some("result".to_string()),
-                    format: MethodResponseFormat::Json,
-                },
-            )))
+            .run_rest(Request::new(format!("http://{}/items", server.address())))
             .await?
             .into_inner();
 
         mock.assert();
-        assert_eq!(output, "[1,2,3]");
+        assert_eq!(output, r#"{"result":[1,2,3]}"#);
         Ok(())
     }
 
@@ -764,14 +729,7 @@ mod tests {
 
         let service = build_babel_service_with_defaults().await?;
         let output = service
-            .blockchain_rest(Request::new((
-                format!("http://{}/items", server.address()),
-                RestResponse {
-                    status: 101,
-                    field: None,
-                    format: MethodResponseFormat::Json,
-                },
-            )))
+            .run_rest(Request::new(format!("http://{}/items", server.address())))
             .await?
             .into_inner();
 
@@ -785,16 +743,10 @@ mod tests {
         let service = build_babel_service_with_defaults().await?;
 
         let output = service
-            .blockchain_sh(Request::new((
-                "echo \\\"make a toast\\\"".to_string(),
-                ShResponse {
-                    status: 102,
-                    format: MethodResponseFormat::Json,
-                },
-            )))
+            .run_sh(Request::new("echo \\\"make a toast\\\"".to_string()))
             .await?
             .into_inner();
-        assert_eq!(output, "\"make a toast\"");
+        assert_eq!(output, "\"make a toast\"\n");
         Ok(())
     }
 
@@ -803,9 +755,9 @@ mod tests {
         let mut test_env = setup_test_env()?;
 
         let incomplete_runner_bin = vec![
-            babel_api::Binary::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
-            babel_api::Binary::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
-            babel_api::Binary::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
+            babel_api::utils::Binary::Bin(vec![1, 2, 3, 4, 6, 7, 8, 9, 10]),
+            babel_api::utils::Binary::Bin(vec![11, 12, 13, 14, 16, 17, 18, 19, 20]),
+            babel_api::utils::Binary::Bin(vec![21, 22, 23, 24, 26, 27, 28, 29, 30]),
         ];
 
         test_env
@@ -816,7 +768,7 @@ mod tests {
         assert!(test_env.job_runner_lock.read().await.is_none());
 
         let mut invalid_runner_bin = incomplete_runner_bin.clone();
-        invalid_runner_bin.push(babel_api::Binary::Checksum(123));
+        invalid_runner_bin.push(babel_api::utils::Binary::Checksum(123));
         test_env
             .client
             .upload_job_runner(tokio_stream::iter(invalid_runner_bin))
@@ -825,7 +777,7 @@ mod tests {
         assert!(test_env.job_runner_lock.read().await.is_none());
 
         let mut runner_bin = incomplete_runner_bin.clone();
-        runner_bin.push(babel_api::Binary::Checksum(4135829304));
+        runner_bin.push(babel_api::utils::Binary::Checksum(4135829304));
         test_env
             .client
             .upload_job_runner(tokio_stream::iter(runner_bin))
@@ -857,7 +809,7 @@ mod tests {
         .await?;
 
         assert_eq!(
-            babel_api::BinaryStatus::Missing,
+            babel_api::utils::BinaryStatus::Missing,
             service
                 .check_job_runner(Request::new(123))
                 .await?
@@ -866,14 +818,14 @@ mod tests {
 
         job_runner_lock.write().await.replace(321);
         assert_eq!(
-            babel_api::BinaryStatus::ChecksumMismatch,
+            babel_api::utils::BinaryStatus::ChecksumMismatch,
             service
                 .check_job_runner(Request::new(123))
                 .await?
                 .into_inner()
         );
         assert_eq!(
-            babel_api::BinaryStatus::Ok,
+            babel_api::utils::BinaryStatus::Ok,
             service
                 .check_job_runner(Request::new(321))
                 .await?
@@ -902,6 +854,7 @@ mod tests {
                 BabelConfig {
                     data_directory_mount_point: "".to_string(),
                     log_buffer_capacity_ln: 10,
+                    swap_size_mb: 16,
                 },
             ))
             .await?;

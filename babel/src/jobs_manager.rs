@@ -10,7 +10,7 @@ use crate::{
     utils::{find_processes, kill_all_processes},
 };
 use async_trait::async_trait;
-use babel_api::config::{JobConfig, JobStatus, RestartPolicy};
+use babel_api::engine::{JobConfig, JobStatus, RestartPolicy};
 use bv_utils::run_flag::RunFlag;
 use eyre::{bail, Context, ContextCompat, Report, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -366,7 +366,7 @@ fn deps_finished(
 mod tests {
     use super::*;
     use assert_fs::TempDir;
-    use babel_api::config::RestartConfig;
+    use babel_api::engine::RestartConfig;
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     use std::path::PathBuf;

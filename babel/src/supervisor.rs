@@ -2,7 +2,7 @@
 /// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
 /// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::utils::{kill_all_processes, Backoff};
-use babel_api::config::SupervisorConfig;
+use babel_api::babelsup::SupervisorConfig;
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use std::path::PathBuf;
 use tokio::{
@@ -194,9 +194,6 @@ mod tests {
         SupervisorConfig {
             backoff_timeout_ms: 600,
             backoff_base_ms: 10,
-            log_buffer_capacity_ln: 10,
-            entry_point: vec![],
-            ..Default::default()
         }
     }
 

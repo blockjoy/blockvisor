@@ -1,5 +1,5 @@
 use babel::{job_runner::JobRunner, jobs, log_buffer::LogBuffer, logging, BABEL_LOGS_UDS_PATH};
-use babel_api::logs_collector_client::LogsCollectorClient;
+use babel_api::babel::logs_collector_client::LogsCollectorClient;
 use bv_utils::run_flag::RunFlag;
 use eyre::{anyhow, bail};
 use std::{env, time::Duration};

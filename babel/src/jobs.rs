@@ -1,4 +1,4 @@
-use babel_api::config::{JobConfig, JobStatus};
+use babel_api::engine::{JobConfig, JobStatus};
 use eyre::{Context, Result};
 use std::{
     collections::HashMap,
