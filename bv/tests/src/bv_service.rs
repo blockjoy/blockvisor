@@ -107,7 +107,6 @@ async fn test_bv_service_e2e() {
         first_name: "first".to_string(),
         last_name: "last".to_string(),
         password: password.to_string(),
-        password_confirmation: password.to_string(),
     };
     let resp: pb::CreateUserResponse = client.create(create_user).await.unwrap().into_inner();
     println!("user created: {resp:?}");
@@ -133,9 +132,8 @@ async fn test_bv_service_e2e() {
     };
     let login: pb::LoginUserResponse = client.login(login_user).await.unwrap().into_inner();
     println!("user login: {login:?}");
-    let login_token = login.token.unwrap().value;
     let login_auth: token::AuthClaim =
-        token::TokenGenerator::from_encoded("1245456".to_string(), &login_token).unwrap();
+        token::TokenGenerator::from_encoded("1245456".to_string(), &login.token).unwrap();
     let login_data = login_auth.data.unwrap();
     let org_id = login_data.get("org_id").unwrap();
 
@@ -228,7 +226,7 @@ async fn test_bv_service_e2e() {
     let node_create = pb::CreateNodeRequest {
         org_id: org_id.clone(),
         blockchain_id: blockchain.id.clone(),
-        version: Some("0.0.1".to_string()),
+        version: "0.0.1".to_string(),
         node_type: pb::node::NodeType::Validator.into(),
         properties: vec![pb::node::NodeProperty {
             name: "TESTING_PARAM".to_string(),
@@ -240,6 +238,10 @@ async fn test_bv_service_e2e() {
             value: Some("I guess just some test value".to_string()),
         }],
         network: "".to_string(),
+        scheduler: Some(pb::NodeScheduler {
+            similarity: None,
+            resource: pb::node_scheduler::ResourceAffinity::LeastResources.into(),
+        }),
     };
     let resp: pb::CreateNodeResponse = node_client
         .create(with_auth(node_create, &auth_token, &refresh_token))

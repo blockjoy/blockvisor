@@ -45,9 +45,7 @@ impl HostInfo {
             name: sys
                 .host_name()
                 .ok_or_else(|| anyhow!("Cannot get host name"))?,
-            cpu_count: sys
-                .physical_core_count()
-                .ok_or_else(|| anyhow!("Cannot get cpu count"))?,
+            cpu_count: sys.cpus().len(),
             mem_size: sys.total_memory(),
             disk_size,
             os: sys.name().ok_or_else(|| anyhow!("Cannot get OS name"))?,

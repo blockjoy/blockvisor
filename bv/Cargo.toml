@@ -33,7 +33,7 @@ anyhow = "1.0.68"
 async-trait = "0.1.60"
 babel_api = {version = "*", path = "../babel_api"}
 base64 = "0.21.0"
-clap = {version = "4.1.1", features = ["derive", "cargo"]}
+clap = {version = "4.2.4", features = ["derive", "cargo"]}
 cli-table = "0.4"
 crc = "3.0.0"
 chrono = {version = "0.4.24", features = ["serde"]}
