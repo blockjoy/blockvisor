@@ -1,9 +1,7 @@
 use crate::config::{Config, CONFIG_PATH};
-use crate::node::REGISTRY_CONFIG_DIR;
-use crate::nodes::{build_registry_filename, REGISTRY_CONFIG_FILENAME};
 use crate::server::bv_pb;
 use crate::server::bv_pb::blockvisor_client::BlockvisorClient;
-use crate::{with_retry, BV_VAR_PATH};
+use crate::with_retry;
 use anyhow::{bail, ensure, Context, Error, Result};
 use async_trait::async_trait;
 use bv_utils::timer::Timer;
@@ -315,18 +313,6 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     fn migrate_bv_data(&self) -> Result<()> {
         // backup state/config and migrate to new version
 
-        // TODO remove that code once all bv instances are updated
-        let current_registry_filename = build_registry_filename(&self.paths.bv_root);
-        let old_registry_filename = self
-            .paths
-            .bv_root
-            .join(BV_VAR_PATH)
-            .join(REGISTRY_CONFIG_DIR)
-            .join(REGISTRY_CONFIG_FILENAME);
-        if !current_registry_filename.exists() && old_registry_filename.exists() {
-            fs::copy(&old_registry_filename, current_registry_filename)?;
-            fs::remove_file(&old_registry_filename)?;
-        }
         // backup blockvisor config since new version may modify/break it
         fs::copy(
             self.paths.bv_root.join(CONFIG_PATH),
@@ -448,15 +434,6 @@ impl<T: Timer, S: BvService> Installer<T, S> {
 
     fn cleanup_bv_data_backup(&self) -> Result<()> {
         // cleanup state/config conversion remnants
-
-        // TODO remove that code once all bv instances are updated
-        let old_registry_filename = self
-            .paths
-            .bv_root
-            .join(BV_VAR_PATH)
-            .join(REGISTRY_CONFIG_DIR)
-            .join(REGISTRY_CONFIG_FILENAME);
-        let _ = fs::remove_file(old_registry_filename);
 
         Ok(())
     }

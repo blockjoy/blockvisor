@@ -141,7 +141,7 @@ impl TestEnv {
             .bv_root
             .join(BV_VAR_PATH)
             .join(REGISTRY_CONFIG_DIR)
-            .join(format!("{vm_id}.toml"));
+            .join(format!("{vm_id}.json"));
         let start = std::time::Instant::now();
         loop {
             if NodeData::<DummyNet>::load(&node_path)

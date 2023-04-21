@@ -107,10 +107,22 @@ fn generate_keys() {
     run_sh("mkdir -p /opt/secrets && echo first > /opt/secrets/first.key && echo second > /opt/secrets/second.key");
 }
 
+fn generate_keys(ignore) {
+    generate_keys();
+    ""
+}
+
 fn stop_babelsup(param) {
     run_sh("systemctl stop babelsup");
     for line in run_sh("ps -e|grep babel").split("\n") {
-        run_sh("do kill -9 " + line.split()[0].trim());
+        let parts = line.split();
+        if !parts.is_empty() {
+            let pid = parts[0];
+            pid.trim();
+            if !pid.is_empty() {
+                run_sh("kill -9 " + pid);
+            }
+        }
     }
     ""
 }
