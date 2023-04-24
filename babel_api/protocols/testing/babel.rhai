@@ -105,6 +105,7 @@ fn staking_status() {
 
 fn generate_keys() {
     run_sh("mkdir -p /opt/secrets && echo first > /opt/secrets/first.key && echo second > /opt/secrets/second.key");
+    return;
 }
 
 fn generate_keys(ignore) {

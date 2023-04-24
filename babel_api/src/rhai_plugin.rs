@@ -221,9 +221,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     }
 
     fn generate_keys(&self) -> Result<()> {
-        Ok(from_dynamic(
-            &self.call_fn::<_, Dynamic>("generate_keys", ())?,
-        )?)
+        self.call_fn::<_, ()>("generate_keys", ())
     }
 
     fn call_custom_method(&self, name: &str, param: &str) -> Result<String> {
