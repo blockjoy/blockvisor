@@ -29,6 +29,33 @@ use tonic::Status;
 use tracing::instrument;
 use uuid::Uuid;
 
+#[macro_export]
+macro_rules! with_retry_on_conn_error {
+    ($fun:expr) => {{
+        const RPC_RETRY_MAX: u32 = 3;
+        const RPC_BACKOFF_BASE_MSEC: u64 = 300;
+        let mut retry_count = 0;
+        loop {
+            match $fun.await {
+                Ok(res) => break Ok(res),
+                Err(err) if err.code() != tonic::Code::Internal => {
+                    if retry_count < RPC_RETRY_MAX {
+                        retry_count += 1;
+                        let backoff = RPC_BACKOFF_BASE_MSEC * 2u64.pow(retry_count);
+                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                        continue;
+                    } else {
+                        break Err(err);
+                    }
+                }
+                Err(err) => {
+                    break Err(err);
+                }
+            }
+        }
+    }};
+}
+
 #[derive(Debug)]
 pub struct BabelEngine<B, P> {
     node_id: Uuid,
@@ -257,17 +284,21 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
         match req {
             NodeRequest::RunSh { body, response_tx } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => with_retry!(babel_client.run_sh(body.clone()))
-                        .map_err(|err| self.handle_connection_errors(err))
-                        .map(|v| v.into_inner()),
+                    Ok(babel_client) => {
+                        with_retry_on_conn_error!(babel_client.run_sh(body.clone()))
+                            .map_err(|err| self.handle_connection_errors(err))
+                            .map(|v| v.into_inner())
+                    }
                     Err(err) => Err(err),
                 });
             }
             NodeRequest::RunRest { url, response_tx } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => with_retry!(babel_client.run_rest(url.clone()))
-                        .map_err(|err| self.handle_connection_errors(err))
-                        .map(|v| v.into_inner()),
+                    Ok(babel_client) => {
+                        with_retry_on_conn_error!(babel_client.run_rest(url.clone()))
+                            .map_err(|err| self.handle_connection_errors(err))
+                            .map(|v| v.into_inner())
+                    }
                     Err(err) => Err(err),
                 });
             }
@@ -277,11 +308,11 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
                 response_tx,
             } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => {
-                        with_retry!(babel_client.run_jrpc((host.clone(), method.clone())))
-                            .map_err(|err| self.handle_connection_errors(err))
-                            .map(|v| v.into_inner())
-                    }
+                    Ok(babel_client) => with_retry_on_conn_error!(
+                        babel_client.run_jrpc((host.clone(), method.clone()))
+                    )
+                    .map_err(|err| self.handle_connection_errors(err))
+                    .map(|v| v.into_inner()),
                     Err(err) => Err(err),
                 });
             }
