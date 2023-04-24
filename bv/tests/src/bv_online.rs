@@ -58,6 +58,6 @@ async fn test_bv_cmd_cookbook_download() -> Result<()> {
 
     assert!(Path::new(&folder.join("kernel")).exists());
     assert!(Path::new(&folder.join("os.img")).exists());
-    assert!(Path::new(&folder.join("babel.toml")).exists());
+    assert!(Path::new(&folder.join("babel.rhai")).exists());
     Ok(())
 }

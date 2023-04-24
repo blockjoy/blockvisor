@@ -1,6 +1,6 @@
 # BlockVisor
 
-The service that runs on the host systems and is responisble for provisioning and managing one or more blockchains on a single server.
+The service that runs on the host systems and is responsible for provisioning and managing one or more blockchains on a single server.
 
 ## How to release a new version
 1. Make sure you have installed:
@@ -51,7 +51,9 @@ used during debugging issues, not printed by default
 - `/etc/systemd/system/tmux.service`
 - `/etc/systemd/system/blockvisor.service`
 - `/var/lib/blockvisor/nodes.toml`
-- `/var/lib/blockvisor/nodes/<uuid>.toml` node specific metadata
+- `/var/lib/blockvisor/nodes/<uuid>.json` node specific metadata
+- `/var/lib/blockvisor/nodes/<uuid>.rhai` node specific Babel plugin
+- `/var/lib/blockvisor/nodes/<uuid>.data` Babel plugin specific data
 - `/var/lib/blockvisor/firecracker/<uuid>/` node specific firecracker data (e.g. copy of images)
 - `/var/lib/blockvisor/images/<protocol>/<node_type>/<node_version>/`
 
@@ -78,6 +80,10 @@ See [BV tests](bv/tests/README.md) for more.
 # High Level Overview
 
 ![](overview.jpg)
+
+## Node Internals
+
+![](node_internals.jpg)
 
 ## Basic Scenarios
 ### Add Host - Host Provisioning
@@ -131,23 +137,13 @@ sequenceDiagram
 
     frontend ->> backend: Create Node
     backend ->> bv: Create Node
-    bv ->> bv: Download os.img
+    bv ->> bv: Download os.img, kernel, babel.rhai
     bv ->> bv: Create data.img
 
-    frontend ->> backend: Start Node
     backend ->> bv: Start Node
 
     bv ->> babel: Start Node
-    babel ->> babel: Load config
     babel ->> babel: Mount data.img
-    babel ->> babel: Supervisor: wait for init
-
-    bv ->> babel: Ping
-    babel -->> bv: Pong
-    bv ->> babel: Setup genesis block
-    babel ->> babel: Init completed
-    babel ->> babel: Start Supervisor
-    babel ->> babel: Start blockchain
 
     bv ->> backend: Get keys
     backend -->> bv: Keys?
@@ -159,10 +155,12 @@ sequenceDiagram
         bv ->> backend: Save keys
     end
 
-    opt Restart needed
-        babel ->> babel: Supervisor: restart processes
-    end
-
+    bv ->> bv: call init on Babel plugin  
+    bv ->> babel: run_*, start_job, ...
+    Note right of bv: forward run_*, start_job and other calls<br> to bebel, so it can be run on the node
+    babel -->> bv: 
+    Note right of bv: result is sent back to BVand processed<br>  by Babel plugin 
+    
     frontend ->> backend: Get keys
     backend -->> frontend: Keys
 ```
@@ -176,9 +174,11 @@ sequenceDiagram
     participant babel as Babel
 
     cli->>bv: Blockchain Method
-    bv->>babel: send(method)
-    babel->>babel: map method to Blockchain API as defined in babel.conf
-    babel-->>bv: response
+    bv ->> bv: call method on Babel plugin  
+    bv ->> babel: run_*, start_job, ...
+    Note right of bv: forward run_*, start_job and other calls<br> to bebel, so it can be run on the node
+    babel -->> bv: 
+    Note right of bv: result is sent back to BVand processed<br>  by Babel plugin 
     bv-->>cli: response
 ```
 
@@ -247,7 +247,7 @@ sequenceDiagram
     deactivate bv
 ```
 
-#### Babel install/update
+#### Babel and JobRunner install/update
 
 ```mermaid
 sequenceDiagram
@@ -275,8 +275,14 @@ sequenceDiagram
         babelsup ->> babel: restart
         activate babel
     end
-    bv ->> babel: ping Babel
 
+    bv ->> babel: check JobRunner binary
+    alt JobRunner checksum doesn't match
+        bv ->> babel: send new JobRunner binary
+        babel ->> babel: replace JobRunner binary
+        Note right of babelsup: JobRunner perform blockchain action/entrypoint<br> so it is not restarted automatiaclly
+    end
+    
     deactivate babel
     deactivate babelsup
     deactivate bv
