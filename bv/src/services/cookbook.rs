@@ -164,7 +164,7 @@ impl CookbookService {
     }
 }
 
-impl From<NodeImage> for cb_pb::PluginIdentifier {
+impl From<NodeImage> for cb_pb::ConfigIdentifier {
     fn from(image: NodeImage) -> Self {
         Self {
             protocol: image.protocol,

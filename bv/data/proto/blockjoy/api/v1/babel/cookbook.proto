@@ -13,7 +13,7 @@ enum StatusName {
 }
 
 /* Message type used for identifying a specific plugin */
-message PluginIdentifier {
+message ConfigIdentifier {
   /* snake_cased name of the blockchain */
   string protocol = 1;
   /* snake_cased name of the node type */
@@ -30,7 +30,7 @@ message BundleIdentifier {
 }
 
 message Plugin {
-  PluginIdentifier identifier = 1;
+  ConfigIdentifier identifier = 1;
   /* Plugin script contents */
   bytes rhai_content = 2;
 }
@@ -46,7 +46,7 @@ message BabelVersionsRequest {
 }
 
 message BabelVersionsResponse {
-  repeated PluginIdentifier identifiers = 1;
+  repeated ConfigIdentifier identifiers = 1;
 }
 
 message BundleVersionsRequest {
@@ -57,22 +57,55 @@ message BundleVersionsResponse {
   repeated BundleIdentifier identifiers = 1;
 }
 
+message RequirementsResponse {
+  int64 vcpu_count = 1;
+  int64 mem_size_mb = 2;
+  int64 disk_size_gb = 3;
+}
+
+message Parameter {
+  string name = 1;
+  string value = 2;
+}
+
+message NetworkConfiguration {
+  enum NetType {
+    UndefinedNetType = 0;
+    Dev = 1;
+    Test = 2;
+    Main = 3;
+  }
+
+  string name = 1;
+  string url = 2;
+  NetType net_type = 3;
+  repeated Parameter meta = 4;
+}
+
+message NetConfigurationResponse {
+  repeated NetworkConfiguration configurations = 1;
+}
+
 /* Babel cookbook service */
 service CookBookService {
   /* Retrieve plugin for specific version and state */
-  rpc RetrievePlugin(PluginIdentifier) returns (Plugin) {}
+  rpc RetrievePlugin(ConfigIdentifier) returns (Plugin) {}
   /* Retrieve image for specific version and state */
-  rpc RetrieveImage(PluginIdentifier) returns (ArchiveLocation) {}
+  rpc RetrieveImage(ConfigIdentifier) returns (ArchiveLocation) {}
   /* Retrieve kernel file for specific version and state */
-  rpc RetrieveKernel(PluginIdentifier) returns (ArchiveLocation) {}
+  rpc RetrieveKernel(ConfigIdentifier) returns (ArchiveLocation) {}
+  /* Retrieve hardware requirements for given identifier */
+  rpc Requirements(ConfigIdentifier) returns (RequirementsResponse) {}
+  /* Retrieve net configurations for given chain */
+  rpc NetConfigurations(ConfigIdentifier) returns (NetConfigurationResponse) {}
   /* List all available babel versions */
   rpc ListBabelVersions(BabelVersionsRequest) returns (BabelVersionsResponse) {}
   /* Promote/Demote plugin/image to the desired state */
-  rpc AddStage(PluginIdentifier) returns (google.protobuf.Empty) {}
+  rpc AddStage(ConfigIdentifier) returns (google.protobuf.Empty) {}
   /* Disable plugin in the desired state */
-  rpc RemoveStage(PluginIdentifier) returns (google.protobuf.Empty) {}
+  rpc RemoveStage(ConfigIdentifier) returns (google.protobuf.Empty) {}
   /* Delete plugin/image from storage */
-  rpc Delete(PluginIdentifier) returns (google.protobuf.Empty) {}
+  rpc Delete(ConfigIdentifier) returns (google.protobuf.Empty) {}
 }
 
 /* Retrieve manage BVD bundles */
