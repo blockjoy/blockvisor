@@ -1,40 +1,12 @@
-use babel_api::{
-    engine::{Engine, JobConfig, JobStatus},
-    metadata::BlockchainMetadata,
-    plugin::Plugin,
-    rhai_plugin,
-};
-use mockall::*;
+mod utils;
+use babel_api::{engine::JobStatus, metadata::BlockchainMetadata, plugin::Plugin, rhai_plugin};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-mock! {
-    pub BabelEngine {}
-
-    impl Engine for BabelEngine {
-        fn start_job(&self, job_name: &str, job_config: JobConfig) -> anyhow::Result<()>;
-        fn stop_job(&self, job_name: &str) -> anyhow::Result<()>;
-        fn job_status(&self, job_name: &str) -> anyhow::Result<JobStatus>;
-        fn run_jrpc(&self, host: &str, method: &str) -> anyhow::Result<String>;
-        fn run_rest(&self, url: &str) -> anyhow::Result<String>;
-        fn run_sh(&self, body: &str) -> anyhow::Result<String>;
-        fn sanitize_sh_param(&self, param: &str) -> anyhow::Result<String>;
-        fn render_template(
-            &self,
-            template: &Path,
-            output: &Path,
-            params: HashMap<String, String>,
-        ) -> anyhow::Result<()>;
-        fn node_params(&self) -> HashMap<String, String>;
-        fn save_data(&self, value: &str) -> anyhow::Result<()>;
-        fn load_data(&self) -> anyhow::Result<String>;
-    }
-}
-
 pub fn rhai_smoke(path: &Path) -> anyhow::Result<BlockchainMetadata> {
     let script = fs::read_to_string(path)?;
-    let mut babel = MockBabelEngine::new();
+    let mut babel = utils::MockBabelEngine::new();
     babel.expect_save_data().returning(|_| Ok(()));
 
     babel.expect_start_job().returning(|_, _| Ok(()));
