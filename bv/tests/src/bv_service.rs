@@ -55,7 +55,7 @@ async fn test_bvup_and_reset() {
         let url = "http://localhost:8082";
         let mqtt = "mqtt://localhost:1883";
         let otp = "AWESOME";
-        let config_path = format!("{}/etc/blockvisor.toml", tmp_dir.to_string_lossy());
+        let config_path = format!("{}/etc/blockvisor.json", tmp_dir.to_string_lossy());
 
         println!("bvup");
         Command::cargo_bin("bvup")
@@ -197,9 +197,9 @@ async fn test_bv_service_e2e() {
         ));
 
     println!("read host id");
-    let config_path = "/etc/blockvisor.toml";
+    let config_path = "/etc/blockvisor.json";
     let config = fs::read_to_string(config_path).unwrap();
-    let config: Config = toml::from_str(&config).unwrap();
+    let config: Config = serde_json::from_str(&config).unwrap();
     let host_id = config.id;
     println!("got host id: {host_id}");
 

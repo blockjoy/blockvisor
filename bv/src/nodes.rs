@@ -25,7 +25,7 @@ use crate::{
     BV_VAR_PATH,
 };
 
-pub const REGISTRY_CONFIG_FILENAME: &str = "nodes.toml";
+pub const REGISTRY_CONFIG_FILENAME: &str = "nodes.json";
 
 fn id_not_found(id: Uuid) -> anyhow::Error {
     anyhow!("Node with id `{}` not found", id)
@@ -557,7 +557,7 @@ impl<P: Pal + Debug> Nodes<P> {
         let config = fs::read_to_string(&registry_path)
             .await
             .context("failed to read nodes registry")?;
-        toml::from_str(&config).context("failed to parse nodes registry")
+        serde_json::from_str(&config).context("failed to parse nodes registry")
     }
 
     async fn load_nodes(
@@ -625,8 +625,7 @@ impl<P: Pal + Debug> Nodes<P> {
             "Writing nodes common config file: {}",
             registry_path.display()
         );
-        let config = toml::Value::try_from(&*self.data.read().await)?;
-        let config = toml::to_string(&config)?;
+        let config = serde_json::to_string(&*self.data.read().await)?;
         fs::write(&*registry_path, &*config).await?;
 
         Ok(())

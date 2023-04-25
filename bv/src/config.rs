@@ -7,7 +7,7 @@ use tokio::{
 };
 use tracing::info;
 
-pub const CONFIG_PATH: &str = "etc/blockvisor.toml";
+pub const CONFIG_PATH: &str = "etc/blockvisor.json";
 
 pub fn default_blockvisor_port() -> u16 {
     9001
@@ -56,7 +56,7 @@ impl Config {
         let path = bv_root.join(CONFIG_PATH);
         info!("Reading host config: {}", path.display());
         let config = fs::read_to_string(path).await?;
-        Ok(toml::from_str(&config)?)
+        Ok(serde_json::from_str(&config)?)
     }
 
     pub async fn save(&self, bv_root: &Path) -> Result<()> {
@@ -65,8 +65,7 @@ impl Config {
         info!("Ensuring config dir is present: {}", parent.display());
         DirBuilder::new().recursive(true).create(parent).await?;
         info!("Writing host config: {}", path.display());
-        let config = toml::Value::try_from(self)?;
-        let config = toml::to_string(&config)?;
+        let config = serde_json::to_string(&self)?;
         fs::write(path, &*config).await?;
         Ok(())
     }
