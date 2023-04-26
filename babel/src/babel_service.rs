@@ -7,7 +7,6 @@ use babel_api::{
 };
 use eyre::{bail, eyre, Report, Result};
 use serde_json::json;
-use std::collections::HashMap;
 use std::{
     mem,
     ops::{Deref, DerefMut},
@@ -305,9 +304,22 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 
     async fn render_template(
         &self,
-        _request: Request<(PathBuf, PathBuf, HashMap<String, String>)>,
+        request: Request<(PathBuf, PathBuf, String)>,
     ) -> Result<Response<()>, Status> {
-        todo!()
+        let (template, output, params) = request.into_inner();
+        let render = || -> Result<()> {
+            let params: serde_json::Value = serde_json::from_str(&params)?;
+            let context = tera::Context::from_serialize(params)?;
+            let mut tera = tera::Tera::default();
+            tera.add_template_file(template, Some("template"))?;
+            let out_file = std::fs::File::create(output)?;
+            tera.render_to("template", &context, out_file)?;
+            Ok(())
+        };
+        render().map_err(|err| {
+            Status::internal(format!("failed to render template file with: {err}"))
+        })?;
+        Ok(Response::new(()))
     }
 
     type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
@@ -416,6 +428,7 @@ mod tests {
     use httpmock::prelude::*;
     use mockall::*;
     use std::collections::HashMap;
+    use std::env::temp_dir;
     use tokio::net::UnixStream;
     use tokio_stream::wrappers::UnixListenerStream;
     use tonic::transport::{Channel, Endpoint, Server, Uri};
@@ -830,6 +843,74 @@ mod tests {
                 .await?
                 .into_inner()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_render_template() -> Result<()> {
+        let tmp_dir = TempDir::new().unwrap();
+        fs::create_dir_all(tmp_dir).await?;
+        let template_path = temp_dir().join("template.txt");
+        fs::write(
+            &template_path,
+            r#"p1: {{ param1 }}, p2: {{param2}}, p3: {% if param3 %}{{ param3 }}{% else %}None{% endif %}; {% for p in vParam %}({{p}}){% endfor %}"#,
+        )
+        .await?;
+        let out_path = temp_dir().join("out.txt");
+
+        let service = build_babel_service_with_defaults().await?;
+
+        service
+            .render_template(Request::new((
+                template_path.clone(),
+                out_path.clone(),
+                r#"{"param1": "value1", "param2": 2, "param3": true, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
+            )))
+            .await?;
+        assert_eq!(
+            "p1: value1, p2: 2, p3: true; (a)(bb)(ccc)",
+            fs::read_to_string(&out_path).await?
+        );
+
+        service
+            .render_template(Request::new((
+                template_path.clone(),
+                out_path.clone(),
+                r#"{"param1": "value1", "param2": 2, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
+            )))
+            .await?;
+        assert_eq!(
+            "p1: value1, p2: 2, p3: None; (a)(bb)(ccc)",
+            fs::read_to_string(&out_path).await?
+        );
+
+        service
+            .render_template(Request::new((
+                template_path.clone(),
+                out_path.clone(),
+                r#"{"param1": "value1", "vParam": ["a", "bb", "ccc"]}"#.to_string(),
+            )))
+            .await
+            .unwrap_err();
+
+        service
+            .render_template(Request::new((
+                Path::new("invalid/path").to_path_buf(),
+                out_path.clone(),
+                r#"{"param1": "value1", "param2": 2, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
+            )))
+            .await
+            .unwrap_err();
+
+        service
+            .render_template(Request::new((
+                template_path.clone(),
+                Path::new("invalid/path").to_path_buf(),
+                r#"{"param1": "value1", "param2": 2, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
+            )))
+            .await
+            .unwrap_err();
+
         Ok(())
     }
 

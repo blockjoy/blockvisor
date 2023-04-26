@@ -428,7 +428,7 @@ enum NodeRequest {
     RenderTemplate {
         template: PathBuf,
         output: PathBuf,
-        params: HashMap<String, String>,
+        params: String,
         response_tx: ResponseTx<Result<()>>,
     },
 }
@@ -500,17 +500,12 @@ impl babel_api::engine::Engine for Engine {
         ))
     }
 
-    fn render_template(
-        &self,
-        template: &Path,
-        output: &Path,
-        params: HashMap<String, String>,
-    ) -> Result<()> {
+    fn render_template(&self, template: &Path, output: &Path, params: &str) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RenderTemplate {
             template: template.to_path_buf(),
             output: output.to_path_buf(),
-            params,
+            params: params.to_string(),
             response_tx,
         })?;
         response_rx.blocking_recv()?
@@ -613,7 +608,7 @@ mod tests {
             ) -> Result<Response<String>, Status>;
             async fn render_template(
                 &self,
-                request: Request<(PathBuf, PathBuf, HashMap<String, String>)>,
+                request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
             type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
             async fn get_logs(
@@ -645,7 +640,7 @@ mod tests {
             self.engine.render_template(
                 Path::new("template"),
                 Path::new("config"),
-                secret_keys.clone(),
+                &serde_json::to_string(secret_keys)?,
             )?;
             Ok(())
         }
@@ -699,7 +694,7 @@ mod tests {
             self.engine.render_template(
                 Path::new(name),
                 Path::new(param),
-                self.engine.node_params(),
+                &serde_json::to_string(&self.engine.node_params())?,
             )?;
             self.engine.save_data("custom plugin data")?;
             self.engine.load_data()
@@ -770,10 +765,12 @@ mod tests {
             .expect_render_template()
             .withf(|req| {
                 let (template, out, params) = req.get_ref();
+                let json: serde_json::Value = serde_json::from_str(params).unwrap();
+                let json = json.as_object().unwrap();
                 template == Path::new("template")
                     && out == Path::new("config")
-                    && params["secret_key"].as_bytes() == [1, 2, 3]
-                    && params["some_key"] == "some value"
+                    && json["some_key"].to_string() == "\"some value\""
+                    && json["secret_key"].to_string() == "\"\\u0001\\u0002\\u0003\""
             })
             .return_once(|_| Ok(Response::new(())));
         // from custom_method
@@ -809,7 +806,7 @@ mod tests {
                 let (template, out, params) = req.get_ref();
                 template == Path::new("name")
                     && out == Path::new("param")
-                    && params["some_key"] == "some value"
+                    && params == r#"{"some_key":"some value"}"#
             })
             .return_once(|_| Ok(Response::new(())));
 

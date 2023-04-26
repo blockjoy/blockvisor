@@ -109,17 +109,12 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn(
             "render_template",
-            move |template: ImmutableString, output: ImmutableString, params: rhai::Map| {
-                into_rhai_result(
-                    babel_engine.render_template(
-                        Path::new(&template.to_string()),
-                        Path::new(&output.to_string()),
-                        params
-                            .into_iter()
-                            .map(|(k, v)| (k.to_string(), v.to_string()))
-                            .collect(),
-                    ),
-                )
+            move |template: ImmutableString, output: ImmutableString, params: ImmutableString| {
+                into_rhai_result(babel_engine.render_template(
+                    Path::new(&template.to_string()),
+                    Path::new(&output.to_string()),
+                    params.as_str(),
+                ))
             },
         );
         let babel_engine = self.babel_engine.clone();
@@ -256,7 +251,7 @@ mod tests {
                 &self,
                 template: &Path,
                 output: &Path,
-                params: HashMap<String, String>,
+                params: &str,
             ) -> Result<()>;
             fn node_params(&self) -> HashMap<String, String>;
             fn save_data(&self, value: &str) -> Result<()>;
@@ -386,7 +381,7 @@ mod tests {
         out += "|" + run_rest("url");
         out += "|" + run_sh("body");
         out += "|" + sanitize_sh_param("sh param");
-        render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"});
+        render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"}.to_json());
         out += "|" + node_params().to_json().to_string(); 
         save_data("some plugin data"); 
         out += "|" + load_data(); 
@@ -443,10 +438,7 @@ mod tests {
             .with(
                 predicate::eq(Path::new("/template/path")),
                 predicate::eq(Path::new("output/path.cfg")),
-                predicate::eq(HashMap::from_iter([(
-                    "PARAM1".to_string(),
-                    "Value I".to_string(),
-                )])),
+                predicate::eq(r#"{"PARAM1":"Value I"}"#),
             )
             .return_once(|_, _, _| Ok(()));
         babel

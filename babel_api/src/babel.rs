@@ -2,7 +2,6 @@ use crate::engine::{JobConfig, JobStatus};
 use crate::metadata::{firewall, BabelConfig, KeysConfig};
 use crate::utils::{Binary, BinaryStatus};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[tonic_rpc::tonic_rpc(bincode)]
@@ -55,8 +54,8 @@ pub trait Babel {
         template: PathBuf,
         /// Path to rendered config file.
         output: PathBuf,
-        /// Parameters to be applied on template.
-        params: HashMap<String, String>,
+        /// Parameters to be applied on template in form of serialized JSON.
+        params: String,
     );
 
     /// Get logs gathered from jobs.

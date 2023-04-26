@@ -17,7 +17,7 @@ mock! {
             &self,
             template: &Path,
             output: &Path,
-            params: HashMap<String, String>,
+            params: &str,
         ) -> anyhow::Result<()>;
         fn node_params(&self) -> HashMap<String, String>;
         fn save_data(&self, value: &str) -> anyhow::Result<()>;

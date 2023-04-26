@@ -28,14 +28,10 @@ pub trait Engine {
     fn sanitize_sh_param(&self, param: &str) -> Result<String>;
 
     /// This function renders configuration template with provided `params`.
+    /// `params` is expected to be JSON serialized to string.
     /// It assumes that file pointed by `template` argument exists.
     /// File pointed by `output` path will be overwritten if exists.
-    fn render_template(
-        &self,
-        template: &Path,
-        output: &Path,
-        params: HashMap<String, String>,
-    ) -> Result<()>;
+    fn render_template(&self, template: &Path, output: &Path, params: &str) -> Result<()>;
 
     /// Get node params as key-value map.
     fn node_params(&self) -> HashMap<String, String>;
