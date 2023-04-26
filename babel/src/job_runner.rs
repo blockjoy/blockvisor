@@ -324,7 +324,7 @@ mod tests {
                 backoff_base_ms: 100,
                 max_retries: Some(3),
             }),
-            needs: vec![],
+            needs: None,
         };
         jobs::save_config(&config, &job_name, &jobs_dir.join(CONFIG_SUBDIR))?;
 

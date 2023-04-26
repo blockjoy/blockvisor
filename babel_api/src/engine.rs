@@ -24,11 +24,11 @@ pub trait Engine {
     /// Allowing people to substitute arbitrary data into sh-commands is unsafe.
     /// Call this function over each value before passing it to `run_sh`. This function is deliberately more
     /// restrictive than needed; it just filters out each character that is not a number or a
-    /// string or absolutely needed to form a url or json file.
+    /// string or absolutely needed to form an url or json file.
     fn sanitize_sh_param(&self, param: &str) -> Result<String>;
 
     /// This function renders configuration template with provided `params`.
-    /// It assume that file pointed by `template` argument exists.
+    /// It assumes that file pointed by `template` argument exists.
     /// File pointed by `output` path will be overwritten if exists.
     fn render_template(
         &self,
@@ -56,7 +56,7 @@ pub struct JobConfig {
     /// Job restart policy.
     pub restart: RestartPolicy,
     /// List of job names that this job needs to be finished before start.
-    pub needs: Vec<String>,
+    pub needs: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -74,7 +74,7 @@ pub enum RestartPolicy {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct RestartConfig {
-    /// if entry_point stay alive given amount of time (in miliseconds) backoff is reset
+    /// if job stay alive given amount of time (in miliseconds) backoff is reset
     pub backoff_timeout_ms: u64,
     /// base time (in miliseconds) for backof, multiplied by consecutive power of 2 each time
     pub backoff_base_ms: u64,

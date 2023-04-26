@@ -689,7 +689,7 @@ mod tests {
                 JobConfig {
                     body: param.to_string(),
                     restart: RestartPolicy::Never,
-                    needs: vec![],
+                    needs: None,
                 },
             )?;
             self.engine.stop_job(name)?;

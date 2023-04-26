@@ -58,22 +58,22 @@ pub struct BlockchainMetadata {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct BabelConfig {
-    /// Path to mount data drive to
+    /// Path to mount data drive to.
     pub data_directory_mount_point: String,
-    /// Capacity of log buffer (in lines)
+    /// Capacity of log buffer (in lines).
     pub log_buffer_capacity_ln: usize,
-    /// Size of swap file created on the node, in MB
+    /// Size of swap file created on the node, in MB.
     pub swap_size_mb: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct Requirements {
-    /// Virtual cores to share with VM
+    /// Virtual cores to share with VM.
     pub vcpu_count: usize,
-    /// RAM allocated to VM in MB
+    /// RAM allocated to VM in MB.
     pub mem_size_mb: usize,
-    /// Size of data drive for storing blockchain data (not to be confused with OS drive)
+    /// Size of data drive for storing blockchain data (not to be confused with OS drive).
     pub disk_size_gb: usize,
 }
 

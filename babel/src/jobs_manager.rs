@@ -255,19 +255,23 @@ impl Monitor {
             } = job
             {
                 if *status == JobStatus::Pending {
-                    match deps_finished(name, &deps, needs) {
-                        Ok(true) => job.state = self.start_job(name, jobs_data).await,
-                        Ok(false) => {}
-                        Err(err) => {
-                            *status = JobStatus::Finished {
-                                exit_code: None,
-                                message: err.to_string(),
-                            };
-                            if let Err(err) = jobs_data.save_status(status, name) {
-                                // if we can't save save status for some reason, just log
-                                error!("failed to save failed job '{name}' status: {err}");
+                    if let Some(needs) = needs {
+                        match deps_finished(name, &deps, needs) {
+                            Ok(true) => job.state = self.start_job(name, jobs_data).await,
+                            Ok(false) => {}
+                            Err(err) => {
+                                *status = JobStatus::Finished {
+                                    exit_code: None,
+                                    message: err.to_string(),
+                                };
+                                if let Err(err) = jobs_data.save_status(status, name) {
+                                    // if we can't save save status for some reason, just log
+                                    error!("failed to save failed job '{name}' status: {err}");
+                                }
                             }
                         }
+                    } else {
+                        job.state = self.start_job(name, jobs_data).await
                     }
                 }
             }
@@ -339,7 +343,7 @@ impl Monitor {
 fn deps_finished(
     name: &str,
     deps: &HashMap<String, Job>,
-    needs: &mut [String],
+    needs: &[String],
 ) -> Result<bool, Report> {
     for needed_name in needs {
         match &deps
@@ -448,7 +452,7 @@ mod tests {
         JobConfig {
             body: "".to_string(),
             restart: RestartPolicy::Never,
-            needs: vec![],
+            needs: None,
         }
     }
 
@@ -504,7 +508,7 @@ mod tests {
                 JobConfig {
                     body: "different".to_string(),
                     restart: RestartPolicy::Never,
-                    needs: vec![],
+                    needs: Some(vec![]),
                 },
             )
             .await
@@ -665,7 +669,7 @@ mod tests {
                 JobConfig {
                     body: "".to_string(),
                     restart: RestartPolicy::Never,
-                    needs: vec!["invalid_dependency".to_string()],
+                    needs: Some(vec!["invalid_dependency".to_string()]),
                 },
             )
             .await?;
@@ -680,7 +684,7 @@ mod tests {
                 JobConfig {
                     body: "".to_string(),
                     restart: RestartPolicy::Never,
-                    needs: vec!["test_job".to_string()],
+                    needs: Some(vec!["test_job".to_string()]),
                 },
             )
             .await?;
@@ -753,7 +757,7 @@ mod tests {
                 JobConfig {
                     body: "".to_string(),
                     restart: RestartPolicy::Never,
-                    needs: vec!["failed_job".to_string()],
+                    needs: Some(vec!["failed_job".to_string()]),
                 },
             )
             .await?;
@@ -828,7 +832,7 @@ mod tests {
                         backoff_base_ms: 0,
                         max_retries: None,
                     }),
-                    needs: vec![],
+                    needs: None,
                 },
             )
             .await?;

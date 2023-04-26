@@ -47,7 +47,7 @@ pub trait Plugin {
     /// Returns blockchain staking status.
     fn staking_status(&self) -> Result<StakingStatus>;
 
-    /// Generates keys on node
+    /// Generates keys on the node.
     fn generate_keys(&self) -> Result<()>;
 
     /// Call custom blockchain method by `name`, that gets String param as input and returns String as well.

@@ -405,7 +405,7 @@ mod tests {
                         backoff_base_ms: 500,
                         max_retries: Some(3),
                     }),
-                    needs: vec!["needed".to_string()],
+                    needs: Some(vec!["needed".to_string()]),
                 }),
             )
             .return_once(|_, _| Ok(()));
