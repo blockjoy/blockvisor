@@ -63,7 +63,7 @@ async fn apply_firewall_config_with(config: Config, runner: impl UfwRunner) -> R
 struct RuleArgs<'a> {
     policy: &'a str,
     direction: &'a str,
-    protocol: &'a str,
+    protocol: Option<String>,
     ips: &'a str,
     port: Option<String>, // no port means - no port argument passed at all i.e. rule apply for all ports
     name: &'a str,
@@ -73,12 +73,18 @@ impl<'a> RuleArgs<'a> {
     fn from_rules(rules: &'a [Rule]) -> Vec<Self> {
         let mut rule_args = Vec::default();
         for rule in rules.iter().rev() {
-            let proto = rule.protocol.as_ref();
+            let proto = rule.protocol.as_ref().and_then(|proto| {
+                if &Protocol::Both != proto {
+                    Some(variant_to_string(proto).to_string())
+                } else {
+                    None
+                }
+            });
             if rule.ports.is_empty() {
                 rule_args.push(Self {
                     policy: variant_to_string(&rule.action),
                     direction: variant_to_string(&rule.direction),
-                    protocol: variant_to_string(proto.unwrap_or(&Protocol::Both)),
+                    protocol: proto,
                     ips: rule.ips.as_ref().map_or("any", |ip| ip.as_str()),
                     port: None,
                     name: rule.name.as_str(),
@@ -88,7 +94,7 @@ impl<'a> RuleArgs<'a> {
                     rule_args.push(Self {
                         policy: variant_to_string(&rule.action),
                         direction: variant_to_string(&rule.direction),
-                        protocol: variant_to_string(proto.unwrap_or(&Protocol::Both)),
+                        protocol: proto.clone(),
                         ips: rule.ips.as_ref().map_or("any", |ip| ip.as_str()),
                         port: Some(port.to_string()),
                         name: rule.name.as_str(),
@@ -100,14 +106,11 @@ impl<'a> RuleArgs<'a> {
     }
 
     fn into(&self) -> Vec<&str> {
-        let mut args = vec![
-            self.policy,
-            self.direction,
-            "proto",
-            self.protocol,
-            "from",
-            self.ips,
-        ];
+        let mut args = vec![self.policy, self.direction, "from", self.ips];
+        if let Some(proto) = &self.protocol {
+            args.push("proto");
+            args.push(proto.as_str());
+        }
         if let Some(port) = &self.port {
             args.push("port");
             args.push(port.as_str());
@@ -255,17 +258,7 @@ mod tests {
         let mut mock_runner = MockTestRunner::new();
         expect_with_args(
             &mut mock_runner,
-            &[
-                "--dry-run",
-                "allow",
-                "out",
-                "proto",
-                "both",
-                "from",
-                "any",
-                "port",
-                "7",
-            ],
+            &["--dry-run", "allow", "out", "from", "any", "port", "7"],
         );
         expect_with_args(
             &mut mock_runner,
@@ -273,8 +266,6 @@ mod tests {
                 "--dry-run",
                 "allow",
                 "out",
-                "proto",
-                "both",
                 "from",
                 "any",
                 "comment",
@@ -287,10 +278,10 @@ mod tests {
                 "--dry-run",
                 "allow",
                 "in",
-                "proto",
-                "tcp",
                 "from",
                 "ip.is.validated.before",
+                "proto",
+                "tcp",
                 "port",
                 "144",
                 "comment",
@@ -303,10 +294,10 @@ mod tests {
                 "--dry-run",
                 "allow",
                 "in",
-                "proto",
-                "tcp",
                 "from",
                 "ip.is.validated.before",
+                "proto",
+                "tcp",
                 "port",
                 "77",
                 "comment",
@@ -319,8 +310,6 @@ mod tests {
                 "--dry-run",
                 "allow",
                 "out",
-                "proto",
-                "both",
                 "from",
                 "any",
                 "port",
@@ -337,23 +326,21 @@ mod tests {
 
         expect_with_args(
             &mut mock_runner,
-            &["allow", "out", "proto", "both", "from", "any", "port", "7"],
+            &["allow", "out", "from", "any", "port", "7"],
         );
         expect_with_args(
             &mut mock_runner,
-            &[
-                "allow", "out", "proto", "both", "from", "any", "comment", "no ports",
-            ],
+            &["allow", "out", "from", "any", "comment", "no ports"],
         );
         expect_with_args(
             &mut mock_runner,
             &[
                 "allow",
                 "in",
-                "proto",
-                "tcp",
                 "from",
                 "ip.is.validated.before",
+                "proto",
+                "tcp",
                 "port",
                 "144",
                 "comment",
@@ -365,10 +352,10 @@ mod tests {
             &[
                 "allow",
                 "in",
-                "proto",
-                "tcp",
                 "from",
                 "ip.is.validated.before",
+                "proto",
+                "tcp",
                 "port",
                 "77",
                 "comment",
@@ -378,7 +365,7 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
-                "allow", "out", "proto", "both", "from", "any", "port", "7", "comment", "rule A",
+                "allow", "out", "from", "any", "port", "7", "comment", "rule A",
             ],
         );
 
