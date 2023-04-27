@@ -322,13 +322,23 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn call_method(&self, id: Uuid, method: &str, param: &str) -> Result<String> {
+    pub async fn call_method(
+        &self,
+        id: Uuid,
+        method: &str,
+        param: &str,
+        reload_plugin: bool,
+    ) -> Result<String> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
             .ok_or_else(|| id_not_found(id))?
             .write()
             .await;
+
+        if reload_plugin {
+            node.reload_plugin().await?;
+        }
         node.babel_engine.call_method(method, param).await
     }
 

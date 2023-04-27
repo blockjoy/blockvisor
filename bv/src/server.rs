@@ -347,7 +347,7 @@ where
 
         let value = self
             .nodes
-            .call_method(id, &request.method, &request.param)
+            .call_method(id, &request.method, &request.param, true)
             .await
             .map_err(|e| Status::unknown(e.to_string()))?;
 

@@ -233,6 +233,15 @@ impl<P: Pal + Debug> Node<P> {
         self.data.save(&self.paths.registry).await
     }
 
+    /// Read script content and update plugin with metadata
+    pub async fn reload_plugin(&mut self) -> Result<()> {
+        let script =
+            fs::read_to_string(Paths::script_file_path(&self.paths.registry, self.data.id)).await?;
+        self.metadata = rhai_plugin::read_metadata(&script)?;
+        self.babel_engine
+            .update_plugin(|engine| RhaiPlugin::new(&script, engine))
+    }
+
     /// Starts the node.
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
