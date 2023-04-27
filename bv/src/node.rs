@@ -501,6 +501,8 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(self))]
     pub async fn delete(self) -> Result<()> {
         self.machine.delete().await?;
+        let _ = fs::remove_file(Paths::script_file_path(&self.paths.registry, self.data.id)).await;
+        let _ = fs::remove_file(&self.paths.plugin_data).await;
         self.data.delete(&self.paths.registry).await
     }
 
