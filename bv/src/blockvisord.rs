@@ -29,6 +29,7 @@ use uuid::Uuid;
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const INFO_UPDATE_INTERVAL: Duration = Duration::from_secs(30);
+const ENV_BV_STANDALONE_MODE: &str = "BV_STANDALONE";
 
 lazy_static::lazy_static! {
     pub static ref BV_HOST_METRICS_COUNTER: Counter = register_counter!("bv.periodic.host.metrics.calls");
@@ -126,16 +127,20 @@ where
                 .await?
                 .run();
 
-        let _ = tokio::join!(
-            internal_api_server_future,
-            external_api_client_future,
-            mqtt_notification_future,
-            nodes_recovery_future,
-            node_updates_future,
-            node_metrics_future,
-            host_metrics_future,
-            self_updater_future
-        );
+        if std::env::var(ENV_BV_STANDALONE_MODE).is_ok() {
+            let _ = internal_api_server_future.await;
+        } else {
+            let _ = tokio::join!(
+                internal_api_server_future,
+                external_api_client_future,
+                mqtt_notification_future,
+                nodes_recovery_future,
+                node_updates_future,
+                node_metrics_future,
+                host_metrics_future,
+                self_updater_future
+            );
+        }
         info!("Stopping...");
         // store fresh config before exit since service urls could change
         self.config.read().await.save(&bv_root).await?;
