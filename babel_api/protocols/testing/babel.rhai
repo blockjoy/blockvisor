@@ -108,11 +108,6 @@ fn generate_keys() {
     return;
 }
 
-fn generate_keys(ignore) {
-    generate_keys();
-    ""
-}
-
 fn stop_babelsup(param) {
     run_sh("systemctl stop babelsup");
     for line in run_sh("ps -e|grep babel").split("\n") {

@@ -9,7 +9,7 @@
 /// Engine methods that implementation needs to interact with node via BV are sent as `NodeRequest`.
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{node_connection::BabelConnection, node_data::NodeProperties, with_retry};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use babel_api::{
     engine::{JobConfig, JobStatus},
     metadata::KeysConfig,
@@ -22,7 +22,6 @@ use std::{
     fmt::Debug,
     fs,
     path::{Path, PathBuf},
-    str::FromStr,
 };
 use tokio::select;
 use tonic::Status;
@@ -176,20 +175,31 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
 
     /// This function calls babel by sending a blockchain command using the specified method name.
     #[instrument(skip(self), fields(id = % self.node_id, name = name.to_string()), err, ret(Debug))]
-    pub async fn call_method<T>(&mut self, name: &str, param: &str) -> Result<T>
-    where
-        T: FromStr + Debug,
-        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
-    {
-        let method_name = name.to_owned();
-        let method_param = param.to_owned();
-        let value = self
-            .on_plugin(move |plugin| plugin.call_custom_method(&method_name, &method_param))
-            .await?;
-        value
-            .trim()
-            .parse()
-            .context(format!("Could not parse {name} response: {value}"))
+    pub async fn call_method(&mut self, name: &str, param: &str) -> Result<String> {
+        Ok(match name {
+            "init" => {
+                self.init(serde_json::from_str(param)?).await?;
+                Default::default()
+            }
+            "height" => self.height().await?.to_string(),
+            "block_age" => self.block_age().await?.to_string(),
+            "name" => self.name().await?,
+            "address" => self.address().await?,
+            "consensus" => self.consensus().await?.to_string(),
+            "application_status" => serde_json::to_string(&self.application_status().await?)?,
+            "sync_status" => serde_json::to_string(&self.sync_status().await?)?,
+            "staking_status" => serde_json::to_string(&self.staking_status().await?)?,
+            "generate_keys" => {
+                self.generate_keys().await?;
+                Default::default()
+            }
+            _ => {
+                let method_name = name.to_owned();
+                let method_param = param.to_owned();
+                self.on_plugin(move |plugin| plugin.call_custom_method(&method_name, &method_param))
+                    .await?
+            }
+        })
     }
 
     /// Returns the methods that are supported by this blockchain. Calling any method on this
@@ -775,36 +785,41 @@ mod tests {
             .return_once(|_| Ok(Response::new(())));
         // from custom_method
         babel_mock
+            .expect_run_sh()
+            .once()
+            .withf(|req| req.get_ref() == "dummy_name")
+            .returning(|req| Ok(Response::new(req.into_inner())));
+        babel_mock
             .expect_start_job()
             .withf(|req| {
                 let (name, config) = req.get_ref();
-                name == "name" && config.body == "param"
+                name == "custom_name" && config.body == "param"
             })
             .return_once(|_| Ok(Response::new(())));
         babel_mock
             .expect_stop_job()
-            .withf(|req| req.get_ref() == "name")
+            .withf(|req| req.get_ref() == "custom_name")
             .return_once(|_| Ok(Response::new(())));
         babel_mock
             .expect_job_status()
-            .withf(|req| req.get_ref() == "name")
+            .withf(|req| req.get_ref() == "custom_name")
             .return_once(|_| Ok(Response::new(JobStatus::Running)));
         babel_mock
             .expect_run_jrpc()
             .withf(|req| {
                 let (name, param) = req.get_ref();
-                name == "name" && param == "param"
+                name == "custom_name" && param == "param"
             })
             .return_once(|_| Ok(Response::new("any".to_string())));
         babel_mock
             .expect_run_rest()
-            .withf(|req| req.get_ref() == "name")
+            .withf(|req| req.get_ref() == "custom_name")
             .return_once(|req| Ok(Response::new(req.into_inner())));
         babel_mock
             .expect_render_template()
             .withf(|req| {
                 let (template, out, params) = req.get_ref();
-                template == Path::new("name")
+                template == Path::new("custom_name")
                     && out == Path::new("param")
                     && params == r#"{"some_key":"some value"}"#
             })
@@ -821,8 +836,9 @@ mod tests {
             .return_once(|req| Ok(Response::new(req.into_inner())));
         babel_mock
             .expect_run_sh()
+            .once()
             .withf(|req| req.get_ref() == "dummy_name")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .returning(|req| Ok(Response::new(req.into_inner())));
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "dummy address")
@@ -866,11 +882,12 @@ mod tests {
             )]))
             .await?;
         assert_eq!(
+            "dummy_name",
+            test_env.engine.call_method("name", "param").await?
+        );
+        assert_eq!(
             "custom plugin data",
-            test_env
-                .engine
-                .call_method::<String>("name", "param")
-                .await?
+            test_env.engine.call_method("custom_name", "param").await?
         );
         assert_eq!(
             "custom plugin data",

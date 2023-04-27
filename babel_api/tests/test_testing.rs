@@ -68,6 +68,5 @@ fn test_testing() -> anyhow::Result<()> {
     assert_eq!(StakingStatus::Staking, plugin.staking_status()?);
     plugin.generate_keys()?;
     assert_eq!(1, plugin.metadata()?.requirements.vcpu_count);
-    assert_eq!("", plugin.call_custom_method("generate_keys", "param")?);
     Ok(())
 }
