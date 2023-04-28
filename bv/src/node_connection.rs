@@ -23,7 +23,7 @@ pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECTION_SWITCH_TIMEOUT: Duration = Duration::from_secs(1);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
