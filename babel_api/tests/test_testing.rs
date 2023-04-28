@@ -17,8 +17,12 @@ fn test_testing() -> anyhow::Result<()> {
         .returning(|_| Ok(JobStatus::Running));
     babel
         .expect_run_jrpc()
-        .with(predicate::eq("http://localhost:4467/"), predicate::always())
-        .returning(|_, _| {
+        .with(
+            predicate::eq("http://localhost:4467/"),
+            predicate::always(),
+            predicate::always(),
+        )
+        .returning(|_, _, _| {
             Ok(r#"
             {"result": {
                 "height": 77,
@@ -31,8 +35,10 @@ fn test_testing() -> anyhow::Result<()> {
         });
     babel
         .expect_run_rest()
-        .returning(|_| Ok(Default::default()));
-    babel.expect_run_sh().returning(|_| Ok(Default::default()));
+        .returning(|_, _| Ok(Default::default()));
+    babel
+        .expect_run_sh()
+        .returning(|_, _| Ok(Default::default()));
     babel
         .expect_sanitize_sh_param()
         .returning(|input| Ok(input.to_string()));

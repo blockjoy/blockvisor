@@ -8,7 +8,11 @@
 /// and then result is sent back with `tokio::sync::oneshot`, see `handle_node_req`. That's why all
 /// Engine methods that implementation needs to interact with node via BV are sent as `NodeRequest`.
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
-use crate::{node_connection::BabelConnection, node_data::NodeProperties, with_retry};
+use crate::{
+    node_connection::{BabelConnection, RPC_REQUEST_TIMEOUT},
+    node_data::NodeProperties,
+    with_retry,
+};
 use anyhow::{anyhow, bail, Result};
 use babel_api::{
     engine::{JobConfig, JobStatus},
@@ -17,6 +21,7 @@ use babel_api::{
 };
 use bv_utils::run_flag::RunFlag;
 use futures_util::StreamExt;
+use std::time::Duration;
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
@@ -24,7 +29,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::select;
-use tonic::Status;
+use tonic::{Request, Status};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -292,37 +297,49 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
     async fn handle_node_req(&mut self, req: NodeRequest) {
         let babel_client = self.babel_connection.babel_client().await;
         match req {
-            NodeRequest::RunSh { body, response_tx } => {
+            NodeRequest::RunSh {
+                body,
+                timeout,
+                response_tx,
+            } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => {
-                        with_retry_on_conn_error!(babel_client.run_sh(body.clone()))
-                            .map_err(|err| self.handle_connection_errors(err))
-                            .map(|v| v.into_inner())
-                    }
+                    Ok(babel_client) => with_retry_on_conn_error!(babel_client.run_sh(
+                        with_timeout(body.clone(), timeout.unwrap_or(RPC_REQUEST_TIMEOUT))
+                    ))
+                    .map_err(|err| self.handle_connection_errors(err))
+                    .map(|v| v.into_inner()),
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::RunRest { url, response_tx } => {
+            NodeRequest::RunRest {
+                url,
+                timeout,
+                response_tx,
+            } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => {
-                        with_retry_on_conn_error!(babel_client.run_rest(url.clone()))
-                            .map_err(|err| self.handle_connection_errors(err))
-                            .map(|v| v.into_inner())
-                    }
+                    Ok(babel_client) => with_retry_on_conn_error!(babel_client.run_rest(
+                        with_timeout(url.clone(), timeout.unwrap_or(RPC_REQUEST_TIMEOUT))
+                    ))
+                    .map_err(|err| self.handle_connection_errors(err))
+                    .map(|v| v.into_inner()),
                     Err(err) => Err(err),
                 });
             }
             NodeRequest::RunJrpc {
                 host,
                 method,
+                timeout,
                 response_tx,
             } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => with_retry_on_conn_error!(
-                        babel_client.run_jrpc((host.clone(), method.clone()))
-                    )
-                    .map_err(|err| self.handle_connection_errors(err))
-                    .map(|v| v.into_inner()),
+                    Ok(babel_client) => {
+                        with_retry_on_conn_error!(babel_client.run_jrpc(with_timeout(
+                            (host.clone(), method.clone()),
+                            timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
+                        )))
+                        .map_err(|err| self.handle_connection_errors(err))
+                        .map(|v| v.into_inner())
+                    }
                     Err(err) => Err(err),
                 });
             }
@@ -396,6 +413,12 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
     }
 }
 
+fn with_timeout<T>(args: T, timeout: Duration) -> Request<T> {
+    let mut req = Request::new(args);
+    req.set_timeout(timeout);
+    req
+}
+
 /// Engine trait implementation. For methods that require interaction with async BV code, it translate
 /// function into message that is sent to BV thread and synchronously waits for the response.
 #[derive(Debug, Clone)]
@@ -425,14 +448,17 @@ enum NodeRequest {
     RunJrpc {
         host: String,
         method: String,
+        timeout: Option<Duration>,
         response_tx: ResponseTx<Result<String>>,
     },
     RunRest {
         url: String,
+        timeout: Option<Duration>,
         response_tx: ResponseTx<Result<String>>,
     },
     RunSh {
         body: String,
+        timeout: Option<Duration>,
         response_tx: ResponseTx<Result<String>>,
     },
     RenderTemplate {
@@ -472,29 +498,32 @@ impl babel_api::engine::Engine for Engine {
         response_rx.blocking_recv()?
     }
 
-    fn run_jrpc(&self, host: &str, method: &str) -> Result<String> {
+    fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> Result<String> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RunJrpc {
             host: host.to_string(),
             method: method.to_string(),
+            timeout,
             response_tx,
         })?;
         response_rx.blocking_recv()?
     }
 
-    fn run_rest(&self, url: &str) -> Result<String> {
+    fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<String> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RunRest {
             url: url.to_string(),
+            timeout,
             response_tx,
         })?;
         response_rx.blocking_recv()?
     }
 
-    fn run_sh(&self, body: &str) -> Result<String> {
+    fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<String> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RunSh {
             body: body.to_string(),
+            timeout,
             response_tx,
         })?;
         response_rx.blocking_recv()?
@@ -556,17 +585,14 @@ fn escape_sh_char(c: char) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node_connection::{BabelClient, DefaultTimeout};
     use crate::utils;
     use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
     use async_trait::async_trait;
     use babel_api::engine::{Engine, RestartPolicy};
-    use babel_api::{
-        babel::{babel_client::BabelClient, BlockchainKey},
-        metadata::BabelConfig,
-    };
+    use babel_api::{babel::BlockchainKey, metadata::BabelConfig};
     use mockall::*;
-    use tonic::transport::Channel;
     use tonic::{Request, Response, Streaming};
 
     mock! {
@@ -635,15 +661,15 @@ mod tests {
 
     impl Plugin for DummyPlugin {
         fn metadata(&self) -> Result<babel_api::metadata::BlockchainMetadata> {
-            self.engine.run_sh("metadata")?;
+            self.engine.run_sh("metadata", None)?;
             bail!("no metadata") // test also some error propagation
         }
         fn capabilities(&self) -> Vec<String> {
-            self.engine.run_sh("capabilities").unwrap();
+            self.engine.run_sh("capabilities", None).unwrap();
             vec!["some_method".to_string()]
         }
         fn has_capability(&self, _name: &str) -> bool {
-            self.engine.run_sh("has_capability").unwrap();
+            self.engine.run_sh("has_capability", None).unwrap();
             true
         }
         fn init(&self, secret_keys: &HashMap<String, String>) -> Result<()> {
@@ -655,37 +681,37 @@ mod tests {
             Ok(())
         }
         fn height(&self) -> Result<u64> {
-            self.engine.run_sh("height")?;
+            self.engine.run_sh("height", None)?;
             Ok(7)
         }
         fn block_age(&self) -> Result<u64> {
-            self.engine.run_sh("block_age")?;
+            self.engine.run_sh("block_age", None)?;
             Ok(77)
         }
         fn name(&self) -> Result<String> {
-            self.engine.run_sh("dummy_name")
+            self.engine.run_sh("dummy_name", None)
         }
         fn address(&self) -> Result<String> {
-            self.engine.run_sh("dummy address")
+            self.engine.run_sh("dummy address", None)
         }
         fn consensus(&self) -> Result<bool> {
-            self.engine.run_sh("consensus")?;
+            self.engine.run_sh("consensus", None)?;
             Ok(true)
         }
         fn application_status(&self) -> Result<ApplicationStatus> {
-            self.engine.run_sh("application_status")?;
+            self.engine.run_sh("application_status", None)?;
             Ok(ApplicationStatus::Disabled)
         }
         fn sync_status(&self) -> Result<SyncStatus> {
-            self.engine.run_sh("sync_status")?;
+            self.engine.run_sh("sync_status", None)?;
             Ok(SyncStatus::Syncing)
         }
         fn staking_status(&self) -> Result<StakingStatus> {
-            self.engine.run_sh("staking_status")?;
+            self.engine.run_sh("staking_status", None)?;
             Ok(StakingStatus::Staked)
         }
         fn generate_keys(&self) -> Result<()> {
-            self.engine.run_sh("generate_keys")?;
+            self.engine.run_sh("generate_keys", None)?;
             Ok(())
         }
         fn call_custom_method(&self, name: &str, param: &str) -> Result<String> {
@@ -699,8 +725,8 @@ mod tests {
             )?;
             self.engine.stop_job(name)?;
             self.engine.job_status(name)?;
-            self.engine.run_jrpc(name, param)?;
-            self.engine.run_rest(name)?;
+            self.engine.run_jrpc(name, param, None)?;
+            self.engine.run_rest(name, None)?;
             self.engine.render_template(
                 Path::new(name),
                 Path::new(param),
@@ -712,12 +738,12 @@ mod tests {
     }
 
     struct TestConnection {
-        client: BabelClient<Channel>,
+        client: BabelClient,
     }
 
     #[async_trait]
     impl BabelConnection for TestConnection {
-        async fn babel_client(&mut self) -> Result<&mut BabelClient<Channel>> {
+        async fn babel_client(&mut self) -> Result<&mut BabelClient> {
             Ok(&mut self.client)
         }
 
@@ -740,7 +766,10 @@ mod tests {
             fs::create_dir_all(&tmp_root)?;
             let data_path = tmp_root.join("data");
             let connection = TestConnection {
-                client: babel_api::babel::babel_client::BabelClient::new(test_channel(&tmp_root)),
+                client: babel_api::babel::babel_client::BabelClient::with_interceptor(
+                    test_channel(&tmp_root),
+                    DefaultTimeout,
+                ),
             };
             let engine = BabelEngine::new(
                 Uuid::new_v4(),

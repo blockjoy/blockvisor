@@ -5,7 +5,7 @@ use babel_api::{
     engine::{JobConfig, JobStatus},
     metadata::{firewall, BabelConfig, KeysConfig},
 };
-use eyre::{bail, eyre, Report, Result};
+use eyre::{bail, eyre, Context, ContextCompat, Report, Result};
 use serde_json::json;
 use std::{
     mem,
@@ -389,33 +389,71 @@ impl<J, P> BabelService<J, P> {
     }
 
     async fn handle_jrpc(&self, request: Request<(String, String)>) -> Result<String> {
+        let timeout = extract_timeout(&request);
         let (host, method) = request.into_inner();
-        Ok(self
+        let mut req_builder = self
             .post(host)
-            .json(&json!({ "jsonrpc": "2.0", "id": 0, "method": method }))
-            .send()
-            .await?
-            .text()
-            .await?)
+            .json(&json!({ "jsonrpc": "2.0", "id": 0, "method": method }));
+        if let Ok(timeout) = timeout {
+            req_builder = req_builder.timeout(timeout);
+        }
+        Ok(req_builder.send().await?.text().await?)
     }
 
     async fn handle_rest(&self, request: Request<String>) -> Result<String> {
+        let timeout = extract_timeout(&request);
         let url = request.into_inner();
-        Ok(self.get(url).send().await?.text().await?)
+        let mut req_builder = self.get(url);
+        if let Ok(timeout) = timeout {
+            req_builder = req_builder.timeout(timeout);
+        }
+        Ok(req_builder.send().await?.text().await?)
     }
 
     async fn handle_sh(&self, request: Request<String>) -> Result<String> {
+        let timeout = extract_timeout(&request);
         let body = request.into_inner();
         let args = vec!["-c", &body];
-        let output = tokio::process::Command::new("sh")
+        let cmd_future = tokio::process::Command::new("sh")
+            .kill_on_drop(true)
             .args(args)
-            .output()
-            .await?;
-
+            .output();
+        let output = if let Ok(timeout) = timeout {
+            tokio::time::timeout(timeout, cmd_future).await?
+        } else {
+            cmd_future.await
+        }?;
         if !output.status.success() {
             bail!("Failed to run command `{body}`, got output `{output:?}`")
         }
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+}
+
+/// Extract request timeout value from "grpc-timeout" header. See [tonic::Request::set_timeout](https://docs.rs/tonic/latest/tonic/struct.Request.html#method.set_timeout).
+/// Units are translated according to [gRPC Spec](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests).
+fn extract_timeout<T>(req: &Request<T>) -> Result<Duration> {
+    let timeout = req
+        .metadata()
+        .get("grpc-timeout")
+        .with_context(|| "grpc-timeout header not set")?
+        .to_str()?;
+    if !timeout.is_empty() {
+        let (value, unit) = timeout.split_at(timeout.len() - 1);
+        let value = value
+            .parse::<u64>()
+            .with_context(|| format!("invalid timeout value: {value}"))?;
+        match unit {
+            "H" => Ok(Duration::from_secs(value * 3600)),
+            "M" => Ok(Duration::from_secs(value * 60)),
+            "S" => Ok(Duration::from_secs(value)),
+            "m" => Ok(Duration::from_millis(value)),
+            "u" => Ok(Duration::from_micros(value)),
+            "n" => Ok(Duration::from_nanos(value)),
+            _ => bail!("invalid unit: {unit}"),
+        }
+    } else {
+        bail!("empty timeout value")
     }
 }
 
@@ -552,6 +590,20 @@ mod tests {
             BabelStatus::Ready(rx),
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn test_extract_timeout() -> Result<()> {
+        let mut req = Request::new("text".to_string());
+        assert_eq!(
+            "grpc-timeout header not set",
+            extract_timeout(&req).unwrap_err().to_string()
+        );
+        req.set_timeout(Duration::from_secs(7));
+        assert_eq!(Duration::from_secs(7), extract_timeout(&req)?);
+        req.set_timeout(Duration::from_nanos(77));
+        assert_eq!(Duration::from_nanos(77), extract_timeout(&req)?);
+        Ok(())
     }
 
     #[tokio::test]

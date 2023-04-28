@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 /// Plugin engin must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -13,13 +14,13 @@ pub trait Engine {
     fn job_status(&self, job_name: &str) -> Result<JobStatus>;
 
     /// Execute Jrpc request to the current blockchain and return its response as json string.
-    fn run_jrpc(&self, host: &str, method: &str) -> Result<String>;
+    fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> Result<String>;
 
     /// Execute a Rest request to the current blockchain and return its response as json string.
-    fn run_rest(&self, url: &str) -> Result<String>;
+    fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<String>;
 
     /// Run Sh script on the blockchain VM and return its stdout as string.
-    fn run_sh(&self, body: &str) -> Result<String>;
+    fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<String>;
 
     /// Allowing people to substitute arbitrary data into sh-commands is unsafe.
     /// Call this function over each value before passing it to `run_sh`. This function is deliberately more

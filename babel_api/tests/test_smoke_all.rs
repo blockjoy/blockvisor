@@ -16,11 +16,13 @@ pub fn rhai_smoke(path: &Path) -> anyhow::Result<BlockchainMetadata> {
         .returning(|_| Ok(JobStatus::Running));
     babel
         .expect_run_jrpc()
-        .returning(|_, _| Ok(Default::default()));
+        .returning(|_, _, _| Ok(Default::default()));
     babel
         .expect_run_rest()
-        .returning(|_| Ok(Default::default()));
-    babel.expect_run_sh().returning(|_| Ok(Default::default()));
+        .returning(|_, _| Ok(Default::default()));
+    babel
+        .expect_run_sh()
+        .returning(|_, _| Ok(Default::default()));
     babel
         .expect_sanitize_sh_param()
         .returning(|input| Ok(input.to_string()));

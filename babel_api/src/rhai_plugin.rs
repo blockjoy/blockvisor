@@ -4,18 +4,19 @@ use crate::{
     metadata::BlockchainMetadata,
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use rhai;
 use rhai::{
     serde::{from_dynamic, to_dynamic},
-    Dynamic, ImmutableString, AST,
+    Dynamic, AST,
 };
+use std::time::Duration;
 use std::{collections::HashMap, path::Path, sync::Arc};
 
 #[derive(Debug)]
 pub struct RhaiPlugin<E> {
     babel_engine: Arc<E>,
-    ast: rhai::AST,
+    ast: AST,
     rhai_engine: rhai::Engine,
 }
 
@@ -64,56 +65,68 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
     /// register all Babel engine methods
     fn init_rhai_engine(&mut self) {
         let babel_engine = self.babel_engine.clone();
-        self.rhai_engine.register_fn(
-            "start_job",
-            move |job_name: ImmutableString, job_config: Dynamic| {
-                into_rhai_result(
-                    babel_engine.start_job(job_name.as_str(), from_dynamic(&job_config)?),
-                )
-            },
-        );
-        let babel_engine = self.babel_engine.clone();
         self.rhai_engine
-            .register_fn("stop_job", move |job_name: ImmutableString| {
-                into_rhai_result(babel_engine.stop_job(job_name.as_str()))
+            .register_fn("start_job", move |job_name: &str, job_config: Dynamic| {
+                into_rhai_result(babel_engine.start_job(job_name, from_dynamic(&job_config)?))
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
-            .register_fn("job_status", move |job_name: ImmutableString| {
-                to_dynamic(into_rhai_result(
-                    babel_engine.job_status(job_name.as_str()),
-                )?)
-            });
-        let babel_engine = self.babel_engine.clone();
-        self.rhai_engine.register_fn(
-            "run_jrpc",
-            move |host: ImmutableString, method: ImmutableString| {
-                into_rhai_result(babel_engine.run_jrpc(host.as_str(), method.as_str()))
-            },
-        );
-        let babel_engine = self.babel_engine.clone();
-        self.rhai_engine
-            .register_fn("run_rest", move |url: ImmutableString| {
-                into_rhai_result(babel_engine.run_rest(url.as_str()))
+            .register_fn("stop_job", move |job_name: &str| {
+                into_rhai_result(babel_engine.stop_job(job_name))
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
-            .register_fn("run_sh", move |body: ImmutableString| {
-                into_rhai_result(babel_engine.run_sh(body.as_str()))
+            .register_fn("job_status", move |job_name: &str| {
+                to_dynamic(into_rhai_result(babel_engine.job_status(job_name))?)
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
-            .register_fn("sanitize_sh_param", move |param: ImmutableString| {
-                into_rhai_result(babel_engine.sanitize_sh_param(param.as_str()))
+            .register_fn("run_jrpc", move |host: &str, method: &str, timeout: i64| {
+                let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
+                into_rhai_result(babel_engine.run_jrpc(
+                    host,
+                    method,
+                    Some(Duration::from_secs(timeout)),
+                ))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("run_jrpc", move |host: &str, method: &str| {
+                into_rhai_result(babel_engine.run_jrpc(host, method, None))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("run_rest", move |url: &str, timeout: i64| {
+                let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
+                into_rhai_result(babel_engine.run_rest(url, Some(Duration::from_secs(timeout))))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn("run_rest", move |url: &str| {
+            into_rhai_result(babel_engine.run_rest(url, None))
+        });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("run_sh", move |body: &str, timeout: i64| {
+                let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
+                into_rhai_result(babel_engine.run_sh(body, Some(Duration::from_secs(timeout))))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn("run_sh", move |body: &str| {
+            into_rhai_result(babel_engine.run_sh(body, None))
+        });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("sanitize_sh_param", move |param: &str| {
+                into_rhai_result(babel_engine.sanitize_sh_param(param))
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn(
             "render_template",
-            move |template: ImmutableString, output: ImmutableString, params: ImmutableString| {
+            move |template: &str, output: &str, params: &str| {
                 into_rhai_result(babel_engine.render_template(
                     Path::new(&template.to_string()),
                     Path::new(&output.to_string()),
-                    params.as_str(),
+                    params,
                 ))
             },
         );
@@ -128,8 +141,8 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
-            .register_fn("save_data", move |value: ImmutableString| {
-                into_rhai_result(babel_engine.save_data(value.as_str()))
+            .register_fn("save_data", move |value: &str| {
+                into_rhai_result(babel_engine.save_data(value))
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("load_data", move || {
@@ -138,7 +151,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
 
         // register other utils
         self.rhai_engine
-            .register_fn("parse_json", move |json: ImmutableString| {
+            .register_fn("parse_json", move |json: &str| {
                 rhai::Engine::new().parse_json(json, true)
             });
     }
@@ -243,9 +256,9 @@ mod tests {
             fn start_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
             fn stop_job(&self, job_name: &str) -> Result<()>;
             fn job_status(&self, job_name: &str) -> Result<JobStatus>;
-            fn run_jrpc(&self, host: &str, method: &str) -> Result<String>;
-            fn run_rest(&self, url: &str) -> Result<String>;
-            fn run_sh(&self, body: &str) -> Result<String>;
+            fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> Result<String>;
+            fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<String>;
+            fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<String>;
             fn sanitize_sh_param(&self, param: &str) -> Result<String>;
             fn render_template(
                 &self,
@@ -279,9 +292,9 @@ mod tests {
             "functionC".to_string(),
         ];
         expected_capabilities.sort();
-        let mut capabilites = plugin.capabilities();
-        capabilites.sort();
-        assert_eq!(expected_capabilities, capabilites);
+        let mut capabilities = plugin.capabilities();
+        capabilities.sort();
+        assert_eq!(expected_capabilities, capabilities);
         assert!(!plugin.has_capability("function_a"));
         assert!(plugin.has_capability("function_b"));
         Ok(())
@@ -378,8 +391,11 @@ mod tests {
         stop_job("test_job_name");
         out += "|" + job_status("test_job_name");
         out += "|" + run_jrpc("host", "method");
+        out += "|" + run_jrpc("host", "method", 1);
         out += "|" + run_rest("url");
+        out += "|" + run_rest("url", 2);
         out += "|" + run_sh("body");
+        out += "|" + run_sh("body", 3);
         out += "|" + sanitize_sh_param("sh param");
         render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"}.to_json());
         out += "|" + node_params().to_json().to_string(); 
@@ -419,16 +435,42 @@ mod tests {
             });
         babel
             .expect_run_jrpc()
-            .with(predicate::eq("host"), predicate::eq("method"))
-            .return_once(|_, _| Ok("jrpc_response".to_string()));
+            .with(
+                predicate::eq("host"),
+                predicate::eq("method"),
+                predicate::eq(None),
+            )
+            .return_once(|_, _, _| Ok("jrpc_response".to_string()));
+        babel
+            .expect_run_jrpc()
+            .with(
+                predicate::eq("host"),
+                predicate::eq("method"),
+                predicate::eq(Some(Duration::from_secs(1))),
+            )
+            .return_once(|_, _, _| Ok("jrpc_with_timeout_response".to_string()));
         babel
             .expect_run_rest()
-            .with(predicate::eq("url"))
-            .return_once(|_| Ok("rest_response".to_string()));
+            .with(predicate::eq("url"), predicate::eq(None))
+            .return_once(|_, _| Ok("rest_response".to_string()));
+        babel
+            .expect_run_rest()
+            .with(
+                predicate::eq("url"),
+                predicate::eq(Some(Duration::from_secs(2))),
+            )
+            .return_once(|_, _| Ok("rest_with_timeout_response".to_string()));
         babel
             .expect_run_sh()
-            .with(predicate::eq("body"))
-            .return_once(|_| Ok("sh_response".to_string()));
+            .with(predicate::eq("body"), predicate::eq(None))
+            .return_once(|_, _| Ok("sh_response".to_string()));
+        babel
+            .expect_run_sh()
+            .with(
+                predicate::eq("body"),
+                predicate::eq(Some(Duration::from_secs(3))),
+            )
+            .return_once(|_, _| Ok("sh_with_timeout_response".to_string()));
         babel
             .expect_sanitize_sh_param()
             .with(predicate::eq("sh param"))
@@ -454,7 +496,7 @@ mod tests {
 
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
-            r#"json_as_param|#{"finished": #{"exit_code": 1, "message": "error msg"}}|jrpc_response|rest_response|sh_response|sh_sanitized|{"key_A":"value_A"}|loaded data"#,
+            r#"json_as_param|#{"finished": #{"exit_code": 1, "message": "error msg"}}|jrpc_response|jrpc_with_timeout_response|rest_response|rest_with_timeout_response|sh_response|sh_with_timeout_response|sh_sanitized|{"key_A":"value_A"}|loaded data"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
         );
         Ok(())
@@ -572,6 +614,7 @@ const METADATA = #{
         "*": "/*"
     },
 };
+fn any_function() {}
 "#;
         let meta_rust = BlockchainMetadata {
             node_version: "node_v".to_string(),

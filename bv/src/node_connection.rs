@@ -1,16 +1,21 @@
 use crate::{node::VSOCK_PATH, with_retry};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use async_trait::async_trait;
-use babel_api::babel::babel_client::BabelClient;
-use babel_api::babelsup::babel_sup_client::BabelSupClient;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tokio::{
     io::AsyncWriteExt,
     net::UnixStream,
     time::{sleep, timeout},
 };
-use tonic::transport::{Channel, Endpoint, Uri};
+use tonic::{
+    codegen::InterceptedService,
+    service::Interceptor,
+    transport::{Channel, Endpoint, Uri},
+    Request, Status,
+};
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -18,25 +23,43 @@ pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECTION_SWITCH_TIMEOUT: Duration = Duration::from_secs(1);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
+
+pub type BabelClient =
+    babel_api::babel::babel_client::BabelClient<InterceptedService<Channel, DefaultTimeout>>;
+pub type BabelSupClient = babel_api::babelsup::babel_sup_client::BabelSupClient<
+    InterceptedService<Channel, DefaultTimeout>,
+>;
 
 /// Abstract Babel connection for better testing.
 #[async_trait]
 pub trait BabelConnection {
     /// This function gets RPC client connected to babel.
-    async fn babel_client(&mut self) -> Result<&mut BabelClient<Channel>>;
+    async fn babel_client(&mut self) -> Result<&mut BabelClient>;
     /// Mark connection as broken, which meant it will be reestablished on next `babel_client` call.
     fn mark_broken(&mut self);
+}
+
+pub struct DefaultTimeout;
+
+impl Interceptor for DefaultTimeout {
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        if request.metadata().get("grpc-timeout").is_none() {
+            // set default timeout if not set yet
+            request.set_timeout(RPC_REQUEST_TIMEOUT);
+        }
+        Ok(request)
+    }
 }
 
 #[derive(Debug)]
 pub enum NodeConnectionState {
     Closed,
     Broken,
-    Babel(BabelClient<Channel>),
-    BabelSup(BabelSupClient<Channel>),
+    Babel(BabelClient),
+    BabelSup(BabelSupClient),
 }
 
 #[derive(Debug)]
@@ -82,7 +105,7 @@ impl NodeConnection {
     }
 
     /// This function gets gRPC client connected to babelsup. It reconnect to babelsup if necessary.
-    pub async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient<Channel>> {
+    pub async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient> {
         match &mut self.state {
             NodeConnectionState::Closed => {
                 bail!("Cannot change port to babelsup: node connection is closed")
@@ -105,7 +128,7 @@ impl NodeConnection {
 #[async_trait]
 impl BabelConnection for NodeConnection {
     /// This function gets RPC client connected to babel. It reconnect to babel if necessary.
-    async fn babel_client(&mut self) -> Result<&mut BabelClient<Channel>> {
+    async fn babel_client(&mut self) -> Result<&mut BabelClient> {
         match &mut self.state {
             NodeConnectionState::Closed => {
                 bail!("Cannot change port to babel: node connection is closed")
@@ -113,14 +136,17 @@ impl BabelConnection for NodeConnection {
             NodeConnectionState::Babel { .. } => {}
             NodeConnectionState::BabelSup { .. } | NodeConnectionState::Broken => {
                 debug!("Reconnecting to babel");
-                self.state = NodeConnectionState::Babel(BabelClient::new(
-                    create_channel(
-                        &self.socket_path,
-                        BABEL_VSOCK_PORT,
-                        CONNECTION_SWITCH_TIMEOUT,
-                    )
-                    .await?,
-                ));
+                self.state = NodeConnectionState::Babel(
+                    babel_api::babel::babel_client::BabelClient::with_interceptor(
+                        create_channel(
+                            &self.socket_path,
+                            BABEL_VSOCK_PORT,
+                            CONNECTION_SWITCH_TIMEOUT,
+                        )
+                        .await?,
+                        DefaultTimeout,
+                    ),
+                );
             }
         };
         if let NodeConnectionState::Babel(client) = &mut self.state {
@@ -143,13 +169,13 @@ fn build_socket_path(chroot_path: &Path, node_id: Uuid) -> PathBuf {
         .join("root")
         .join(VSOCK_PATH)
 }
-async fn connect_babelsup(
-    socket_path: &Path,
-    max_delay: Duration,
-) -> Result<BabelSupClient<Channel>> {
-    Ok(BabelSupClient::new(
-        create_channel(socket_path, BABEL_SUP_VSOCK_PORT, max_delay).await?,
-    ))
+async fn connect_babelsup(socket_path: &Path, max_delay: Duration) -> Result<BabelSupClient> {
+    Ok(
+        babel_api::babelsup::babel_sup_client::BabelSupClient::with_interceptor(
+            create_channel(socket_path, BABEL_SUP_VSOCK_PORT, max_delay).await?,
+            DefaultTimeout,
+        ),
+    )
 }
 
 async fn open_stream(socket_path: PathBuf, port: u32, max_delay: Duration) -> Result<UnixStream> {
@@ -235,7 +261,6 @@ async fn create_channel(
 ) -> Result<Channel> {
     let socket_path = socket_path.to_owned();
     Ok(Endpoint::from_static("http://[::]:50052")
-        .timeout(RPC_REQUEST_TIMEOUT)
         .connect_timeout(RPC_CONNECT_TIMEOUT)
         .connect_with_connector(tower::service_fn(move |_: Uri| {
             let socket_path = socket_path.clone();
