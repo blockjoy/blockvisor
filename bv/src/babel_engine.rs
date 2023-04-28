@@ -33,8 +33,12 @@ use tonic::{Request, Status};
 use tracing::instrument;
 use uuid::Uuid;
 
+lazy_static::lazy_static! {
+    static ref NON_RETRIABLE: Vec<tonic::Code> = vec![tonic::Code::Internal, tonic::Code::Cancelled];
+}
+
 #[macro_export]
-macro_rules! with_retry_on_conn_error {
+macro_rules! with_selective_retry {
     ($fun:expr) => {{
         const RPC_RETRY_MAX: u32 = 3;
         const RPC_BACKOFF_BASE_MSEC: u64 = 300;
@@ -42,7 +46,7 @@ macro_rules! with_retry_on_conn_error {
         loop {
             match $fun.await {
                 Ok(res) => break Ok(res),
-                Err(err) if err.code() != tonic::Code::Internal => {
+                Err(err) if !NON_RETRIABLE.contains(&err.code()) => {
                     if retry_count < RPC_RETRY_MAX {
                         retry_count += 1;
                         let backoff = RPC_BACKOFF_BASE_MSEC * 2u64.pow(retry_count);
@@ -303,9 +307,10 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
                 response_tx,
             } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => with_retry_on_conn_error!(babel_client.run_sh(
-                        with_timeout(body.clone(), timeout.unwrap_or(RPC_REQUEST_TIMEOUT))
-                    ))
+                    Ok(babel_client) => with_selective_retry!(babel_client.run_sh(with_timeout(
+                        body.clone(),
+                        timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
+                    )))
                     .map_err(|err| self.handle_connection_errors(err))
                     .map(|v| v.into_inner()),
                     Err(err) => Err(err),
@@ -317,9 +322,10 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
                 response_tx,
             } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => with_retry_on_conn_error!(babel_client.run_rest(
-                        with_timeout(url.clone(), timeout.unwrap_or(RPC_REQUEST_TIMEOUT))
-                    ))
+                    Ok(babel_client) => with_selective_retry!(babel_client.run_rest(with_timeout(
+                        url.clone(),
+                        timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
+                    )))
                     .map_err(|err| self.handle_connection_errors(err))
                     .map(|v| v.into_inner()),
                     Err(err) => Err(err),
@@ -332,14 +338,12 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
                 response_tx,
             } => {
                 let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => {
-                        with_retry_on_conn_error!(babel_client.run_jrpc(with_timeout(
-                            (host.clone(), method.clone()),
-                            timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
-                        )))
-                        .map_err(|err| self.handle_connection_errors(err))
-                        .map(|v| v.into_inner())
-                    }
+                    Ok(babel_client) => with_selective_retry!(babel_client.run_jrpc(with_timeout(
+                        (host.clone(), method.clone()),
+                        timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
+                    )))
+                    .map_err(|err| self.handle_connection_errors(err))
+                    .map(|v| v.into_inner()),
                     Err(err) => Err(err),
                 });
             }
