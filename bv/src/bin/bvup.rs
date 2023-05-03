@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
         let ip = get_ip_address(&cmd_args.ifa).with_context(|| "failed to get ip address")?;
         let host_info = HostInfo::collect()?;
 
-        let mut create = pb::ProvisionHostRequest {
+        let mut create = pb::HostServiceProvisionRequest {
             otp: cmd_args.otp.unwrap(),
             status: 0, // We use the setter to set this field for type-safety
             name: host_info.name,
@@ -81,10 +81,11 @@ async fn main() -> Result<()> {
             os_version: host_info.os_version,
             ip,
         };
-        create.set_status(pb::provision_host_request::ConnectionStatus::Online);
+        create.set_status(pb::HostConnectionStatus::Online);
 
         let mut client =
-            pb::hosts_client::HostsClient::connect(cmd_args.blockjoy_api_url.clone()).await?;
+            pb::host_service_client::HostServiceClient::connect(cmd_args.blockjoy_api_url.clone())
+                .await?;
 
         let host = client.provision(create).await?.into_inner();
 

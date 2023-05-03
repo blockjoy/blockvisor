@@ -133,7 +133,7 @@ where
 /// responses (think instead of block_height: 3 it will send block_height: aaaaaaaaaaaa). Even when
 /// this is the case we still want to send as many metrics to the api as possible, so after duly
 /// logging them, we ignore these failures.
-impl From<Metrics> for pb::NodeMetricsRequest {
+impl From<Metrics> for pb::MetricsServiceNodeRequest {
     fn from(metrics: Metrics) -> Self {
         let metrics = metrics
             .0
@@ -163,48 +163,48 @@ impl From<Metrics> for pb::NodeMetricsRequest {
     }
 }
 
-impl From<StakingStatus> for pb::node::StakingStatus {
+impl From<StakingStatus> for pb::StakingStatus {
     fn from(value: StakingStatus) -> Self {
         match value {
-            StakingStatus::Follower => pb::node::StakingStatus::Follower,
-            StakingStatus::Staked => pb::node::StakingStatus::Staked,
-            StakingStatus::Staking => pb::node::StakingStatus::Staking,
-            StakingStatus::Validating => pb::node::StakingStatus::Validating,
-            StakingStatus::Consensus => pb::node::StakingStatus::Consensus,
-            StakingStatus::Unstaked => pb::node::StakingStatus::Unstaked,
+            StakingStatus::Follower => pb::StakingStatus::Follower,
+            StakingStatus::Staked => pb::StakingStatus::Staked,
+            StakingStatus::Staking => pb::StakingStatus::Staking,
+            StakingStatus::Validating => pb::StakingStatus::Validating,
+            StakingStatus::Consensus => pb::StakingStatus::Consensus,
+            StakingStatus::Unstaked => pb::StakingStatus::Unstaked,
         }
     }
 }
 
-impl From<ApplicationStatus> for pb::node::NodeStatus {
+impl From<ApplicationStatus> for pb::NodeStatus {
     fn from(value: ApplicationStatus) -> Self {
         match value {
-            ApplicationStatus::Provisioning => pb::node::NodeStatus::Provisioning,
-            ApplicationStatus::Broadcasting => pb::node::NodeStatus::Broadcasting,
-            ApplicationStatus::Cancelled => pb::node::NodeStatus::Cancelled,
-            ApplicationStatus::Delegating => pb::node::NodeStatus::Delegating,
-            ApplicationStatus::Delinquent => pb::node::NodeStatus::Delinquent,
-            ApplicationStatus::Disabled => pb::node::NodeStatus::Disabled,
-            ApplicationStatus::Earning => pb::node::NodeStatus::Earning,
-            ApplicationStatus::Electing => pb::node::NodeStatus::Electing,
-            ApplicationStatus::Elected => pb::node::NodeStatus::Elected,
-            ApplicationStatus::Exported => pb::node::NodeStatus::Exported,
-            ApplicationStatus::Ingesting => pb::node::NodeStatus::Ingesting,
-            ApplicationStatus::Mining => pb::node::NodeStatus::Mining,
-            ApplicationStatus::Minting => pb::node::NodeStatus::Minting,
-            ApplicationStatus::Processing => pb::node::NodeStatus::Processing,
-            ApplicationStatus::Relaying => pb::node::NodeStatus::Relaying,
-            ApplicationStatus::Removed => pb::node::NodeStatus::Removed,
-            ApplicationStatus::Removing => pb::node::NodeStatus::Removing,
+            ApplicationStatus::Provisioning => pb::NodeStatus::Provisioning,
+            ApplicationStatus::Broadcasting => pb::NodeStatus::Broadcasting,
+            ApplicationStatus::Cancelled => pb::NodeStatus::Cancelled,
+            ApplicationStatus::Delegating => pb::NodeStatus::Delegating,
+            ApplicationStatus::Delinquent => pb::NodeStatus::Delinquent,
+            ApplicationStatus::Disabled => pb::NodeStatus::Disabled,
+            ApplicationStatus::Earning => pb::NodeStatus::Earning,
+            ApplicationStatus::Electing => pb::NodeStatus::Electing,
+            ApplicationStatus::Elected => pb::NodeStatus::Elected,
+            ApplicationStatus::Exported => pb::NodeStatus::Exported,
+            ApplicationStatus::Ingesting => pb::NodeStatus::Ingesting,
+            ApplicationStatus::Mining => pb::NodeStatus::Mining,
+            ApplicationStatus::Minting => pb::NodeStatus::Minting,
+            ApplicationStatus::Processing => pb::NodeStatus::Processing,
+            ApplicationStatus::Relaying => pb::NodeStatus::Relaying,
+            ApplicationStatus::Removed => pb::NodeStatus::Removed,
+            ApplicationStatus::Removing => pb::NodeStatus::Removing,
         }
     }
 }
 
-impl From<SyncStatus> for pb::node::SyncStatus {
+impl From<SyncStatus> for pb::SyncStatus {
     fn from(value: SyncStatus) -> Self {
         match value {
-            SyncStatus::Syncing => pb::node::SyncStatus::Synced,
-            SyncStatus::Synced => pb::node::SyncStatus::Synced,
+            SyncStatus::Syncing => pb::SyncStatus::Synced,
+            SyncStatus::Synced => pb::SyncStatus::Synced,
         }
     }
 }

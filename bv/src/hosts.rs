@@ -122,7 +122,7 @@ impl HostMetrics {
     }
 }
 
-impl pb::HostMetricsRequest {
+impl pb::MetricsServiceHostRequest {
     pub fn new(host_id: String, metrics: HostMetrics) -> Self {
         let metrics = pb::HostMetrics {
             used_cpu: Some(metrics.used_cpu),

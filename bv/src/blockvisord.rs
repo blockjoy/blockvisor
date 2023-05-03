@@ -275,11 +275,11 @@ where
                 }
 
                 let container_status = match status {
-                    NodeStatus::Running => pb::node::ContainerStatus::Running,
-                    NodeStatus::Stopped => pb::node::ContainerStatus::Stopped,
-                    NodeStatus::Failed => pb::node::ContainerStatus::Unspecified,
+                    NodeStatus::Running => pb::ContainerStatus::Running,
+                    NodeStatus::Stopped => pb::ContainerStatus::Stopped,
+                    NodeStatus::Failed => pb::ContainerStatus::Unspecified,
                 };
-                let mut update = pb::UpdateNodeRequest {
+                let mut update = pb::NodeServiceUpdateRequest {
                     id: node_id.to_string(),
                     container_status: None, // We use the setter to set this field for type-safety
                     address: address.clone(),
@@ -337,7 +337,7 @@ where
                     Self::wait_for_channel(run.clone(), endpoint).await?,
                     api::AuthToken(config.read().await.token),
                 );
-                let metrics: pb::NodeMetricsRequest = metrics.into();
+                let metrics: pb::MetricsServiceNodeRequest = metrics.into();
                 if let Err(e) = client.node(metrics).await {
                     error!("Could not send node metrics! `{e}`");
                 }
@@ -367,7 +367,7 @@ where
                         api::AuthToken(config.read().await.token),
                     );
                     metrics.set_all_gauges();
-                    let metrics = pb::HostMetricsRequest::new(host_id.clone(), metrics);
+                    let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
                     if let Err(e) = client.host(metrics).await {
                         error!("Could not send host metrics! `{e}`");
                     }
@@ -385,7 +385,7 @@ where
     // Send node info update to control plane
     async fn send_node_info_update(
         config: SharedConfig,
-        update: pb::UpdateNodeRequest,
+        update: pb::NodeServiceUpdateRequest,
     ) -> Result<()> {
         let mut client = api::NodesService::connect(config.read().await)
             .await

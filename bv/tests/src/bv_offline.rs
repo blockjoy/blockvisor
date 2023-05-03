@@ -276,12 +276,12 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: node_name.clone(),
                 image: Some(pb::ContainerImage {
                     protocol: "testing".to_string(),
-                    node_type: pb::node::NodeType::Validator.into(),
+                    node_type: pb::NodeType::Validator.into(),
                     node_version: "0.0.1".to_string(),
-                    status: pb::container_image::StatusName::Development.into(),
+                    status: pb::ContainerImageStatus::Development.into(),
                 }),
                 blockchain: "testing".to_string(),
-                node_type: pb::node::NodeType::Validator.into(),
+                node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.195".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 self_update: false,
@@ -309,12 +309,12 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: "some-new-name".to_string(),
                 image: Some(pb::ContainerImage {
                     protocol: "testing".to_string(),
-                    node_type: pb::node::NodeType::Validator.into(),
+                    node_type: pb::NodeType::Validator.into(),
                     node_version: "0.0.1".to_string(),
-                    status: pb::container_image::StatusName::Development.into(),
+                    status: pb::ContainerImageStatus::Development.into(),
                 }),
                 blockchain: "testing".to_string(),
-                node_type: pb::node::NodeType::Validator.into(),
+                node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.196".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 self_update: false,
@@ -342,12 +342,12 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: node_name.clone(),
                 image: Some(pb::ContainerImage {
                     protocol: "testing".to_string(),
-                    node_type: pb::node::NodeType::Validator.into(),
+                    node_type: pb::NodeType::Validator.into(),
                     node_version: "0.0.1".to_string(),
                     status: 1, // Development
                 }),
                 blockchain: "testing".to_string(),
-                node_type: pb::node::NodeType::Validator.into(),
+                node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.197".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 self_update: false,
@@ -375,12 +375,12 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: "some-new-name".to_string(),
                 image: Some(pb::ContainerImage {
                     protocol: "testing".to_string(),
-                    node_type: pb::node::NodeType::Validator.into(),
+                    node_type: pb::NodeType::Validator.into(),
                     node_version: "0.0.1".to_string(),
                     status: 1, // Development
                 }),
                 blockchain: "testing".to_string(),
-                node_type: pb::node::NodeType::Validator.into(),
+                node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.195".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 self_update: false,
@@ -455,7 +455,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             command: Some(pb::node_command::Command::Upgrade(pb::NodeUpgrade {
                 image: Some(pb::ContainerImage {
                     protocol: "testing".to_string(),
-                    node_type: pb::node::NodeType::Validator.into(),
+                    node_type: pb::NodeType::Validator.into(),
                     node_version: "0.0.2".to_string(),
                     status: 1, // Development
                 }),
@@ -516,7 +516,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     let server_future = async {
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(pb::commands_server::CommandsServer::new(commands_server))
+            .add_service(pb::command_service_server::CommandServiceServer::new(
+                commands_server,
+            ))
             .serve("0.0.0.0:8089".to_socket_addrs().unwrap().next().unwrap())
             .await
             .unwrap()
@@ -607,7 +609,7 @@ async fn test_discovery_on_connection_error() -> Result<()> {
     let server_future = async {
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(pb::discovery_server::DiscoveryServer::new(
+            .add_service(pb::discovery_service_server::DiscoveryServiceServer::new(
                 discovery_service,
             ))
             .serve("0.0.0.0:8091".to_socket_addrs().unwrap().next().unwrap())

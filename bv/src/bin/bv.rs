@@ -97,7 +97,7 @@ async fn process_host_command(config: Config, command: HostCommand) -> Result<()
         HostCommand::Update => {
             let info = HostInfo::collect()?;
             let mut client = HostsService::connect(config.clone()).await?;
-            let update = pb::UpdateHostRequest {
+            let update = pb::HostServiceUpdateRequest {
                 id: config.id,
                 name: Some(info.name),
                 version: Some(crate_version!().to_string()),

@@ -40,7 +40,7 @@ async fn test_bvup() {
     let server_future = async {
         Server::builder()
             .max_concurrent_streams(1)
-            .add_service(pb::hosts_server::HostsServer::new(server))
+            .add_service(pb::host_service_server::HostServiceServer::new(server))
             .serve("0.0.0.0:8082".to_socket_addrs().unwrap().next().unwrap())
             .await
             .unwrap()
@@ -88,24 +88,26 @@ async fn test_bv_service_e2e() {
     let email = "user1@example.com";
     let password = "user1pass";
 
-    let mut client = pb::users_client::UsersClient::connect(url).await.unwrap();
+    let mut client = pb::user_service_client::UserServiceClient::connect(url)
+        .await
+        .unwrap();
 
     println!("create user");
-    let create_user = pb::CreateUserRequest {
+    let create_user = pb::UserServiceCreateRequest {
         email: email.to_string(),
         first_name: "first".to_string(),
         last_name: "last".to_string(),
         password: password.to_string(),
     };
-    let resp: pb::CreateUserResponse = client.create(create_user).await.unwrap().into_inner();
+    let resp = client.create(create_user).await.unwrap().into_inner();
     println!("user created: {resp:?}");
     let user_id = resp.user.unwrap().id.parse().unwrap();
 
     println!("confirm user");
-    let mut client = pb::authentication_client::AuthenticationClient::connect(url)
+    let mut client = pb::auth_service_client::AuthServiceClient::connect(url)
         .await
         .unwrap();
-    let confirm_user = pb::ConfirmRegistrationRequest {};
+    let confirm_user = pb::AuthServiceConfirmRequest {};
     let refresh_token = token::TokenGenerator::create_refresh(user_id, "23942390".to_string());
     let register_token =
         token::TokenGenerator::create_register(user_id, "23ß357320".to_string(), email.to_string());
@@ -115,11 +117,11 @@ async fn test_bv_service_e2e() {
         .unwrap();
 
     println!("login user");
-    let login_user = pb::LoginUserRequest {
+    let login_user = pb::AuthServiceLoginRequest {
         email: email.to_string(),
         password: password.to_string(),
     };
-    let login: pb::LoginUserResponse = client.login(login_user).await.unwrap().into_inner();
+    let login = client.login(login_user).await.unwrap().into_inner();
     println!("user login: {login:?}");
     let login_auth: token::AuthClaim =
         token::TokenGenerator::from_encoded("1245456".to_string(), &login.token).unwrap();
@@ -148,16 +150,17 @@ async fn test_bv_service_e2e() {
         .stdout(predicate::str::contains("INSERT"));
 
     println!("create host provision");
-    let mut client = pb::host_provisions_client::HostProvisionsClient::connect(url)
+    let mut client = pb::host_provision_service_client::HostProvisionServiceClient::connect(url)
         .await
         .unwrap();
 
-    let provision_create = pb::CreateHostProvisionRequest {
-        ip_gateway: "216.18.214.193".to_string(),
+    let provision_create = pb::HostProvisionServiceCreateRequest {
         ip_range_from: "216.18.214.195".to_string(),
         ip_range_to: "216.18.214.206".to_string(),
+        ip_gateway: "216.18.214.193".to_string(),
+        org_id: None,
     };
-    let response: pb::CreateHostProvisionResponse = client
+    let response = client
         .create(with_auth(provision_create, &auth_token, &refresh_token))
         .await
         .unwrap()
@@ -197,12 +200,12 @@ async fn test_bv_service_e2e() {
     test_env::bv_run(&["start"], "blockvisor service started successfully", None);
 
     println!("get blockchain id");
-    let mut client = pb::blockchains_client::BlockchainsClient::connect(url)
+    let mut client = pb::blockchain_service_client::BlockchainServiceClient::connect(url)
         .await
         .unwrap();
 
-    let list_blockchains = pb::ListBlockchainsRequest {};
-    let list: pb::ListBlockchainsResponse = client
+    let list_blockchains = pb::BlockchainServiceListRequest {};
+    let list = client
         .list(with_auth(list_blockchains, &auth_token, &refresh_token))
         .await
         .unwrap()
@@ -210,14 +213,16 @@ async fn test_bv_service_e2e() {
     let blockchain = list.blockchains.first().unwrap();
     println!("got blockchain: {:?}", blockchain);
 
-    let mut node_client = pb::nodes_client::NodesClient::connect(url).await.unwrap();
+    let mut node_client = pb::node_service_client::NodeServiceClient::connect(url)
+        .await
+        .unwrap();
 
-    let node_create = pb::CreateNodeRequest {
+    let node_create = pb::NodeServiceCreateRequest {
         org_id: org_id.clone(),
         blockchain_id: blockchain.id.clone(),
         version: "0.0.1".to_string(),
-        node_type: pb::node::NodeType::Validator.into(),
-        properties: vec![pb::node::NodeProperty {
+        node_type: pb::NodeType::Validator.into(),
+        properties: vec![pb::NodeProperty {
             name: "TESTING_PARAM".to_string(),
             label: "testeronis".to_string(),
             description: "this param is for testing".to_string(),
@@ -227,14 +232,18 @@ async fn test_bv_service_e2e() {
             value: Some("I guess just some test value".to_string()),
         }],
         network: "".to_string(),
-        scheduler: Some(pb::NodeScheduler {
-            similarity: None,
-            resource: pb::node_scheduler::ResourceAffinity::LeastResources.into(),
+        placement: Some(pb::NodePlacement {
+            placement: Some(pb::node_placement::Placement::Scheduler(
+                pb::NodeScheduler {
+                    similarity: None,
+                    resource: pb::node_scheduler::ResourceAffinity::LeastResources.into(),
+                },
+            )),
         }),
         allow_ips: vec![],
         deny_ips: vec![],
     };
-    let resp: pb::CreateNodeResponse = node_client
+    let resp = node_client
         .create(with_auth(node_create, &auth_token, &refresh_token))
         .await
         .unwrap()
@@ -247,21 +256,21 @@ async fn test_bv_service_e2e() {
     println!("list created node, should be auto-started");
     test_env::bv_run(&["node", "status", &node_id], "Running", None);
 
-    let mut client = pb::commands_client::CommandsClient::connect(url)
+    let mut client = pb::command_service_client::CommandServiceClient::connect(url)
         .await
         .unwrap();
 
     println!("check node keys");
     test_env::bv_run(&["node", "keys", &node_id], "first", None);
 
-    let node_stop = pb::CreateCommandRequest {
-        command: Some(pb::create_command_request::Command::StopNode(
+    let node_stop = pb::CommandServiceCreateRequest {
+        command: Some(pb::command_service_create_request::Command::StopNode(
             pb::StopNodeCommand {
                 node_id: node_id.clone(),
             },
         )),
     };
-    let resp: pb::CreateCommandResponse = client
+    let resp = client
         .create(with_auth(node_stop, &auth_token, &refresh_token))
         .await
         .unwrap()
@@ -273,7 +282,7 @@ async fn test_bv_service_e2e() {
     println!("get node status");
     test_env::bv_run(&["node", "status", &node_id], "Stopped", None);
 
-    let node_delete = pb::DeleteNodeRequest {
+    let node_delete = pb::NodeServiceDeleteRequest {
         id: node_id.clone(),
     };
     node_client

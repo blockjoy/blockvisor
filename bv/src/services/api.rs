@@ -13,8 +13,9 @@ use babel_api::metadata::firewall;
 use base64::Engine;
 use metrics::{register_counter, Counter};
 use pb::{
-    commands_client::CommandsClient, discovery_client::DiscoveryClient, hosts_client::HostsClient,
-    metrics_client, node_command::Command, nodes_client,
+    command_service_client::CommandServiceClient, discovery_service_client::DiscoveryServiceClient,
+    host_service_client::HostServiceClient, metrics_service_client, node_command::Command,
+    node_service_client,
 };
 use std::{
     fmt::Debug,
@@ -29,7 +30,7 @@ use uuid::Uuid;
 
 #[allow(clippy::large_enum_variant)]
 pub mod pb {
-    tonic::include_proto!("v1");
+    tonic::include_proto!("blockjoy.v1");
 }
 
 const STATUS_OK: i32 = 0;
@@ -55,7 +56,8 @@ lazy_static::lazy_static! {
 #[derive(Clone)]
 pub struct AuthToken(pub String);
 
-pub type MetricsClient = metrics_client::MetricsClient<InterceptedService<Channel, AuthToken>>;
+pub type MetricsClient =
+    metrics_service_client::MetricsServiceClient<InterceptedService<Channel, AuthToken>>;
 
 impl Interceptor for AuthToken {
     fn call(&mut self, request: Request<()>) -> Result<Request<()>, Status> {
@@ -73,19 +75,19 @@ impl Interceptor for AuthToken {
 
 impl MetricsClient {
     pub fn with_auth(channel: Channel, token: AuthToken) -> Self {
-        metrics_client::MetricsClient::with_interceptor(channel, token)
+        metrics_service_client::MetricsServiceClient::with_interceptor(channel, token)
     }
 }
 
 pub struct CommandsService {
     token: String,
-    client: CommandsClient<Channel>,
+    client: CommandServiceClient<Channel>,
 }
 
 impl CommandsService {
     pub async fn connect(config: Config) -> Result<Self> {
         let url = config.blockjoy_api_url;
-        let client = CommandsClient::connect(url.clone())
+        let client = CommandServiceClient::connect(url.clone())
             .await
             .context(format!("Failed to connect to commands service at {url}"))?;
 
@@ -107,7 +109,7 @@ impl CommandsService {
     pub async fn get_pending_commands(&mut self, host_id: &str) -> Result<Vec<pb::Command>> {
         info!("Get pending commands");
 
-        let req = pb::PendingCommandsRequest {
+        let req = pb::CommandServicePendingRequest {
             host_id: host_id.to_string(),
             filter_type: None,
         };
@@ -179,7 +181,7 @@ impl CommandsService {
         exit_code: Option<i32>,
         response: Option<String>,
     ) -> Result<()> {
-        let req = pb::UpdateCommandRequest {
+        let req = pb::CommandServiceUpdateRequest {
             id: command_id,
             response,
             exit_code,
@@ -315,13 +317,13 @@ async fn process_node_command<P: Pal + Debug>(
 
 pub struct NodesService {
     token: String,
-    client: nodes_client::NodesClient<Channel>,
+    client: node_service_client::NodeServiceClient<Channel>,
 }
 
 impl NodesService {
     pub async fn connect(config: Config) -> Result<Self> {
         let url = config.blockjoy_api_url;
-        let client = nodes_client::NodesClient::connect(url.clone())
+        let client = node_service_client::NodeServiceClient::connect(url.clone())
             .await
             .with_context(|| format!("Failed to connect to nodes service at {url}"))?;
 
@@ -332,7 +334,7 @@ impl NodesService {
     }
 
     #[instrument(skip(self))]
-    pub async fn send_node_update(&mut self, update: pb::UpdateNodeRequest) -> Result<()> {
+    pub async fn send_node_update(&mut self, update: pb::NodeServiceUpdateRequest) -> Result<()> {
         self.client.update(with_auth(update, &self.token)).await?;
         Ok(())
     }
@@ -340,13 +342,13 @@ impl NodesService {
 
 pub struct DiscoveryService {
     token: String,
-    client: DiscoveryClient<Channel>,
+    client: DiscoveryServiceClient<Channel>,
 }
 
 impl DiscoveryService {
     pub async fn connect(config: Config) -> Result<Self> {
         let url = config.blockjoy_api_url;
-        let client = DiscoveryClient::connect(url.clone())
+        let client = DiscoveryServiceClient::connect(url.clone())
             .await
             .with_context(|| format!("Failed to connect to discovery service at {url}"))?;
 
@@ -357,8 +359,8 @@ impl DiscoveryService {
     }
 
     #[instrument(skip(self))]
-    pub async fn get_services(&mut self) -> Result<pb::ServicesResponse> {
-        let request = pb::ServicesRequest {};
+    pub async fn get_services(&mut self) -> Result<pb::DiscoveryServiceServicesResponse> {
+        let request = pb::DiscoveryServiceServicesRequest {};
         Ok(self
             .client
             .services(with_auth(request, &self.token))
@@ -369,13 +371,13 @@ impl DiscoveryService {
 
 pub struct HostsService {
     token: String,
-    client: HostsClient<Channel>,
+    client: HostServiceClient<Channel>,
 }
 
 impl HostsService {
     pub async fn connect(config: Config) -> Result<Self> {
         let url = config.blockjoy_api_url;
-        let client = HostsClient::connect(url.clone())
+        let client = HostServiceClient::connect(url.clone())
             .await
             .with_context(|| format!("Failed to connect to host service at {url}"))?;
 
@@ -388,8 +390,8 @@ impl HostsService {
     #[instrument(skip(self))]
     pub async fn update(
         &mut self,
-        request: pb::UpdateHostRequest,
-    ) -> Result<pb::UpdateHostResponse> {
+        request: pb::HostServiceUpdateRequest,
+    ) -> Result<pb::HostServiceUpdateResponse> {
         Ok(self
             .client
             .update(with_auth(request, &self.token))
@@ -422,7 +424,7 @@ impl From<pb::ContainerImage> for NodeImage {
     }
 }
 
-impl std::fmt::Display for pb::node::NodeType {
+impl std::fmt::Display for pb::NodeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = self.as_str_name();
         let s = s.strip_prefix("NODE_TYPE_").unwrap_or(s).to_lowercase();

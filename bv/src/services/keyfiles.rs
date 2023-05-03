@@ -11,7 +11,7 @@ use crate::{
 
 pub struct KeyService {
     token: String,
-    client: pb::key_files_client::KeyFilesClient<Channel>,
+    client: pb::key_file_service_client::KeyFileServiceClient<Channel>,
 }
 
 impl KeyService {
@@ -21,9 +21,10 @@ impl KeyService {
                 .blockjoy_keys_url
                 .ok_or_else(|| anyhow!("missing blockjoy_keys_url"))?
                 .clone();
-            let client = pb::key_files_client::KeyFilesClient::connect(url.to_string())
-                .await
-                .context(format!("Failed to connect to key service at {url}"))?;
+            let client =
+                pb::key_file_service_client::KeyFileServiceClient::connect(url.to_string())
+                    .await
+                    .context(format!("Failed to connect to key service at {url}"))?;
             Ok(Self {
                 token: config.token,
                 client,
@@ -33,16 +34,16 @@ impl KeyService {
     }
 
     pub async fn download_keys(&mut self, node_id: Uuid) -> Result<Vec<pb::Keyfile>> {
-        let req: pb::GetKeyFilesRequest = pb::GetKeyFilesRequest {
+        let req = pb::KeyFileServiceListRequest {
             node_id: node_id.to_string(),
         };
-        let resp = with_retry!(self.client.get(with_auth(req.clone(), &self.token)))?.into_inner();
+        let resp = with_retry!(self.client.list(with_auth(req.clone(), &self.token)))?.into_inner();
 
         Ok(resp.key_files)
     }
 
     pub async fn upload_keys(&mut self, node_id: Uuid, keys: Vec<pb::Keyfile>) -> Result<()> {
-        let req = pb::CreateKeyFilesRequest {
+        let req = pb::KeyFileServiceCreateRequest {
             node_id: node_id.to_string(),
             key_files: keys,
         };
