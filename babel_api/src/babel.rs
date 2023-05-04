@@ -1,6 +1,8 @@
-use crate::engine::{JobConfig, JobStatus};
-use crate::metadata::{firewall, BabelConfig, KeysConfig};
-use crate::utils::{Binary, BinaryStatus};
+use crate::{
+    engine::{HttpResponse, JobConfig, JobStatus, ShResponse},
+    metadata::{firewall, BabelConfig, KeysConfig},
+    utils::{Binary, BinaryStatus},
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -32,19 +34,19 @@ pub trait Babel {
         host: String,
         /// The name of the jRPC method that we are going to call into.
         method: String,
-    ) -> String;
+    ) -> HttpResponse;
 
     /// Send a Rest request to the current blockchain.
     fn run_rest(
         /// This is the url of the rest endpoint.
         url: String,
-    ) -> String;
+    ) -> HttpResponse;
 
     /// Send a Sh request to the current blockchain.
     fn run_sh(
         /// These are the arguments to the sh command that is executed for this `Method`.
         body: String,
-    ) -> String;
+    ) -> ShResponse;
 
     /// This function renders configuration template with provided `params`.
     /// It assume that file pointed by `template` argument exists.
@@ -64,7 +66,6 @@ pub trait Babel {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct BlockchainKey {
     pub name: String,
     #[serde(with = "serde_bytes")]

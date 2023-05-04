@@ -1,8 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::Path;
-use std::time::Duration;
+use std::{collections::HashMap, path::Path, time::Duration};
 
 /// Plugin engin must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -13,14 +11,15 @@ pub trait Engine {
     /// Get background job status by unique name.
     fn job_status(&self, job_name: &str) -> Result<JobStatus>;
 
-    /// Execute Jrpc request to the current blockchain and return its response as json string.
-    fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> Result<String>;
+    /// Execute Jrpc request to the current blockchain and return its http response. See `HttpResponse`.
+    fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>)
+        -> Result<HttpResponse>;
 
-    /// Execute a Rest request to the current blockchain and return its response as json string.
-    fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<String>;
+    /// Execute a Rest request to the current blockchain and return its http response. See `HttpResponse`.
+    fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<HttpResponse>;
 
-    /// Run Sh script on the blockchain VM and return its stdout as string.
-    fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<String>;
+    /// Run Sh script on the blockchain VM and return its response. See `ShResponse` for details.
+    fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<ShResponse>;
 
     /// Allowing people to substitute arbitrary data into sh-commands is unsafe.
     /// Call this function over each value before passing it to `run_sh`. This function is deliberately more
@@ -47,7 +46,6 @@ pub trait Engine {
 
 /// Long running job configuration
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct JobConfig {
     /// Sh script body.
     pub body: String,
@@ -70,7 +68,6 @@ pub enum RestartPolicy {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct RestartConfig {
     /// if job stay alive given amount of time (in miliseconds) backoff is reset
     pub backoff_timeout_ms: u64,
@@ -99,4 +96,24 @@ pub enum JobStatus {
     },
     /// Job was explicitly stopped.
     Stopped,
+}
+
+/// Http response.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct HttpResponse {
+    /// Http status code.
+    pub status_code: u16,
+    /// Response body as text.
+    pub body: String,
+}
+
+/// Sh script response.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ShResponse {
+    /// script exit code
+    pub exit_code: i32,
+    /// stdout
+    pub stdout: String,
+    /// stderr
+    pub stderr: String,
 }

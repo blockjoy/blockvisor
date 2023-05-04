@@ -83,36 +83,40 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         self.rhai_engine
             .register_fn("run_jrpc", move |host: &str, method: &str, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
-                into_rhai_result(babel_engine.run_jrpc(
+                to_dynamic(into_rhai_result(babel_engine.run_jrpc(
                     host,
                     method,
                     Some(Duration::from_secs(timeout)),
-                ))
+                ))?)
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_jrpc", move |host: &str, method: &str| {
-                into_rhai_result(babel_engine.run_jrpc(host, method, None))
+                to_dynamic(into_rhai_result(babel_engine.run_jrpc(host, method, None))?)
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_rest", move |url: &str, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
-                into_rhai_result(babel_engine.run_rest(url, Some(Duration::from_secs(timeout))))
+                to_dynamic(into_rhai_result(
+                    babel_engine.run_rest(url, Some(Duration::from_secs(timeout))),
+                )?)
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("run_rest", move |url: &str| {
-            into_rhai_result(babel_engine.run_rest(url, None))
+            to_dynamic(into_rhai_result(babel_engine.run_rest(url, None))?)
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_sh", move |body: &str, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
-                into_rhai_result(babel_engine.run_sh(body, Some(Duration::from_secs(timeout))))
+                to_dynamic(into_rhai_result(
+                    babel_engine.run_sh(body, Some(Duration::from_secs(timeout))),
+                )?)
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("run_sh", move |body: &str| {
-            into_rhai_result(babel_engine.run_sh(body, None))
+            to_dynamic(into_rhai_result(babel_engine.run_sh(body, None))?)
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
@@ -244,7 +248,9 @@ fn into_rhai_result<T>(result: Result<T>) -> std::result::Result<T, Box<rhai::Ev
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::{JobConfig, JobStatus, RestartConfig, RestartPolicy};
+    use crate::engine::{
+        HttpResponse, JobConfig, JobStatus, RestartConfig, RestartPolicy, ShResponse,
+    };
     use crate::metadata::{firewall, BabelConfig, NetConfiguration, NetType, Requirements};
     use anyhow::bail;
     use mockall::*;
@@ -256,9 +262,9 @@ mod tests {
             fn start_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
             fn stop_job(&self, job_name: &str) -> Result<()>;
             fn job_status(&self, job_name: &str) -> Result<JobStatus>;
-            fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> Result<String>;
-            fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<String>;
-            fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<String>;
+            fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> Result<HttpResponse>;
+            fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<HttpResponse>;
+            fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<ShResponse>;
             fn sanitize_sh_param(&self, param: &str) -> Result<String>;
             fn render_template(
                 &self,
@@ -390,15 +396,19 @@ mod tests {
         });
         stop_job("test_job_name");
         out += "|" + job_status("test_job_name");
-        out += "|" + run_jrpc("host", "method");
-        out += "|" + run_jrpc("host", "method", 1);
-        out += "|" + run_rest("url");
-        out += "|" + run_rest("url", 2);
-        out += "|" + run_sh("body");
-        out += "|" + run_sh("body", 3);
+        out += "|" + run_jrpc("host", "method").body;
+        out += "|" + run_jrpc("host", "method", 1).body;
+        let http_out = run_rest("url");
+        out += "|" + http_out.body;
+        out += "|" + http_out.status_code;
+        out += "|" + run_rest("url", 2).body;
+        out += "|" + run_sh("body").stdout;
+        let sh_out = run_sh("body", 3);
+        out += "|" + sh_out.stderr;
+        out += "|" + sh_out.exit_code;
         out += "|" + sanitize_sh_param("sh param");
         render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"}.to_json());
-        out += "|" + node_params().to_json().to_string(); 
+        out += "|" + node_params().to_json(); 
         save_data("some plugin data"); 
         out += "|" + load_data(); 
         out
@@ -440,7 +450,12 @@ mod tests {
                 predicate::eq("method"),
                 predicate::eq(None),
             )
-            .return_once(|_, _, _| Ok("jrpc_response".to_string()));
+            .return_once(|_, _, _| {
+                Ok(HttpResponse {
+                    status_code: 200,
+                    body: "jrpc_response".to_string(),
+                })
+            });
         babel
             .expect_run_jrpc()
             .with(
@@ -448,29 +463,56 @@ mod tests {
                 predicate::eq("method"),
                 predicate::eq(Some(Duration::from_secs(1))),
             )
-            .return_once(|_, _, _| Ok("jrpc_with_timeout_response".to_string()));
+            .return_once(|_, _, _| {
+                Ok(HttpResponse {
+                    status_code: 200,
+                    body: "jrpc_with_timeout_response".to_string(),
+                })
+            });
         babel
             .expect_run_rest()
             .with(predicate::eq("url"), predicate::eq(None))
-            .return_once(|_, _| Ok("rest_response".to_string()));
+            .return_once(|_, _| {
+                Ok(HttpResponse {
+                    status_code: 200,
+                    body: "rest_response".to_string(),
+                })
+            });
         babel
             .expect_run_rest()
             .with(
                 predicate::eq("url"),
                 predicate::eq(Some(Duration::from_secs(2))),
             )
-            .return_once(|_, _| Ok("rest_with_timeout_response".to_string()));
+            .return_once(|_, _| {
+                Ok(HttpResponse {
+                    status_code: 200,
+                    body: "rest_with_timeout_response".to_string(),
+                })
+            });
         babel
             .expect_run_sh()
             .with(predicate::eq("body"), predicate::eq(None))
-            .return_once(|_, _| Ok("sh_response".to_string()));
+            .return_once(|_, _| {
+                Ok(ShResponse {
+                    exit_code: 0,
+                    stdout: "sh_response".to_string(),
+                    stderr: "".to_string(),
+                })
+            });
         babel
             .expect_run_sh()
             .with(
                 predicate::eq("body"),
                 predicate::eq(Some(Duration::from_secs(3))),
             )
-            .return_once(|_, _| Ok("sh_with_timeout_response".to_string()));
+            .return_once(|_, _| {
+                Ok(ShResponse {
+                    exit_code: -1,
+                    stdout: "".to_string(),
+                    stderr: "sh_with_timeout_err".to_string(),
+                })
+            });
         babel
             .expect_sanitize_sh_param()
             .with(predicate::eq("sh param"))
@@ -496,7 +538,7 @@ mod tests {
 
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
-            r#"json_as_param|#{"finished": #{"exit_code": 1, "message": "error msg"}}|jrpc_response|jrpc_with_timeout_response|rest_response|rest_with_timeout_response|sh_response|sh_with_timeout_response|sh_sanitized|{"key_A":"value_A"}|loaded data"#,
+            r#"json_as_param|#{"finished": #{"exit_code": 1, "message": "error msg"}}|jrpc_response|jrpc_with_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|{"key_A":"value_A"}|loaded data"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
         );
         Ok(())

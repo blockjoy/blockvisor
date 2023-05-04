@@ -2,7 +2,7 @@ use crate::{jobs_manager::JobsManagerClient, ufw_wrapper::apply_firewall_config,
 use async_trait::async_trait;
 use babel_api::{
     babel::BlockchainKey,
-    engine::{JobConfig, JobStatus},
+    engine::{HttpResponse, JobConfig, JobStatus, ShResponse},
     metadata::{firewall, BabelConfig, KeysConfig},
 };
 use eyre::{bail, eyre, Context, ContextCompat, Report, Result};
@@ -284,19 +284,19 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
     async fn run_jrpc(
         &self,
         request: Request<(String, String)>,
-    ) -> Result<Response<String>, Status> {
+    ) -> Result<Response<HttpResponse>, Status> {
         Ok(Response::new(
             self.handle_jrpc(request).await.map_err(to_blockchain_err)?,
         ))
     }
 
-    async fn run_rest(&self, request: Request<String>) -> Result<Response<String>, Status> {
+    async fn run_rest(&self, request: Request<String>) -> Result<Response<HttpResponse>, Status> {
         Ok(Response::new(
             self.handle_rest(request).await.map_err(to_blockchain_err)?,
         ))
     }
 
-    async fn run_sh(&self, request: Request<String>) -> Result<Response<String>, Status> {
+    async fn run_sh(&self, request: Request<String>) -> Result<Response<ShResponse>, Status> {
         Ok(Response::new(
             self.handle_sh(request).await.map_err(to_blockchain_err)?,
         ))
@@ -388,7 +388,7 @@ impl<J, P> BabelService<J, P> {
         Ok(())
     }
 
-    async fn handle_jrpc(&self, request: Request<(String, String)>) -> Result<String> {
+    async fn handle_jrpc(&self, request: Request<(String, String)>) -> Result<HttpResponse> {
         let timeout = extract_timeout(&request);
         let (host, method) = request.into_inner();
         let mut req_builder = self
@@ -397,20 +397,28 @@ impl<J, P> BabelService<J, P> {
         if let Ok(timeout) = timeout {
             req_builder = req_builder.timeout(timeout);
         }
-        Ok(req_builder.send().await?.text().await?)
+        let resp = req_builder.send().await?;
+        Ok(HttpResponse {
+            status_code: resp.status().as_u16(),
+            body: resp.text().await?,
+        })
     }
 
-    async fn handle_rest(&self, request: Request<String>) -> Result<String> {
+    async fn handle_rest(&self, request: Request<String>) -> Result<HttpResponse> {
         let timeout = extract_timeout(&request);
         let url = request.into_inner();
         let mut req_builder = self.get(url);
         if let Ok(timeout) = timeout {
             req_builder = req_builder.timeout(timeout);
         }
-        Ok(req_builder.send().await?.text().await?)
+        let resp = req_builder.send().await?;
+        Ok(HttpResponse {
+            status_code: resp.status().as_u16(),
+            body: resp.text().await?,
+        })
     }
 
-    async fn handle_sh(&self, request: Request<String>) -> Result<String> {
+    async fn handle_sh(&self, request: Request<String>) -> Result<ShResponse> {
         let timeout = extract_timeout(&request);
         let body = request.into_inner();
         let args = vec!["-c", &body];
@@ -423,10 +431,13 @@ impl<J, P> BabelService<J, P> {
         } else {
             cmd_future.await
         }?;
-        if !output.status.success() {
-            bail!("Failed to run command `{body}`, got output `{output:?}`")
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        Ok(ShResponse {
+            exit_code: output.status.code().with_context(|| {
+                format!("Failed to run command `{body}`, got output `{output:?}`")
+            })?,
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        })
     }
 }
 
@@ -732,7 +743,7 @@ mod tests {
                     "jsonrpc": "2.0",
                     "method": "info_get",
                 }));
-            then.status(200)
+            then.status(201)
                 .header("Content-Type", "application/json")
                 .json_body(json!({
                         "id": 0,
@@ -752,9 +763,10 @@ mod tests {
 
         mock.assert();
         assert_eq!(
-            output,
+            output.body,
             r#"{"id":0,"jsonrpc":"2.0","result":{"info":{"address":"abc","height":123}}}"#
         );
+        assert_eq!(output.status_code, 201);
         Ok(())
     }
 
@@ -776,7 +788,8 @@ mod tests {
             .into_inner();
 
         mock.assert();
-        assert_eq!(output, r#"{"result":[1,2,3]}"#);
+        assert_eq!(output.body, r#"{"result":[1,2,3]}"#);
+        assert_eq!(output.status_code, 200);
         Ok(())
     }
 
@@ -798,7 +811,7 @@ mod tests {
             .into_inner();
 
         mock.assert();
-        assert_eq!(output, "{\"result\":[1,2,3]}");
+        assert_eq!(output.body, "{\"result\":[1,2,3]}");
         Ok(())
     }
 
@@ -807,10 +820,14 @@ mod tests {
         let service = build_babel_service_with_defaults().await?;
 
         let output = service
-            .run_sh(Request::new("echo \\\"make a toast\\\"".to_string()))
+            .run_sh(Request::new(
+                r#"echo "make a toast"; >&2 echo "error""#.to_string(),
+            ))
             .await?
             .into_inner();
-        assert_eq!(output, "\"make a toast\"\n");
+        assert_eq!(output.stdout, "make a toast\n");
+        assert_eq!(output.stderr, "error\n");
+        assert_eq!(output.exit_code, 0);
         Ok(())
     }
 

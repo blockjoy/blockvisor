@@ -57,7 +57,10 @@ const METADATA = #{
 const API_HOST = "http://localhost:4467/";
 
 fn init(keys) {
-    run_sh("echo 'noop for testing'");
+    let res = run_sh("echo 'noop for testing'");
+    if res.exit_code != 0  {
+        throw res;
+    }
     let param = sanitize_sh_param(node_params().TESTING_PARAM);
     start_job("echo", #{
         body: "echo \"Testing entry_point not configured, but parametrized with " + param + "!\"",
@@ -72,19 +75,19 @@ fn init(keys) {
 }
 
 fn height() {
-    parse_json(run_jrpc(global::API_HOST, "info_height")).result.height
+    parse_json(run_jrpc(global::API_HOST, "info_height").body).result.height
 }
 
 fn block_age() {
-    parse_json(run_jrpc(global::API_HOST, "info_block_age")).result.block_age
+    parse_json(run_jrpc(global::API_HOST, "info_block_age").body).result.block_age
 }
 
 fn name() {
-    parse_json(run_jrpc(global::API_HOST, "info_name")).result.name.to_string()
+    parse_json(run_jrpc(global::API_HOST, "info_name").body).result.name.to_string()
 }
 
 fn address() {
-    parse_json(run_jrpc(global::API_HOST, "peer_addr")).result.peer_addr.to_string()
+    parse_json(run_jrpc(global::API_HOST, "peer_addr").body).result.peer_addr.to_string()
 }
 
 fn consensus() {
@@ -110,7 +113,7 @@ fn generate_keys() {
 
 fn stop_babelsup(param) {
     run_sh("systemctl stop babelsup");
-    for line in run_sh("ps -e|grep babel").split("\n") {
+    for line in run_sh("ps -e|grep babel").stdout.split("\n") {
         let parts = line.split();
         if !parts.is_empty() {
             let pid = parts[0];
@@ -124,7 +127,7 @@ fn stop_babelsup(param) {
 }
 
 fn disable_babelsup(param) {
-    run_sh("systemctl disable babelsup")
+    run_sh("systemctl disable babelsup").stdout
 }
 
 fn info(param) {
@@ -132,7 +135,7 @@ fn info(param) {
     try {
         info = load_data()
     } catch {
-        info = parse_json(run_jrpc(global::API_HOST, "info_summary")).result.to_string();
+        info = parse_json(run_jrpc(global::API_HOST, "info_summary").body).result.to_string();
         save_data(info);
     };
     info

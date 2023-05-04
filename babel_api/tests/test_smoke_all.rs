@@ -1,4 +1,5 @@
 mod utils;
+use babel_api::engine::{HttpResponse, ShResponse};
 use babel_api::{engine::JobStatus, metadata::BlockchainMetadata, plugin::Plugin, rhai_plugin};
 use std::collections::HashMap;
 use std::fs;
@@ -14,15 +15,25 @@ pub fn rhai_smoke(path: &Path) -> anyhow::Result<BlockchainMetadata> {
     babel
         .expect_job_status()
         .returning(|_| Ok(JobStatus::Running));
-    babel
-        .expect_run_jrpc()
-        .returning(|_, _, _| Ok(Default::default()));
-    babel
-        .expect_run_rest()
-        .returning(|_, _| Ok(Default::default()));
-    babel
-        .expect_run_sh()
-        .returning(|_, _| Ok(Default::default()));
+    babel.expect_run_jrpc().returning(|_, _, _| {
+        Ok(HttpResponse {
+            status_code: 200,
+            body: Default::default(),
+        })
+    });
+    babel.expect_run_rest().returning(|_, _| {
+        Ok(HttpResponse {
+            status_code: 200,
+            body: Default::default(),
+        })
+    });
+    babel.expect_run_sh().returning(|_, _| {
+        Ok(ShResponse {
+            exit_code: 0,
+            stdout: Default::default(),
+            stderr: Default::default(),
+        })
+    });
     babel
         .expect_sanitize_sh_param()
         .returning(|input| Ok(input.to_string()));

@@ -17,7 +17,6 @@ pub trait BabelSup {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct SupervisorConfig {
     ///  if entry_point stay alive given amount of time (in miliseconds) backof is reset
     pub backoff_timeout_ms: u64,

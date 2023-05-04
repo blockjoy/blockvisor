@@ -15,7 +15,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use babel_api::{
-    engine::{JobConfig, JobStatus},
+    engine::{HttpResponse, JobConfig, JobStatus, ShResponse},
     metadata::KeysConfig,
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
@@ -453,17 +453,17 @@ enum NodeRequest {
         host: String,
         method: String,
         timeout: Option<Duration>,
-        response_tx: ResponseTx<Result<String>>,
+        response_tx: ResponseTx<Result<HttpResponse>>,
     },
     RunRest {
         url: String,
         timeout: Option<Duration>,
-        response_tx: ResponseTx<Result<String>>,
+        response_tx: ResponseTx<Result<HttpResponse>>,
     },
     RunSh {
         body: String,
         timeout: Option<Duration>,
-        response_tx: ResponseTx<Result<String>>,
+        response_tx: ResponseTx<Result<ShResponse>>,
     },
     RenderTemplate {
         template: PathBuf,
@@ -502,7 +502,12 @@ impl babel_api::engine::Engine for Engine {
         response_rx.blocking_recv()?
     }
 
-    fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> Result<String> {
+    fn run_jrpc(
+        &self,
+        host: &str,
+        method: &str,
+        timeout: Option<Duration>,
+    ) -> Result<HttpResponse> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RunJrpc {
             host: host.to_string(),
@@ -513,7 +518,7 @@ impl babel_api::engine::Engine for Engine {
         response_rx.blocking_recv()?
     }
 
-    fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<String> {
+    fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<HttpResponse> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RunRest {
             url: url.to_string(),
@@ -523,7 +528,7 @@ impl babel_api::engine::Engine for Engine {
         response_rx.blocking_recv()?
     }
 
-    fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<String> {
+    fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<ShResponse> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RunSh {
             body: body.to_string(),
@@ -637,15 +642,15 @@ mod tests {
             async fn run_jrpc(
                 &self,
                 request: Request<(String, String)>,
-            ) -> Result<Response<String>, Status>;
+            ) -> Result<Response<HttpResponse>, Status>;
             async fn run_rest(
                 &self,
                 request: Request<String>,
-            ) -> Result<Response<String>, Status>;
+            ) -> Result<Response<HttpResponse>, Status>;
             async fn run_sh(
                 &self,
                 request: Request<String>,
-            ) -> Result<Response<String>, Status>;
+            ) -> Result<Response<ShResponse>, Status>;
             async fn render_template(
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
@@ -693,10 +698,10 @@ mod tests {
             Ok(77)
         }
         fn name(&self) -> Result<String> {
-            self.engine.run_sh("dummy_name", None)
+            Ok(self.engine.run_sh("dummy_name", None)?.stdout)
         }
         fn address(&self) -> Result<String> {
-            self.engine.run_sh("dummy address", None)
+            Ok(self.engine.run_sh("dummy address", None)?.stdout)
         }
         fn consensus(&self) -> Result<bool> {
             self.engine.run_sh("consensus", None)?;
@@ -821,7 +826,13 @@ mod tests {
             .expect_run_sh()
             .once()
             .withf(|req| req.get_ref() == "dummy_name")
-            .returning(|req| Ok(Response::new(req.into_inner())));
+            .returning(|req| {
+                Ok(Response::new(ShResponse {
+                    exit_code: 0,
+                    stdout: req.into_inner(),
+                    stderr: "".to_string(),
+                }))
+            });
         babel_mock
             .expect_start_job()
             .withf(|req| {
@@ -843,11 +854,21 @@ mod tests {
                 let (name, param) = req.get_ref();
                 name == "custom_name" && param == "param"
             })
-            .return_once(|_| Ok(Response::new("any".to_string())));
+            .return_once(|_| {
+                Ok(Response::new(HttpResponse {
+                    status_code: 200,
+                    body: "any".to_string(),
+                }))
+            });
         babel_mock
             .expect_run_rest()
             .withf(|req| req.get_ref() == "custom_name")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(|req| {
+                Ok(Response::new(HttpResponse {
+                    status_code: 200,
+                    body: req.into_inner(),
+                }))
+            });
         babel_mock
             .expect_render_template()
             .withf(|req| {
@@ -859,51 +880,58 @@ mod tests {
             .return_once(|_| Ok(Response::new(())));
 
         // others
+        let return_request = |req: Request<String>| {
+            Ok(Response::new(ShResponse {
+                exit_code: 0,
+                stdout: req.into_inner(),
+                stderr: "".to_string(),
+            }))
+        };
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "height")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "block_age")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .once()
             .withf(|req| req.get_ref() == "dummy_name")
-            .returning(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "dummy address")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "consensus")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "application_status")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "sync_status")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "staking_status")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "capabilities")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "has_capability")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "metadata")
-            .return_once(|req| Ok(Response::new(req.into_inner())));
+            .return_once(return_request);
 
         let babel_server = test_env.start_test_server(babel_mock);
 

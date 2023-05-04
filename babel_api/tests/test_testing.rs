@@ -1,4 +1,5 @@
 mod utils;
+use babel_api::engine::{HttpResponse, ShResponse};
 use babel_api::plugin::{ApplicationStatus, StakingStatus, SyncStatus};
 use babel_api::{engine::JobStatus, plugin::Plugin, rhai_plugin};
 use mockall::*;
@@ -23,22 +24,32 @@ fn test_testing() -> anyhow::Result<()> {
             predicate::always(),
         )
         .returning(|_, _, _| {
-            Ok(r#"
-            {"result": {
-                "height": 77,
-                "block_age": 18,
-                "name": "node name",
-                "peer_addr": "peer/address" 
-            }}
-        "#
-            .to_string())
+            Ok(HttpResponse {
+                status_code: 200,
+                body: r#"
+                    {"result": {
+                        "height": 77,
+                        "block_age": 18,
+                        "name": "node name",
+                        "peer_addr": "peer/address" 
+                    }}
+                "#
+                .to_string(),
+            })
         });
-    babel
-        .expect_run_rest()
-        .returning(|_, _| Ok(Default::default()));
-    babel
-        .expect_run_sh()
-        .returning(|_, _| Ok(Default::default()));
+    babel.expect_run_rest().returning(|_, _| {
+        Ok(HttpResponse {
+            status_code: 200,
+            body: Default::default(),
+        })
+    });
+    babel.expect_run_sh().returning(|_, _| {
+        Ok(ShResponse {
+            exit_code: 0,
+            stdout: Default::default(),
+            stderr: Default::default(),
+        })
+    });
     babel
         .expect_sanitize_sh_param()
         .returning(|input| Ok(input.to_string()));

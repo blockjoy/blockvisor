@@ -1,4 +1,4 @@
-use babel_api::engine::{Engine, JobConfig, JobStatus};
+use babel_api::engine::{Engine, HttpResponse, JobConfig, JobStatus, ShResponse};
 use mockall::*;
 use std::{collections::HashMap, path::Path, time::Duration};
 
@@ -9,9 +9,9 @@ mock! {
         fn start_job(&self, job_name: &str, job_config: JobConfig) -> anyhow::Result<()>;
         fn stop_job(&self, job_name: &str) -> anyhow::Result<()>;
         fn job_status(&self, job_name: &str) -> anyhow::Result<JobStatus>;
-        fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> anyhow::Result<String>;
-        fn run_rest(&self, url: &str, timeout: Option<Duration>) -> anyhow::Result<String>;
-        fn run_sh(&self, body: &str, timeout: Option<Duration>) -> anyhow::Result<String>;
+        fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> anyhow::Result<HttpResponse>;
+        fn run_rest(&self, url: &str, timeout: Option<Duration>) -> anyhow::Result<HttpResponse>;
+        fn run_sh(&self, body: &str, timeout: Option<Duration>) -> anyhow::Result<ShResponse>;
         fn sanitize_sh_param(&self, param: &str) -> anyhow::Result<String>;
         fn render_template(
             &self,

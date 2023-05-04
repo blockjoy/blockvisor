@@ -30,7 +30,6 @@ pub fn check_firewall_rules(rules: &[firewall::Rule]) -> Result<()> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct BlockchainMetadata {
     /// A semver version of the blockchain node program.
     pub node_version: String,
@@ -56,7 +55,6 @@ pub struct BlockchainMetadata {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct BabelConfig {
     /// Path to mount data drive to.
     pub data_directory_mount_point: String,
@@ -67,7 +65,6 @@ pub struct BabelConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct Requirements {
     /// Virtual cores to share with VM.
     pub vcpu_count: usize,
@@ -86,7 +83,6 @@ pub enum NetType {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub struct NetConfiguration {
     /// Url for given blockchain network.
     pub url: String,
@@ -102,7 +98,6 @@ pub mod firewall {
 
     /// Single firewall rule.
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(rename_all = "snake_case")]
     pub struct Rule {
         /// Unique rule name.
         pub name: String,
@@ -120,7 +115,6 @@ pub mod firewall {
 
     /// Firewall configuration that is applied on node start.
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-    #[serde(rename_all = "snake_case")]
     pub struct Config {
         /// Option to disable firewall at all. Only for debugging purpose - use on your own risk!
         pub enabled: bool,

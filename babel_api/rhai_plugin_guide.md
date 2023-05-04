@@ -156,7 +156,10 @@ Functions listed below are required by BV to work properly.
 **Example:**
 ```rust
 fn init(keys) {
-    run_sh("echo 'some initialization step'");
+    let res = run_sh("echo 'some initialization step'");
+    if res.exit_code != 0  {
+      throw res;
+    }
     let param = sanitize_sh_param(node_params().TESTING_PARAM);
     start_job("echo", #{
         body: "echo \"Blockchain entry_point parametrized with " + param + "\"",
@@ -217,11 +220,30 @@ To make implementation of Babel Plugin interface possible, BV provides following
 - `stop_job(job_name)` - Stop background job with given unique name if running.
 - `job_status(job_name)` - Get background job status by unique name.
   <br>**Possible return values**: _pending_, _running_, _stopped_, _finished{exit_code, message}_
-- `run_jrpc(host, method)` - Execute Jrpc request to the current blockchain and return its response as json string (with default 15s timeout).
+- `run_jrpc(host, method)` - Execute Jrpc request to the current blockchain and return http response (with default 15s timeout) as following structure:
+```
+{ 
+  status_code: i32,
+  body: String,
+}
+```
 - `run_jrpc(host, method, timeout)` - Same as above, but with custom request timeout (in seconds).
-- `run_rest(url)` - Execute a Rest request to the current blockchain and return its response as json string (with default 15s timeout).
+- `run_rest(url)` - Execute a Rest request to the current blockchain and return its http response (with default 15s timeout) as following structure:
+```
+{ 
+  status_code: i32,
+  body: String,
+}
+```
 - `run_rest(url, timeout)` - Same as above, but with custom request timeout (in seconds).
-- `run_sh(body)` - Run Sh script on the blockchain VM and return its stdout as string (with default 15s timeout).
+- `run_sh(body)` - Run Sh script on the blockchain VM and return its result (with default 15s timeout). Result is following structure:
+```
+{ 
+  exit_code: i32,
+  stdout: String,
+  stderr: String,
+}
+```
 - `run_sh(body, timeout)` - Same as above, but with custom execution timeout (in seconds).
 - `sanitize_sh_param(param)` - Allowing people to substitute arbitrary data into sh-commands is unsafe.
   Call this function over each value before passing it to `run_sh`. This function is deliberately more
@@ -325,14 +347,18 @@ fn some_function() {
 
 ## Handling JRPC Output
 
-`run_jrpc` function always return JSON serialized to string. Use `parse_json` to easily access json fields.
+`run_jrpc` function return raw http response. Use `parse_json` on response body, to easily access json fields.
 
 **Example:**
 ```rust
 const API_HOST = "http://localhost:4467/";
 
 fn block_age() {
-    parse_json(run_jrpc(global::API_HOST, "info_block_age")).result.block_age
+    let resp = run_jrpc(global::API_HOST, "info_block_age");
+    if resp.status_code != 200 {
+      throw resp;
+    }
+    parse_json(resp.body).result.block_age
 }
 ```
 
@@ -344,8 +370,12 @@ Hence, it is a good candidate for output mapping.
 **Example:**
 ```rust
 fn sync_status() {
-    let out = run_sh("get_sync_status");
-    let status = switch out {
+    let res = run_sh("get_sync_status");
+    if res.exit_code != 0 {
+        debug(res.stderr);
+        throw res;
+    }
+    let status = switch res.stdout {
         "0" => "synced",
         _ => "syncing",
     };
@@ -362,7 +392,12 @@ it should be sanitized with `sanitize_sh_param()`, to avoid malicious code injec
 ```rust
 fn custom_function(arg) {
   let user_param = sanitize_sh_param(node_params().USER_INPUT);
-  run_sh("echo '" + user_param + "'")
+  let res = run_sh("echo '" + user_param + "'");
+  if res.exit_code == 0 {
+    res.stdout
+  } else {
+    res.stderr
+  }
 }
 ```
 
