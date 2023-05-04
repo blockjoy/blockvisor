@@ -4,7 +4,7 @@ use crate::{
     node_data::{NodeData, NodeImage, NodeStatus},
     pal::{NetInterface, Pal},
     services::cookbook::{CookbookService, BABEL_PLUGIN_NAME},
-    utils::get_process_pid,
+    utils::{get_process_pid, with_timeout},
     with_retry, BV_VAR_PATH,
 };
 use anyhow::{bail, Context, Result};
@@ -36,6 +36,7 @@ const NODE_START_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+const FW_SETUP_TIMEOUT: Duration = Duration::from_secs(120);
 pub const REGISTRY_CONFIG_DIR: &str = "nodes";
 pub const FC_BIN_NAME: &str = "firecracker";
 const FC_BIN_PATH: &str = "usr/bin/firecracker";
@@ -283,12 +284,15 @@ impl<P: Pal + Debug> Node<P> {
             Err(e) => bail!(e),
         }
 
-        // setup firewall
-        let mut firewall_config = self.metadata.firewall.clone();
-        firewall_config
-            .rules
-            .append(&mut self.data.firewall_rules.clone());
-        with_retry!(babel_client.setup_firewall(firewall_config.clone()))?;
+        if !self.data.initialized {
+            // setup firewall, but only once
+            let mut firewall_config = self.metadata.firewall.clone();
+            firewall_config
+                .rules
+                .append(&mut self.data.firewall_rules.clone());
+            with_retry!(babel_client
+                .setup_firewall(with_timeout(firewall_config.clone(), FW_SETUP_TIMEOUT)))?;
+        }
 
         Ok(())
     }
@@ -377,12 +381,12 @@ impl<P: Pal + Debug> Node<P> {
         job_runner_path: &Path,
     ) -> Result<()> {
         // check and update job_runner
-        let (babel_bin, checksum) = Self::load_bin(job_runner_path).await?;
+        let (job_runner_bin, checksum) = Self::load_bin(job_runner_path).await?;
         let client = connection.babel_client().await?;
         let job_runner_status = with_retry!(client.check_job_runner(checksum))?.into_inner();
         if job_runner_status != babel_api::utils::BinaryStatus::Ok {
             info!("Invalid or missing JobRunner service on VM, installing new one");
-            with_retry!(client.upload_job_runner(tokio_stream::iter(babel_bin.clone())))?;
+            with_retry!(client.upload_job_runner(tokio_stream::iter(job_runner_bin.clone())))?;
         }
         Ok(())
     }

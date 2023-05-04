@@ -11,6 +11,7 @@
 use crate::{
     node_connection::{BabelConnection, RPC_REQUEST_TIMEOUT},
     node_data::NodeProperties,
+    utils::with_timeout,
     with_retry,
 };
 use anyhow::{anyhow, bail, Result};
@@ -29,7 +30,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::select;
-use tonic::{Request, Status};
+use tonic::Status;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -415,12 +416,6 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
         }
         .into()
     }
-}
-
-fn with_timeout<T>(args: T, timeout: Duration) -> Request<T> {
-    let mut req = Request::new(args);
-    req.set_timeout(timeout);
-    req
 }
 
 /// Engine trait implementation. For methods that require interaction with async BV code, it translate

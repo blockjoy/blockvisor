@@ -9,6 +9,7 @@ use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, Syste
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::time::sleep;
+use tonic::Request;
 use tracing::{debug, warn};
 
 #[macro_export]
@@ -142,6 +143,12 @@ pub fn semver_cmp(a: &str, b: &str) -> Ordering {
         (Err(_), Ok(_)) => Ordering::Less,
         (Err(_), Err(_)) => Ordering::Equal,
     }
+}
+
+pub fn with_timeout<T>(args: T, timeout: Duration) -> Request<T> {
+    let mut req = Request::new(args);
+    req.set_timeout(timeout);
+    req
 }
 
 #[cfg(test)]
