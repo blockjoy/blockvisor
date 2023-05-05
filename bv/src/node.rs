@@ -36,7 +36,8 @@ const NODE_START_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
-const FW_SETUP_TIMEOUT: Duration = Duration::from_secs(120);
+const FW_SETUP_TIMEOUT_SEC: u64 = 30;
+const FW_RULE_SETUP_TIMEOUT_SEC: u64 = 1;
 pub const REGISTRY_CONFIG_DIR: &str = "nodes";
 pub const FC_BIN_NAME: &str = "firecracker";
 const FC_BIN_PATH: &str = "usr/bin/firecracker";
@@ -290,8 +291,10 @@ impl<P: Pal + Debug> Node<P> {
             firewall_config
                 .rules
                 .append(&mut self.data.firewall_rules.clone());
-            with_retry!(babel_client
-                .setup_firewall(with_timeout(firewall_config.clone(), FW_SETUP_TIMEOUT)))?;
+            with_retry!(babel_client.setup_firewall(with_timeout(
+                firewall_config.clone(),
+                fw_setup_timeout(&firewall_config)
+            )))?;
         }
 
         Ok(())
@@ -515,7 +518,8 @@ impl<P: Pal + Debug> Node<P> {
         let mut firewall = self.metadata.firewall.clone();
         firewall.rules.append(&mut rules.clone());
         let babel_client = self.babel_engine.babel_connection.babel_client().await?;
-        with_retry!(babel_client.setup_firewall(firewall.clone()))?;
+        with_retry!(babel_client
+            .setup_firewall(with_timeout(firewall.clone(), fw_setup_timeout(&firewall))))?;
         self.data.firewall_rules = rules;
         self.data.save(&self.paths.registry).await
     }
@@ -636,4 +640,10 @@ impl<P: Pal + Debug> Node<P> {
         let metadata = rhai_plugin::read_metadata(&script)?;
         Ok((script, metadata))
     }
+}
+
+fn fw_setup_timeout(config: &firewall::Config) -> Duration {
+    Duration::from_secs(
+        FW_SETUP_TIMEOUT_SEC + FW_RULE_SETUP_TIMEOUT_SEC * config.rules.len() as u64,
+    )
 }

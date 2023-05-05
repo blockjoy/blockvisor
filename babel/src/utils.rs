@@ -242,8 +242,8 @@ mod tests {
             writeln!(cmd_file, "sleep infinity")?;
         }
 
-        let mut cmd = Command::new(&cmd_path);
-        cmd.args(["a", "b", "c"]);
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg(format!("{} a b c", cmd_path.display()));
         let child = cmd.spawn()?;
         let pid = child.id().unwrap();
         wait_for_process(&ctrl_file).await;

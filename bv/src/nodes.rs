@@ -26,6 +26,7 @@ use crate::{
 };
 
 pub const REGISTRY_CONFIG_FILENAME: &str = "nodes.json";
+const MAX_SUPPORTED_RULES: usize = 128;
 
 fn id_not_found(id: Uuid) -> anyhow::Error {
     anyhow!("Node with id `{}` not found", id)
@@ -95,6 +96,7 @@ impl<P: Pal + Debug> Nodes<P> {
         if self.node_ids.read().await.contains_key(&config.name) {
             bail!("Node with name `{}` exists", config.name);
         }
+        check_rules_count(config.rules.len())?;
 
         let ip = config
             .ip
@@ -266,6 +268,7 @@ impl<P: Pal + Debug> Nodes<P> {
 
     #[instrument(skip(self))]
     pub async fn update(&self, id: Uuid, rules: Vec<firewall::Rule>) -> Result<()> {
+        check_rules_count(rules.len())?;
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
@@ -654,4 +657,11 @@ impl<P: Pal + Debug> Nodes<P> {
 
         Ok(iface)
     }
+}
+
+fn check_rules_count(rules_count: usize) -> Result<()> {
+    if rules_count > MAX_SUPPORTED_RULES {
+        bail!("Can't configure more than {MAX_SUPPORTED_RULES} rules!");
+    }
+    Ok(())
 }
