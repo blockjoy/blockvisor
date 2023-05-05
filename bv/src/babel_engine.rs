@@ -31,7 +31,8 @@ use std::{
 };
 use tokio::select;
 use tonic::Status;
-use tracing::instrument;
+use tracing::log::Level;
+use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 lazy_static::lazy_static! {
@@ -86,6 +87,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
     ) -> Result<Self> {
         let (node_tx, node_rx) = tokio::sync::mpsc::channel(16);
         let engine = Engine {
+            node_id,
             tx: node_tx.clone(),
             params: properties.clone(),
             plugin_data_path: plugin_data_path.clone(),
@@ -106,6 +108,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
         plugin_builder: F,
     ) -> Result<()> {
         let engine = Engine {
+            node_id: self.node_id,
             tx: self.node_tx.clone(),
             params: self.properties.clone(),
             plugin_data_path: self.plugin_data_path.clone(),
@@ -422,6 +425,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
 /// function into message that is sent to BV thread and synchronously waits for the response.
 #[derive(Debug, Clone)]
 pub struct Engine {
+    node_id: Uuid,
     tx: tokio::sync::mpsc::Sender<NodeRequest>,
     params: NodeProperties,
     plugin_data_path: PathBuf,
@@ -564,6 +568,16 @@ impl babel_api::engine::Engine for Engine {
 
     fn load_data(&self) -> Result<String> {
         Ok(fs::read_to_string(&self.plugin_data_path)?)
+    }
+
+    fn log(&self, level: Level, message: &str) {
+        match level {
+            Level::Error => error!("node_id: {}|{message}", self.node_id),
+            Level::Warn => warn!("node_id: {}|{message}", self.node_id),
+            Level::Info => info!("node_id: {}|{message}", self.node_id),
+            Level::Debug => debug!("node_id: {}|{message}", self.node_id),
+            Level::Trace => trace!("node_id: {}|{message}", self.node_id),
+        }
     }
 }
 

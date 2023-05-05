@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path, time::Duration};
+use tracing::log::Level;
 
 /// Plugin engin must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -42,6 +43,9 @@ pub trait Engine {
 
     /// Load plugin data from persistent storage.
     fn load_data(&self) -> Result<String>;
+
+    /// Handle logs from plugin.
+    fn log(&self, level: Level, message: &str);
 }
 
 /// Long running job configuration

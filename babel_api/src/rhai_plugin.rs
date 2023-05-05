@@ -12,6 +12,7 @@ use rhai::{
 };
 use std::time::Duration;
 use std::{collections::HashMap, path::Path, sync::Arc};
+use tracing::log::Level;
 
 #[derive(Debug)]
 pub struct RhaiPlugin<E> {
@@ -152,12 +153,29 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         self.rhai_engine.register_fn("load_data", move || {
             into_rhai_result(babel_engine.load_data())
         });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn("debug", move |msg: &str| {
+            babel_engine.log(Level::Debug, msg);
+            // debug is built-in function, so to override it, we need to return the same type
+            Result::<_, Box<rhai::EvalAltResult>>::Ok("")
+        });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn("info", move |msg: &str| {
+            babel_engine.log(Level::Info, msg);
+        });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn("warn", move |msg: &str| {
+            babel_engine.log(Level::Warn, msg);
+        });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn("error", move |msg: &str| {
+            babel_engine.log(Level::Error, msg);
+        });
 
         // register other utils
-        self.rhai_engine
-            .register_fn("parse_json", move |json: &str| {
-                rhai::Engine::new().parse_json(json, true)
-            });
+        self.rhai_engine.register_fn("parse_json", |json: &str| {
+            rhai::Engine::new().parse_json(json, true)
+        });
     }
 
     fn call_fn<P: rhai::FuncArgs, R: Clone + Send + Sync + 'static>(
@@ -275,6 +293,7 @@ mod tests {
             fn node_params(&self) -> HashMap<String, String>;
             fn save_data(&self, value: &str) -> Result<()>;
             fn load_data(&self) -> Result<String>;
+            fn log(&self, level: Level, message: &str);
         }
     }
 
@@ -382,6 +401,10 @@ mod tests {
     fn test_call_custom_method_call_engine() -> Result<()> {
         let script = r#"
     fn custom_method(param) {
+        debug("debug message");
+        info("info message");
+        warn("warn message");
+        error("error message");
         let out = parse_json(param).a;
         start_job("test_job_name", #{
             body: "job body",
@@ -415,6 +438,22 @@ mod tests {
     }
 "#;
         let mut babel = MockBabelEngine::new();
+        babel
+            .expect_log()
+            .with(predicate::eq(Level::Debug), predicate::eq("debug message"))
+            .return_once(|_, _| ());
+        babel
+            .expect_log()
+            .with(predicate::eq(Level::Info), predicate::eq("info message"))
+            .return_once(|_, _| ());
+        babel
+            .expect_log()
+            .with(predicate::eq(Level::Warn), predicate::eq("warn message"))
+            .return_once(|_, _| ());
+        babel
+            .expect_log()
+            .with(predicate::eq(Level::Error), predicate::eq("error message"))
+            .return_once(|_, _| ());
         babel
             .expect_start_job()
             .with(

@@ -332,6 +332,28 @@ Each background job has its unique name and configuration structure described by
 Once job has been started, other functions in the script may fetch for its state with `job_status(job_name)`,
 or stopped on demand with `stop_job(job_name)`.
 
+## Logging
+
+Rhai provides `print` and `debug` functions to simply print into stdout. To make plugin logs consistent with BV logs,
+it is recommended to use following log functions:
+
+- `debug` (overridden built-in `debug` implementation)
+- `info`
+- `warn`
+- `error`
+
+**Example:**
+```rust
+fn some_function() {
+    info("some important step logged with INFO level");
+}
+```
+Output:
+```
+<time>  INFO babel_api::rhai_plugin: node_id: <node_id>|some important step logged with INFO level 
+```
+
+
 # Common Use Cases
 
 ## Referencing METADATA in Functions
