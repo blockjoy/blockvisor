@@ -3,7 +3,7 @@ use crate::{
     node::{KERNEL_FILE, ROOT_FS_FILE},
     node_data::NodeImage,
     services,
-    services::api::with_auth,
+    services::api::{AuthToken, AuthenticatedService},
     utils, with_retry, BV_VAR_PATH,
 };
 use anyhow::{anyhow, Context, Result};
@@ -12,7 +12,7 @@ use tokio::{
     fs::{self, DirBuilder, File},
     io::AsyncWriteExt,
 };
-use tonic::transport::Channel;
+use tonic::transport::Endpoint;
 use tracing::{debug, info, instrument};
 
 pub mod cb_pb {
@@ -26,8 +26,7 @@ const KERNEL_ARCHIVE_NAME: &str = "kernel.gz";
 pub const BABEL_PLUGIN_NAME: &str = "babel.rhai";
 
 pub struct CookbookService {
-    token: String,
-    client: cb_pb::cook_book_service_client::CookBookServiceClient<Channel>,
+    client: cb_pb::cook_book_service_client::CookBookServiceClient<AuthenticatedService>,
     bv_root: PathBuf,
 }
 
@@ -36,15 +35,15 @@ impl CookbookService {
         services::connect(config.clone(), |config| async {
             let url = config
                 .blockjoy_registry_url
-                .ok_or_else(|| anyhow!("missing blockjoy_registry_url"))?
-                .clone();
-            let client =
-                cb_pb::cook_book_service_client::CookBookServiceClient::connect(url.to_string())
+                .ok_or_else(|| anyhow!("missing blockjoy_registry_url"))?;
+            let endpoint = Endpoint::from_shared(url.clone())?;
+            let client = cb_pb::cook_book_service_client::CookBookServiceClient::with_interceptor(
+                Endpoint::connect(&endpoint)
                     .await
-                    .context(format!("Failed to connect to cookbook service at {url}"))?;
-
+                    .context(format!("Failed to connect to cookbook service at {url}"))?,
+                AuthToken(config.token),
+            );
             Ok(Self {
-                token: config.token,
                 client,
                 bv_root: bv_root.clone(),
             })
@@ -61,10 +60,7 @@ impl CookbookService {
             status: cb_pb::StatusName::Development.into(),
         };
 
-        let resp = with_retry!(self
-            .client
-            .list_babel_versions(with_auth(req.clone(), &self.token)))?
-        .into_inner();
+        let resp = with_retry!(self.client.list_babel_versions(req.clone()))?.into_inner();
 
         let mut versions: Vec<String> = resp
             .identifiers
@@ -82,7 +78,7 @@ impl CookbookService {
         info!("Downloading plugin...");
         let rhai_content = with_retry!(self
             .client
-            .retrieve_plugin(with_auth(image.clone().into(), &self.token)))?
+            .retrieve_plugin(tonic::Request::new(image.clone().into())))?
         .into_inner()
         .rhai_content;
 
@@ -101,7 +97,7 @@ impl CookbookService {
         info!("Downloading image...");
         let archive: cb_pb::ArchiveLocation = with_retry!(self
             .client
-            .retrieve_image(with_auth(image.clone().into(), &self.token)))?
+            .retrieve_image(tonic::Request::new(image.clone().into())))?
         .into_inner();
 
         let folder = Self::get_image_download_folder_path(&self.bv_root, image);
@@ -124,7 +120,7 @@ impl CookbookService {
         info!("Downloading kernel...");
         let archive: cb_pb::ArchiveLocation = with_retry!(self
             .client
-            .retrieve_kernel(with_auth(image.clone().into(), &self.token)))?
+            .retrieve_kernel(tonic::Request::new(image.clone().into())))?
         .into_inner();
 
         let folder = Self::get_image_download_folder_path(&self.bv_root, image);

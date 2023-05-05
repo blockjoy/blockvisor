@@ -2,7 +2,7 @@ use crate::{
     config::SharedConfig,
     installer, services,
     services::{
-        api::AuthToken,
+        api::{AuthToken, AuthenticatedService},
         cookbook::{
             cb_pb,
             cb_pb::{bundle_service_client::BundleServiceClient, BundleIdentifier},
@@ -20,7 +20,6 @@ use std::{
     time::Duration,
 };
 use tokio::{fs, process::Command};
-use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 
 const BUNDLES_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -56,7 +55,7 @@ impl BundleConnector for DefaultConnector {
     }
 }
 
-pub type BundleClient = BundleServiceClient<InterceptedService<Channel, AuthToken>>;
+pub type BundleClient = BundleServiceClient<AuthenticatedService>;
 
 impl BundleClient {
     pub fn with_auth(channel: Channel, token: AuthToken) -> Self {
