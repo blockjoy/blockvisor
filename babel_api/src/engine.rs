@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path, time::Duration};
-use tracing::log::Level;
+use tracing::Level;
 
 /// Plugin engin must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -93,7 +93,7 @@ pub enum JobStatus {
     /// Job finished - successfully or not. It means that the JobRunner won't try to restart that job anymore.
     Finished {
         /// Job `sh` script exit code, if any. `None` always means some error, usually before the process
-        /// was even started (e.g. needed job failed).  
+        /// was even started (e.g. needed job failed).
         exit_code: Option<i32>,
         /// Error description or empty if successful.
         message: String,

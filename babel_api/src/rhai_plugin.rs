@@ -12,7 +12,7 @@ use rhai::{
 };
 use std::time::Duration;
 use std::{collections::HashMap, path::Path, sync::Arc};
-use tracing::log::Level;
+use tracing::Level;
 
 #[derive(Debug)]
 pub struct RhaiPlugin<E> {
@@ -155,21 +155,21 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("debug", move |msg: &str| {
-            babel_engine.log(Level::Debug, msg);
+            babel_engine.log(Level::DEBUG, msg);
             // debug is built-in function, so to override it, we need to return the same type
             Result::<_, Box<rhai::EvalAltResult>>::Ok("")
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("info", move |msg: &str| {
-            babel_engine.log(Level::Info, msg);
+            babel_engine.log(Level::INFO, msg);
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("warn", move |msg: &str| {
-            babel_engine.log(Level::Warn, msg);
+            babel_engine.log(Level::WARN, msg);
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("error", move |msg: &str| {
-            babel_engine.log(Level::Error, msg);
+            babel_engine.log(Level::ERROR, msg);
         });
 
         // register other utils
@@ -302,10 +302,10 @@ mod tests {
         let script = r#"
         fn function_A(any_param) {
         }
-        
+
         fn function_b(more, params) {
         }
-        
+
         fn functionC() {
             // no params
         }
@@ -331,15 +331,15 @@ mod tests {
         fn init(keys) {
             save_data(keys.key1.to_string());
         }
-        
+
         fn height() {
             77
         }
-        
+
         fn block_age() {
             18
         }
-        
+
         fn name() {
             "block name"
         }
@@ -359,7 +359,7 @@ mod tests {
         fn sync_status() {
             "synced"
         }
-        
+
         fn staking_status() {
             "staking"
         }
@@ -431,9 +431,9 @@ mod tests {
         out += "|" + sh_out.exit_code;
         out += "|" + sanitize_sh_param("sh param");
         render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"}.to_json());
-        out += "|" + node_params().to_json(); 
-        save_data("some plugin data"); 
-        out += "|" + load_data(); 
+        out += "|" + node_params().to_json();
+        save_data("some plugin data");
+        out += "|" + load_data();
         out
     }
 "#;
@@ -594,7 +594,7 @@ mod tests {
         throw "some Rhai exception";
         ""
     }
-    
+
     fn custom_failing_method(param) {
         load_data()
     }

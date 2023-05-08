@@ -31,8 +31,8 @@ use std::{
 };
 use tokio::select;
 use tonic::Status;
-use tracing::log::Level;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::Level;
+use tracing::{event, instrument};
 use uuid::Uuid;
 
 lazy_static::lazy_static! {
@@ -571,13 +571,8 @@ impl babel_api::engine::Engine for Engine {
     }
 
     fn log(&self, level: Level, message: &str) {
-        match level {
-            Level::Error => error!("node_id: {}|{message}", self.node_id),
-            Level::Warn => warn!("node_id: {}|{message}", self.node_id),
-            Level::Info => info!("node_id: {}|{message}", self.node_id),
-            Level::Debug => debug!("node_id: {}|{message}", self.node_id),
-            Level::Trace => trace!("node_id: {}|{message}", self.node_id),
-        }
+        const log_level: Level = level;
+        event!(log_level, "node_id: {}|{message}", self.node_id);
     }
 }
 
