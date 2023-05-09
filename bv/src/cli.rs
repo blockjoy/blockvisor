@@ -137,11 +137,21 @@ pub enum NodeCommand {
         yes: bool,
     },
 
-    /// Display node logs
+    /// Display node jobs logs
     #[clap(alias = "l")]
     Logs {
         /// Node id or name
         id_or_name: String,
+    },
+
+    /// Display node Babel logs
+    #[clap(alias = "bl")]
+    BabelLogs {
+        /// Node id or name
+        id_or_name: String,
+        /// Max number of log lines returned
+        #[clap(long, short, default_value = "10")]
+        max_lines: u32,
     },
 
     /// Get installed key names

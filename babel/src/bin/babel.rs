@@ -32,7 +32,7 @@ async fn main() -> eyre::Result<()> {
     logging::setup_logging()?;
     info!(
         "Starting {} {} ...",
-        env!("CARGO_PKG_NAME"),
+        env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
     );
     let vsock_listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_BABEL_PORT)

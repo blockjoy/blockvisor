@@ -290,6 +290,17 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
+    pub async fn babel_logs(&self, id: Uuid, max_lines: u32) -> Result<Vec<String>> {
+        let nodes = self.nodes.read().await;
+        let mut node = nodes
+            .get(&id)
+            .ok_or_else(|| id_not_found(id))?
+            .write()
+            .await;
+        node.babel_engine.get_babel_logs(max_lines).await
+    }
+
+    #[instrument(skip(self))]
     pub async fn metrics(&self, id: Uuid) -> Result<node_metrics::Metric> {
         let nodes = self.nodes.read().await;
         let mut node = nodes

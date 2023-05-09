@@ -240,6 +240,17 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
         Ok(logs)
     }
 
+    /// Returns the list of logs from babel processes.
+    pub async fn get_babel_logs(&mut self, max_lines: u32) -> Result<Vec<String>> {
+        let client = self.babel_connection.babel_client().await?;
+        let mut resp = with_retry!(client.get_babel_logs(max_lines))?.into_inner();
+        let mut logs = Vec::<String>::default();
+        while let Some(Ok(log)) = resp.next().await {
+            logs.push(log);
+        }
+        Ok(logs)
+    }
+
     /// Returns blockchain node keys.
     pub async fn download_keys(&mut self) -> Result<Vec<babel_api::babel::BlockchainKey>> {
         let config = self.get_keys_config().await?;
@@ -668,6 +679,11 @@ mod tests {
             async fn get_logs(
                 &self,
                 _request: Request<()>,
+            ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
+            type GetBabelLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
+            async fn get_babel_logs(
+                &self,
+                _request: Request<u32>,
             ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
         }
     }

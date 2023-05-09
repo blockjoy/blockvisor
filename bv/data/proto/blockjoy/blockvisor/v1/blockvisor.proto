@@ -108,6 +108,15 @@ message GetNodeLogsResponse {
     repeated string logs = 1;
 }
 
+message GetBabelLogsRequest {
+    string id = 1;
+    uint32 max_lines = 2;
+}
+
+message GetBabelLogsResponse {
+    repeated string logs = 1;
+}
+
 message GetNodeKeysRequest {
     string id = 1;
 }

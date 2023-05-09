@@ -93,6 +93,12 @@ async fn test_bv_cmd_logs() -> Result<()> {
         "Testing entry_point not configured, but parametrized with anything!",
     );
 
+    println!("get babel logs");
+    test_env.bv_run(
+        &["node", "babel-logs", "-m", "256", vm_id],
+        "INFO babel::jobs: Reading job config file: /var/lib/babel/jobs/config/echo.cfg",
+    );
+
     println!("stop started node");
     test_env.bv_run(&["node", "stop", vm_id], "Stopped node");
     Ok(())

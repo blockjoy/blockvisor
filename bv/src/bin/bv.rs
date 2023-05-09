@@ -363,6 +363,22 @@ impl NodeClient {
                     print!("{log}");
                 }
             }
+            NodeCommand::BabelLogs {
+                id_or_name,
+                max_lines,
+            } => {
+                let id = self.resolve_id_or_name(&id_or_name).await?.to_string();
+                let logs = self
+                    .client
+                    .get_babel_logs(bv_pb::GetBabelLogsRequest {
+                        id: id.clone(),
+                        max_lines,
+                    })
+                    .await?;
+                for log in logs.into_inner().logs {
+                    print!("{log}");
+                }
+            }
             NodeCommand::Status { id_or_names } => {
                 for id_or_name in id_or_names {
                     let id = self.resolve_id_or_name(&id_or_name).await?.to_string();

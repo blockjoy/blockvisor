@@ -503,6 +503,10 @@ mod tests {
                 &self,
                 request: tonic::Request<bv_pb::GetNodeLogsRequest>,
             ) -> Result<tonic::Response<bv_pb::GetNodeLogsResponse>, tonic::Status>;
+            async fn get_babel_logs(
+                &self,
+                request: tonic::Request<bv_pb::GetBabelLogsRequest>,
+            ) -> Result<tonic::Response<bv_pb::GetBabelLogsResponse>, tonic::Status>;
             async fn get_node_keys(
                 &self,
                 request: tonic::Request<bv_pb::GetNodeKeysRequest>,

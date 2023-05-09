@@ -258,7 +258,7 @@ where
         Ok(Response::new(reply))
     }
 
-    #[instrument(skip(self), ret(Debug))]
+    #[instrument(skip(self))]
     async fn get_node_logs(
         &self,
         request: Request<bv_pb::GetNodeLogsRequest>,
@@ -274,6 +274,24 @@ where
             .map_err(|e| Status::unknown(e.to_string()))?;
 
         Ok(Response::new(bv_pb::GetNodeLogsResponse { logs }))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_babel_logs(
+        &self,
+        request: Request<bv_pb::GetBabelLogsRequest>,
+    ) -> Result<Response<bv_pb::GetBabelLogsResponse>, Status> {
+        status_check().await?;
+        let request = request.into_inner();
+        let id = helpers::parse_uuid(request.id)?;
+
+        let logs = self
+            .nodes
+            .babel_logs(id, request.max_lines)
+            .await
+            .map_err(|e| Status::unknown(e.to_string()))?;
+
+        Ok(Response::new(bv_pb::GetBabelLogsResponse { logs }))
     }
 
     #[instrument(skip(self), ret(Debug))]

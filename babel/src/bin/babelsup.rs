@@ -22,7 +22,7 @@ async fn main() -> eyre::Result<()> {
     logging::setup_logging()?;
     info!(
         "Starting {} {} ...",
-        env!("CARGO_PKG_NAME"),
+        env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
     );
 

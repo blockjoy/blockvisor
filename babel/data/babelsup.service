@@ -5,7 +5,7 @@ After=syslog.target network.target
 
 [Service]
 # Debug logging for now
-Environment="RUST_LOG=debug"
+Environment="RUST_LOG=debug,h2=info"
 ExecStart=/usr/bin/babelsup
 TimeoutStopSec=15
 Restart=always
