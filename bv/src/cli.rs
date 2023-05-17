@@ -11,13 +11,6 @@ pub struct App {
 }
 
 #[derive(Debug, Args)]
-pub struct ResetArgs {
-    /// Assume "yes" as answer to all prompts
-    #[clap(short, long)]
-    pub yes: bool,
-}
-
-#[derive(Debug, Args)]
 pub struct StartArgs {}
 
 #[derive(Debug, Args)]
