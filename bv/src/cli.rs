@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-#[derive(Debug, Parser)]
+#[derive(Parser)]
 #[clap(name = "bv", author, version, about)]
 pub struct App {
     #[clap(flatten)]
@@ -10,16 +10,16 @@ pub struct App {
     pub command: Command,
 }
 
-#[derive(Debug, Args)]
+#[derive(Args)]
 pub struct StartArgs {}
 
-#[derive(Debug, Args)]
+#[derive(Args)]
 pub struct StopArgs {}
 
-#[derive(Debug, Args)]
+#[derive(Args)]
 pub struct StatusArgs {}
 
-#[derive(Debug, Subcommand)]
+#[derive(Subcommand)]
 pub enum Command {
     /// Start blockvisor service
     Start(StartArgs),
@@ -52,7 +52,7 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Subcommand)]
 pub enum NodeCommand {
     /// Show nodes list
     #[clap(alias = "ls")]
@@ -188,7 +188,7 @@ pub enum NodeCommand {
     },
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Subcommand)]
 pub enum HostCommand {
     /// Collect host system information
     #[clap(alias = "i")]
@@ -203,7 +203,7 @@ pub enum HostCommand {
     Metrics,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Subcommand)]
 pub enum ChainCommand {
     /// Show chains list
     #[clap(alias = "ls")]
@@ -220,13 +220,13 @@ pub enum ChainCommand {
     },
 }
 
-#[derive(ValueEnum, PartialEq, Eq, Debug, Clone)]
+#[derive(ValueEnum, PartialEq, Eq, Clone)]
 pub enum FormatArg {
     Text,
     Json,
 }
 
-#[derive(Debug, Args)]
+#[derive(Args)]
 pub struct GlobalOpts {
     /// Verbosity level (can be specified multiple times)
     #[clap(long, short, global = true, action = clap::ArgAction::Count)]
