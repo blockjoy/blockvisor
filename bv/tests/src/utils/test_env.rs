@@ -159,7 +159,7 @@ impl TestEnv {
         }
     }
 
-    pub fn create_node(&self, image: &str, ip: &str) -> String {
+    pub fn create_node(&self, image: &str, ip: &str) -> (String, String) {
         let mut cmd = Command::cargo_bin("bv").unwrap();
         let cmd = cmd
             .args([
@@ -179,12 +179,14 @@ impl TestEnv {
         let stderr = str::from_utf8(&output.stderr).unwrap();
         println!("create stdout: {stdout}");
         println!("create stderr: {stderr}");
-        stdout
+        let vm_id = stdout
             .trim_start_matches(&format!("Created new node from `{image}` image with ID "))
             .split('`')
             .nth(1)
             .unwrap()
-            .to_string()
+            .to_string();
+        let vm_name = stdout.split('`').rev().nth(1).unwrap().to_string();
+        (vm_id, vm_name)
     }
 }
 

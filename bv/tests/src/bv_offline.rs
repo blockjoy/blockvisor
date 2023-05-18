@@ -56,7 +56,7 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
     test_env.run_blockvisord(RunFlag::default()).await?;
     const NODES_COUNT: usize = 2;
     println!("create {NODES_COUNT} nodes");
-    let mut nodes: Vec<String> = Default::default();
+    let mut nodes: Vec<(String, String)> = Default::default();
     for i in 0..NODES_COUNT {
         nodes.push(test_env.create_node("testing/validator/0.0.1", &format!("216.18.214.{i}")));
     }
@@ -64,14 +64,14 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
     println!("start all created nodes");
     test_env.bv_run(&["node", "start"], "Started node");
     println!("check all nodes are running");
-    for id in &nodes {
-        test_env.bv_run(&["node", "status", id], "Running");
+    for (vm_id, _) in &nodes {
+        test_env.bv_run(&["node", "status", vm_id], "Running");
     }
     println!("stop all nodes");
     test_env.bv_run(&["node", "stop"], "Stopped node");
     println!("check all nodes are stopped");
-    for id in &nodes {
-        test_env.bv_run(&["node", "status", id], "Stopped");
+    for (vm_id, _) in &nodes {
+        test_env.bv_run(&["node", "status", vm_id], "Stopped");
     }
     Ok(())
 }
@@ -81,7 +81,7 @@ async fn test_bv_cmd_logs() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
     test_env.run_blockvisord(RunFlag::default()).await?;
     println!("create a node");
-    let vm_id = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
+    let (vm_id, _) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start node");
@@ -110,7 +110,7 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     let mut run = RunFlag::default();
     let bv_handle = test_env.run_blockvisord(run.clone()).await?;
     println!("create a node");
-    let vm_id = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
+    let (vm_id, vm_name) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("stop stopped node");
@@ -130,6 +130,9 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
 
     println!("list running node before service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    println!("list running node using vm name");
+    test_env.bv_run(&["node", "status", vm_name], "Running");
 
     println!("stop service");
     run.stop();
@@ -167,7 +170,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     test_env.run_blockvisord(RunFlag::default()).await?;
 
     println!("create a node");
-    let vm_id = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
+    let (vm_id, _) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start stopped node");
@@ -229,7 +232,7 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
     test_env.run_blockvisord(RunFlag::default()).await?;
 
     println!("create a node");
-    let vm_id = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
+    let (vm_id, _) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start stopped node");
