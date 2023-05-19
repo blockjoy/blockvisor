@@ -153,6 +153,7 @@ pub fn with_timeout<T>(args: T, timeout: Duration) -> Request<T> {
 
 #[cfg(test)]
 pub mod tests {
+    use super::*;
     use http::{Request, Response};
     use hyper::Body;
     use std::convert::Infallible;
@@ -167,6 +168,59 @@ pub mod tests {
     use tonic::body::BoxBody;
     use tonic::codegen::Service;
     use tonic::transport::{Channel, Endpoint, NamedService, Server, Uri};
+
+    #[test]
+    pub fn test_semver_sort() {
+        let mut versions = vec![
+            "1.2.0",
+            "1.2.3+2",
+            "1.2.3+10",
+            "1.3.0",
+            "2.0.0",
+            "1.0.0-build.3",
+            "1.0.0-build.20",
+            "1.0.0-build.100",
+            "1.0.0-alpha.1",
+            "1.0.0-1",
+            "1.0.0-beta.1",
+            "1.0.0-beta",
+            "1.0.0",
+            "not",
+            "being",
+            "sorted",
+            "0",
+            "1",
+            "3.4.0_bad_underscore.3",
+            "3.4.0_bad_underscore.10",
+        ];
+        versions.sort_by(|a, b| semver_cmp(b, a));
+
+        assert_eq!(
+            versions,
+            vec![
+                "2.0.0",
+                "1.3.0",
+                "1.2.3+10",
+                "1.2.3+2",
+                "1.2.0",
+                "1.0.0",
+                "1.0.0-build.100",
+                "1.0.0-build.20",
+                "1.0.0-build.3",
+                "1.0.0-beta.1",
+                "1.0.0-beta",
+                "1.0.0-alpha.1",
+                "1.0.0-1",
+                "not",
+                "being",
+                "sorted",
+                "0",
+                "1",
+                "3.4.0_bad_underscore.3",
+                "3.4.0_bad_underscore.10",
+            ]
+        );
+    }
 
     pub fn test_channel(tmp_root: &Path) -> Channel {
         let socket_path = tmp_root.join("test_socket");
