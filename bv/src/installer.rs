@@ -1,15 +1,22 @@
-use crate::config::{Config, CONFIG_PATH};
-use crate::server::bv_pb;
-use crate::server::bv_pb::blockvisor_client::BlockvisorClient;
-use crate::with_retry;
-use anyhow::{bail, ensure, Context, Error, Result};
+use crate::{
+    config::{Config, CONFIG_PATH},
+    linux_platform::BRIDGE_IFACE,
+    server::bv_pb,
+    server::bv_pb::blockvisor_client::BlockvisorClient,
+    with_retry,
+};
+use anyhow::{anyhow, bail, ensure, Context, Error, Result};
 use async_trait::async_trait;
 use bv_utils::timer::Timer;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Duration;
-use std::{env, fs};
+use semver::Version;
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+    {env, fs},
+};
+use sysinfo::{System, SystemExt};
 use tonic::transport::Channel;
 use tracing::{debug, info, warn};
 
@@ -87,10 +94,10 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     }
 
     pub async fn run(mut self) -> Result<()> {
-        info!("installing BV {THIS_VERSION}...");
         if self.is_blacklisted(THIS_VERSION)? {
             bail!("BV {THIS_VERSION} is on a blacklist - can't install")
         }
+        check_requirements().await?;
         info!("installing BV {THIS_VERSION}...");
 
         self.preinstall()?; // TODO: try to send install failed status to the backend in error case
@@ -439,6 +446,46 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     }
 }
 
+async fn check_requirements() -> Result<()> {
+    info!("checking BV {THIS_VERSION} requirements ...");
+    check_cli_dependencies().await?;
+    check_kernel_requirements()?;
+    check_network_setup().await?;
+    Ok(())
+}
+
+async fn check_cli_dependencies() -> Result<()> {
+    // smoke test for all CLI tools used in BV
+    for cmd in ["pigz", "tar", "fallocate", "systemctl"] {
+        bv_utils::cmd::run_cmd(cmd, ["--version"]).await?;
+    }
+    for cmd in ["tmux", "ip", "mkfs.ext4"] {
+        bv_utils::cmd::run_cmd(cmd, ["-V"]).await?;
+    }
+    Ok(())
+}
+
+fn check_kernel_requirements() -> Result<()> {
+    const MIN_KERNEL_VERSION: Version = Version::new(4, 14, 0);
+    const MAX_KERNEL_VERSION: Version = Version::new(6, 0, 0);
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    let kernel_version = Version::parse(
+        &sys.kernel_version()
+            .ok_or_else(|| anyhow!("can't read kernel version"))?,
+    )?;
+    if kernel_version < MIN_KERNEL_VERSION || kernel_version >= MAX_KERNEL_VERSION {
+        bail!("supported kernel versions are >={MIN_KERNEL_VERSION} and <{MAX_KERNEL_VERSION}, but {kernel_version} found")
+    }
+    Ok(())
+}
+
+async fn check_network_setup() -> Result<()> {
+    bv_utils::cmd::run_cmd("ip", ["link", "show", BRIDGE_IFACE])
+        .await
+        .with_context(|| format!("bridge interface '{BRIDGE_IFACE}' not configured"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,7 +602,7 @@ mod tests {
     }
 
     impl TestEnv {
-        async fn new() -> Result<Self> {
+        fn new() -> Result<Self> {
             let tmp_root = TempDir::new()?.to_path_buf();
             let _ = fs::create_dir_all(&tmp_root);
 
@@ -588,7 +635,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_prepare_running_none() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
 
         let mut installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
         installer.backup_status = BackupStatus::NothingToBackup;
@@ -600,7 +647,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_prepare_running_ok() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
 
         let mut bv_mock = MockTestBV::new();
         bv_mock.expect_start_update().once().returning(|_| {
@@ -623,7 +670,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_prepare_running_timeout() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
         let mut bv_mock = MockTestBV::new();
         let update_start_called = Arc::new(AtomicBool::new(false));
         let update_start_called_flag = update_start_called.clone();
@@ -659,7 +706,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check_ok() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
 
         let mut bv_mock = MockTestBV::new();
         bv_mock.expect_health().times(2).returning(|_| {
@@ -690,7 +737,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check_timeout() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
         let mut bv_mock = MockTestBV::new();
         bv_mock.expect_health().returning(|_| {
             let reply = bv_pb::HealthResponse {
@@ -730,7 +777,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backup_running_version() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
         let mut installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
 
         fs::create_dir_all(&installer.paths.install_path)?;
@@ -758,7 +805,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_move_bundle_to_install_path() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
         let installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
         let bundle_path = test_env.tmp_root.join("bundle");
 
@@ -792,7 +839,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_install_this_version() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
         let installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
 
         installer.install_this_version().unwrap_err();
@@ -828,7 +875,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_broken_installation() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
         let mut service_mock = MockTestBvService::new();
         service_mock.expect_reload().return_once(|| Ok(()));
         service_mock.expect_stop().return_once(|| Ok(()));
@@ -882,7 +929,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup() -> Result<()> {
-        let test_env = TestEnv::new().await?;
+        let test_env = TestEnv::new()?;
         let installer = test_env.build_installer(MockTimer::new(), MockTestBvService::new());
 
         // cant cleanup non existing dir nothing

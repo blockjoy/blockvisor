@@ -4,6 +4,8 @@ use tokio::process::Command;
 use tracing::info;
 
 /// Runs the specified command and returns error on failure.
+/// **IMPORTANT**: Whenever you use new CLI tool in BV,
+/// remember to add it to requirements check in `installer::check_cli_dependencies()`.   
 pub async fn run_cmd<I, S>(cmd: &str, args: I) -> Result<()>
 where
     I: IntoIterator<Item = S>,

@@ -12,14 +12,15 @@ use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
+pub const BRIDGE_IFACE: &str = "bvbr0";
+const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
+
 #[derive(Debug)]
 pub struct LinuxPlatform {
     bv_root: PathBuf,
     babel_path: PathBuf,
     job_runner_path: PathBuf,
 }
-
-const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
 
 pub fn bv_root() -> PathBuf {
     PathBuf::from(std::env::var(ENV_BV_ROOT_KEY).unwrap_or_else(|_| "/".to_string()))
@@ -99,8 +100,6 @@ impl Pal for LinuxPlatform {
         }
     }
 }
-
-const BRIDGE_IFACE: &str = "bvbr0";
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct LinuxNetInterface {
