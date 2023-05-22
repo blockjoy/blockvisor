@@ -97,7 +97,9 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         if self.is_blacklisted(THIS_VERSION)? {
             bail!("BV {THIS_VERSION} is on a blacklist - can't install")
         }
-        check_requirements().await?;
+        check_requirements().await.with_context(|| {
+            format!("Host doesn't meet the requirements, see [Host Setup Guide]('https://github.com/blockjoy/bv-host-setup/releases/tag/{THIS_VERSION}') for more details.")
+        })?;
         info!("installing BV {THIS_VERSION}...");
 
         self.preinstall()?; // TODO: try to send install failed status to the backend in error case
