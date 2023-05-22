@@ -1,0 +1,130 @@
+[env]
+path_append = "/blockjoy/bin/"
+
+[config]
+protocol = "eth"
+node_type = "validator"
+node_version = "1.10.26"  
+min_babel_version = "0.0.1"
+description = "eth blockchain validator"
+api_host = "http://localhost:8000/"
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+
+    [[firewall.rules]]
+    name = "Allowed incoming traffic on port"
+    action = "allow"
+    direction = "in"
+    ports = [8000]
+
+[requirements]
+vcpu_count = 4
+mem_size_mb = 16384
+disk_size_gb = 10
+
+[supervisor]
+backoff_timeout_ms = 60000
+backoff_base_ms = 100
+log_buffer_capacity_ln = 1000
+data_directory_mount_point = "/blockjoy/data"
+
+   [[supervisor.entry_point]]
+    name = "geth"
+    body = """
+    test -f /blockjoy/.init && \
+    /usr/bin/geth --syncmode snap --http --authrpc.addr 0.0.0.0 --authrpc.vhosts="*" --authrpc.port 8551  --{{NETWORK}} --datadir /blockjoy/data/.ethereum  --ethash.dagdir /blockjoy/data/.ethash
+    """
+
+
+    [[supervisor.entry_point]]
+    name = "lighthouse"
+    body = """
+    test -f /blockjoy/.init && \
+    /usr/bin/lighthouse --datadir /blockjoy/lighthouse bn --http --http-address 0.0.0.0 --http-port 6868 --network {{NETWORK}}  --execution-endpoint http://localhost:8551 --execution-jwt /blockjoy/data/.ethereum/geth/jwtsecret
+    """
+
+[keys]
+"*" = "/opt/secrets"
+
+[[methods]]
+name = "height"
+transport = "rest"
+method = "" # find 
+
+    [methods.response]
+    status = 200
+    field = "" # find
+    format = "raw" # find
+
+[[methods]]
+name = "address"
+transport = "rest"
+method = "eth/v1/node/identity"
+
+    [methods.response]
+    status = 200
+    field = "data.peer_id" 
+    format = "json"
+
+[[methods]]
+name = "status"
+transport = "rest"
+method = "eth/v1/node/syncing"
+
+    [methods.response]
+    status = 200
+    field = "data.is_syncing"
+    format = "json"
+
+[[methods]]
+name = "genesis_info"
+transport = "rest"
+method = "/eth/v1/beacon/genesis"
+
+    [methods.response]
+    status = 200
+    field = "data"
+    format = "json"
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+    echo {{VOTING-PWD}} > /blockjoy/secret && \
+    lighthouse --network {{NETWORK}} --datadir /blockjoy/data/lighthouse account validator import --directory /opt/secrets --reuse-password --password-file /blockjoy/secret && \
+    touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+curl http://localhost:5062/lighthouse/validators -H "Authorization: Bearer `cat /blockjoy/data/lighthouse/validators/api-token.txt`" | jq '[ .data[].enabled ] | all' | grep -q true && echo -n processing || echo cancelled
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[nets.mainnet]
+net_type = "main"
+url = "https://rpc.ankr.com/eth"
+beacon_nodes_csv = "http://beacon01.mainnet.eth.nyc.blockjoy.com:6868,http://beacon02.mainnet.eth.nyc.blockjoy.com:6868"
+
+#[nets.sepolia]
+#net_type = "test"
+#url = "https://rpc.sepolia.dev"
+#beacon_nodes_csv = "http://beacon01.sepolia.eth.nyc.blockjoy.com,http://beacon02.sepolia.eth.blockjoy.com"
+
+[nets.goerli] # will be depreciated
+net_type = "test"
+url = "https://goerli.prylabs.net"
+beacon_nodes_csv = "http://beacon02.goerli.eth.nyc.blockjoy.com:6868,http://beacon01.goerli.eth.nyc.blockjoy.com:6868"
