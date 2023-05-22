@@ -14,7 +14,7 @@ impl pb::host_service_server::HostService for StubHostsServer {
         request: Request<pb::HostServiceProvisionRequest>,
     ) -> Result<pb::HostServiceProvisionResponse> {
         let host = request.into_inner();
-        if host.otp != "UNKNOWN" {
+        if host.provision_token != "UNKNOWN" {
             let host_id = "497d13b1-ddbe-4ee7-bfc7-752c7b710afe".to_string();
 
             let reply = pb::HostServiceProvisionResponse {
