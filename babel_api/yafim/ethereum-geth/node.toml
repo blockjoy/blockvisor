@@ -1,0 +1,80 @@
+application_name = "ethereum"
+node_type = "node"
+version = "1.10.26-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = []
+apt_source = ["universe","software-properties-common"]
+cmds = [
+  "add-apt-repository -y ppa:ethereum/ethereum",
+  "apt-get update",
+  "apt-get install ethereum",
+  "useradd -r -s /usr/sbin/nologin -d /nonexistent eth",
+  "mkdir -p /blockjoy",
+  "chown eth:eth /blockjoy",
+  """cat <<EOF > /etc/systemd/system/geth.service
+[Unit]
+Description=Ethereum go client
+After=syslog.target network.target
+
+[Service]
+User=eth
+Group=eth
+Type=simple
+ExecStart=/usr/bin/geth --syncmode snap --http --http.api eth,net,engine,admin --mainnet --datadir /blockjoy/.ethereum --ethash.dagdir /blockjoy/.ethash
+KillMode=process
+KillSignal=SIGINT
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=default.target
+EOF""",
+  "systemctl enable geth.service", 
+  "systemctl start geth.service",
+  "wget -O lighthouse.tar.gz https://github.com/sigp/lighthouse/releases/download/v4.1.0/lighthouse-v4.1.0-x86_64-unknown-linux-gnu.tar.gz",
+  "tar xvzf lighthouse.tar.gz --directory /usr/bin/",
+  """cat <<EOF > /etc/systemd/system/lighthouse.service
+[Unit]
+Description=Lighthouse Beacon client
+After=syslog.target network.target
+
+[Service]
+User=eth
+Group=eth
+Type=simple
+ExecStart=/usr/bin/lighthouse --datadir /blockjoy/lighthouse bn --http --http-address 0.0.0.0 --http-port 6868 --execution-endpoint http://localhost:8551 --execution-jwt /blockjoy/.ethereum/geth/jwtsecret
+KillMode=process
+KillSignal=SIGINT
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=default.target
+EOF""",
+  "systemctl enable lighthouse.service", 
+  "systemctl start lighthouse.service",
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
+] 
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+	        "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/ethereum-geth/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/ethereum-geth/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/ethereum-geth/node.toml {{.YafimHome}}/target/ethereum-geth/node/mnt/etc/babel.conf",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/ethereum-geth/node/mnt",
+		"echo eth-rpc > {{.YafimHome}}/target/ethereum-geth/node/mnt/etc/hostname"
+]
