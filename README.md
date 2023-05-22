@@ -11,15 +11,7 @@ The service that runs on the host systems and is responsible for provisioning an
 
 ## Host Setup
 
-### Prerequisites
- - networking is set up (including `bvbr0` bridge interface)
- - dependencies are installed `apt install tmux pigz util-linux e2fsprogs`
- - got `bvup` binary and **O**ne **T**ime **P**assword
-
-```sh
-./bvup <PROVISION_TOKEN> 
-```
-See `bvup --help` for more details.
+See [BlockVisor Host Setup Guide](https://github.com/blockjoy/bv-host-setup/releases) for more details.
 
 ## API proto files
 
