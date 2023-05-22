@@ -1,5 +1,5 @@
 use crate::{
-    config::Config,
+    config::SharedConfig,
     node_data::NodeImage,
     nodes,
     nodes::Nodes,
@@ -29,6 +29,8 @@ use tonic::{
 use tracing::{error, info, instrument};
 use uuid::Uuid;
 
+use self::pb::{auth_service_client, AuthServiceRefreshResponse};
+
 #[allow(clippy::large_enum_variant)]
 pub mod pb {
     tonic::include_proto!("blockjoy.v1");
@@ -57,17 +59,51 @@ lazy_static::lazy_static! {
 #[derive(Clone)]
 pub struct AuthToken(pub String);
 
+impl AuthToken {
+    pub fn expired(&self) -> Result<bool, Status> {
+        self.exp().map(|d| d > chrono::Utc::now())
+    }
+
+    fn exp(&self) -> Result<chrono::DateTime<chrono::Utc>, Status> {
+        use base64::engine::general_purpose::STANDARD;
+        use chrono::TimeZone;
+
+        #[derive(serde::Deserialize)]
+        struct Field {
+            iat: i64,
+        }
+
+        let unauth = |s| move || Status::unauthenticated(s);
+        // Take the middle section of the jwt, which has the payload.
+        let middle = self
+            .0
+            .split('.')
+            .nth(1)
+            .ok_or_else(unauth("Can't parse token"))?;
+        // Base64 decode the payload.
+        let decoded = STANDARD
+            .decode(middle)
+            .ok()
+            .ok_or_else(unauth("Token is not bas64"))?;
+        // Json-parse the payload, with only the `iat` field being of interest.
+        let parsed: Field = serde_json::from_slice(&decoded)
+            .ok()
+            .ok_or_else(unauth("Token is not JSON"))?;
+        // Now interpret this timestamp as an utc time.
+        match chrono::Utc.timestamp_opt(parsed.iat, 0) {
+            chrono::LocalResult::None => Err(unauth("Invalid timestamp")()),
+            chrono::LocalResult::Single(t) => Ok(t),
+            chrono::LocalResult::Ambiguous(t, _) => Ok(t),
+        }
+    }
+}
+
 impl Interceptor for AuthToken {
     fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        request.metadata_mut().insert(
-            "authorization",
-            format!(
-                "Bearer {}",
-                base64::engine::general_purpose::STANDARD.encode(self.0.clone())
-            )
-            .parse()
-            .unwrap(),
-        );
+        let token = &self.0;
+        request
+            .metadata_mut()
+            .insert("authorization", format!("Bearer {token}").parse().unwrap());
         Ok(request)
     }
 }
@@ -82,20 +118,39 @@ impl MetricsClient {
     }
 }
 
+pub struct AuthClient {
+    client: auth_service_client::AuthServiceClient<Channel>,
+}
+
+impl AuthClient {
+    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+        let url = &config.read().await.blockjoy_api_url;
+        let endpoint = Endpoint::from_str(url)?;
+        let client = auth_service_client::AuthServiceClient::connect(endpoint).await?;
+        Ok(Self { client })
+    }
+
+    pub async fn refresh(
+        &mut self,
+        req: pb::AuthServiceRefreshRequest,
+    ) -> Result<AuthServiceRefreshResponse> {
+        let resp = self.client.refresh(req).await?;
+        Ok(resp.into_inner())
+    }
+}
+
 pub struct CommandsService {
     client: CommandServiceClient<AuthenticatedService>,
 }
 
 impl CommandsService {
-    pub async fn connect(config: Config) -> Result<Self> {
-        let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
-        let client = CommandServiceClient::with_interceptor(
-            Endpoint::connect(&endpoint).await.context(format!(
-                "Failed to connect to commands service at {}",
-                config.blockjoy_api_url
-            ))?,
-            AuthToken(config.token),
-        );
+    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+        let url = config.read().await.blockjoy_api_url;
+        let endpoint = Endpoint::from_str(&url)?;
+        let endpoint = Endpoint::connect(&endpoint)
+            .await
+            .with_context(|| format!("Failed to connect to commands service at {url}"))?;
+        let client = CommandServiceClient::with_interceptor(endpoint, config.token().await?);
 
         Ok(Self { client })
     }
@@ -322,14 +377,15 @@ pub struct NodesService {
 }
 
 impl NodesService {
-    pub async fn connect(config: Config) -> Result<Self> {
-        let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
+    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+        let url = config.read().await.blockjoy_api_url;
+        let endpoint = Endpoint::from_str(&url)?;
+        let endpoint = Endpoint::connect(&endpoint)
+            .await
+            .with_context(|| format!("Failed to connect to commands service at {url}"))?;
         let client = node_service_client::NodeServiceClient::with_interceptor(
-            Endpoint::connect(&endpoint).await.context(format!(
-                "Failed to connect to nodes service at {}",
-                config.blockjoy_api_url
-            ))?,
-            AuthToken(config.token),
+            endpoint,
+            config.token().await?,
         );
 
         Ok(Self { client })
@@ -347,15 +403,13 @@ pub struct DiscoveryService {
 }
 
 impl DiscoveryService {
-    pub async fn connect(config: Config) -> Result<Self> {
-        let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
-        let client = DiscoveryServiceClient::with_interceptor(
-            Endpoint::connect(&endpoint).await.context(format!(
-                "Failed to connect to discovery service at {}",
-                config.blockjoy_api_url
-            ))?,
-            AuthToken(config.token),
-        );
+    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+        let url = &config.read().await.blockjoy_api_url;
+        let endpoint = Endpoint::from_str(url)?;
+        let channel = Endpoint::connect(&endpoint)
+            .await
+            .with_context(|| format!("Failed to connect to discovery service at {url}"))?;
+        let client = DiscoveryServiceClient::with_interceptor(channel, config.token().await?);
 
         Ok(Self { client })
     }
@@ -372,15 +426,13 @@ pub struct HostsService {
 }
 
 impl HostsService {
-    pub async fn connect(config: Config) -> Result<Self> {
-        let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
-        let client = HostServiceClient::with_interceptor(
-            Endpoint::connect(&endpoint).await.context(format!(
-                "Failed to connect to host service at {}",
-                config.blockjoy_api_url
-            ))?,
-            AuthToken(config.token),
-        );
+    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+        let url = &config.read().await.blockjoy_api_url;
+        let endpoint = Endpoint::from_str(url)?;
+        let channel = Endpoint::connect(&endpoint)
+            .await
+            .with_context(|| format!("Failed to connect to discovery service at {url}"))?;
+        let client = HostServiceClient::with_interceptor(channel, config.token().await?);
         Ok(Self { client })
     }
 

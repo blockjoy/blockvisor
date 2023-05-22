@@ -203,10 +203,7 @@ impl<P: Pal + Debug> Nodes<P> {
             .await
             .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
         {
-            let mut cookbook_service =
-                CookbookService::connect(self.pal.bv_root().to_path_buf(), &self.api_config)
-                    .await?;
-
+            let mut cookbook_service = CookbookService::connect(&self.api_config).await?;
             cookbook_service.download_babel_plugin(image).await?;
             cookbook_service.download_image(image).await?;
             cookbook_service.download_kernel(image).await?;

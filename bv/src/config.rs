@@ -1,3 +1,4 @@
+use crate::services::api::{pb, AuthClient, AuthToken};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -14,19 +15,56 @@ pub fn default_blockvisor_port() -> u16 {
 }
 
 #[derive(Debug, Clone)]
-pub struct SharedConfig(std::sync::Arc<tokio::sync::RwLock<Config>>);
+pub struct SharedConfig {
+    config: std::sync::Arc<tokio::sync::RwLock<Config>>,
+    pub bv_root: std::path::PathBuf,
+}
 
 impl SharedConfig {
-    pub fn new(config: Config) -> Self {
-        Self(std::sync::Arc::new(tokio::sync::RwLock::new(config)))
+    pub fn new(config: Config, bv_root: std::path::PathBuf) -> Self {
+        Self {
+            config: std::sync::Arc::new(tokio::sync::RwLock::new(config)),
+            bv_root,
+        }
     }
 
     pub async fn read(&self) -> Config {
-        self.0.read().await.clone()
+        self.config.read().await.clone()
     }
 
     pub async fn write(&self) -> RwLockWriteGuard<'_, Config> {
-        self.0.write().await
+        self.config.write().await
+    }
+
+    pub async fn token(&self) -> Result<AuthToken> {
+        let token = self.refreshed_token().await?;
+        Ok(AuthToken(token))
+    }
+
+    async fn refreshed_token(&self) -> Result<String> {
+        let read_lock = self.read().await;
+        if AuthToken(read_lock.token.clone()).expired()? {
+            drop(read_lock);
+            let mut write_lock = self.write().await;
+            // A concurrent update may have written to the jwt field, check if the token has become
+            // unexpired while we have unique access.
+            if AuthToken(write_lock.token.clone()).expired()? {
+                return Ok(write_lock.token.clone());
+            }
+
+            let req = pb::AuthServiceRefreshRequest {
+                token: write_lock.token.clone(),
+                refresh: Some(write_lock.refresh.clone()),
+            };
+            let mut service = AuthClient::connect(self).await?;
+            let resp = service.refresh(req).await?;
+            write_lock.token = resp.token.clone();
+            write_lock.refresh = resp.refresh;
+            write_lock.save(&self.bv_root).await?;
+            Ok(resp.token)
+        } else {
+            Ok(read_lock.token)
+        }
     }
 }
 
@@ -36,6 +74,8 @@ pub struct Config {
     pub id: String,
     /// Host auth token
     pub token: String,
+    /// The refresh token.
+    pub refresh: String,
     /// API endpoint url
     pub blockjoy_api_url: String,
     /// Url of key service for getting secrets

@@ -36,8 +36,10 @@ async fn main() -> Result<()> {
     if !bv_root().join(CONFIG_PATH).exists() {
         bail!("Host is not registered, please run `bvup` first");
     }
-    let config = Config::load(&bv_root()).await?;
-    let bv_url = format!("http://localhost:{}", config.blockvisor_port);
+    let bv_root = bv_root();
+    let config = SharedConfig::new(Config::load(&bv_root).await?, bv_root);
+    let port = config.read().await.blockvisor_port;
+    let bv_url = format!("http://localhost:{port}");
 
     match args.command {
         Command::Start(_) => {
@@ -62,10 +64,10 @@ async fn main() -> Result<()> {
                 println!("Service stopped");
             }
         }
-        Command::Host { command } => process_host_command(config, command).await?,
+        Command::Host { command } => process_host_command(&config, command).await?,
         Command::Chain { command } => process_chain_command(command).await?,
         Command::Node { command } => {
-            NodeClient::new(format!("http://localhost:{}", config.blockvisor_port))
+            NodeClient::new(format!("http://localhost:{port}"))
                 .await?
                 .process_node_command(command)
                 .await?
@@ -82,7 +84,7 @@ async fn is_running(url: String) -> Result<bool> {
         .is_ok())
 }
 
-async fn process_host_command(config: Config, command: HostCommand) -> Result<()> {
+async fn process_host_command(config: &SharedConfig, command: HostCommand) -> Result<()> {
     let to_gb = |n| n as f64 / 1_000_000_000.0;
     match command {
         HostCommand::Info => {
@@ -96,9 +98,9 @@ async fn process_host_command(config: Config, command: HostCommand) -> Result<()
         }
         HostCommand::Update => {
             let info = HostInfo::collect()?;
-            let mut client = HostsService::connect(config.clone()).await?;
+            let mut client = HostsService::connect(config).await?;
             let update = pb::HostServiceUpdateRequest {
-                id: config.id,
+                id: config.read().await.id,
                 name: Some(info.name),
                 version: Some(crate_version!().to_string()),
                 os: Some(info.os),
@@ -131,7 +133,8 @@ async fn process_host_command(config: Config, command: HostCommand) -> Result<()
 
 #[allow(unreachable_code)]
 async fn process_chain_command(command: ChainCommand) -> Result<()> {
-    let config = SharedConfig::new(Config::load(&bv_root()).await?);
+    let bv_root = bv_root();
+    let config = SharedConfig::new(Config::load(&bv_root).await?, bv_root);
 
     match command {
         ChainCommand::List {
@@ -139,7 +142,7 @@ async fn process_chain_command(command: ChainCommand) -> Result<()> {
             r#type,
             number,
         } => {
-            let mut cookbook_service = CookbookService::connect(bv_root(), &config).await?;
+            let mut cookbook_service = CookbookService::connect(&config).await?;
             let mut versions = cookbook_service.list_versions(&protocol, &r#type).await?;
 
             versions.truncate(number);

@@ -3,7 +3,7 @@ use crate::{
     node::{KERNEL_FILE, ROOT_FS_FILE},
     node_data::NodeImage,
     services,
-    services::api::{AuthToken, AuthenticatedService},
+    services::api::AuthenticatedService,
     utils, with_retry, BV_VAR_PATH,
 };
 use anyhow::{anyhow, Context, Result};
@@ -31,21 +31,24 @@ pub struct CookbookService {
 }
 
 impl CookbookService {
-    pub async fn connect(bv_root: PathBuf, config: &SharedConfig) -> Result<Self> {
-        services::connect(config.clone(), |config| async {
+    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+        services::connect(config, |config| async {
             let url = config
+                .read()
+                .await
                 .blockjoy_registry_url
                 .ok_or_else(|| anyhow!("missing blockjoy_registry_url"))?;
             let endpoint = Endpoint::from_shared(url.clone())?;
+            let channel = Endpoint::connect(&endpoint)
+                .await
+                .with_context(|| format!("Failed to connect to cookbook service at {url}"))?;
             let client = cb_pb::cook_book_service_client::CookBookServiceClient::with_interceptor(
-                Endpoint::connect(&endpoint)
-                    .await
-                    .context(format!("Failed to connect to cookbook service at {url}"))?,
-                AuthToken(config.token),
+                channel,
+                config.token().await?,
             );
             Ok(Self {
                 client,
-                bv_root: bv_root.clone(),
+                bv_root: config.bv_root.clone(),
             })
         })
         .await
