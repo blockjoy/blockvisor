@@ -92,6 +92,7 @@ async fn main() -> Result<()> {
         let api_config = Config {
             id: host.host_id,
             token: host.token,
+            refresh: host.refresh,
             blockjoy_api_url: cmd_args.blockjoy_api_url,
             blockjoy_keys_url: cmd_args.blockjoy_keys_url,
             blockjoy_registry_url: cmd_args.blockjoy_registry_url,
@@ -108,12 +109,13 @@ async fn main() -> Result<()> {
     };
     if !cmd_args.skip_download {
         println!("Download and install bv bundle");
-        let api_config = SharedConfig::new(match api_config {
+        let config = match api_config {
             None => Config::load(&bv_root).await.with_context(|| {
                 "failed to load configuration - need to provision and init first"
             })?,
             Some(value) => value,
-        });
+        };
+        let api_config = SharedConfig::new(config, bv_root.clone());
 
         let mut updater =
             self_updater::new(bv_utils::timer::SysTimer, &bv_root, &api_config).await?;

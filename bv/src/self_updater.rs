@@ -38,8 +38,10 @@ pub struct DefaultConnector {
 #[async_trait]
 impl BundleConnector for DefaultConnector {
     async fn connect(&self) -> Result<BundleClient> {
-        services::connect(self.config.clone(), |config| async {
+        services::connect(&self.config, |config| async {
             let url = config
+                .read()
+                .await
                 .blockjoy_registry_url
                 .ok_or_else(|| anyhow!("missing blockjoy_registry_url"))?;
             Ok(BundleClient::with_auth(
@@ -48,7 +50,7 @@ impl BundleConnector for DefaultConnector {
                     .connect_timeout(BUNDLES_CONNECT_TIMEOUT)
                     .connect()
                     .await?,
-                AuthToken(config.token),
+                config.token().await?,
             ))
         })
         .await
@@ -62,7 +64,6 @@ impl BundleClient {
         BundleServiceClient::with_interceptor(channel, token)
     }
 }
-
 pub struct SelfUpdater<T, C> {
     blacklist_path: PathBuf,
     download_path: PathBuf,

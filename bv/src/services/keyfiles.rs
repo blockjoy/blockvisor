@@ -1,5 +1,5 @@
 use crate::{
-    services::api::{AuthToken, AuthenticatedService},
+    services::api::AuthenticatedService,
     {config::SharedConfig, services, services::api::pb, with_retry},
 };
 use anyhow::{anyhow, Context, Result};
@@ -12,16 +12,19 @@ pub struct KeyService {
 
 impl KeyService {
     pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        services::connect(config.clone(), |config| async {
+        services::connect(config, |config| async {
             let url = config
+                .read()
+                .await
                 .blockjoy_keys_url
                 .ok_or_else(|| anyhow!("missing blockjoy_keys_url"))?;
             let endpoint = Endpoint::from_shared(url.clone())?;
+            let channel = Endpoint::connect(&endpoint)
+                .await
+                .with_context(|| format!("Failed to connect to key service at {url}"))?;
             let client = pb::key_file_service_client::KeyFileServiceClient::with_interceptor(
-                Endpoint::connect(&endpoint)
-                    .await
-                    .context(format!("Failed to connect to key service at {url}"))?,
-                AuthToken(config.token),
+                channel,
+                config.token().await?,
             );
             Ok(Self { client })
         })

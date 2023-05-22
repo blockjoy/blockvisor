@@ -27,13 +27,14 @@ pub struct MqttStream {
 #[async_trait]
 impl pal::ServiceConnector<MqttStream> for MqttConnector {
     async fn connect(&self) -> Result<MqttStream> {
-        services::connect(self.config.clone(), |config| async {
+        services::connect(&self.config, |config| async {
+            let token = config.token().await?;
+            let config = config.read().await;
             let url = config
                 .blockjoy_mqtt_url
                 .ok_or_else(|| anyhow!("missing blockjoy_mqtt_url"))?
                 .clone();
             let host_id = config.id;
-            let token = config.token;
             // parse url into host and port
             let url = Url::parse(&url)?;
             let host = url
@@ -55,7 +56,7 @@ impl pal::ServiceConnector<MqttStream> for MqttConnector {
                 retain: true,
             });
             // use jwt as username, set empty password
-            options.set_credentials(token, "");
+            options.set_credentials(token.0, "");
 
             let client_channel_capacity = 100;
             let (client, eventloop) = AsyncClient::new(options, client_channel_capacity);
