@@ -8,16 +8,16 @@ use predicates::prelude::*;
 use std::path::Path;
 
 #[test]
-fn test_bvup_unknown_otp() {
+fn test_bvup_unknown_provision_token() {
     let tmp_dir = TempDir::new().unwrap();
 
-    let otp = "NOT_FOUND";
+    let provision_token = "NOT_FOUND";
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
     let url = "http://localhost:8080";
     let mqtt = "mqtt://localhost:1883";
 
     let mut cmd = Command::cargo_bin("bvup").unwrap();
-    cmd.args([otp, "--skip-download"])
+    cmd.args([provision_token, "--skip-download"])
         .args(["--ifa", ifa])
         .args(["--api", url])
         .args(["--keys", url])

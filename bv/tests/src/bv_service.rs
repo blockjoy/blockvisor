@@ -54,13 +54,13 @@ async fn test_bvup() {
         let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
         let url = "http://localhost:8082";
         let mqtt = "mqtt://localhost:1883";
-        let otp = "AWESOME";
+        let provision_token = "AWESOME";
         let config_path = format!("{}/etc/blockvisor.json", tmp_dir.to_string_lossy());
 
         println!("bvup");
         Command::cargo_bin("bvup")
             .unwrap()
-            .args([otp, "--skip-download"])
+            .args([provision_token, "--skip-download"])
             .args(["--ifa", ifa])
             .args(["--api", url])
             .args(["--keys", url])
@@ -166,7 +166,7 @@ async fn test_bv_service_e2e() {
         .unwrap()
         .into_inner();
     println!("host provision: {response:?}");
-    let otp = response.host_provision.unwrap().id;
+    let provision_token = response.host_provision.unwrap().id;
 
     println!("bvup");
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
@@ -176,7 +176,7 @@ async fn test_bv_service_e2e() {
 
     Command::cargo_bin("bvup")
         .unwrap()
-        .args([&otp, "--skip-download"])
+        .args([&provision_token, "--skip-download"])
         .args(["--ifa", ifa])
         .args(["--api", url])
         .args(["--keys", url])

@@ -8,11 +8,11 @@ use clap::{crate_version, ArgGroup, Parser};
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]
-#[clap(group(ArgGroup::new("input").required(true).args(&["otp", "skip_init"])))]
+#[clap(group(ArgGroup::new("input").required(true).args(&["provision_token", "skip_init"])))]
 #[clap(group(ArgGroup::new("skip").args(&["skip_download", "skip_init"])))]
 pub struct CmdArgs {
-    /// One-time password
-    pub otp: Option<String>,
+    /// Provision token
+    pub provision_token: Option<String>,
 
     /// BlockJoy API url
     #[clap(long = "api", default_value = "https://api.dev.blockjoy.com")]
@@ -37,7 +37,7 @@ pub struct CmdArgs {
     #[clap(long = "port")]
     pub blockvisor_port: Option<u16>,
 
-    /// Skip provision and init phase
+    /// Skip provisioning and init phase
     #[clap(long = "skip-init")]
     pub skip_init: bool,
 
@@ -55,7 +55,7 @@ pub fn get_ip_address(ifa_name: &str) -> Result<String> {
     Ok(ip.to_string())
 }
 
-/// Simple host init tool. It provision host with OTP than download and install latest bv bundle.
+/// Simple host init tool. It provision host with PROVISION_TOKEN then download and install latest bv bundle.
 #[tokio::main]
 async fn main() -> Result<()> {
     let bv_root = bv_root();
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
         let host_info = HostInfo::collect()?;
 
         let mut create = pb::HostServiceProvisionRequest {
-            otp: cmd_args.otp.unwrap(),
+            provision_token: cmd_args.provision_token.unwrap(),
             status: 0, // We use the setter to set this field for type-safety
             name: host_info.name,
             version: crate_version!().to_string(),
