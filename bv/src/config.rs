@@ -44,6 +44,8 @@ impl SharedConfig {
     async fn refreshed_token(&self) -> Result<String> {
         let read_lock = self.read().await;
         if AuthToken::expired(&read_lock.token)? {
+            // Explicity drop the lock. Note that if we do not drop the lock here, the succeeding
+            // call to `self.write()` will immediately deadlock.
             drop(read_lock);
             let mut write_lock = self.write().await;
             // A concurrent update may have written to the jwt field, check if the token has become
