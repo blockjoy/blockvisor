@@ -79,6 +79,7 @@ impl TestEnv {
         let api_config = Config {
             id: "host_id".to_owned(),
             token: "token".to_owned(),
+            refresh_token: "fresh boii".to_owned(),
             blockjoy_api_url: "http://localhost:8070".to_owned(),
             blockjoy_keys_url: Some("http://localhost:8070".to_owned()),
             blockjoy_registry_url: Some("http://localhost:50041".to_owned()),

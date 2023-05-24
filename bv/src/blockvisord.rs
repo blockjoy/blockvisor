@@ -330,14 +330,20 @@ where
             let metrics = node_metrics::collect_metrics(nodes.clone()).await;
             // do not bother api with empty updates
             if metrics.has_any() {
-                let token = match config.token().await {
-                    Ok(token) => token,
-                    Err(e) => {
-                        tracing::error!("Could not upload metrics, error retrieving token: {e}");
+                let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
+                    Some(channel) => channel,
+                    None => {
+                        tracing::error!("Node metrics could not establish channel");
                         continue;
                     }
                 };
-                let channel = Self::wait_for_channel(run.clone(), endpoint).await?;
+                let token = match config.token().await {
+                    Ok(channel) => channel,
+                    Err(e) => {
+                        tracing::error!("Node metrics could not refresh tokens: {e}");
+                        continue;
+                    }
+                };
                 let mut client = api::MetricsClient::with_auth(channel, token);
                 let metrics: pb::MetricsServiceNodeRequest = metrics.into();
                 if let Err(e) = client.node(metrics).await {
@@ -364,10 +370,21 @@ where
             let now = Instant::now();
             match HostMetrics::collect() {
                 Ok(metrics) => {
-                    let mut client = api::MetricsClient::with_auth(
-                        Self::wait_for_channel(run.clone(), endpoint).await?,
-                        config.token().await.ok()?,
-                    );
+                    let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
+                        Some(channel) => channel,
+                        None => {
+                            tracing::error!("Host metrics could not establish channel");
+                            continue;
+                        }
+                    };
+                    let token = match config.token().await {
+                        Ok(channel) => channel,
+                        Err(e) => {
+                            tracing::error!("Host metrics could not refresh tokens: {e}");
+                            continue;
+                        }
+                    };
+                    let mut client = api::MetricsClient::with_auth(channel, token);
                     metrics.set_all_gauges();
                     let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
                     if let Err(e) = client.host(metrics).await {

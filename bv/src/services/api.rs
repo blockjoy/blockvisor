@@ -56,15 +56,24 @@ lazy_static::lazy_static! {
     pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
 }
 
-#[derive(Clone)]
 pub struct AuthToken(pub String);
 
+impl Interceptor for AuthToken {
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        let token = &self.0;
+        request
+            .metadata_mut()
+            .insert("authorization", format!("Bearer {token}").parse().unwrap());
+        Ok(request)
+    }
+}
+
 impl AuthToken {
-    pub fn expired(&self) -> Result<bool, Status> {
-        self.exp().map(|d| d > chrono::Utc::now())
+    pub fn expired(token: &str) -> Result<bool, Status> {
+        Self::expiration(token).map(|exp| exp < chrono::Utc::now())
     }
 
-    fn exp(&self) -> Result<chrono::DateTime<chrono::Utc>, Status> {
+    fn expiration(token: &str) -> Result<chrono::DateTime<chrono::Utc>, Status> {
         use base64::engine::general_purpose::STANDARD;
         use chrono::TimeZone;
 
@@ -75,8 +84,7 @@ impl AuthToken {
 
         let unauth = |s| move || Status::unauthenticated(s);
         // Take the middle section of the jwt, which has the payload.
-        let middle = self
-            .0
+        let middle = token
             .split('.')
             .nth(1)
             .ok_or_else(unauth("Can't parse token"))?;
@@ -92,19 +100,9 @@ impl AuthToken {
         // Now interpret this timestamp as an utc time.
         match chrono::Utc.timestamp_opt(parsed.iat, 0) {
             chrono::LocalResult::None => Err(unauth("Invalid timestamp")()),
-            chrono::LocalResult::Single(t) => Ok(t),
-            chrono::LocalResult::Ambiguous(t, _) => Ok(t),
+            chrono::LocalResult::Single(expiration) => Ok(expiration),
+            chrono::LocalResult::Ambiguous(expiration, _) => Ok(expiration),
         }
-    }
-}
-
-impl Interceptor for AuthToken {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        let token = &self.0;
-        request
-            .metadata_mut()
-            .insert("authorization", format!("Bearer {token}").parse().unwrap());
-        Ok(request)
     }
 }
 

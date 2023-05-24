@@ -20,6 +20,7 @@ impl pb::host_service_server::HostService for StubHostsServer {
             let reply = pb::HostServiceProvisionResponse {
                 host_id,
                 token: "awesome-token".to_owned(),
+                refresh: "even-more-awesomer-token".to_owned(),
             };
 
             Ok(Response::new(reply))

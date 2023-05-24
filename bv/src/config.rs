@@ -43,23 +43,23 @@ impl SharedConfig {
 
     async fn refreshed_token(&self) -> Result<String> {
         let read_lock = self.read().await;
-        if AuthToken(read_lock.token.clone()).expired()? {
+        if AuthToken::expired(&read_lock.token)? {
             drop(read_lock);
             let mut write_lock = self.write().await;
             // A concurrent update may have written to the jwt field, check if the token has become
             // unexpired while we have unique access.
-            if AuthToken(write_lock.token.clone()).expired()? {
+            if AuthToken::expired(&write_lock.token)? {
                 return Ok(write_lock.token.clone());
             }
 
             let req = pb::AuthServiceRefreshRequest {
                 token: write_lock.token.clone(),
-                refresh: Some(write_lock.refresh.clone()),
+                refresh: Some(write_lock.refresh_token.clone()),
             };
             let mut service = AuthClient::connect(self).await?;
             let resp = service.refresh(req).await?;
             write_lock.token = resp.token.clone();
-            write_lock.refresh = resp.refresh;
+            write_lock.refresh_token = resp.refresh;
             write_lock.save(&self.bv_root).await?;
             Ok(resp.token)
         } else {
@@ -75,7 +75,7 @@ pub struct Config {
     /// Host auth token
     pub token: String,
     /// The refresh token.
-    pub refresh: String,
+    pub refresh_token: String,
     /// API endpoint url
     pub blockjoy_api_url: String,
     /// Url of key service for getting secrets

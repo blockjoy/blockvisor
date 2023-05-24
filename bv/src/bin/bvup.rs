@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
         let api_config = Config {
             id: host.host_id,
             token: host.token,
-            refresh: host.refresh,
+            refresh_token: host.refresh,
             blockjoy_api_url: cmd_args.blockjoy_api_url,
             blockjoy_keys_url: cmd_args.blockjoy_keys_url,
             blockjoy_registry_url: cmd_args.blockjoy_registry_url,
