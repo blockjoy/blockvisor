@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use blockvisord::config::SharedConfig;
+use blockvisord::services::cookbook;
 use blockvisord::{
     config, config::Config, hosts::HostInfo, linux_platform::bv_root, self_updater,
     services::api::pb,
@@ -92,7 +93,8 @@ async fn main() -> Result<()> {
         let api_config = Config {
             id: host.host_id,
             token: host.token,
-            refresh_token: host.refresh,
+            refresh_token: host.refresh.clone(),
+            cookbook_token: cookbook::COOKBOOK_TOKEN.to_string(),
             blockjoy_api_url: cmd_args.blockjoy_api_url,
             blockjoy_keys_url: cmd_args.blockjoy_keys_url,
             blockjoy_registry_url: cmd_args.blockjoy_registry_url,

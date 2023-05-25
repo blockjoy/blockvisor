@@ -74,7 +74,7 @@ impl AuthToken {
     }
 
     fn expiration(token: &str) -> Result<chrono::DateTime<chrono::Utc>, Status> {
-        use base64::engine::general_purpose::STANDARD;
+        use base64::engine::general_purpose::STANDARD_NO_PAD;
         use chrono::TimeZone;
 
         #[derive(serde::Deserialize)]
@@ -89,14 +89,14 @@ impl AuthToken {
             .nth(1)
             .ok_or_else(unauth("Can't parse token"))?;
         // Base64 decode the payload.
-        let decoded = STANDARD
+        let decoded = STANDARD_NO_PAD
             .decode(middle)
             .ok()
             .ok_or_else(unauth("Token is not base64"))?;
         // Json-parse the payload, with only the `iat` field being of interest.
         let parsed: Field = serde_json::from_slice(&decoded)
             .ok()
-            .ok_or_else(unauth("Token is not JSON"))?;
+            .ok_or_else(unauth("Token is not JSON with iat field"))?;
         // Now interpret this timestamp as an utc time.
         match chrono::Utc.timestamp_opt(parsed.iat, 0) {
             chrono::LocalResult::None => Err(unauth("Invalid timestamp")()),
@@ -380,7 +380,7 @@ impl NodesService {
         let endpoint = Endpoint::from_str(&url)?;
         let endpoint = Endpoint::connect(&endpoint)
             .await
-            .with_context(|| format!("Failed to connect to commands service at {url}"))?;
+            .with_context(|| format!("Failed to connect to node service at {url}"))?;
         let client = node_service_client::NodeServiceClient::with_interceptor(
             endpoint,
             config.token().await?,

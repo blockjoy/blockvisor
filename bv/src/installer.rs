@@ -901,7 +901,7 @@ mod tests {
         assert!(installer.is_blacklisted(THIS_VERSION)?);
 
         fs::create_dir_all(&installer.paths.backup)?;
-        fs::create_dir_all(&installer.paths.bv_root.join("etc"))?;
+        fs::create_dir_all(installer.paths.bv_root.join("etc"))?;
         fs::File::create(installer.paths.backup.join(BLOCKVISOR_CONFIG))?;
         {
             // create dummy installer that will touch test file as a proof it was called

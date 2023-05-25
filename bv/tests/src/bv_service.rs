@@ -8,17 +8,12 @@ use std::{fs, net::ToSocketAddrs, path::Path};
 use tokio::time::{sleep, Duration};
 use tonic::{transport::Server, Request};
 
-fn with_auth<T>(inner: T, auth_token: &str, refresh_token: &str) -> Request<T> {
+fn with_auth<T>(inner: T, auth_token: &str) -> Request<T> {
     let mut request = Request::new(inner);
     request.metadata_mut().insert(
         "authorization",
         format!("Bearer {}", auth_token).parse().unwrap(),
     );
-    request.metadata_mut().insert(
-        "cookie",
-        format!("refresh={}", refresh_token).parse().unwrap(),
-    );
-    println!("{:?}", request.metadata());
     request
 }
 
@@ -108,11 +103,9 @@ async fn test_bv_service_e2e() {
         .await
         .unwrap();
     let confirm_user = pb::AuthServiceConfirmRequest {};
-    let refresh_token = token::TokenGenerator::create_refresh(user_id, "23942390".to_string());
-    let register_token =
-        token::TokenGenerator::create_register(user_id, "23ß357320".to_string(), email.to_string());
+    let register_token = token::TokenGenerator::create_register(user_id, "1245456");
     client
-        .confirm(with_auth(confirm_user, &register_token, &refresh_token))
+        .confirm(with_auth(confirm_user, &register_token))
         .await
         .unwrap();
 
@@ -123,23 +116,26 @@ async fn test_bv_service_e2e() {
     };
     let login = client.login(login_user).await.unwrap().into_inner();
     println!("user login: {login:?}");
-    let login_auth: token::AuthClaim =
-        token::TokenGenerator::from_encoded("1245456".to_string(), &login.token).unwrap();
-    let login_data = login_auth.data.unwrap();
-    let org_id = login_data.get("org_id").unwrap();
+    let orgs = pb::org_service_client::OrgServiceClient::connect(url)
+        .await
+        .unwrap()
+        .list(with_auth(
+            pb::OrgServiceListRequest {
+                member_id: Some(user_id.to_string()),
+            },
+            &login.token,
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let org_id = orgs.orgs[0].id.clone();
 
-    let auth_token = token::TokenGenerator::create_auth(
-        user_id,
-        "1245456".to_string(),
-        org_id.clone(),
-        email.to_string(),
-    );
+    let auth_token = token::TokenGenerator::create_auth(user_id, "1245456");
 
     println!("add blockchain");
     let db_url = "postgres://blockvisor:password@database:5432/blockvisor_db";
-    let db_query = format!(
-        r#"INSERT INTO blockchains (name, status, supported_node_types) values ('Testing', 'production', '[{{"id": 3, "version": "0.0.3", "properties": [{{"name": "self-hosted", "default": "false", "ui_type": "switch", "disabled": true, "required": true}}]}}]');"#
-    );
+    let db_query =
+        r#"INSERT INTO blockchains (name, status, supported_node_types, version) values ('Testing', 'production', '[{"id": 3, "version": "0.0.1", "properties": [{"name": "self-hosted", "default": "false", "ui_type": "switch", "disabled": true, "required": true}]}]', '0.0.1');"#.to_string();
 
     Command::new("docker")
         .args(&[
@@ -158,10 +154,10 @@ async fn test_bv_service_e2e() {
         ip_range_from: "216.18.214.195".to_string(),
         ip_range_to: "216.18.214.206".to_string(),
         ip_gateway: "216.18.214.193".to_string(),
-        org_id: None,
+        org_id: Some(org_id.clone()),
     };
     let response = client
-        .create(with_auth(provision_create, &auth_token, &refresh_token))
+        .create(with_auth(provision_create, &auth_token))
         .await
         .unwrap()
         .into_inner();
@@ -206,7 +202,7 @@ async fn test_bv_service_e2e() {
 
     let list_blockchains = pb::BlockchainServiceListRequest {};
     let list = client
-        .list(with_auth(list_blockchains, &auth_token, &refresh_token))
+        .list(with_auth(list_blockchains, &auth_token))
         .await
         .unwrap()
         .into_inner();
@@ -218,10 +214,10 @@ async fn test_bv_service_e2e() {
         .unwrap();
 
     let node_create = pb::NodeServiceCreateRequest {
-        org_id: org_id.clone(),
-        blockchain_id: blockchain.id.clone(),
-        version: "0.0.1".to_string(),
-        node_type: pb::NodeType::Validator.into(),
+        org_id,
+        blockchain_id: blockchain.id.to_string(),
+        version: blockchain.version.clone().unwrap(),
+        node_type: blockchain.nodes_types[0].node_type,
         properties: vec![pb::NodeProperty {
             name: "TESTING_PARAM".to_string(),
             label: "testeronis".to_string(),
@@ -231,7 +227,7 @@ async fn test_bv_service_e2e() {
             required: true,
             value: Some("I guess just some test value".to_string()),
         }],
-        network: "".to_string(),
+        network: blockchain.networks[0].clone().name,
         placement: Some(pb::NodePlacement {
             placement: Some(pb::node_placement::Placement::Scheduler(
                 pb::NodeScheduler {
@@ -244,7 +240,7 @@ async fn test_bv_service_e2e() {
         deny_ips: vec![],
     };
     let resp = node_client
-        .create(with_auth(node_create, &auth_token, &refresh_token))
+        .create(with_auth(node_create, &auth_token))
         .await
         .unwrap()
         .into_inner();
@@ -271,7 +267,7 @@ async fn test_bv_service_e2e() {
         )),
     };
     let resp = client
-        .create(with_auth(node_stop, &auth_token, &refresh_token))
+        .create(with_auth(node_stop, &auth_token))
         .await
         .unwrap()
         .into_inner();
@@ -286,7 +282,7 @@ async fn test_bv_service_e2e() {
         id: node_id.clone(),
     };
     node_client
-        .delete(with_auth(node_delete, &auth_token, &refresh_token))
+        .delete(with_auth(node_delete, &auth_token))
         .await
         .unwrap()
         .into_inner();

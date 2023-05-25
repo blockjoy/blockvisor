@@ -1,6 +1,7 @@
 use crate::src::utils::{
     stub_server::{StubCommandsServer, StubDiscoveryService},
     test_env::TestEnv,
+    token::TokenGenerator,
 };
 use anyhow::{bail, Result};
 use assert_cmd::Command;
@@ -11,7 +12,7 @@ use blockvisord::{
     nodes::Nodes,
     server::bv_pb,
     services,
-    services::{api, api::pb},
+    services::{api, api::pb, cookbook},
     set_bv_status, utils, BV_VAR_PATH,
 };
 use bv_utils::{cmd::run_cmd, run_flag::RunFlag};
@@ -539,10 +540,12 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             .unwrap()
     };
     set_bv_status(bv_pb::ServiceStatus::Ok).await;
+    let id = Uuid::new_v4();
     let config = Config {
-        id: Uuid::new_v4().to_string(),
-        token: "any token".to_string(),
+        id: id.to_string(),
+        token: TokenGenerator::create_host(id, "1245456"),
         refresh_token: "any refresh token".to_string(),
+        cookbook_token: cookbook::COOKBOOK_TOKEN.to_string(),
         blockjoy_api_url: "http://localhost:8089".to_string(),
         blockjoy_keys_url: Some("http://localhost:8089".to_string()),
         blockjoy_registry_url: Some("http://localhost:50059".to_string()),
@@ -635,10 +638,12 @@ async fn test_discovery_on_connection_error() -> Result<()> {
             .await
             .unwrap()
     };
+    let id = Uuid::new_v4();
     let config = Config {
-        id: Uuid::new_v4().to_string(),
-        token: "any token".to_string(),
+        id: id.to_string(),
+        token: TokenGenerator::create_host(id, "1245456"),
         refresh_token: "any refresh token".to_string(),
+        cookbook_token: cookbook::COOKBOOK_TOKEN.to_string(),
         blockjoy_api_url: "http://localhost:8091".to_string(),
         blockjoy_keys_url: None,
         blockjoy_registry_url: None,

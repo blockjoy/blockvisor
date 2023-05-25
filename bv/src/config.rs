@@ -78,6 +78,8 @@ pub struct Config {
     pub token: String,
     /// The refresh token.
     pub refresh_token: String,
+    /// The token used for talking to cookbook.
+    pub cookbook_token: String,
     /// API endpoint url
     pub blockjoy_api_url: String,
     /// Url of key service for getting secrets

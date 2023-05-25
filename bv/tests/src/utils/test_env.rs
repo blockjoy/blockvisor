@@ -26,10 +26,10 @@ use std::{
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
-/// Global integration tests token. All tests (that may run in parallel) share common FS and net devices space
-/// (tap devices which are created by Firecracker during tests).
-/// Each test shall pick its own token that can be then used to create unique bv_root and net device names,
-/// so tests won't collide.
+/// Global integration tests token. All tests (that may run in parallel) share common FS and net
+/// devices space (tap devices which are created by Firecracker during tests). Each test shall pick
+/// its own token that can be then used to create unique bv_root and net device names, so tests
+/// won't collide.
 pub static TEST_TOKEN: AtomicU32 = AtomicU32::new(0);
 
 /// Common staff to setup for all tests like sut (blockvisord in that case),
@@ -80,6 +80,7 @@ impl TestEnv {
             id: "host_id".to_owned(),
             token: "token".to_owned(),
             refresh_token: "fresh boii".to_owned(),
+            cookbook_token: "cookiebookie".to_string(),
             blockjoy_api_url: "http://localhost:8070".to_owned(),
             blockjoy_keys_url: Some("http://localhost:8070".to_owned()),
             blockjoy_registry_url: Some("http://localhost:50041".to_owned()),
