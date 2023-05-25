@@ -92,7 +92,7 @@ impl AuthToken {
         let decoded = STANDARD
             .decode(middle)
             .ok()
-            .ok_or_else(unauth("Token is not bas64"))?;
+            .ok_or_else(unauth("Token is not base64"))?;
         // Json-parse the payload, with only the `iat` field being of interest.
         let parsed: Field = serde_json::from_slice(&decoded)
             .ok()

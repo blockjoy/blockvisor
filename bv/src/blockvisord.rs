@@ -333,14 +333,14 @@ where
                 let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
                     Some(channel) => channel,
                     None => {
-                        tracing::error!("Node metrics could not establish channel");
+                        error!("Node metrics could not establish channel");
                         continue;
                     }
                 };
                 let token = match config.token().await {
                     Ok(channel) => channel,
                     Err(e) => {
-                        tracing::error!("Node metrics could not refresh tokens: {e}");
+                        error!("Node metrics could not refresh tokens: {e}");
                         continue;
                     }
                 };
@@ -373,14 +373,14 @@ where
                     let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
                         Some(channel) => channel,
                         None => {
-                            tracing::error!("Host metrics could not establish channel");
+                            error!("Host metrics could not establish channel");
                             continue;
                         }
                     };
                     let token = match config.token().await {
                         Ok(channel) => channel,
                         Err(e) => {
-                            tracing::error!("Host metrics could not refresh tokens: {e}");
+                            error!("Host metrics could not refresh tokens: {e}");
                             continue;
                         }
                     };
