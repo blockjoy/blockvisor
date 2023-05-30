@@ -70,7 +70,8 @@ impl Interceptor for AuthToken {
 
 impl AuthToken {
     pub fn expired(token: &str) -> Result<bool, Status> {
-        Self::expiration(token).map(|exp| exp < chrono::Utc::now())
+        let margin = chrono::Duration::minutes(1);
+        Self::expiration(token).map(|exp| exp < chrono::Utc::now() - margin)
     }
 
     fn expiration(token: &str) -> Result<chrono::DateTime<chrono::Utc>, Status> {
