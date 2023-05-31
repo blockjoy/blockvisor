@@ -1,7 +1,7 @@
 use crate::{
     babel_engine,
-    node_connection::{BabelConnection, NodeConnection},
     node_data::{NodeData, NodeImage, NodeStatus},
+    pal::NodeConnection,
     pal::{NetInterface, Pal},
     services::cookbook::{CookbookService, BABEL_PLUGIN_NAME},
     utils::{get_process_pid, with_timeout},
@@ -60,12 +60,12 @@ pub fn build_registry_dir(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR)
 }
 
-pub type BabelEngine = babel_engine::BabelEngine<NodeConnection, RhaiPlugin<babel_engine::Engine>>;
+pub type BabelEngine<N> = babel_engine::BabelEngine<N, RhaiPlugin<babel_engine::Engine>>;
 
 #[derive(Debug)]
 pub struct Node<P: Pal> {
     pub data: NodeData<P::NetInterface>,
-    pub babel_engine: BabelEngine,
+    pub babel_engine: BabelEngine<P::NodeConnection>,
     metadata: BlockchainMetadata,
     machine: Machine<'static>,
     paths: Paths,
@@ -131,7 +131,7 @@ impl<P: Pal + Debug> Node<P> {
 
         let babel_engine = BabelEngine::new(
             node_id,
-            NodeConnection::closed(&paths.chroot, node_id),
+            pal.create_node_connection(node_id),
             |engine| RhaiPlugin::new(&script, engine),
             data.properties.clone(),
             paths.plugin_data.clone(),
@@ -159,38 +159,27 @@ impl<P: Pal + Debug> Node<P> {
         let config = Self::create_config(&paths, &data).await?;
         let node_id = data.id;
         let cmd = node_id.to_string();
-        let (pid, node_conn) = match get_process_pid(FC_BIN_NAME, &cmd) {
-            Ok(pid) => {
-                // Since this is the startup phase it doesn't make sense to wait a long time
-                // for the nodes to come online. For that reason we restrict the allowed delay
-                // further down.
-                debug!("connecting to babel ...");
-                let node_conn = match Self::connect(
-                    &paths.chroot,
-                    pal.babel_path(),
-                    node_id,
-                    NODE_RECONNECT_TIMEOUT,
-                )
-                .await
-                {
-                    Ok(mut node_conn) => {
-                        if let Err(err) =
-                            Self::check_job_runner(&mut node_conn, pal.job_runner_path()).await
-                        {
-                            warn!("failed to check/update job runner on running node {node_id}: {err}");
-                            NodeConnection::closed(&paths.chroot, node_id)
-                        } else {
-                            node_conn
-                        }
-                    }
-                    Err(err) => {
-                        warn!("failed to reestablish babel connection to running node {node_id}: {err}");
-                        NodeConnection::closed(&paths.chroot, node_id)
-                    }
-                };
-                (Some(pid), node_conn)
+        let mut node_conn = pal.create_node_connection(node_id);
+        let pid = if let Ok(pid) = get_process_pid(FC_BIN_NAME, &cmd) {
+            // Since this is the startup phase it doesn't make sense to wait a long time
+            // for the nodes to come online. For that reason we restrict the allowed delay
+            // further down.
+            debug!("connecting to babel ...");
+
+            if let Err(err) =
+                Self::connect(&mut node_conn, NODE_RECONNECT_TIMEOUT, pal.babel_path()).await
+            {
+                warn!("failed to reestablish babel connection to running node {node_id}: {err}");
+            } else if let Err(err) =
+                Self::check_job_runner(&mut node_conn, pal.job_runner_path()).await
+            {
+                warn!("failed to check/update job runner on running node {node_id}: {err}");
+                node_conn.close();
             }
-            Err(_) => (None, NodeConnection::closed(&paths.chroot, node_id)),
+
+            Some(pid)
+        } else {
+            None
         };
         let machine = Machine::connect(config, pid).await;
         let babel_engine = BabelEngine::new(
@@ -259,23 +248,22 @@ impl<P: Pal + Debug> Node<P> {
             self.machine.start().await?;
         }
         let id = self.id();
-        self.babel_engine.babel_connection = Self::connect(
-            &self.paths.chroot,
-            self.pal.babel_path(),
-            id,
+        Self::connect(
+            &mut self.babel_engine.node_connection,
             NODE_START_TIMEOUT,
+            self.pal.babel_path(),
         )
         .await?;
-        let babelsup_client = self.babel_engine.babel_connection.babelsup_client().await?;
+        let babelsup_client = self.babel_engine.node_connection.babelsup_client().await?;
         with_retry!(babelsup_client.setup_supervisor(SUPERVISOR_CONFIG))?;
         Self::check_job_runner(
-            &mut self.babel_engine.babel_connection,
+            &mut self.babel_engine.node_connection,
             self.pal.job_runner_path(),
         )
         .await?;
 
         // setup babel
-        let babel_client = self.babel_engine.babel_connection.babel_client().await?;
+        let babel_client = self.babel_engine.node_connection.babel_client().await?;
         match babel_client
             .setup_babel((id.to_string(), self.metadata.babel_config.clone()))
             .await
@@ -318,8 +306,8 @@ impl<P: Pal + Debug> Node<P> {
         };
         if machine_status == self.data.expected_status {
             if machine_status == NodeStatus::Running
-                && (self.babel_engine.babel_connection.is_closed()
-                    || self.babel_engine.babel_connection.is_broken())
+                && (self.babel_engine.node_connection.is_closed()
+                    || self.babel_engine.node_connection.is_broken())
             {
                 // node is running, but there is no babel connection or is broken for some reason
                 NodeStatus::Failed
@@ -362,12 +350,11 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     async fn connect(
-        chroot_path: &Path,
-        babel_path: &Path,
-        node_id: Uuid,
+        connection: &mut impl NodeConnection,
         max_delay: Duration,
-    ) -> Result<NodeConnection> {
-        let mut connection = NodeConnection::try_open(chroot_path, node_id, max_delay).await?;
+        babel_path: &Path,
+    ) -> Result<()> {
+        connection.open(max_delay).await?;
         // check and update babel
         let (babel_bin, checksum) = Self::load_bin(babel_path).await?;
         let client = connection.babelsup_client().await?;
@@ -376,11 +363,11 @@ impl<P: Pal + Debug> Node<P> {
             info!("Invalid or missing Babel service on VM, installing new one");
             with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
         }
-        Ok(connection)
+        Ok(())
     }
 
     async fn check_job_runner(
-        connection: &mut NodeConnection,
+        connection: &mut impl NodeConnection,
         job_runner_path: &Path,
     ) -> Result<()> {
         // check and update job_runner
@@ -435,7 +422,7 @@ impl<P: Pal + Debug> Node<P> {
         let id = self.id();
         self.recovery_counters.reconnect += 1;
         info!("Recovery: fix broken connection to node with ID `{id}`");
-        if let Err(e) = self.babel_engine.babel_connection.connection_test().await {
+        if let Err(e) = self.babel_engine.node_connection.test().await {
             warn!("Recovery: reconnect to node with ID `{id}` failed: {e}");
             if self.recovery_counters.reconnect >= MAX_RECONNECT_TRIES {
                 info!("Recovery: restart broken node with ID `{id}`");
@@ -451,7 +438,7 @@ impl<P: Pal + Debug> Node<P> {
                     self.started_node_recovery().await?;
                 }
             }
-        } else if self.babel_engine.babel_connection.is_closed() {
+        } else if self.babel_engine.node_connection.is_closed() {
             // node wasn't fully started so proceed with other stuff
             self.started_node_recovery().await?;
         } else {
@@ -499,7 +486,7 @@ impl<P: Pal + Debug> Node<P> {
                 firec::MachineState::SHUTOFF => break,
             }
         }
-        self.babel_engine.babel_connection = NodeConnection::closed(&self.paths.chroot, self.id());
+        self.babel_engine.node_connection.close();
 
         Ok(())
     }
@@ -517,7 +504,7 @@ impl<P: Pal + Debug> Node<P> {
         babel_api::metadata::check_firewall_rules(&rules)?;
         let mut firewall = self.metadata.firewall.clone();
         firewall.rules.append(&mut rules.clone());
-        let babel_client = self.babel_engine.babel_connection.babel_client().await?;
+        let babel_client = self.babel_engine.node_connection.babel_client().await?;
         with_retry!(babel_client
             .setup_firewall(with_timeout(firewall.clone(), fw_setup_timeout(&firewall))))?;
         self.data.firewall_rules = rules;

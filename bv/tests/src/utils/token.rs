@@ -1,6 +1,6 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use jsonwebtoken as jwt;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]

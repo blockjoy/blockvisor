@@ -3,7 +3,7 @@
 use crate::node::BabelEngine;
 use crate::node_data::NodeStatus;
 use crate::nodes::Nodes;
-use crate::pal::Pal;
+use crate::pal::{NodeConnection, Pal};
 use crate::services::api::pb;
 use babel_api::plugin::{ApplicationStatus, StakingStatus, SyncStatus};
 use std::collections::HashMap;
@@ -74,7 +74,7 @@ pub async fn collect_metrics<P: Pal + Debug + 'static>(nodes: Arc<Nodes<P>>) -> 
 }
 
 /// Returns the metric for a single node.
-pub async fn collect_metric(babel_engine: &mut BabelEngine) -> Metric {
+pub async fn collect_metric<N: NodeConnection>(babel_engine: &mut BabelEngine<N>) -> Metric {
     let capabilities = babel_engine.capabilities().await.unwrap_or_default();
     let height = match capabilities.contains(&"height".to_string()) {
         true => timeout(babel_engine.height()).await.ok(),

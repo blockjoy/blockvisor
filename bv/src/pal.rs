@@ -1,16 +1,20 @@
-use crate::config::SharedConfig;
 /// Platform Abstraction Layer is a helper module which goal is to increase testability of BV.
 /// Original intention is testability, not portability, nevertheless it may be useful if such requirement appear.
 ///
 /// It defines `Pal` trait which is top level abstraction that contains definitions of sub layers.
 ///
+use crate::config::SharedConfig;
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::fmt::Debug;
-use std::net::IpAddr;
-use std::path::Path;
+use serde::{de::DeserializeOwned, Serialize};
+use std::{fmt::Debug, net::IpAddr, path::Path, time::Duration};
+use tonic::{
+    codegen::InterceptedService,
+    service::Interceptor,
+    transport::Channel,
+    {Request, Status},
+};
+use uuid::Uuid;
 
 /// Platform Abstraction Layer - trait used to detach business logic form platform specifics, so it
 /// can be easily tested.
@@ -47,6 +51,10 @@ pub trait Pal {
         &self,
         config: &SharedConfig,
     ) -> Self::CommandsStreamConnector;
+
+    /// Type representing node connection.
+    type NodeConnection: NodeConnection + Debug;
+    fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection;
 }
 
 #[async_trait]
@@ -70,4 +78,34 @@ pub trait ServiceConnector<S> {
 pub trait CommandsStream {
     /// Wait for next command. Returns pb::Command serialized with protobufs to bytes.
     async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>>;
+}
+
+pub struct DefaultTimeout(pub Duration);
+
+impl Interceptor for DefaultTimeout {
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        if request.metadata().get("grpc-timeout").is_none() {
+            // set default timeout if not set yet
+            request.set_timeout(self.0);
+        }
+        Ok(request)
+    }
+}
+
+pub type BabelClient =
+    babel_api::babel::babel_client::BabelClient<InterceptedService<Channel, DefaultTimeout>>;
+pub type BabelSupClient = babel_api::babelsup::babel_sup_client::BabelSupClient<
+    InterceptedService<Channel, DefaultTimeout>,
+>;
+
+#[async_trait]
+pub trait NodeConnection {
+    async fn open(&mut self, max_delay: Duration) -> Result<()>;
+    fn close(&mut self);
+    fn is_closed(&self) -> bool;
+    fn mark_broken(&mut self);
+    fn is_broken(&self) -> bool;
+    async fn test(&self) -> Result<()>;
+    async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient>;
+    async fn babel_client(&mut self) -> Result<&mut BabelClient>;
 }

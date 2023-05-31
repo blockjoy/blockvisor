@@ -9,10 +9,8 @@
 /// Engine methods that implementation needs to interact with node via BV are sent as `NodeRequest`.
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{
-    node_connection::{BabelConnection, RPC_REQUEST_TIMEOUT},
-    node_data::NodeProperties,
-    utils::with_timeout,
-    with_retry,
+    node_connection::RPC_REQUEST_TIMEOUT, node_data::NodeProperties, pal::NodeConnection,
+    utils::with_timeout, with_retry,
 };
 use anyhow::{anyhow, bail, Result};
 use babel_api::{
@@ -22,17 +20,16 @@ use babel_api::{
 };
 use bv_utils::run_flag::RunFlag;
 use futures_util::StreamExt;
-use std::time::Duration;
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
     fs,
     path::{Path, PathBuf},
+    time::Duration,
 };
 use tokio::select;
 use tonic::Status;
-use tracing::log::Level;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, log::Level, trace, warn};
 use uuid::Uuid;
 
 lazy_static::lazy_static! {
@@ -67,9 +64,9 @@ macro_rules! with_selective_retry {
 }
 
 #[derive(Debug)]
-pub struct BabelEngine<B, P> {
+pub struct BabelEngine<N, P> {
     node_id: Uuid,
-    pub babel_connection: B,
+    pub node_connection: N,
     properties: NodeProperties,
     plugin: P,
     plugin_data_path: PathBuf,
@@ -77,10 +74,10 @@ pub struct BabelEngine<B, P> {
     node_tx: tokio::sync::mpsc::Sender<NodeRequest>,
 }
 
-impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
+impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     pub fn new<F: FnOnce(Engine) -> Result<P>>(
         node_id: Uuid,
-        babel_connection: B,
+        node_connection: N,
         plugin_builder: F,
         properties: NodeProperties,
         plugin_data_path: PathBuf,
@@ -94,7 +91,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
         };
         Ok(Self {
             node_id,
-            babel_connection,
+            node_connection,
             plugin: plugin_builder(engine)?,
             properties,
             plugin_data_path,
@@ -231,7 +228,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
 
     /// Returns the list of logs from blockchain jobs.
     pub async fn get_logs(&mut self) -> Result<Vec<String>> {
-        let client = self.babel_connection.babel_client().await?;
+        let client = self.node_connection.babel_client().await?;
         let mut resp = with_retry!(client.get_logs(()))?.into_inner();
         let mut logs = Vec::<String>::default();
         while let Some(Ok(log)) = resp.next().await {
@@ -242,7 +239,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
 
     /// Returns the list of logs from babel processes.
     pub async fn get_babel_logs(&mut self, max_lines: u32) -> Result<Vec<String>> {
-        let client = self.babel_connection.babel_client().await?;
+        let client = self.node_connection.babel_client().await?;
         let mut resp = with_retry!(client.get_babel_logs(max_lines))?.into_inner();
         let mut logs = Vec::<String>::default();
         while let Some(Ok(log)) = resp.next().await {
@@ -254,7 +251,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
     /// Returns blockchain node keys.
     pub async fn download_keys(&mut self) -> Result<Vec<babel_api::babel::BlockchainKey>> {
         let config = self.get_keys_config().await?;
-        let babel_client = self.babel_connection.babel_client().await?;
+        let babel_client = self.node_connection.babel_client().await?;
         let keys = with_retry!(babel_client.download_keys(config.clone()))?.into_inner();
         Ok(keys)
     }
@@ -262,7 +259,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
     /// Sets blockchain node keys.
     pub async fn upload_keys(&mut self, keys: Vec<babel_api::babel::BlockchainKey>) -> Result<()> {
         let config = self.get_keys_config().await?;
-        let babel_client = self.babel_connection.babel_client().await?;
+        let babel_client = self.node_connection.babel_client().await?;
         with_retry!(babel_client.upload_keys((config.clone(), keys.clone())))?;
         Ok(())
     }
@@ -314,7 +311,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
     }
 
     async fn handle_node_req(&mut self, req: NodeRequest) {
-        let babel_client = self.babel_connection.babel_client().await;
+        let babel_client = self.node_connection.babel_client().await;
         match req {
             NodeRequest::RunSh {
                 body,
@@ -424,7 +421,7 @@ impl<B: BabelConnection, P: Plugin + Clone + Send + 'static> BabelEngine<B, P> {
             tonic::Code::Internal => err,
             _ => {
                 // for others mark connection as broken
-                self.babel_connection.mark_broken();
+                self.node_connection.mark_broken();
                 err
             }
         }
@@ -614,7 +611,7 @@ fn escape_sh_char(c: char) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_connection::{BabelClient, DefaultTimeout};
+    use crate::pal::{BabelClient, BabelSupClient, DefaultTimeout};
     use crate::utils;
     use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
@@ -776,12 +773,34 @@ mod tests {
     }
 
     #[async_trait]
-    impl BabelConnection for TestConnection {
-        async fn babel_client(&mut self) -> Result<&mut BabelClient> {
-            Ok(&mut self.client)
+    impl NodeConnection for TestConnection {
+        async fn open(&mut self, _max_delay: Duration) -> Result<()> {
+            Ok(())
+        }
+
+        fn close(&mut self) {}
+
+        fn is_closed(&self) -> bool {
+            false
         }
 
         fn mark_broken(&mut self) {}
+
+        fn is_broken(&self) -> bool {
+            false
+        }
+
+        async fn test(&self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient> {
+            unimplemented!()
+        }
+
+        async fn babel_client(&mut self) -> Result<&mut BabelClient> {
+            Ok(&mut self.client)
+        }
     }
 
     /// Common staff to setup for all tests like sut (BabelEngine in that case),
@@ -802,7 +821,7 @@ mod tests {
             let connection = TestConnection {
                 client: babel_api::babel::babel_client::BabelClient::with_interceptor(
                     test_channel(&tmp_root),
-                    DefaultTimeout,
+                    DefaultTimeout(RPC_REQUEST_TIMEOUT),
                 ),
             };
             let engine = BabelEngine::new(

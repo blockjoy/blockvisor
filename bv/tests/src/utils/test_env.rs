@@ -25,6 +25,7 @@ use std::{
 };
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
+use uuid::Uuid;
 
 /// Global integration tests token. All tests (that may run in parallel) share common FS and net
 /// devices space (tap devices which are created by Firecracker during tests). Each test shall pick
@@ -253,6 +254,12 @@ impl Pal for DummyPlatform {
         _config: &SharedConfig,
     ) -> Self::CommandsStreamConnector {
         EmptyStreamConnector
+    }
+
+    type NodeConnection = blockvisord::node_connection::NodeConnection;
+
+    fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
+        blockvisord::node_connection::new(&self.bv_root.join(BV_VAR_PATH), node_id)
     }
 }
 

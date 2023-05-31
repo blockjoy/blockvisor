@@ -1,7 +1,7 @@
 use crate::config::SharedConfig;
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::pal::{NetInterface, Pal};
-use crate::services;
+use crate::{node_connection, services, BV_VAR_PATH};
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use bv_utils::cmd::run_cmd;
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
 pub const BRIDGE_IFACE: &str = "bvbr0";
 const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
@@ -98,6 +99,11 @@ impl Pal for LinuxPlatform {
         services::mqtt::MqttConnector {
             config: config.clone(),
         }
+    }
+
+    type NodeConnection = node_connection::NodeConnection;
+    fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
+        node_connection::new(&self.bv_root.join(BV_VAR_PATH), node_id)
     }
 }
 

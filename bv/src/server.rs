@@ -39,6 +39,7 @@ impl<P> bv_pb::blockvisor_server::Blockvisor for BlockvisorServer<P>
 where
     P: Pal + Debug + Send + Sync + 'static,
     P::NetInterface: Send + Sync + 'static,
+    P::NodeConnection: Send + Sync + 'static,
 {
     #[instrument(skip(self), ret(Debug))]
     async fn health(
