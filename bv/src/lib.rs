@@ -4,6 +4,7 @@ pub mod babel_engine;
 pub mod blockvisord;
 pub mod cli;
 pub mod config;
+pub mod firecracker_machine;
 pub mod hosts;
 pub mod installer;
 pub mod linux_platform;

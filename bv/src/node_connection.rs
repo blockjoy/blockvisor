@@ -1,4 +1,4 @@
-use crate::{node::VSOCK_PATH, pal, with_retry};
+use crate::{firecracker_machine::VSOCK_PATH, pal, with_retry};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use async_trait::async_trait;
 use std::{

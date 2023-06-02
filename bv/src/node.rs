@@ -1,10 +1,14 @@
 use crate::{
     babel_engine,
     node_data::{NodeData, NodeImage, NodeStatus},
+    pal,
     pal::NodeConnection,
+    pal::VirtualMachine,
     pal::{NetInterface, Pal},
-    services::cookbook::{CookbookService, BABEL_PLUGIN_NAME},
-    utils::{get_process_pid, with_timeout},
+    services::cookbook::{
+        CookbookService, BABEL_PLUGIN_NAME, DATA_FILE, KERNEL_FILE, ROOT_FS_FILE,
+    },
+    utils::with_timeout,
     with_retry, BV_VAR_PATH,
 };
 use anyhow::{anyhow, bail, Context, Result};
@@ -16,7 +20,6 @@ use babel_api::{
 };
 use bv_utils::cmd::run_cmd;
 use chrono::{DateTime, Utc};
-use firec::{config::JailerMode, Machine};
 use std::{
     ffi::OsStr,
     fmt::Debug,
@@ -41,15 +44,6 @@ const FW_RULE_SETUP_TIMEOUT_SEC: u64 = 1;
 pub const REGISTRY_CONFIG_DIR: &str = "nodes";
 pub const DATA_CACHE_DIR: &str = "blocks";
 const DATA_CACHE_EXPIRATION: Duration = Duration::from_secs(7 * 24 * 3600);
-pub const FC_BIN_NAME: &str = "firecracker";
-const FC_BIN_PATH: &str = "usr/bin/firecracker";
-const FC_SOCKET_PATH: &str = "/firecracker.socket";
-pub const ROOT_FS_FILE: &str = "os.img";
-pub const KERNEL_FILE: &str = "kernel";
-const DATA_FILE: &str = "data.img";
-pub const VSOCK_PATH: &str = "vsock.socket";
-const VSOCK_GUEST_CID: u32 = 3;
-const MAX_KERNEL_ARGS_LEN: usize = 1024;
 const MAX_START_TRIES: usize = 3;
 const MAX_STOP_TRIES: usize = 3;
 const MAX_RECONNECT_TRIES: usize = 3;
@@ -69,7 +63,7 @@ pub struct Node<P: Pal> {
     pub data: NodeData<P::NetInterface>,
     pub babel_engine: BabelEngine<P::NodeConnection>,
     metadata: BlockchainMetadata,
-    machine: Machine<'static>,
+    machine: P::VirtualMachine,
     paths: Paths,
     pal: Arc<P>,
     recovery_counters: RecoveryCounters,
@@ -85,7 +79,6 @@ struct RecoveryCounters {
 #[derive(Debug)]
 struct Paths {
     bv_root: PathBuf,
-    chroot: PathBuf,
     data_cache_dir: PathBuf,
     data_dir: PathBuf,
     plugin_data: PathBuf,
@@ -93,17 +86,13 @@ struct Paths {
 }
 
 impl Paths {
-    fn build(bv_root: &Path, id: Uuid) -> Self {
+    fn build(pal: &impl Pal, id: Uuid) -> Self {
+        let bv_root = pal.bv_root();
         let registry = build_registry_dir(bv_root);
         Self {
             bv_root: bv_root.to_path_buf(),
-            chroot: bv_root.join(BV_VAR_PATH),
             data_cache_dir: bv_root.join(BV_VAR_PATH).join(DATA_CACHE_DIR),
-            data_dir: bv_root
-                .join(BV_VAR_PATH)
-                .join(FC_BIN_NAME)
-                .join(id.to_string())
-                .join("root"),
+            data_dir: pal.build_vm_data_path(id),
             plugin_data: registry.join(format!("{id}.data")),
             registry,
         }
@@ -120,14 +109,13 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn create(pal: Arc<P>, data: NodeData<P::NetInterface>) -> Result<Self> {
         info!("Creating node with data: {data:?}");
         let node_id = data.id;
-        let paths = Paths::build(pal.bv_root(), node_id);
+        let paths = Paths::build(pal.as_ref(), node_id);
 
         let (script, metadata) = Self::copy_and_check_plugin(&paths, node_id, &data.image).await?;
 
         let _ = tokio::fs::remove_dir_all(&paths.data_dir).await;
-        let config = Self::create_config(&paths, &data).await?;
         Self::prepare_data_image(&paths, &data).await?;
-        let machine = Machine::create(config).await?;
+        let machine = pal.create_vm(&data).await?;
 
         data.save(&paths.registry).await?;
 
@@ -153,21 +141,19 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(data))]
     pub async fn attach(pal: Arc<P>, data: NodeData<P::NetInterface>) -> Result<Self> {
         info!("Attaching to node with data: {data:?}");
-        let paths = Paths::build(pal.bv_root(), data.id);
+        let paths = Paths::build(pal.as_ref(), data.id);
 
         let script = fs::read_to_string(&Paths::script_file_path(&paths.registry, data.id)).await?;
         let metadata = rhai_plugin::read_metadata(&script)?;
 
-        let config = Self::create_config(&paths, &data).await?;
         let node_id = data.id;
-        let cmd = node_id.to_string();
         let mut node_conn = pal.create_node_connection(node_id);
-        let pid = if let Ok(pid) = get_process_pid(FC_BIN_NAME, &cmd) {
+        let machine = pal.attach_vm(&data).await?;
+        if machine.state() == pal::VmState::RUNNING {
+            debug!("connecting to babel ...");
             // Since this is the startup phase it doesn't make sense to wait a long time
             // for the nodes to come online. For that reason we restrict the allowed delay
             // further down.
-            debug!("connecting to babel ...");
-
             if let Err(err) =
                 Self::connect(&mut node_conn, NODE_RECONNECT_TIMEOUT, pal.babel_path()).await
             {
@@ -178,12 +164,7 @@ impl<P: Pal + Debug> Node<P> {
                 warn!("failed to check/update job runner on running node {node_id}: {err}");
                 node_conn.close();
             }
-
-            Some(pid)
-        } else {
-            None
-        };
-        let machine = Machine::connect(config, pid).await;
+        }
         let babel_engine = BabelEngine::new(
             node_id,
             node_conn,
@@ -245,7 +226,7 @@ impl<P: Pal + Debug> Node<P> {
             bail!("can't start node which is not stopped properly");
         }
 
-        if self.machine.state() == firec::MachineState::SHUTOFF {
+        if self.machine.state() == pal::VmState::SHUTOFF {
             self.data.network_interface.remaster().await?;
             self.machine.start().await?;
         }
@@ -303,8 +284,8 @@ impl<P: Pal + Debug> Node<P> {
     /// Returns the actual status of the node.
     pub fn status(&self) -> NodeStatus {
         let machine_status = match self.machine.state() {
-            firec::MachineState::RUNNING => NodeStatus::Running,
-            firec::MachineState::SHUTOFF => NodeStatus::Stopped,
+            pal::VmState::RUNNING => NodeStatus::Running,
+            pal::VmState::SHUTOFF => NodeStatus::Stopped,
         };
         if machine_status == self.data.expected_status {
             if machine_status == NodeStatus::Running
@@ -325,7 +306,7 @@ impl<P: Pal + Debug> Node<P> {
         let id = self.id();
         match self.data.expected_status {
             NodeStatus::Running => {
-                if self.machine.state() == firec::MachineState::SHUTOFF {
+                if self.machine.state() == pal::VmState::SHUTOFF {
                     self.started_node_recovery().await?;
                 } else {
                     self.node_connection_recovery().await?;
@@ -463,8 +444,8 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(self))]
     pub async fn stop(&mut self) -> Result<()> {
         match self.machine.state() {
-            firec::MachineState::SHUTOFF => {}
-            firec::MachineState::RUNNING => {
+            pal::VmState::SHUTOFF => {}
+            pal::VmState::RUNNING => {
                 if let Err(err) = self.machine.shutdown().await {
                     warn!("Graceful shutdown failed: {err}");
 
@@ -478,14 +459,14 @@ impl<P: Pal + Debug> Node<P> {
         let start = Instant::now();
         loop {
             match self.machine.state() {
-                firec::MachineState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
-                    debug!("Firecracker process not shutdown yet, will retry");
+                pal::VmState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
+                    debug!("VM not shutdown yet, will retry");
                     tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
                 }
-                firec::MachineState::RUNNING => {
-                    bail!("Firecracker shutdown timeout");
+                pal::VmState::RUNNING => {
+                    bail!("VM shutdown timeout");
                 }
-                firec::MachineState::SHUTOFF => break,
+                pal::VmState::SHUTOFF => break,
             }
         }
         self.babel_engine.node_connection.close();
@@ -586,59 +567,6 @@ impl<P: Pal + Debug> Node<P> {
         }
 
         Ok(())
-    }
-
-    async fn create_config(
-        paths: &Paths,
-        data: &NodeData<P::NetInterface>,
-    ) -> Result<firec::config::Config<'static>> {
-        let kernel_args = format!(
-            "console=ttyS0 reboot=k panic=1 pci=off random.trust_cpu=on \
-            ip={}::{}:255.255.255.240::eth0:on",
-            data.network_interface.ip(),
-            data.network_interface.gateway(),
-        );
-        if kernel_args.len() > MAX_KERNEL_ARGS_LEN {
-            bail!("too long kernel_args {kernel_args}")
-        }
-        let iface =
-            firec::config::network::Interface::new(data.network_interface.name().clone(), "eth0");
-        let root_fs_path =
-            CookbookService::get_image_download_folder_path(&paths.bv_root, &data.image)
-                .join(ROOT_FS_FILE);
-        let kernel_path =
-            CookbookService::get_image_download_folder_path(&paths.bv_root, &data.image)
-                .join(KERNEL_FILE);
-        let data_fs_path = paths.data_dir.join(DATA_FILE);
-
-        let config = firec::config::Config::builder(Some(data.id), kernel_path)
-            // Jailer configuration.
-            .jailer_cfg()
-            .chroot_base_dir(paths.chroot.clone())
-            .exec_file(paths.bv_root.join(FC_BIN_PATH))
-            .mode(JailerMode::Tmux(Some(data.name.clone().into())))
-            .build()
-            // Machine configuration.
-            .machine_cfg()
-            .vcpu_count(data.requirements.vcpu_count)
-            .mem_size_mib(data.requirements.mem_size_mb as i64)
-            .build()
-            // Add root drive.
-            .add_drive("root", root_fs_path)
-            .is_root_device(true)
-            .build()
-            // Add data drive.
-            .add_drive("data", data_fs_path)
-            .build()
-            // Network configuration.
-            .add_network_interface(iface)
-            // Rest of the configuration.
-            .socket_path(Path::new(FC_SOCKET_PATH))
-            .kernel_args(kernel_args)
-            .vsock_cfg(VSOCK_GUEST_CID, Path::new("/").join(VSOCK_PATH))
-            .build();
-
-        Ok(config)
     }
 
     /// copy plugin script into nodes registry and read metadata form it

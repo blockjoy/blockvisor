@@ -8,7 +8,7 @@ use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::{
     config::{Config, SharedConfig},
-    node::FC_BIN_NAME,
+    firecracker_machine::FC_BIN_NAME,
     nodes::Nodes,
     server::bv_pb,
     services,

@@ -1,16 +1,22 @@
-use crate::config::SharedConfig;
 /// Default Platform Abstraction Layer implementation for Linux.
-use crate::pal::{NetInterface, Pal};
-use crate::{node_connection, services, BV_VAR_PATH};
+use crate::{
+    config::SharedConfig,
+    firecracker_machine, node_connection,
+    node_data::NodeData,
+    pal::{NetInterface, Pal},
+    services, BV_VAR_PATH,
+};
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use bv_utils::cmd::run_cmd;
 use core::fmt;
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    net::IpAddr,
+    path::{Path, PathBuf},
+};
 use uuid::Uuid;
 
 pub const BRIDGE_IFACE: &str = "bvbr0";
@@ -104,6 +110,26 @@ impl Pal for LinuxPlatform {
     type NodeConnection = node_connection::NodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
         node_connection::new(&self.bv_root.join(BV_VAR_PATH), node_id)
+    }
+
+    type VirtualMachine = firecracker_machine::FirecrackerMachine;
+
+    async fn create_vm(
+        &self,
+        node_data: &NodeData<Self::NetInterface>,
+    ) -> Result<Self::VirtualMachine> {
+        firecracker_machine::create(&self.bv_root, node_data).await
+    }
+
+    async fn attach_vm(
+        &self,
+        node_data: &NodeData<Self::NetInterface>,
+    ) -> Result<Self::VirtualMachine> {
+        firecracker_machine::attach(&self.bv_root, node_data).await
+    }
+
+    fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
+        firecracker_machine::build_vm_data_path(&self.bv_root, id)
     }
 }
 

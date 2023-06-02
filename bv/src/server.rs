@@ -40,6 +40,7 @@ where
     P: Pal + Debug + Send + Sync + 'static,
     P::NetInterface: Send + Sync + 'static,
     P::NodeConnection: Send + Sync + 'static,
+    P::VirtualMachine: Send + Sync + 'static,
 {
     #[instrument(skip(self), ret(Debug))]
     async fn health(

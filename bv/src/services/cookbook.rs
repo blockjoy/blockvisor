@@ -1,6 +1,5 @@
 use crate::{
     config::SharedConfig,
-    node::{KERNEL_FILE, ROOT_FS_FILE},
     node_data::NodeImage,
     services,
     services::api::{self, AuthenticatedService},
@@ -29,6 +28,9 @@ const BABEL_ARCHIVE_IMAGE_NAME: &str = "blockjoy.gz";
 const BABEL_IMAGE_NAME: &str = "blockjoy";
 const KERNEL_ARCHIVE_NAME: &str = "kernel.gz";
 pub const BABEL_PLUGIN_NAME: &str = "babel.rhai";
+pub const ROOT_FS_FILE: &str = "os.img";
+pub const KERNEL_FILE: &str = "kernel";
+pub const DATA_FILE: &str = "data.img";
 
 pub struct CookbookService {
     client: cb_pb::cook_book_service_client::CookBookServiceClient<AuthenticatedService>,

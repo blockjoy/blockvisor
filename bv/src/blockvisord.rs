@@ -53,6 +53,7 @@ where
     P: Pal + Send + Sync + Debug + 'static,
     P::NetInterface: Send + Sync + Clone,
     P::NodeConnection: Send + Sync,
+    P::VirtualMachine: Send + Sync,
 {
     pub async fn new(pal: P) -> Result<Self> {
         let bv_root = pal.bv_root().to_owned();

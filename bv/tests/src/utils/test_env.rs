@@ -1,30 +1,28 @@
 use anyhow::Result;
 use assert_cmd::Command;
 use async_trait::async_trait;
-use blockvisord::config::SharedConfig;
-use blockvisord::node::REGISTRY_CONFIG_DIR;
-use blockvisord::node_data::{NodeData, NodeStatus};
-use blockvisord::pal::{CommandsStream, ServiceConnector};
 use blockvisord::{
     blockvisord::BlockvisorD,
-    config::Config,
-    pal::{NetInterface, Pal},
+    config::{Config, SharedConfig},
+    firecracker_machine,
+    node::REGISTRY_CONFIG_DIR,
+    node_data::{NodeData, NodeStatus},
+    pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
     services::cookbook::IMAGES_DIR,
     BV_VAR_PATH,
 };
 use bv_utils::{cmd::run_cmd, run_flag::RunFlag};
 use predicates::prelude::predicate;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use std::{
     fs,
     net::IpAddr,
     path::{Path, PathBuf},
     str,
     sync::atomic::{AtomicU32, Ordering},
+    time::Duration,
 };
-use tokio::task::JoinHandle;
-use tokio::time::sleep;
+use tokio::{task::JoinHandle, time::sleep};
 use uuid::Uuid;
 
 /// Global integration tests token. All tests (that may run in parallel) share common FS and net
@@ -260,6 +258,26 @@ impl Pal for DummyPlatform {
 
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
         blockvisord::node_connection::new(&self.bv_root.join(BV_VAR_PATH), node_id)
+    }
+
+    type VirtualMachine = firecracker_machine::FirecrackerMachine;
+
+    async fn create_vm(
+        &self,
+        node_data: &NodeData<Self::NetInterface>,
+    ) -> Result<Self::VirtualMachine> {
+        firecracker_machine::create(&self.bv_root, node_data).await
+    }
+
+    async fn attach_vm(
+        &self,
+        node_data: &NodeData<Self::NetInterface>,
+    ) -> Result<Self::VirtualMachine> {
+        firecracker_machine::attach(&self.bv_root, node_data).await
+    }
+
+    fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
+        firecracker_machine::build_vm_data_path(&self.bv_root, id)
     }
 }
 

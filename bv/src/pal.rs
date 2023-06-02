@@ -3,11 +3,16 @@
 ///
 /// It defines `Pal` trait which is top level abstraction that contains definitions of sub layers.
 ///
-use crate::config::SharedConfig;
+use crate::{config::SharedConfig, node_data::NodeData};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Debug, net::IpAddr, path::Path, time::Duration};
+use std::{
+    fmt::Debug,
+    net::IpAddr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tonic::{
     codegen::InterceptedService,
     service::Interceptor,
@@ -54,7 +59,23 @@ pub trait Pal {
 
     /// Type representing node connection.
     type NodeConnection: NodeConnection + Debug;
+    /// Created node connection, so it can be used to communicate with Babel and BabelSup.
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection;
+
+    /// Type representing virtual machine on which node is running.
+    type VirtualMachine: VirtualMachine + Debug;
+    /// Created new VM instance.
+    async fn create_vm(
+        &self,
+        node_data: &NodeData<Self::NetInterface>,
+    ) -> Result<Self::VirtualMachine>;
+    /// Attach to already created VM instance.
+    async fn attach_vm(
+        &self,
+        node_data: &NodeData<Self::NetInterface>,
+    ) -> Result<Self::VirtualMachine>;
+    /// Build path to VM data directory, a place where kernel and other VM related data are stored.
+    fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
 }
 
 #[async_trait]
@@ -100,12 +121,43 @@ pub type BabelSupClient = babel_api::babelsup::babel_sup_client::BabelSupClient<
 
 #[async_trait]
 pub trait NodeConnection {
+    /// Open node connection with given `max_delay`.
     async fn open(&mut self, max_delay: Duration) -> Result<()>;
+    /// Close opened connection.
     fn close(&mut self);
+    /// Check if connection is closed.
     fn is_closed(&self) -> bool;
+    /// Mark connection as broken. It should be called whenever client detect some connectivity issues.
+    /// Once connection is marked as broken, it will try to reestablish connection on next `*_client` call.
     fn mark_broken(&mut self);
+    /// Check if connection was marked as broken.
     fn is_broken(&self) -> bool;
+    /// Perform basic connectivity test, to check actual connection state.
     async fn test(&self) -> Result<()>;
+    /// Get reference to Babel rpc client. Try to reestablish connection if it's necessary.
     async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient>;
+    /// Get reference to BabelSup rpc client. Try to reestablish connection if it's necessary.
     async fn babel_client(&mut self) -> Result<&mut BabelClient>;
+}
+
+#[derive(Debug, PartialEq)]
+pub enum VmState {
+    /// Machine is not started or already shut down
+    SHUTOFF,
+    /// Machine is running
+    RUNNING,
+}
+
+#[async_trait]
+pub trait VirtualMachine {
+    /// Checks the VM actual state
+    fn state(&self) -> VmState;
+    /// Deletes the VM, cleaning up all associated resources.
+    async fn delete(mut self) -> Result<()>;
+    /// Request for graceful shutdown of the VM.
+    async fn shutdown(&mut self) -> Result<()>;
+    /// Forcefully shutdown the VM.
+    async fn force_shutdown(&mut self) -> Result<()>;
+    /// Start the VM.
+    async fn start(&mut self) -> Result<()>;
 }
