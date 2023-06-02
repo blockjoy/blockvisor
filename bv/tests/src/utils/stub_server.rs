@@ -9,26 +9,6 @@ pub struct StubHostsServer {}
 
 #[tonic::async_trait]
 impl pb::host_service_server::HostService for StubHostsServer {
-    async fn provision(
-        &self,
-        request: Request<pb::HostServiceProvisionRequest>,
-    ) -> Result<pb::HostServiceProvisionResponse> {
-        let host = request.into_inner();
-        if host.provision_token != "UNKNOWN" {
-            let host_id = "497d13b1-ddbe-4ee7-bfc7-752c7b710afe".to_string();
-
-            let reply = pb::HostServiceProvisionResponse {
-                host_id,
-                token: "awesome-token".to_owned(),
-                refresh: "even-more-awesomer-token".to_owned(),
-            };
-
-            Ok(Response::new(reply))
-        } else {
-            Err(Status::permission_denied("Invalid token"))
-        }
-    }
-
     async fn update(
         &self,
         _: Request<pb::HostServiceUpdateRequest>,
@@ -65,7 +45,29 @@ impl pb::host_service_server::HostService for StubHostsServer {
         &self,
         _: Request<pb::HostServiceCreateRequest>,
     ) -> Result<pb::HostServiceCreateResponse> {
-        unimplemented!("Sod off I'm just a test server")
+        let reply = pb::HostServiceCreateResponse {
+            host: Some(pb::Host {
+                id: "497d13b1-ddbe-4ee7-bfc7-752c7b710afe".to_string(),
+                name: "hostname".to_string(),
+                version: "1.0".to_string(),
+                cpu_count: Some(1),
+                mem_size_bytes: Some(1),
+                disk_size_bytes: Some(1),
+                os: "os".to_string(),
+                os_version: "20.0".to_string(),
+                ip: "1.1.1.1".to_string(),
+                status: 0,
+                created_at: None,
+                ip_range_from: None,
+                ip_range_to: None,
+                ip_gateway: None,
+                org_id: None,
+            }),
+            token: "awesome-token".to_string(),
+            refresh: "even-more-awesomer-token".to_string(),
+        };
+
+        Ok(Response::new(reply))
     }
 }
 

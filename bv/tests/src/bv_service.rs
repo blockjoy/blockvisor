@@ -61,6 +61,9 @@ async fn test_bvup() {
             .args(["--keys", url])
             .args(["--registry", url])
             .args(["--mqtt", mqtt])
+            .args(["--ip-gateway", "216.18.214.193"])
+            .args(["--ip-range-from", "216.18.214.195"])
+            .args(["--ip-range-to", "216.18.214.206"])
             .env("BV_ROOT", tmp_dir.as_os_str())
             .assert()
             .success()
@@ -116,9 +119,12 @@ async fn test_bv_service_e2e() {
     };
     let login = client.login(login_user).await.unwrap().into_inner();
     println!("user login: {login:?}");
-    let orgs = pb::org_service_client::OrgServiceClient::connect(url)
+
+    println!("get user org and token");
+    let mut client = pb::org_service_client::OrgServiceClient::connect(url)
         .await
-        .unwrap()
+        .unwrap();
+    let orgs = client
         .list(with_auth(
             pb::OrgServiceListRequest {
                 member_id: Some(user_id.to_string()),
@@ -132,12 +138,25 @@ async fn test_bv_service_e2e() {
 
     let auth_token = token::TokenGenerator::create_auth(user_id, "1245456");
 
+    let get_token = pb::OrgServiceGetProvisionTokenRequest {
+        user_id: user_id.to_string(),
+        org_id: org_id.clone(),
+    };
+
+    let response = client
+        .get_provision_token(with_auth(get_token, &auth_token))
+        .await
+        .unwrap()
+        .into_inner();
+    let provision_token = response.token;
+    println!("host provision token: {provision_token}");
+
     println!("add blockchain");
     let db_url = "postgres://blockvisor:password@database:5432/blockvisor_db";
     let db_query =
         r#"INSERT INTO blockchains (id, name, status) values ('ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'Testing', 'production');
         INSERT INTO blockchain_properties VALUES ('5972a35a-333c-421f-ab64-a77f4ae17533', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '0.0.1', 'validator', 'keystore-file', NULL, 'file_upload', FALSE, FALSE);
-        INSERT INTO blockchain_properties VALUES ('a989ad08-b455-4a57-9fe0-696405947e48', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '0.0.1', 'validator', 'self-hosted', NULL, 'switch', FALSE, FALSE);
+        INSERT INTO blockchain_properties VALUES ('a989ad08-b455-4a57-9fe0-696405947e48', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '0.0.1', 'validator', 'TESTING_PARAM', NULL, 'text', FALSE, FALSE);
         "#.to_string();
 
     Command::new("docker")
@@ -147,25 +166,6 @@ async fn test_bv_service_e2e() {
         .assert()
         .success()
         .stdout(predicate::str::contains("INSERT"));
-
-    println!("create host provision");
-    let mut client = pb::host_provision_service_client::HostProvisionServiceClient::connect(url)
-        .await
-        .unwrap();
-
-    let provision_create = pb::HostProvisionServiceCreateRequest {
-        ip_range_from: "216.18.214.195".to_string(),
-        ip_range_to: "216.18.214.206".to_string(),
-        ip_gateway: "216.18.214.193".to_string(),
-        org_id: Some(org_id.clone()),
-    };
-    let response = client
-        .create(with_auth(provision_create, &auth_token))
-        .await
-        .unwrap()
-        .into_inner();
-    println!("host provision: {response:?}");
-    let provision_token = response.host_provision.unwrap().id;
 
     println!("bvup");
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
@@ -181,6 +181,9 @@ async fn test_bv_service_e2e() {
         .args(["--keys", url])
         .args(["--registry", registry])
         .args(["--mqtt", mqtt])
+        .args(["--ip-gateway", "216.18.214.193"])
+        .args(["--ip-range-from", "216.18.214.195"])
+        .args(["--ip-range-to", "216.18.214.206"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -219,16 +222,14 @@ async fn test_bv_service_e2e() {
     let node_create = pb::NodeServiceCreateRequest {
         org_id,
         blockchain_id: blockchain.id.to_string(),
-        version: blockchain.version.clone().unwrap(),
-        node_type: blockchain.nodes_types[0].node_type,
+        version: "0.0.1".to_string(),
+        node_type: 3, // validator
         properties: vec![pb::NodeProperty {
             name: "TESTING_PARAM".to_string(),
-            label: "testeronis".to_string(),
-            description: "this param is for testing".to_string(),
             ui_type: pb::UiType::Text.into(),
             disabled: false,
             required: true,
-            value: Some("I guess just some test value".to_string()),
+            value: "I guess just some test value".to_string(),
         }],
         network: blockchain.networks[0].clone().name,
         placement: Some(pb::NodePlacement {

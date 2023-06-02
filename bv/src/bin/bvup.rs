@@ -35,6 +35,18 @@ pub struct CmdArgs {
     #[clap(long = "ifa", default_value = "bvbr0")]
     pub ifa: String,
 
+    /// Network gateway IPv4 address
+    #[clap(long = "ip-gateway")]
+    pub ip_gateway: String,
+
+    /// Network IP range from IPv4 value
+    #[clap(long = "ip-range-from")]
+    pub ip_range_from: String,
+
+    /// Network IP range to IPv4 value
+    #[clap(long = "ip-range-to")]
+    pub ip_range_to: String,
+
     #[clap(long = "port")]
     pub blockvisor_port: Option<u16>,
 
@@ -67,9 +79,8 @@ async fn main() -> Result<()> {
         let ip = get_ip_address(&cmd_args.ifa).with_context(|| "failed to get ip address")?;
         let host_info = HostInfo::collect()?;
 
-        let mut create = pb::HostServiceProvisionRequest {
+        let create = pb::HostServiceCreateRequest {
             provision_token: cmd_args.provision_token.unwrap(),
-            status: 0, // We use the setter to set this field for type-safety
             name: host_info.name,
             version: crate_version!().to_string(),
             cpu_count: host_info
@@ -80,20 +91,26 @@ async fn main() -> Result<()> {
             disk_size_bytes: host_info.disk_size,
             os: host_info.os,
             os_version: host_info.os_version,
-            ip,
+            ip_addr: ip,
+            ip_gateway: cmd_args.ip_gateway,
+            ip_range_from: cmd_args.ip_range_from,
+            ip_range_to: cmd_args.ip_range_to,
+            org_id: None,
         };
-        create.set_status(pb::HostConnectionStatus::Online);
 
         let mut client =
             pb::host_service_client::HostServiceClient::connect(cmd_args.blockjoy_api_url.clone())
                 .await?;
 
-        let host = client.provision(create).await?.into_inner();
+        let host = client.create(create).await?.into_inner();
 
         let api_config = Config {
-            id: host.host_id,
+            id: host
+                .host
+                .ok_or_else(|| anyhow!("No `host` in response"))?
+                .id,
             token: host.token,
-            refresh_token: host.refresh.clone(),
+            refresh_token: host.refresh,
             cookbook_token: cookbook::COOKBOOK_TOKEN.to_string(),
             blockjoy_api_url: cmd_args.blockjoy_api_url,
             blockjoy_keys_url: cmd_args.blockjoy_keys_url,
