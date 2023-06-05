@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use babel_api::metadata::firewall::{Config, Protocol, Rule};
+use babel_api::metadata::firewall::{Config, Direction, Protocol, Rule};
 use eyre::{bail, Result};
 use serde_variant::to_variant_name;
 
@@ -62,7 +62,7 @@ async fn apply_firewall_config_with(config: Config, runner: impl UfwRunner) -> R
 
 struct RuleArgs<'a> {
     policy: &'a str,
-    direction: &'a str,
+    direction: &'a Direction,
     protocol: Option<String>,
     ips: &'a str,
     port: Option<String>, // no port means - no port argument passed at all i.e. rule apply for all ports
@@ -83,7 +83,7 @@ impl<'a> RuleArgs<'a> {
             if rule.ports.is_empty() {
                 rule_args.push(Self {
                     policy: variant_to_string(&rule.action),
-                    direction: variant_to_string(&rule.direction),
+                    direction: &rule.direction,
                     protocol: proto,
                     ips: rule.ips.as_ref().map_or("any", |ip| ip.as_str()),
                     port: None,
@@ -93,7 +93,7 @@ impl<'a> RuleArgs<'a> {
                 for port in &rule.ports {
                     rule_args.push(Self {
                         policy: variant_to_string(&rule.action),
-                        direction: variant_to_string(&rule.direction),
+                        direction: &rule.direction,
                         protocol: proto.clone(),
                         ips: rule.ips.as_ref().map_or("any", |ip| ip.as_str()),
                         port: Some(port.to_string()),
@@ -106,14 +106,28 @@ impl<'a> RuleArgs<'a> {
     }
 
     fn into(&self) -> Vec<&str> {
-        let mut args = vec![self.policy, self.direction, "from", self.ips];
-        if let Some(proto) = &self.protocol {
-            args.push("proto");
-            args.push(proto.as_str());
-        }
+        let mut args = vec![self.policy, variant_to_string(self.direction)];
+        match self.direction {
+            Direction::Out => {
+                args.push("from");
+                args.push("any");
+                args.push("to");
+                args.push(self.ips);
+            }
+            Direction::In => {
+                args.push("from");
+                args.push(self.ips);
+                args.push("to");
+                args.push("any");
+            }
+        };
         if let Some(port) = &self.port {
             args.push("port");
             args.push(port.as_str());
+        }
+        if let Some(proto) = &self.protocol {
+            args.push("proto");
+            args.push(proto.as_str());
         }
         if !self.name.is_empty() {
             args.push("comment");
@@ -226,7 +240,7 @@ mod tests {
                     action: Action::Allow,
                     direction: Direction::Out,
                     protocol: None,
-                    ips: None,
+                    ips: Some("ip.is.validated.before".to_string()),
                     ports: vec![7],
                 },
                 Rule {
@@ -258,7 +272,17 @@ mod tests {
         let mut mock_runner = MockTestRunner::new();
         expect_with_args(
             &mut mock_runner,
-            &["--dry-run", "allow", "out", "from", "any", "port", "7"],
+            &[
+                "--dry-run",
+                "allow",
+                "out",
+                "from",
+                "any",
+                "to",
+                "any",
+                "port",
+                "7",
+            ],
         );
         expect_with_args(
             &mut mock_runner,
@@ -267,6 +291,8 @@ mod tests {
                 "allow",
                 "out",
                 "from",
+                "any",
+                "to",
                 "any",
                 "comment",
                 "no ports",
@@ -280,10 +306,12 @@ mod tests {
                 "in",
                 "from",
                 "ip.is.validated.before",
-                "proto",
-                "tcp",
+                "to",
+                "any",
                 "port",
                 "144",
+                "proto",
+                "tcp",
                 "comment",
                 "rule B",
             ],
@@ -296,10 +324,12 @@ mod tests {
                 "in",
                 "from",
                 "ip.is.validated.before",
-                "proto",
-                "tcp",
+                "to",
+                "any",
                 "port",
                 "77",
+                "proto",
+                "tcp",
                 "comment",
                 "rule B",
             ],
@@ -312,6 +342,8 @@ mod tests {
                 "out",
                 "from",
                 "any",
+                "to",
+                "ip.is.validated.before",
                 "port",
                 "7",
                 "comment",
@@ -326,11 +358,13 @@ mod tests {
 
         expect_with_args(
             &mut mock_runner,
-            &["allow", "out", "from", "any", "port", "7"],
+            &["allow", "out", "from", "any", "to", "any", "port", "7"],
         );
         expect_with_args(
             &mut mock_runner,
-            &["allow", "out", "from", "any", "comment", "no ports"],
+            &[
+                "allow", "out", "from", "any", "to", "any", "comment", "no ports",
+            ],
         );
         expect_with_args(
             &mut mock_runner,
@@ -339,10 +373,12 @@ mod tests {
                 "in",
                 "from",
                 "ip.is.validated.before",
-                "proto",
-                "tcp",
+                "to",
+                "any",
                 "port",
                 "144",
+                "proto",
+                "tcp",
                 "comment",
                 "rule B",
             ],
@@ -354,10 +390,12 @@ mod tests {
                 "in",
                 "from",
                 "ip.is.validated.before",
-                "proto",
-                "tcp",
+                "to",
+                "any",
                 "port",
                 "77",
+                "proto",
+                "tcp",
                 "comment",
                 "rule B",
             ],
@@ -365,7 +403,16 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
-                "allow", "out", "from", "any", "port", "7", "comment", "rule A",
+                "allow",
+                "out",
+                "from",
+                "any",
+                "to",
+                "ip.is.validated.before",
+                "port",
+                "7",
+                "comment",
+                "rule A",
             ],
         );
 
