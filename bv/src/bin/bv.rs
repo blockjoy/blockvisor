@@ -1,8 +1,7 @@
 use anyhow::{bail, Result};
-use blockvisord::config::SharedConfig;
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
-    config::{Config, CONFIG_PATH},
+    config::{Config, SharedConfig, CONFIG_PATH},
     hosts::{HostInfo, HostMetrics},
     linux_platform::bv_root,
     pretty_table::{PrettyTable, PrettyTableRow},
@@ -21,8 +20,7 @@ use cli_table::print_stdout;
 use petname::Petnames;
 use std::{collections::HashMap, io::BufRead};
 use tokio::time::{sleep, Duration};
-use tonic::transport;
-use tonic::transport::Channel;
+use tonic::{transport, transport::Channel, Code};
 use uuid::Uuid;
 
 // TODO: use proper wait mechanism
@@ -425,7 +423,7 @@ impl NodeClient {
                 match self.client.blockchain(req).await {
                     Ok(result) => println!("{}", result.into_inner().value),
                     Err(e) => {
-                        if e.message().contains("not found") {
+                        if e.code() == Code::NotFound {
                             let msg = "Method not found. Options are:";
                             let caps = self.list_capabilities(node_id).await?;
                             bail!("{msg}\n{caps}");

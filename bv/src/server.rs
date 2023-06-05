@@ -2,6 +2,7 @@ pub mod bv_pb {
     tonic::include_proto!("blockjoy.blockvisor.v1");
 }
 
+use crate::nodes::BabelError;
 use crate::pal::{NetInterface, Pal};
 use crate::{
     get_bv_status,
@@ -369,7 +370,11 @@ where
             .nodes
             .call_method(id, &request.method, &request.param, true)
             .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+            .map_err(|e| match e {
+                BabelError::MethodNotFound => Status::not_found("blockchain method not found"),
+                BabelError::Internal { err } => Status::internal(format!("{err:#}")),
+                BabelError::Plugin { err } => Status::unknown(format!("{err:#}")),
+            })?;
 
         Ok(Response::new(bv_pb::BlockchainResponse { value }))
     }

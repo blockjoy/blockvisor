@@ -1,16 +1,23 @@
 use anyhow::{anyhow, bail, Context, Result};
-use babel_api::metadata::{firewall, Requirements};
-use babel_api::rhai_plugin;
+use babel_api::{
+    metadata::{firewall, Requirements},
+    rhai_plugin,
+};
 use chrono::{DateTime, Utc};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
-use std::net::IpAddr;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::fs::{self, read_dir};
-use tokio::sync::RwLock;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    net::IpAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+use thiserror::Error;
+use tokio::{
+    fs::{self, read_dir},
+    sync::RwLock,
+};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
@@ -78,6 +85,16 @@ pub struct NodeConfig {
     pub gateway: String,
     pub rules: Vec<firewall::Rule>,
     pub properties: NodeProperties,
+}
+
+#[derive(Error, Debug)]
+pub enum BabelError {
+    #[error("given method not found")]
+    MethodNotFound,
+    #[error("BV plugin error: {err}")]
+    Plugin { err: anyhow::Error },
+    #[error("BV internal error: {err}")]
+    Internal { err: anyhow::Error },
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -346,18 +363,33 @@ impl<P: Pal + Debug> Nodes<P> {
         method: &str,
         param: &str,
         reload_plugin: bool,
-    ) -> Result<String> {
+    ) -> Result<String, BabelError> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| id_not_found(id))
+            .map_err(|err| BabelError::Internal { err })?
             .write()
             .await;
 
         if reload_plugin {
-            node.reload_plugin().await?;
+            node.reload_plugin()
+                .await
+                .map_err(|err| BabelError::Internal { err })?;
         }
-        node.babel_engine.call_method(method, param).await
+        if !node
+            .babel_engine
+            .has_capability(method)
+            .await
+            .map_err(|err| BabelError::Internal { err })?
+        {
+            Err(BabelError::MethodNotFound)
+        } else {
+            node.babel_engine
+                .call_method(method, param)
+                .await
+                .map_err(|err| BabelError::Plugin { err })
+        }
     }
 
     #[instrument(skip(self))]
