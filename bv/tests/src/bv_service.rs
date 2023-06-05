@@ -161,7 +161,7 @@ async fn test_bv_service_e2e() {
 
     Command::new("docker")
         .args(&[
-            "compose", "run", "-it", "database", "psql", db_url, "-c", &db_query,
+            "compose", "exec", "-T", "database", "psql", db_url, "-c", &db_query,
         ])
         .assert()
         .success()
@@ -251,10 +251,8 @@ async fn test_bv_service_e2e() {
     println!("created node: {resp:?}");
     let node_id = resp.node.unwrap().id;
 
-    sleep(Duration::from_secs(30)).await;
-
     println!("list created node, should be auto-started");
-    test_env::bv_run(&["node", "status", &node_id], "Running", None);
+    test_env::wait_for_node_status(&node_id, "Running", Duration::from_secs(60), None).await;
 
     let mut client = pb::command_service_client::CommandServiceClient::connect(url)
         .await
@@ -277,10 +275,8 @@ async fn test_bv_service_e2e() {
         .into_inner();
     println!("executed stop node command: {resp:?}");
 
-    sleep(Duration::from_secs(15)).await;
-
     println!("get node status");
-    test_env::bv_run(&["node", "status", &node_id], "Stopped", None);
+    test_env::wait_for_node_status(&node_id, "Stopped", Duration::from_secs(60), None).await;
 
     let node_delete = pb::NodeServiceDeleteRequest {
         id: node_id.clone(),
@@ -291,12 +287,21 @@ async fn test_bv_service_e2e() {
         .unwrap()
         .into_inner();
 
-    sleep(Duration::from_secs(10)).await;
-
-    println!("check node is deleted");
-    let mut cmd = Command::cargo_bin("bv").unwrap();
-    cmd.args(["node", "status", &node_id])
-        .env("NO_COLOR", "1")
-        .assert()
-        .failure();
+    println!("check if node is deleted");
+    let is_deleted = || {
+        let mut cmd = Command::cargo_bin("bv").unwrap();
+        cmd.args(["node", "status", &node_id])
+            .env("NO_COLOR", "1")
+            .assert()
+            .try_failure()
+            .is_ok()
+    };
+    let start = std::time::Instant::now();
+    while !is_deleted() {
+        if start.elapsed() < Duration::from_secs(30) {
+            sleep(Duration::from_secs(1)).await;
+        } else {
+            panic!("timeout expired")
+        }
+    }
 }

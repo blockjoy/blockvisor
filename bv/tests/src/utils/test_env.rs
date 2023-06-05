@@ -115,25 +115,11 @@ impl TestEnv {
     }
 
     pub fn try_bv_run(&self, commands: &[&str], stdout_pattern: &str) -> bool {
-        let mut cmd = Command::cargo_bin("bv").unwrap();
-        cmd.args(commands)
-            .env("BV_ROOT", &self.bv_root)
-            .env("NO_COLOR", "1")
-            .assert()
-            .try_stdout(predicate::str::contains(stdout_pattern))
-            .is_ok()
+        try_bv_run(commands, stdout_pattern, Some(&self.bv_root))
     }
 
     pub async fn wait_for_running_node(&self, vm_id: &str, timeout: Duration) {
-        println!("wait for running node");
-        let start = std::time::Instant::now();
-        while !self.try_bv_run(&["node", "status", vm_id], "Running") {
-            if start.elapsed() < timeout {
-                sleep(Duration::from_secs(1)).await;
-            } else {
-                panic!("timeout expired")
-            }
-        }
+        wait_for_node_status(vm_id, "Running", timeout, Some(&self.bv_root)).await
     }
 
     pub async fn wait_for_node_fail(&self, vm_id: &str, timeout: Duration) {
@@ -206,6 +192,34 @@ pub fn bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(stdout_pattern));
+}
+
+pub fn try_bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) -> bool {
+    let mut cmd = Command::cargo_bin("bv").unwrap();
+    cmd.args(commands).env("NO_COLOR", "1");
+    if let Some(bv_root) = bv_root {
+        cmd.env("BV_ROOT", bv_root);
+    }
+    cmd.assert()
+        .try_stdout(predicate::str::contains(stdout_pattern))
+        .is_ok()
+}
+
+pub async fn wait_for_node_status(
+    vm_id: &str,
+    status: &str,
+    timeout: Duration,
+    bv_root: Option<&Path>,
+) {
+    println!("wait for {status} node");
+    let start = std::time::Instant::now();
+    while !try_bv_run(&["node", "status", vm_id], status, bv_root) {
+        if start.elapsed() < timeout {
+            sleep(Duration::from_secs(1)).await;
+        } else {
+            panic!("timeout expired")
+        }
+    }
 }
 
 #[derive(Debug)]
