@@ -30,9 +30,9 @@ apt_build_machine = []
 git_repo = ""
 git_tag = ""
 build_cmds =  [
-	  "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/ethereum/node/mnt/usr/bin/",
-		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/ethereum/node/mnt/etc/systemd/system/",
-		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/ethereum/node.toml {{.YafimHome}}/target/ethereum/node/mnt/etc/babel.conf",
-		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/ethereum/node/mnt",
-		"echo eth-erigon-node > {{.YafimHome}}/target/ethereum/node/mnt/etc/hostname"
+	  "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/EthereumErigon/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/EthereumErigon/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/ethereum/node.toml {{.YafimHome}}/target/EthereumErigon/node/mnt/etc/babel.conf",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/EthereumErigon/node/mnt",
+		"echo eth-erigon-node > {{.YafimHome}}/target/EthereumErigon/node/mnt/etc/hostname"
 ]
