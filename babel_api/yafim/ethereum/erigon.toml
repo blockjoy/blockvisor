@@ -16,7 +16,6 @@ cmds = [
   "tar xvzf erigon.tar.gz --directory /usr/bin/",
   "apt install ufw -y",
   "fallocate -l 4G /swap && chmod 600 /swap && mkswap /swap && swapon /swap",
-  "swapon --show",
   "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
   "systemctl disable systemd-resolved.service",
   "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
@@ -32,7 +31,7 @@ git_tag = ""
 build_cmds =  [
 	  "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/EthereumErigon/node/mnt/usr/bin/",
 		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/EthereumErigon/node/mnt/etc/systemd/system/",
-		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/ethereum/node.toml {{.YafimHome}}/target/EthereumErigon/node/mnt/etc/babel.conf",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/ethereum/erigon.toml {{.YafimHome}}/target/EthereumErigon/node/mnt/etc/babel.conf",
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/EthereumErigon/node/mnt",
 		"echo eth-erigon-node > {{.YafimHome}}/target/EthereumErigon/node/mnt/etc/hostname"
 ]
