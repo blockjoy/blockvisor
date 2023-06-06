@@ -6,7 +6,7 @@ protocol = "eth"
 node_type = "node"
 node_version = "4.2.0"
 min_babel_version = "0.15.4"
-description = "Ethereum Erigon"
+description = "EthereumErigon"
 
 [firewall]
 enabled = true

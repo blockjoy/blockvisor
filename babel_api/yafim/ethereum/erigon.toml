@@ -1,4 +1,4 @@
-application_name = "Ethereum Erigon"
+application_name = "EthereumErigon"
 node_type = "node"
 version = "4.2.0-build.1"
 
