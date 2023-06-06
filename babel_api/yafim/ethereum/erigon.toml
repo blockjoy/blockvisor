@@ -1,0 +1,38 @@
+application_name = "Ethereum Erigon"
+node_type = "node"
+version = "4.2.0-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "20G"
+fs_type = "ext4"
+apt_image = ["jq","ethereum"]
+apt_source = ["universe","ppa:ethereum/ethereum"]
+cmds = [
+  "wget -O lighthouse.tar.gz https://github.com/sigp/lighthouse/releases/download/v4.2.0/lighthouse-v4.2.0-x86_64-unknown-linux-gnu.tar.gz",
+  "wget -O erigon.tar.gz https://github.com/ledgerwatch/erigon/releases/download/v2.43.1/erigon_2.43.1_linux_amd64.tar.gz",
+  "mkdir -p /blockjoy/{lighthouse,erigon}",
+  "tar xvzf lighthouse.tar.gz --directory /usr/bin/",
+  "tar xvzf erigon.tar.gz --directory /usr/bin/",
+  "apt install ufw -y",
+  "fallocate -l 4G /swap && chmod 600 /swap && mkswap /swap && swapon /swap",
+  "swapon --show",
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
+] 
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+	  "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/ethereum/node/mnt/usr/bin/",
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/ethereum/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/ethereum/node.toml {{.YafimHome}}/target/ethereum/node/mnt/etc/babel.conf",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/ethereum/node/mnt",
+		"echo eth-erigon-node > {{.YafimHome}}/target/ethereum/node/mnt/etc/hostname"
+]

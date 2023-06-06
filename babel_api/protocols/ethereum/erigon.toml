@@ -1,0 +1,119 @@
+[env]
+path_append = "/blockjoy/bin/"
+
+[config]
+protocol = "eth"
+node_type = "node"
+node_version = "4.2.0"
+min_babel_version = "0.15.4"
+description = "Ethereum Erigon"
+
+[firewall]
+enabled = true
+default_in = "deny"
+default_out = "allow"
+
+    [[firewall.rules]]
+    name = "Allowed incoming traffic on port"
+    action = "allow"
+    direction = "in"
+    ports = [8000]
+
+[requirements]
+vcpu_count = 4
+mem_size_mb = 16384
+disk_size_gb = 3500
+
+[supervisor]
+backoff_timeout_ms = 60000
+backoff_base_ms = 100
+log_buffer_capacity_ln = 1000
+data_directory_mount_point = "/blockjoy/"
+
+   [[supervisor.entry_point]]
+    name = "geth"
+    body = """
+    test -f /blockjoy/.init && \
+    /usr/bin/erigon --datadir=/blockjoy/erigon/data --chain=mainnet --port=30303 --http.port=8545 --authrpc.port=8551 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon --torrent.download.rate=100mb --metrics --metrics.port=6666 --externalcl --http.vhosts *
+    """
+
+
+    [[supervisor.entry_point]]
+    name = "lighthouse"
+    body = """
+    test -f /blockjoy/.init && \
+    /usr/bin/lighthouse bn --datadir /blockjoy/lighthouse --checkpoint-sync-url https://beaconstate.ethstaker.cc --http --http-address 127.0.0.1 --http-port 6868 --execution-endpoint http://localhost:8551 --execution-jwt /blockjoy/erigon/data/jwt.hex --metrics
+    """
+
+[keys]
+"*" = "/opt/secrets"
+
+[[methods]]
+name = "height"
+transport = "rest"
+method = "" # find 
+
+    [methods.response]
+    status = 200
+    field = "" # find
+    format = "raw" # find
+
+[[methods]]
+name = "address"
+transport = "rest"
+method = "eth/v1/node/identity"
+
+    [methods.response]
+    status = 200
+    field = "data.peer_id" 
+    format = "json"
+
+[[methods]]
+name = "status"
+transport = "rest"
+method = "eth/v1/node/syncing"
+
+    [methods.response]
+    status = 200
+    field = "data.is_syncing"
+    format = "json"
+
+[[methods]]
+name = "genesis_info"
+transport = "rest"
+method = "/eth/v1/beacon/genesis"
+
+    [methods.response]
+    status = 200
+    field = "data"
+    format = "json"
+
+[[methods]]
+name = "init"
+transport = "sh"
+body = """
+! test -f /blockjoy/.init && \
+    echo {{VOTING-PWD}} > /blockjoy/secret && \
+    /usr/bin/lighthouse --network {{NETWORK}} --datadir /blockjoy/lighthouse account validator import --directory /opt/secrets --reuse-password --password-file /blockjoy/secret && \
+    touch /blockjoy/.init
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[[methods]]
+name = "application_status"
+transport = "sh"
+body = """
+curl http://localhost:5062/lighthouse/validators -H "Authorization: Bearer `cat /blockjoy/data/lighthouse/validators/api-token.txt`" | jq '[ .data[].enabled ] | all' | grep -q true && echo -n processing || echo cancelled
+"""
+
+    [methods.response]
+    status = 200
+    format = "raw"
+
+[nets.mainnet]
+net_type = "main"
+url = "https://rpc.ankr.com/eth"
+beacon_nodes_csv = "http://beacon01.mainnet.eth.nyc.blockjoy.com:6868,http://beacon02.mainnet.eth.nyc.blockjoy.com:6868"
