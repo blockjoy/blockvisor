@@ -11,7 +11,15 @@ The service that runs on the host systems and is responsible for provisioning an
 
 ## Host Setup
 
-See [BlockVisor Host Setup Guide](https://github.com/blockjoy/bv-host-setup/releases) for more details.
+See [BlockVisor Host Setup Guide](host_setup_guide.md) for more details.
+
+Published version of above guide with `bvup` tool can be found [here](https://github.com/blockjoy/bv-host-setup/releases).
+
+## Babel Plugins
+
+BV is blockchain agnostic system that uses plugin system to add support for specific blockchains. 
+
+See [Rhai Plugin Scripting Guide](babel_api/rhai_plugin_guide.md) for more details.
 
 ## API proto files
 
@@ -47,7 +55,7 @@ used during debugging issues, not printed by default
 - `/var/lib/blockvisor/nodes/<uuid>.rhai` node specific Babel plugin
 - `/var/lib/blockvisor/nodes/<uuid>.data` Babel plugin specific data
 - `/var/lib/blockvisor/firecracker/<uuid>/` node specific firecracker data (e.g. copy of images)
-- `/var/lib/blockvisor/images/<protocol>/<node_type>/<node_version>/`
+- `/var/lib/blockvisor/images/<protocol>/<node_type>/<node_version>/` downloaded images cache
 
 ### Node
 - `/usr/bin/babel`
@@ -56,7 +64,8 @@ used during debugging issues, not printed by default
 - `/etc/babelsup.conf`
 - `/etc/babel.conf`
 - `/etc/systemd/system/babelsup.service`
-- `/var/lib/babel/jobs`
+- `/var/lib/babel/jobs/<job_name>.cfg`
+- `/var/lib/babel/jobs/<job_name>.status`
 - `/var/lib/babel/logs.socket`
 
 ### Bundle
