@@ -267,11 +267,12 @@ fn into_rhai_result<T>(result: Result<T>) -> std::result::Result<T, Box<rhai::Ev
 mod tests {
     use super::*;
     use crate::engine::{
-        HttpResponse, JobConfig, JobStatus, RestartConfig, RestartPolicy, ShResponse,
+        HttpResponse, JobConfig, JobStatus, JobType, RestartConfig, RestartPolicy, ShResponse,
     };
     use crate::metadata::{firewall, BabelConfig, NetConfiguration, NetType, Requirements};
     use anyhow::bail;
     use mockall::*;
+    use std::path::PathBuf;
 
     mock! {
         pub BabelEngine {}
@@ -407,7 +408,9 @@ mod tests {
         error("error message");
         let out = parse_json(param).a;
         start_job("test_job_name", #{
-            body: "job body",
+            job_type: #{
+                run_sh: "job body",
+            },
             restart: #{
                 "on_failure": #{
                     max_retries: 3,
@@ -416,6 +419,14 @@ mod tests {
                 },
             },
             needs: ["needed"],
+        });
+        start_job("fetch_job_name", #{
+             job_type: #{
+                fetch_blockchain: #{
+                    destination: "destination/path/for/blockchain_data",    
+                },
+            },
+            restart: "never",
         });
         stop_job("test_job_name");
         out += "|" + job_status("test_job_name");
@@ -459,13 +470,27 @@ mod tests {
             .with(
                 predicate::eq("test_job_name"),
                 predicate::eq(JobConfig {
-                    body: "job body".to_string(),
+                    job_type: JobType::RunSh("job body".to_string()),
                     restart: RestartPolicy::OnFailure(RestartConfig {
                         backoff_timeout_ms: 1000,
                         backoff_base_ms: 500,
                         max_retries: Some(3),
                     }),
                     needs: Some(vec!["needed".to_string()]),
+                }),
+            )
+            .return_once(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(
+                predicate::eq("fetch_job_name"),
+                predicate::eq(JobConfig {
+                    job_type: JobType::FetchBlockchain {
+                        manifest: None,
+                        destination: PathBuf::from("destination/path/for/blockchain_data"),
+                    },
+                    restart: RestartPolicy::Never,
+                    needs: None,
                 }),
             )
             .return_once(|_, _| Ok(()));

@@ -63,9 +63,11 @@ fn init(keys) {
     }
     let param = sanitize_sh_param(node_params().TESTING_PARAM);
     start_job("echo", #{
-        body: "echo \"Testing entry_point not configured, but parametrized with " + param + "!\"",
+        job_type: #{
+            run_sh: "echo \"Testing entry_point not configured, but parametrized with " + param + "!\"",
+        },
         restart: #{
-            "always": #{
+            always: #{
                 backoff_timeout_ms: 60000,
                 backoff_base_ms: 10000,
             },

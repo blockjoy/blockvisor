@@ -5,11 +5,11 @@
 /// Backoff timeout and retry count are reset after child stays alive for at least `backoff_timeout_ms`.
 use crate::{
     jobs,
-    jobs::{CONFIG_SUBDIR, STATUS_SUBDIR},
+    jobs::STATUS_SUBDIR,
     log_buffer::LogBuffer,
     utils::{self, Backoff, LimitStatus},
 };
-use babel_api::engine::{JobConfig, JobStatus, RestartConfig, RestartPolicy};
+use babel_api::engine::{JobStatus, RestartConfig, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::Result;
 use std::{
@@ -23,7 +23,8 @@ use tracing::{debug, error, info, warn};
 pub struct JobRunner<T> {
     jobs_dir: PathBuf,
     name: String,
-    job_config: JobConfig,
+    sh_body: String,
+    restart_policy: RestartPolicy,
     timer: T,
     log_buffer: LogBuffer,
 }
@@ -109,16 +110,19 @@ impl<'a, T: AsyncTimer> JobBackoff<'a, T> {
 }
 
 impl<T: AsyncTimer> JobRunner<T> {
-    pub fn new(timer: T, jobs_dir: &Path, name: String, log_buffer: LogBuffer) -> Result<Self> {
-        let job_config = jobs::load_config(&jobs::config_file_path(
-            &name,
-            &jobs_dir.join(CONFIG_SUBDIR),
-        ))?;
-
+    pub fn new(
+        timer: T,
+        sh_body: String,
+        restart_policy: RestartPolicy,
+        jobs_dir: &Path,
+        name: String,
+        log_buffer: LogBuffer,
+    ) -> Result<Self> {
         Ok(JobRunner {
             jobs_dir: jobs_dir.to_path_buf(),
             name,
-            job_config,
+            sh_body,
+            restart_policy,
             timer,
             log_buffer,
         })
@@ -127,7 +131,7 @@ impl<T: AsyncTimer> JobRunner<T> {
     pub async fn run(mut self, mut run: RunFlag) {
         // Check if there are no remnant child process after previous run.
         // If so, just kill it.
-        let (cmd, args) = utils::bv_shell(&self.job_config.body);
+        let (cmd, args) = utils::bv_shell(&self.sh_body);
         utils::kill_all_processes(&cmd, args);
         if let Err(status) = self.try_run_job(run.clone()).await {
             if let Err(err) =
@@ -143,10 +147,10 @@ impl<T: AsyncTimer> JobRunner<T> {
     /// is stopped explicitly.  
     async fn try_run_job(&mut self, mut run: RunFlag) -> Result<(), JobStatus> {
         let job_name = &self.name;
-        let (cmd, args) = utils::bv_shell(&self.job_config.body);
+        let (cmd, args) = utils::bv_shell(&self.sh_body);
         let mut cmd = Command::new(cmd);
         cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut backoff = JobBackoff::new(&self.timer, run.clone(), &self.job_config.restart);
+        let mut backoff = JobBackoff::new(&self.timer, run.clone(), &self.restart_policy);
         while run.load() {
             backoff.start();
             match cmd.spawn() {
@@ -181,8 +185,8 @@ impl<T: AsyncTimer> JobRunner<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jobs::CONFIG_SUBDIR;
     use assert_fs::TempDir;
-    use babel_api::engine::JobConfig;
     use bv_utils::timer::MockAsyncTimer;
     use std::fs;
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
@@ -316,24 +320,25 @@ mod tests {
             writeln!(cmd_file, "#!/bin/sh")?;
             writeln!(cmd_file, "echo 'cmd log'")?;
         }
-        let config = JobConfig {
-            body: cmd_path.to_string_lossy().to_string(),
-            restart: RestartPolicy::Always(RestartConfig {
-                backoff_timeout_ms: 1000,
-                backoff_base_ms: 100,
-                max_retries: Some(3),
-            }),
-            needs: None,
-        };
-        jobs::save_config(&config, &job_name, &jobs_dir.join(CONFIG_SUBDIR))?;
 
         let mut timer_mock = MockAsyncTimer::new();
         let now = std::time::Instant::now();
         timer_mock.expect_now().returning(move || now);
         timer_mock.expect_sleep().returning(|_| ());
-        JobRunner::new(timer_mock, &jobs_dir, job_name.clone(), log_buffer)?
-            .run(test_run)
-            .await;
+        JobRunner::new(
+            timer_mock,
+            cmd_path.to_string_lossy().to_string(),
+            RestartPolicy::Always(RestartConfig {
+                backoff_timeout_ms: 1000,
+                backoff_base_ms: 100,
+                max_retries: Some(3),
+            }),
+            &jobs_dir,
+            job_name.clone(),
+            log_buffer,
+        )?
+        .run(test_run)
+        .await;
 
         let status = jobs::load_status(&jobs::status_file_path(
             &job_name,

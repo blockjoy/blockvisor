@@ -63,7 +63,9 @@ fn init(keys) {
     //     throw res;
     // }
     start_job("helium", #{
-        body: "/blockjoy/miner/bin/miner foreground",
+        job_type: #{
+            run_sh: "/blockjoy/miner/bin/miner foreground",
+        },
         restart: #{
             "always": #{
                 backoff_timeout_ms: 60000,

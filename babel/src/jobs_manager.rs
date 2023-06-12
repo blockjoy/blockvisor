@@ -374,7 +374,7 @@ fn deps_finished(
 mod tests {
     use super::*;
     use assert_fs::TempDir;
-    use babel_api::engine::RestartConfig;
+    use babel_api::engine::{JobType, RestartConfig};
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     use std::path::PathBuf;
@@ -457,7 +457,7 @@ mod tests {
 
     fn dummy_job_config() -> JobConfig {
         JobConfig {
-            body: "".to_string(),
+            job_type: JobType::RunSh("".to_string()),
             restart: RestartPolicy::Never,
             needs: None,
         }
@@ -513,7 +513,7 @@ mod tests {
             .start(
                 "test_job",
                 JobConfig {
-                    body: "different".to_string(),
+                    job_type: JobType::RunSh("different".to_string()),
                     restart: RestartPolicy::Never,
                     needs: Some(vec![]),
                 },
@@ -674,7 +674,7 @@ mod tests {
             .start(
                 "test_invalid_job",
                 JobConfig {
-                    body: "".to_string(),
+                    job_type: JobType::RunSh("".to_string()),
                     restart: RestartPolicy::Never,
                     needs: Some(vec!["invalid_dependency".to_string()]),
                 },
@@ -689,7 +689,7 @@ mod tests {
             .start(
                 "test_pending_job",
                 JobConfig {
-                    body: "".to_string(),
+                    job_type: JobType::RunSh("".to_string()),
                     restart: RestartPolicy::Never,
                     needs: Some(vec!["test_job".to_string()]),
                 },
@@ -762,7 +762,7 @@ mod tests {
             .start(
                 "test_pending_job",
                 JobConfig {
-                    body: "".to_string(),
+                    job_type: JobType::RunSh("".to_string()),
                     restart: RestartPolicy::Never,
                     needs: Some(vec!["failed_job".to_string()]),
                 },
@@ -833,7 +833,7 @@ mod tests {
             .start(
                 "test_restarting_job",
                 JobConfig {
-                    body: "".to_string(),
+                    job_type: JobType::RunSh("".to_string()),
                     restart: RestartPolicy::Always(RestartConfig {
                         backoff_timeout_ms: 0,
                         backoff_base_ms: 0,

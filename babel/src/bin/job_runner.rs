@@ -1,5 +1,6 @@
 use babel::{job_runner::JobRunner, jobs, log_buffer::LogBuffer, BABEL_LOGS_UDS_PATH};
 use babel_api::babel::logs_collector_client::LogsCollectorClient;
+use babel_api::engine::JobType;
 use bv_utils::logging::setup_logging;
 use bv_utils::run_flag::RunFlag;
 use eyre::{anyhow, bail};
@@ -67,16 +68,25 @@ async fn main() -> eyre::Result<()> {
             );
         }
     };
-    join!(
-        JobRunner::new(
+    let job_config = jobs::load_config(&jobs::config_file_path(
+        &job_name,
+        &jobs::JOBS_DIR.join(jobs::CONFIG_SUBDIR),
+    ))?;
+    let job_future = match job_config.job_type {
+        JobType::RunSh(body) => JobRunner::new(
             bv_utils::timer::SysTimer,
+            body,
+            job_config.restart,
             &jobs::JOBS_DIR,
             job_name,
-            log_buffer
+            log_buffer,
         )?
         .run(run),
-        log_handler
-    );
+        JobType::FetchBlockchain { .. } => {
+            unimplemented!()
+        }
+    };
+    join!(job_future, log_handler);
 
     Ok(())
 }

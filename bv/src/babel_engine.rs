@@ -12,7 +12,8 @@ use crate::{
     node_connection::RPC_REQUEST_TIMEOUT, node_data::NodeProperties, pal::NodeConnection,
     utils::with_timeout, with_retry,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Error, Result};
+use babel_api::engine::JobType;
 use babel_api::{
     engine::{HttpResponse, JobConfig, JobStatus, ShResponse},
     metadata::KeysConfig,
@@ -311,14 +312,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     async fn handle_node_req(&mut self, req: NodeRequest) {
-        let babel_client = self.node_connection.babel_client().await;
         match req {
             NodeRequest::RunSh {
                 body,
                 timeout,
                 response_tx,
             } => {
-                let _ = response_tx.send(match babel_client {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_selective_retry!(babel_client.run_sh(with_timeout(
                         body.clone(),
                         timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
@@ -333,7 +333,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 timeout,
                 response_tx,
             } => {
-                let _ = response_tx.send(match babel_client {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_selective_retry!(babel_client.run_rest(with_timeout(
                         url.clone(),
                         timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
@@ -349,7 +349,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 timeout,
                 response_tx,
             } => {
-                let _ = response_tx.send(match babel_client {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_selective_retry!(babel_client.run_jrpc(with_timeout(
                         (host.clone(), method.clone()),
                         timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
@@ -364,20 +364,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 job_config,
                 response_tx,
             } => {
-                let _ = response_tx.send(match babel_client {
-                    Ok(babel_client) => {
-                        with_retry!(babel_client.start_job((job_name.clone(), job_config.clone())))
-                            .map_err(|err| self.handle_connection_errors(err))
-                            .map(|v| v.into_inner())
-                    }
-                    Err(err) => Err(err),
-                });
+                let _ = response_tx.send(self.handle_start_job(job_name, job_config).await);
             }
             NodeRequest::StopJob {
                 job_name,
                 response_tx,
             } => {
-                let _ = response_tx.send(match babel_client {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_retry!(babel_client.stop_job(job_name.clone()))
                         .map_err(|err| self.handle_connection_errors(err))
                         .map(|v| v.into_inner()),
@@ -388,7 +381,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 job_name,
                 response_tx,
             } => {
-                let _ = response_tx.send(match babel_client {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_retry!(babel_client.job_status(job_name.clone()))
                         .map_err(|err| self.handle_connection_errors(err))
                         .map(|v| v.into_inner()),
@@ -401,7 +394,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 params,
                 response_tx,
             } => {
-                let _ = response_tx.send(match babel_client {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_retry!(babel_client.render_template((
                         template.clone(),
                         output.clone(),
@@ -426,6 +419,23 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             }
         }
         .into()
+    }
+
+    async fn handle_start_job(
+        &mut self,
+        job_name: String,
+        mut job_config: JobConfig,
+    ) -> std::result::Result<(), Error> {
+        let babel_client = self.node_connection.babel_client().await?;
+        if let JobType::FetchBlockchain { manifest, .. } = &mut job_config.job_type {
+            if manifest.is_none() {
+                // TODO fetch manifest from cookbook
+                unimplemented!()
+            } // if already set it mean that plugin use some custom manifest source - other than cookbook
+        }
+        with_retry!(babel_client.start_job((job_name.clone(), job_config.clone())))
+            .map_err(|err| self.handle_connection_errors(err))
+            .map(|v| v.into_inner())
     }
 }
 
@@ -616,7 +626,7 @@ mod tests {
     use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
     use async_trait::async_trait;
-    use babel_api::engine::{Engine, RestartPolicy};
+    use babel_api::engine::{Engine, JobType, RestartPolicy};
     use babel_api::{babel::BlockchainKey, metadata::BabelConfig};
     use mockall::*;
     use tonic::{Request, Response, Streaming};
@@ -749,7 +759,7 @@ mod tests {
             self.engine.start_job(
                 name,
                 JobConfig {
-                    body: param.to_string(),
+                    job_type: JobType::RunSh(param.to_string()),
                     restart: RestartPolicy::Never,
                     needs: None,
                 },
@@ -881,7 +891,7 @@ mod tests {
             .expect_start_job()
             .withf(|req| {
                 let (name, config) = req.get_ref();
-                name == "custom_name" && config.body == "param"
+                name == "custom_name" && config.job_type == JobType::RunSh("param".to_string())
             })
             .return_once(|_| Ok(Response::new(())));
         babel_mock

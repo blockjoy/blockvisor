@@ -162,9 +162,11 @@ fn init(keys) {
     }
     let param = sanitize_sh_param(node_params().TESTING_PARAM);
     start_job("echo", #{
-        body: "echo \"Blockchain entry_point parametrized with " + param + "\"",
+        job_type: #{
+          run_sh: "echo \"Blockchain entry_point parametrized with " + param + "\"",
+        },
         restart: #{
-            "always": #{
+            always: #{
                 backoff_timeout_ms: 60000,
                 backoff_base_ms: 10000,
             },
@@ -260,8 +262,10 @@ To make implementation of Babel Plugin interface possible, BV provides following
 
 ## Background Jobs
 
-Background job is a way to asynchronously run long-running sh command. In particular, it can be used
-to define blockchain entrypoint(s) i.e. background process(es) that are automatically started
+Background job is a way to asynchronously run long-running tasks. Currently, two types of tasks are supported:
+1. `run_sh` - arbitrary long-running shell script.
+2. `fetch_blockchain` - download archived blockchain data, to speedup init process.
+In particular, it can be used to define blockchain entrypoint(s) i.e. background process(es) that are automatically started
 with the node.
 
 Each background job has its unique name and configuration structure described by following example.
@@ -269,10 +273,12 @@ Each background job has its unique name and configuration structure described by
 **Example:**
 ```rust
     let job_config_A = #{
-        // Sh script body
-        body: "echo \"some initial job done\"",
-        
-        // Job restart policy.
+        job_type: #{
+            // Sh script body
+            run_sh: "echo \"some initial job done\"",
+        },
+
+// Job restart policy.
         // "never" indicates that this job will never be restarted, whether succeeded or not - appropriate for jobs
         // that can't be simply restarted on failure (e.g. need some manual actions).
         restart: "never",
@@ -280,14 +286,17 @@ Each background job has its unique name and configuration structure described by
     start_job("job_name_A", job_config_A);
 
     let job_config_B = #{
-            // Sh script body
-            body: "wget https://some_url",
+            job_type: #{
+                fetch_blockchain: #{
+                    destination: "destination/path/for/blockchain_data",    
+                },
+            },
             
             // Job restart policy.
             restart: #{
             
             // "on_failure" key means that job is restarted only if `exit_code != 0`.
-            "on_failure": #{
+            on_failure: #{
                 // if job stay alive given amount of time (in miliseconds) backoff is reset
                 backoff_timeout_ms: 60000,
                 
@@ -303,14 +312,16 @@ Each background job has its unique name and configuration structure described by
     start_job("job_name_B", job_config_B);
 
     let entrypoint_config = #{
-        // Sh script body
-        body: "echo \"Blockchain entry_point parametrized with " + param + "\"",
+        job_type: #{
+            // Sh script body
+            run_sh: "echo \"Blockchain entry_point parametrized with " + param + "\"",
+        },
 
         // Job restart policy.
         restart: #{
 
             // "always" key means that job is always restarted - equivalent to entrypoint.
-            "always": #{
+            always: #{
                 // if job stay alive given amount of time (in miliseconds) backoff is reset
                 backoff_timeout_ms: 60000,
                 

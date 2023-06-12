@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::{collections::HashMap, path::Path, time::Duration};
 use tracing::log::Level;
 
@@ -48,11 +49,118 @@ pub trait Engine {
     fn log(&self, level: Level, message: &str);
 }
 
+/// Structure describing where decompressed data shall be written to and how many byte.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct FileLocation {
+    /// Relative file path
+    pub path: PathBuf,
+    /// Position of data in the file
+    pub pos: u64,
+    /// Size of uncompressed data
+    pub size: u64,
+}
+
+/// Checksum variant.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Checksum {
+    Sha1(Vec<u8>),
+}
+
+/// Blockchain data are stored on the cloud in chunks. Each chunk may map into part of single file
+/// or multiple files (i.e. original disk representation).
+/// Downloaded chunks, after decompression, shall be written into disk location(s) described by destinations.
+///
+/// Example of chunk-file mapping:
+///```ascii flow
+///                 path: file1           path: file1          path: file1
+///  compressed     pos: 0                pos: 1024            pos: 2048
+///  ─────────┐     size: 1024            size: 1024           size: 1024
+///           │   ┌────────────────────┬────────────────────┬───────────────────┐
+///           │   │  decompressed      │                    │                   │
+///           │   └────────────────────┴────────────────────┴───────────────────┘
+///           │                 ▲                 ▲                  ▲
+///           ▼                 │                 │                  │
+///         ┌──┐                │                 │                  │
+/// chunk 1 │  │                │                 │                  │
+///         │  ├────────────────┘                 │                  │
+///         │  │                                  │                  │
+///         └──┘                                  │                  │
+///         ┌──┐                                  │                  │
+/// chunk 2 │  │                                  │                  │
+///         │  ├──────────────────────────────────┘                  │
+///         │  │                                                     │
+///         └──┘                                                     │
+///         ┌──┐                                                     │
+/// chunk 3 │  │     download and decompress                         │
+///         │  ├─────────────────────────────────────────────────────┘
+///         │  │
+///         └──┘
+///         ┌──┐         ┌──────┐ path: file2
+/// chunk 4 │  ├────────►│      │ pos: 0
+///         │  │         └──────┘ size: 256
+///         ├──┤
+///         │  │         ┌──────────────┐ path: file3
+///         │  ├────────►│              │ pos: 0
+///         │  │         └──────────────┘ size: 512
+///         │  │
+///         ├──┤         ┌────┐ path: file4
+///         │  ├────────►│    │ pos: 0
+///         └──┘         └────┘ size: 128
+///```
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Chunk {
+    /// Persistent chunk key
+    pub key: String,
+    /// Pre-signed download url (may be temporary)
+    pub url: String,
+    /// Chunk data checksum
+    pub checksum: Checksum,
+    /// Chunk to blockchain data files mapping
+    pub destinations: Vec<FileLocation>,
+}
+
+/// Type of compression used on chunk data.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Compression {
+    // no compression is supported yet
+}
+
+/// Blockchain data manifest, describing cloud to disk mapping.
+/// Sometimes it is necessary to put data into cloud in a different form, because of cloud
+/// limitations or needed optimization.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BlockchainDataManifest {
+    /// Total size of uncompressed blockchain data
+    pub total_size: u64,
+    /// Chunk compression type or none
+    pub compression: Option<Compression>,
+    /// Full list of chunks
+    pub chunks: Vec<Chunk>,
+}
+
+/// Type of long running job.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum JobType {
+    /// Shell script - takes script body as a `String`
+    RunSh(String),
+    /// Fetch Blockchain data
+    FetchBlockchain {
+        /// Blockchain data manifest to be used to download data.
+        /// If `None` BV will try to find manifest based on node `NodeImage` and `NetType`.  
+        manifest: Option<BlockchainDataManifest>,
+        /// Destination directory for downloaded files
+        destination: PathBuf,
+    },
+}
+
 /// Long running job configuration
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct JobConfig {
     /// Sh script body.
-    pub body: String,
+    pub job_type: JobType,
     /// Job restart policy.
     pub restart: RestartPolicy,
     /// List of job names that this job needs to be finished before start.
