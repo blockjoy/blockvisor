@@ -200,8 +200,8 @@ pub enum JobStatus {
     Running,
     /// Job finished - successfully or not. It means that the JobRunner won't try to restart that job anymore.
     Finished {
-        /// Job `sh` script exit code, if any. `None` always means some error, usually before the process
-        /// was even started (e.g. needed job failed).  
+        /// Job exit code, if any. For `run_sh` job type it is script exit code.
+        /// `None` always means some error, usually before the process was even started (e.g. needed job failed).  
         exit_code: Option<i32>,
         /// Error description or empty if successful.
         message: String,

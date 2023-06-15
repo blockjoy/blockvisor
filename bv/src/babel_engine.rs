@@ -13,7 +13,7 @@ use crate::{
     utils::with_timeout, with_retry,
 };
 use anyhow::{anyhow, bail, Error, Result};
-use babel_api::engine::JobType;
+use babel_api::engine::{JobType, RestartPolicy};
 use babel_api::{
     engine::{HttpResponse, JobConfig, JobStatus, ShResponse},
     metadata::KeysConfig,
@@ -428,6 +428,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     ) -> std::result::Result<(), Error> {
         let babel_client = self.node_connection.babel_client().await?;
         if let JobType::FetchBlockchain { manifest, .. } = &mut job_config.job_type {
+            if let RestartPolicy::Always(_) = job_config.restart {
+                bail!("'RestartPolicy::Always' is not allowed for 'JobType::FetchBlockchain'")
+            }
             if manifest.is_none() {
                 // TODO fetch manifest from cookbook
                 unimplemented!()
