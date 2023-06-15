@@ -1,4 +1,4 @@
-use babel::{job_runner::JobRunner, jobs, log_buffer::LogBuffer, BABEL_LOGS_UDS_PATH};
+use babel::{jobs, log_buffer::LogBuffer, run_sh::RunSh, BABEL_LOGS_UDS_PATH};
 use babel_api::babel::logs_collector_client::LogsCollectorClient;
 use babel_api::engine::JobType;
 use bv_utils::logging::setup_logging;
@@ -73,7 +73,7 @@ async fn main() -> eyre::Result<()> {
         &jobs::JOBS_DIR.join(jobs::CONFIG_SUBDIR),
     ))?;
     let job_future = match job_config.job_type {
-        JobType::RunSh(body) => JobRunner::new(
+        JobType::RunSh(body) => RunSh::new(
             bv_utils::timer::SysTimer,
             body,
             job_config.restart,
