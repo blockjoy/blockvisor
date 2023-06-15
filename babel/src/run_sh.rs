@@ -20,7 +20,7 @@ use std::{
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 
-pub struct JobRunner<T> {
+pub struct RunSh<T> {
     jobs_dir: PathBuf,
     name: String,
     sh_body: String,
@@ -109,7 +109,7 @@ impl<'a, T: AsyncTimer> JobBackoff<'a, T> {
     }
 }
 
-impl<T: AsyncTimer> JobRunner<T> {
+impl<T: AsyncTimer> RunSh<T> {
     pub fn new(
         timer: T,
         sh_body: String,
@@ -118,7 +118,7 @@ impl<T: AsyncTimer> JobRunner<T> {
         name: String,
         log_buffer: LogBuffer,
     ) -> Result<Self> {
-        Ok(JobRunner {
+        Ok(RunSh {
             jobs_dir: jobs_dir.to_path_buf(),
             name,
             sh_body,
@@ -325,7 +325,7 @@ mod tests {
         let now = std::time::Instant::now();
         timer_mock.expect_now().returning(move || now);
         timer_mock.expect_sleep().returning(|_| ());
-        JobRunner::new(
+        RunSh::new(
             timer_mock,
             cmd_path.to_string_lossy().to_string(),
             RestartPolicy::Always(RestartConfig {
