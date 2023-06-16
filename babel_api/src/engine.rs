@@ -67,7 +67,7 @@ pub enum Checksum {
     Sha1(Vec<u8>),
 }
 
-/// Blockchain data are stored on the cloud in chunks. Each chunk may map into part of single file
+/// Data are stored on the cloud in chunks. Each chunk may map into part of single file
 /// or multiple files (i.e. original disk representation).
 /// Downloaded chunks, after decompression, shall be written into disk location(s) described by destinations.
 ///
@@ -116,7 +116,7 @@ pub struct Chunk {
     pub url: String,
     /// Chunk data checksum
     pub checksum: Checksum,
-    /// Chunk to blockchain data files mapping
+    /// Chunk to data files mapping
     pub destinations: Vec<FileLocation>,
 }
 
@@ -127,12 +127,12 @@ pub enum Compression {
     // no compression is supported yet
 }
 
-/// Blockchain data manifest, describing cloud to disk mapping.
+/// Download manifest, describing cloud to disk mapping.
 /// Sometimes it is necessary to put data into cloud in a different form, because of cloud
 /// limitations or needed optimization.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct BlockchainDataManifest {
-    /// Total size of uncompressed blockchain data
+pub struct DownloadManifest {
+    /// Total size of uncompressed data
     pub total_size: u64,
     /// Chunk compression type or none
     pub compression: Option<Compression>,
@@ -146,11 +146,11 @@ pub struct BlockchainDataManifest {
 pub enum JobType {
     /// Shell script - takes script body as a `String`
     RunSh(String),
-    /// Fetch Blockchain data
-    FetchBlockchain {
-        /// Blockchain data manifest to be used to download data.
+    /// Download data - according to given manifest.
+    Download {
+        /// Manifest to be used to download data.
         /// If `None` BV will try to find manifest based on node `NodeImage` and `NetType`.  
-        manifest: Option<BlockchainDataManifest>,
+        manifest: Option<DownloadManifest>,
         /// Destination directory for downloaded files
         destination: PathBuf,
     },
@@ -200,8 +200,8 @@ pub enum JobStatus {
     Running,
     /// Job finished - successfully or not. It means that the JobRunner won't try to restart that job anymore.
     Finished {
-        /// Job `sh` script exit code, if any. `None` always means some error, usually before the process
-        /// was even started (e.g. needed job failed).  
+        /// Job exit code, if any. For `run_sh` job type it is script exit code.
+        /// `None` always means some error, usually before the process was even started (e.g. needed job failed).  
         exit_code: Option<i32>,
         /// Error description or empty if successful.
         message: String,

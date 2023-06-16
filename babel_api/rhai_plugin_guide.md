@@ -264,7 +264,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
 
 Background job is a way to asynchronously run long-running tasks. Currently, two types of tasks are supported:
 1. `run_sh` - arbitrary long-running shell script.
-2. `fetch_blockchain` - download archived blockchain data, to speedup init process.
+2. `download` - download data (e.g. previously archived blockchain data, to speedup init process).
 In particular, it can be used to define blockchain entrypoint(s) i.e. background process(es) that are automatically started
 with the node.
 
@@ -287,7 +287,7 @@ Each background job has its unique name and configuration structure described by
 
     let job_config_B = #{
             job_type: #{
-                fetch_blockchain: #{
+                download: #{
                     destination: "destination/path/for/blockchain_data",    
                 },
             },

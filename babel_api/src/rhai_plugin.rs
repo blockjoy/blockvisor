@@ -420,9 +420,9 @@ mod tests {
             },
             needs: ["needed"],
         });
-        start_job("fetch_job_name", #{
+        start_job("download_job_name", #{
              job_type: #{
-                fetch_blockchain: #{
+                download: #{
                     destination: "destination/path/for/blockchain_data",    
                 },
             },
@@ -483,9 +483,9 @@ mod tests {
         babel
             .expect_start_job()
             .with(
-                predicate::eq("fetch_job_name"),
+                predicate::eq("download_job_name"),
                 predicate::eq(JobConfig {
-                    job_type: JobType::FetchBlockchain {
+                    job_type: JobType::Download {
                         manifest: None,
                         destination: PathBuf::from("destination/path/for/blockchain_data"),
                     },

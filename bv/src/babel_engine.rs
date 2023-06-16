@@ -427,7 +427,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         mut job_config: JobConfig,
     ) -> std::result::Result<(), Error> {
         let babel_client = self.node_connection.babel_client().await?;
-        if let JobType::FetchBlockchain { manifest, .. } = &mut job_config.job_type {
+        if let JobType::Download { manifest, .. } = &mut job_config.job_type {
             if manifest.is_none() {
                 // TODO fetch manifest from cookbook
                 unimplemented!()

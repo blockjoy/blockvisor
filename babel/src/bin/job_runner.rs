@@ -82,7 +82,7 @@ async fn main() -> eyre::Result<()> {
             log_buffer,
         )?
         .run(run),
-        JobType::FetchBlockchain { .. } => {
+        JobType::Download { .. } => {
             unimplemented!()
         }
     };
