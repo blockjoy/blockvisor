@@ -1,8 +1,9 @@
-use babel::{job_runner::JobRunner, jobs, log_buffer::LogBuffer, BABEL_LOGS_UDS_PATH};
-use babel_api::babel::logs_collector_client::LogsCollectorClient;
-use babel_api::engine::JobType;
-use bv_utils::logging::setup_logging;
-use bv_utils::run_flag::RunFlag;
+use babel::{
+    download_job::DownloadJob, job_runner::JobRunner, jobs, log_buffer::LogBuffer,
+    run_sh_job::RunShJob, BABEL_LOGS_UDS_PATH,
+};
+use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobType};
+use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::{anyhow, bail};
 use std::{env, time::Duration};
 use tokio::{
@@ -37,56 +38,70 @@ async fn main() -> eyre::Result<()> {
 
     let mut run = RunFlag::run_until_ctrlc();
 
-    let log_buffer = LogBuffer::new(LOG_BUFFER_CAPACITY_LN);
-    let mut log_rx = log_buffer.subscribe();
-    let mut log_run = run.clone();
-    let log_handler = async move {
-        let mut client = LogsCollectorClient::new(
-            Endpoint::from_static("http://[::]:50052")
-                .timeout(Duration::from_secs(3))
-                .connect_timeout(Duration::from_secs(3))
-                .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                    UnixStream::connect(BABEL_LOGS_UDS_PATH.to_path_buf())
-                })),
-        );
-
-        while log_run.load() {
-            select!(
-                log = log_rx.recv() => {
-                    if let Ok(log) = log {
-                        while let Err(err) = client.send_log(log.clone()).await {
-                            debug!("send_log failed with: {err}");
-                            // try to send log every 1s - log server may be temporarily unavailable
-                            log_run.select(tokio::time::sleep(LOG_RETRY_INTERVAL)).await;
-                            if !log_run.load() {
-                                break;
-                            }
-                        }
-                    }
-                }
-                _ = log_run.wait() => {}
-            );
-        }
-    };
     let job_config = jobs::load_config(&jobs::config_file_path(
         &job_name,
         &jobs::JOBS_DIR.join(jobs::CONFIG_SUBDIR),
     ))?;
-    let job_future = match job_config.job_type {
-        JobType::RunSh(body) => JobRunner::new(
-            bv_utils::timer::SysTimer,
-            body,
-            job_config.restart,
-            &jobs::JOBS_DIR,
-            job_name,
-            log_buffer,
-        )?
-        .run(run),
-        JobType::Download { .. } => {
-            unimplemented!()
+    match job_config.job_type {
+        JobType::RunSh(body) => {
+            let log_buffer = LogBuffer::new(LOG_BUFFER_CAPACITY_LN);
+            let log_handler = run_log_handler(run.clone(), log_buffer.subscribe());
+            join!(
+                RunShJob::new(
+                    bv_utils::timer::SysTimer,
+                    body,
+                    job_config.restart,
+                    log_buffer,
+                )?
+                .run(run, &job_name, &jobs::JOBS_DIR),
+                log_handler
+            );
         }
-    };
-    join!(job_future, log_handler);
-
+        JobType::Download {
+            manifest,
+            destination,
+        } => {
+            DownloadJob::new(
+                bv_utils::timer::SysTimer,
+                manifest.ok_or(anyhow!("missing DownloadManifest"))?,
+                destination,
+                job_config.restart,
+            )?
+            .run(run, &job_name, &jobs::JOBS_DIR)
+            .await;
+        }
+    }
     Ok(())
+}
+
+async fn run_log_handler(
+    mut log_run: RunFlag,
+    mut log_rx: tokio::sync::broadcast::Receiver<String>,
+) {
+    let mut client = LogsCollectorClient::new(
+        Endpoint::from_static("http://[::]:50052")
+            .timeout(Duration::from_secs(3))
+            .connect_timeout(Duration::from_secs(3))
+            .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+                UnixStream::connect(BABEL_LOGS_UDS_PATH.to_path_buf())
+            })),
+    );
+
+    while log_run.load() {
+        select!(
+            log = log_rx.recv() => {
+                if let Ok(log) = log {
+                    while let Err(err) = client.send_log(log.clone()).await {
+                        debug!("send_log failed with: {err}");
+                        // try to send log every 1s - log server may be temporarily unavailable
+                        log_run.select(tokio::time::sleep(LOG_RETRY_INTERVAL)).await;
+                        if !log_run.load() {
+                            break;
+                        }
+                    }
+                }
+            }
+            _ = log_run.wait() => {}
+        );
+    }
 }
