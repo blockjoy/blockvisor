@@ -2,12 +2,14 @@
 #For running a production grade public fullnode:
 #CPU: 8 cores, 16 threads (Intel Xeon Skylake or newer).
 #Memory: 32GB RAM.
+
 #For running the public fullnode for development or testing:
 #CPU: 2 cores.
 #Memory: 4GB RAM.
-#application_name = "aptos"
-#node_type = "node"
-#version = "1.2.4-build.1"
+
+application_name = "aptos"
+node_type = "node"
+version = "1.2.4-build.1"
 
 [image]
 debian_version = "focal"
@@ -37,7 +39,8 @@ build_cmds =  [
 		"mkdir -p {{.YafimHome}}/target/aptos/node/mnt/blockjoy/aptos",
 		"wget -O aptos.tar.gz https://github.com/aptos-labs/aptos-core/archive/refs/tags/aptos-node-v1.2.4.tar.gz",
 		"tar xvzf aptos.tar.gz",
-		"cd aptos-core* && ./scripts/dev_setup.sh -b && cargo build -p aptos-node --release && cp {{.YafimHome}}/target/release/aptos-node ..{{.YafimHome}}/target/aptos/node/mnt/blockjoy/aptos/",
+		"cd aptos-core* && ./scripts/dev_setup.sh -b && cargo build -p aptos-nodedisk_size_gb = 1000
+ && cp {{.YafimHome}}/target/release/aptos-node ..{{.YafimHome}}/target/aptos/node/mnt/blockjoy/aptos/",
 		"cp {{.YafimHome}}/blockvisor/babel_api/yafim/aptos/supporting-files/fullnode.yaml {{.YafimHome}}/target/aptos/node/mnt/blockjoy/aptos/",
                    
 ]
