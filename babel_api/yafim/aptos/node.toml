@@ -1,6 +1,13 @@
-application_name = "aptos"
-node_type = "node"
-version = "1.2.4-build.1"
+# HARDWARE specs
+#For running a production grade public fullnode:
+#CPU: 8 cores, 16 threads (Intel Xeon Skylake or newer).
+#Memory: 32GB RAM.
+#For running the public fullnode for development or testing:
+#CPU: 2 cores.
+#Memory: 4GB RAM.
+#application_name = "aptos"
+#node_type = "node"
+#version = "1.2.4-build.1"
 
 [image]
 debian_version = "focal"
@@ -22,7 +29,7 @@ apt_build_machine = []
 git_repo = ""
 git_tag = ""
 build_cmds =  [
-	        "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/aptos/node/mnt/usr/bin/",
+	    "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/aptos/node/mnt/usr/bin/",
 		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/aptos/node/mnt/etc/systemd/system/",
 		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/aptos/node.toml {{.YafimHome}}/target/aptos/node/mnt/etc/babel.conf",
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/aptos/node/mnt",
