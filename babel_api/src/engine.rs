@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{collections::HashMap, path::Path, time::Duration};
 use tracing::log::Level;
+use url::Url;
 
 /// Plugin engin must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -113,7 +114,7 @@ pub struct Chunk {
     /// Persistent chunk key
     pub key: String,
     /// Pre-signed download url (may be temporary)
-    pub url: String,
+    pub url: Url,
     /// Chunk data checksum
     pub checksum: Checksum,
     /// Chunk to data files mapping

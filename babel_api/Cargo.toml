@@ -5,6 +5,7 @@ version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+anyhow = "1.0.69"
 cidr-utils = "0.5.10"
 rhai = {version = "1.12.0", features = ["serde", "sync"]}
 serde = {version = "1.0.152", features = ["derive"]}
@@ -12,7 +13,7 @@ serde_bytes = "0.11.8"
 tonic-rpc = { version = "0.2.0", features = ["bincode"] }
 tonic = "0.8.3"
 tracing = "0.1.37"
-anyhow = "1.0.69"
+url = {version = "2.3.1", features = ["serde"]}
 
 [dev-dependencies]
 mockall = "0.11.3"

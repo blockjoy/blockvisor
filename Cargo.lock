@@ -424,6 +424,7 @@ dependencies = [
  "tonic",
  "tonic-rpc",
  "tracing",
+ "url",
  "walkdir",
 ]
 
@@ -3744,6 +3745,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]
