@@ -270,31 +270,23 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         name: "Rule X".to_string(),
         action: pb::Action::Allow as i32,
         direction: pb::Direction::In as i32,
-        protocol: Some(pb::Protocol::Tcp as i32),
+        protocol: pb::Protocol::Tcp as i32,
         ips: Some("192.167.0.1/24".to_string()),
         ports: vec![8080, 8000],
     }];
-    let properties = vec![
-        pb::Parameter {
-            name: "TESTING_PARAM".to_string(),
-            value: "anything".to_string(),
-        },
-        pb::Parameter {
-            name: "network".to_string(),
-            value: "test".to_string(),
-        },
-    ];
+    let properties = vec![pb::Parameter {
+        name: "TESTING_PARAM".to_string(),
+        value: "anything".to_string(),
+    }];
     let image = Some(pb::ContainerImage {
         protocol: "testing".to_string(),
         node_type: pb::NodeType::Validator.into(),
         node_version: "0.0.1".to_string(),
-        status: pb::ContainerImageStatus::Development.into(),
     });
     let image_v2 = Some(pb::ContainerImage {
         protocol: "testing".to_string(),
         node_type: pb::NodeType::Validator.into(),
         node_version: "0.0.2".to_string(),
-        status: pb::ContainerImageStatus::Development.into(),
     });
 
     println!("preparing server");
@@ -322,6 +314,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
+                network: "test".to_string(),
             })),
         })),
         // create with same node id
@@ -340,6 +333,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
+                network: "test".to_string(),
             })),
         })),
         // create with same node name
@@ -358,6 +352,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
+                network: "test".to_string(),
             })),
         })),
         // create with same node ip address
@@ -376,6 +371,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
+                network: "test".to_string(),
             })),
         })),
         // create with invalid node ip address
@@ -394,6 +390,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
+                network: "test".to_string(),
             })),
         })),
         // create with invalid gateway ip address
@@ -412,6 +409,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
+                network: "test".to_string(),
             })),
         })),
         // stop stopped
@@ -484,7 +482,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     name: "Rule B".to_string(),
                     action: pb::Action::Allow as i32,
                     direction: pb::Direction::In as i32,
-                    protocol: None,
+                    protocol: pb::Protocol::Both as i32,
                     ips: Some("invalid_ip".to_string()),
                     ports: vec![8080],
                 }],
@@ -513,7 +511,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     name: "Rule A".to_string(),
                     action: pb::Action::Allow as i32,
                     direction: pb::Direction::In as i32,
-                    protocol: Some(pb::Protocol::Tcp as i32),
+                    protocol: pb::Protocol::Tcp as i32,
                     ips: Some("192.168.0.1/24".to_string()),
                     ports: vec![8080, 8000],
                 }],

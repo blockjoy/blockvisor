@@ -297,6 +297,7 @@ async fn process_node_command<P: Pal + Debug>(
                     .properties
                     .into_iter()
                     .map(|p| (p.name, p.value))
+                    .chain([("network".to_string(), args.network)])
                     .collect();
                 let rules = args
                     .rules
@@ -509,21 +510,12 @@ impl TryFrom<Protocol> for firewall::Protocol {
 impl TryFrom<Rule> for firewall::Rule {
     type Error = anyhow::Error;
     fn try_from(rule: Rule) -> Result<Self, Self::Error> {
-        let protocol: Option<firewall::Protocol> = match rule.protocol {
-            Some(p) => Some(
-                Protocol::from_i32(p)
-                    .ok_or_else(|| anyhow!("Invalid Protocol"))?
-                    .try_into()?,
-            ),
-            None => None,
-        };
-
+        let direction = rule.direction().try_into()?;
+        let protocol = Some(rule.protocol().try_into()?);
         Ok(Self {
             name: rule.name,
             action: try_action(rule.action)?,
-            direction: Direction::from_i32(rule.direction)
-                .ok_or_else(|| anyhow!("Invalid Direction"))?
-                .try_into()?,
+            direction,
             protocol,
             ips: rule.ips,
             ports: rule.ports.into_iter().map(|p| p as u16).collect(),
