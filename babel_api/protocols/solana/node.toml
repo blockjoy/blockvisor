@@ -4,8 +4,8 @@ path_append = "/blockjoy/bin/"
 [config]
 protocol = "solana"
 node_type = "validator"
-node_version = "1.10.34"
-min_babel_version = "0.0.1"
+node_version = "1.16.0"
+min_babel_version = "0.15.4"
 description = "solana blockchain validator"
 api_host = "http://localhost:8899/"
 

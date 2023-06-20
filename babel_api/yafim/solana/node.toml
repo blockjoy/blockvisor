@@ -1,6 +1,6 @@
 application_name = "solana"
 node_type = "node"
-version = "1.15.2-build.1"
+version = "1.16.0-build.1"
 
 [image]
 debian_version = "focal"
@@ -29,7 +29,7 @@ build_cmds =  [
 		"cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/solana/node/mnt/usr/bin/",
 		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/solana/node/mnt/etc/systemd/system/",
 		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/solana/node/mnt/etc/systemd/system/multi-user.target.wants/",
-                "cp {{.YafimHome}}/blockvisor/babel_api/protocols/solana/node.toml {{.YafimHome}}/target/solana/node/mnt/etc/babel.conf",	
+    "cp {{.YafimHome}}/blockvisor/babel_api/protocols/solana/node.toml {{.YafimHome}}/target/solana/node/mnt/etc/babel.conf",	
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/solana/node/mnt/",
 		"echo solana-node > {{.YafimHome}}/target/solana/node/mnt/etc/hostname",
 ]
