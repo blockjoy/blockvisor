@@ -45,24 +45,21 @@ const METADATA = #{
     },
 };
 
-// const API_HOST = "http://localhost:9650/ext/bc/";
 const API_HOST = "http://localhost:9650/ext/";
 const HOME = "/blockjoy";
 const AVAX_HOME = "/blockjoy/avalanche";
+const HEADERS = {
+    "Content-Type": "application/json"
+};
 
-
-fn init() {
-    // let net = sanitize_sh_param(node_params().NETWORK); for future use
+fn init(keys) {
     debug("Executing startup scripts...");
     start_job("Running the avalanche validator node", #{
         body: `
-        wget https://github.com/ava-labs/avalanchego/releases/download/v1.9.9/avalanchego-linux-amd64-v1.9.9.tar.gz
-        tar xvzf avalanchego-linux-amd64-v1.9.9.tar.gz
-        sudo cp avalanchego-v1.9.9/avalanchego /usr/bin/
-        avalanchego --version
+        avalanchego
         `,
-       restart: #{
-            "always": #{
+        restart: {
+            "always": {
                 backoff_timeout_ms: 60000,
                 backoff_base_ms: 10000,
             },
@@ -71,100 +68,58 @@ fn init() {
     });
 }
 
-fn application_status() {
-    const method = "info.isBootstrapped";
-    const path = "info";
-    let params = {
-        "chain": "X"
-    };
+fn make_jrpc_request(path, method, params) {
+    let url = GLOBAL::API_HOST + path;
+
     let body = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": method,
         "params": params
     };
-    let headers = {
-        "Content-Type": "application/json"
-    };
-    let url = GLOBAL::API_HOST + path;
 
-    let resp = http_post(url, json::stringify(body), headers);
+    let resp = run_jrpc(url, body, HEADERS);
     if resp.status_code != 200 {
         throw resp;
     }
 
-    let bodyJson = json::parse(resp.body);
-    let result = bodyJson["result"]["isBootstrapped"];
-    return result;
+    let response_json = json::parse(resp.body);
+    return response_json["result"];
+}
+
+fn application_status() {
+    let method = "info.isBootstrapped";
+    let path = "info";
+    let params = {
+        "chain": "X"
+    };
+
+    return make_jrpc_request(path, method, params);
 }
 
 fn get_health() {
-    const path = "health";
-    let url = GLOBAL::API_HOST + path;
+    let method = "health.health";
+    let path = "health";
 
-    let resp = http_post(url);
-    if resp.status_code != 200 {
-        throw resp;
-    }
-  
-    let body = json::parse(resp.body);
-    let healthy = body["result"]["healthy"];
-    return healthy;
+    return make_jrpc_request(path, method, {});
 }
 
 fn get_metrics() {
-    const path = "metrics";
-    let url = GLOBAL::API_HOST + path;
+    let path = "metrics";
 
-    let resp = http_post(url);
-    if resp.status_code != 200 {
-        throw resp;
-    }
-    return resp.body;
+    return make_jrpc_request(path, {}, {});
 }
 
 fn get_node_id() {
-    const method = "info.getNodeID";
-    const path = "info";
-    let body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": method
-    };
-    let headers = {
-        "Content-Type": "application/json"
-    };
-    let url = GLOBAL::API_HOST + path;
+    let method = "info.getNodeID";
+    let path = "info";
 
-    let resp = http_post(url, json::stringify(body), headers);
-    if resp.status_code != 200 {
-        throw resp;
-    }
-
-    let bodyJson = json::parse(resp.body);
-    let result = bodyJson["result"];
-    return result;
+    return make_jrpc_request(path, method, {});
 }
 
 fn get_node_version() {
-    const method = "info.getNodeVersion";
-    const path = "info";
-    let body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": method
-    };
-    let headers = {
-        "Content-Type": "application/json"
-    };
-    let url = API_HOST + path;
+    let method = "info.getNodeVersion";
+    let path = "info";
 
-    let resp = http_post(url, json::stringify(body), headers);
-    if resp.status_code != 200 {
-        throw resp;
-    }
-
-    let bodyJson = json::parse(resp.body);
-    let result = bodyJson["result"];
-    return result;
+    return make_jrpc_request(path, method, {});
 }
