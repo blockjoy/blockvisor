@@ -117,6 +117,8 @@ pub struct Chunk {
     pub url: Url,
     /// Chunk data checksum
     pub checksum: Checksum,
+    /// Chunk size in bytes
+    pub size: u64,
     /// Chunk to data files mapping
     pub destinations: Vec<FileLocation>,
 }

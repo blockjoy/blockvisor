@@ -6,7 +6,7 @@ use crate::job_runner::JobRunnerImpl;
 use async_trait::async_trait;
 use babel_api::engine::{Chunk, DownloadManifest, FileLocation, JobStatus, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use eyre::{anyhow, Result};
+use eyre::{anyhow, bail, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
 use std::{
@@ -130,7 +130,7 @@ impl ChunkDownloader {
     }
 
     async fn run(self) -> Result<()> {
-        let chunk_size = self.get_chunk_len().await?;
+        let chunk_size = usize::try_from(self.chunk.size)?;
         let mut pos = 0;
         let mut destination = DestinationsIter::new(self.chunk.destinations.clone().into_iter())?;
         while pos < chunk_size {
@@ -145,23 +145,6 @@ impl ChunkDownloader {
         Ok(())
     }
 
-    async fn get_chunk_len(&self) -> Result<usize> {
-        let content_len = self
-            .client
-            .get(self.chunk.url.clone())
-            .send()
-            .await?
-            .content_length()
-            .ok_or_else(|| {
-                anyhow!(
-                    "can't get chunk content length; key: {}, url: {}",
-                    self.chunk.key,
-                    self.chunk.url
-                )
-            })?;
-        Ok(usize::try_from(content_len)?)
-    }
-
     async fn download_part(&self, pos: usize, chunk_size: usize) -> Result<Vec<u8>> {
         // TODO add multipart download support
         let buffer_size = min(chunk_size - pos, MAX_BUFFER_SIZE);
@@ -173,6 +156,9 @@ impl ChunkDownloader {
             .send()
             .await?;
         while let Some(bytes) = resp.chunk().await? {
+            if bytes.len() + buffer.len() > buffer_size {
+                bail!("server error: received more bytes than requested");
+            }
             buffer.append(&mut bytes.to_vec());
         }
         Ok(buffer)
@@ -280,9 +266,8 @@ impl Writer {
                     Entry::Vacant(entry) => {
                         // file not opened yet
                         let file = File::options()
-                            .write(true)
-                            .append(true)
                             .create(true)
+                            .write(true)
                             .open(self.destination_dir.join(entry.key()))?;
                         let (_, file) = entry.insert((Instant::now(), file));
                         file.write_all_at(&part.data, part.pos)?;
