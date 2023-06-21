@@ -66,6 +66,7 @@ pub struct FileLocation {
 #[serde(rename_all = "snake_case")]
 pub enum Checksum {
     Sha1(Vec<u8>),
+    Sha256(Vec<u8>),
 }
 
 /// Data are stored on the cloud in chunks. Each chunk may map into part of single file

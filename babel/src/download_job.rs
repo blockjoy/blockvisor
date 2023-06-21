@@ -2,17 +2,18 @@
 /// according to to given manifest and destination dir. In case of recoverable errors download
 /// is retried according to given `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
 /// Backoff timeout and retry count are reset if download continue without errors for at least `backoff_timeout_ms`.
-use crate::job_runner::JobRunnerImpl;
+use crate::{checksum, job_runner::JobRunnerImpl};
 use async_trait::async_trait;
-use babel_api::engine::{Chunk, DownloadManifest, FileLocation, JobStatus, RestartPolicy};
+use babel_api::engine::{
+    Checksum, Chunk, DownloadManifest, FileLocation, JobStatus, RestartPolicy,
+};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{anyhow, ensure, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
 use std::{
     cmp::min,
-    collections::hash_map::Entry,
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     fs::File,
     mem,
     ops::{Deref, DerefMut},
@@ -82,7 +83,7 @@ impl<T: AsyncTimer> DownloadJob<T> {
 
         let mut downloaders = FuturesUnordered::new();
         let mut chunks = self.manifest.chunks.clone();
-        // TODO add multipart download support for low numer of chunks case
+        // TODO add multipart download support for low number of chunks case
         // let max_parts = if chunks.len() < self.config.max_downloaders {
         //     self.config.max_downloaders / chunks.len()
         // } else {
@@ -161,18 +162,41 @@ impl ChunkDownloader {
     }
 
     async fn run(self) -> Result<()> {
+        match &self.chunk.checksum {
+            Checksum::Sha1(checksum) => {
+                self.download_chunk(sha1_smol::Sha1::new(), checksum)
+                    .await?;
+            }
+            Checksum::Sha256(checksum) => {
+                self.download_chunk(<sha2::Sha256 as sha2::Digest>::new(), checksum)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn download_chunk(
+        &self,
+        mut digest: impl checksum::Checksum,
+        expected_checksum: &[u8],
+    ) -> Result<()> {
         let chunk_size = usize::try_from(self.chunk.size)?;
         let mut pos = 0;
         let mut destination = DestinationsIter::new(self.chunk.destinations.clone().into_iter())?;
         while pos < chunk_size {
             let buffer = self.download_part(pos, chunk_size).await?;
             pos += buffer.len();
+            digest.update(&buffer);
 
             // TODO add decompression support here
 
             self.send_to_writer(buffer, &mut destination).await?;
         }
-        // TODO verify calculated checksum
+        let calculated_checksum = digest.into_bytes();
+        ensure!(
+            calculated_checksum == expected_checksum,
+            "chunk checksum mismatch - expected {expected_checksum:?}, actual {calculated_checksum:?}"
+        );
         Ok(())
     }
 
@@ -362,7 +386,10 @@ mod tests {
                 Chunk {
                     key: "first_chunk".to_string(),
                     url: Url::parse(&server.url("/first_chunk"))?,
-                    checksum: Checksum::Sha1(vec![]),
+                    checksum: Checksum::Sha1(vec![
+                        169, 185, 254, 145, 238, 11, 74, 4, 251, 241, 28, 220, 137, 165, 91, 139,
+                        42, 59, 14, 92,
+                    ]),
                     size: 600,
                     destinations: vec![
                         FileLocation {
@@ -385,7 +412,10 @@ mod tests {
                 Chunk {
                     key: "second_chunk".to_string(),
                     url: Url::parse(&server.url("/second_chunk"))?,
-                    checksum: Checksum::Sha1(vec![]),
+                    checksum: Checksum::Sha256(vec![
+                        104, 0, 168, 43, 116, 130, 25, 151, 217, 240, 13, 245, 96, 88, 86, 0, 75,
+                        93, 168, 15, 58, 171, 248, 94, 149, 167, 72, 202, 179, 227, 164, 214,
+                    ]),
                     size: 324,
                     destinations: vec![FileLocation {
                         path: PathBuf::from("second.file"),
