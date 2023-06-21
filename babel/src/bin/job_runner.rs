@@ -1,3 +1,4 @@
+use babel::download_job::DownloaderConfig;
 use babel::{
     download_job::DownloadJob, job_runner::JobRunner, jobs, log_buffer::LogBuffer,
     run_sh_job::RunShJob, BABEL_LOGS_UDS_PATH,
@@ -66,7 +67,7 @@ async fn main() -> eyre::Result<()> {
                 manifest.ok_or(anyhow!("missing DownloadManifest"))?,
                 destination,
                 job_config.restart,
-                Default::default(),
+                DownloaderConfig::new()?,
             )?
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;

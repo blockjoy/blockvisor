@@ -18,12 +18,13 @@ use std::{
     ops::{Deref, DerefMut},
     os::unix::fs::FileExt,
     path::PathBuf,
+    usize,
     vec::IntoIter,
 };
 use tokio::{sync::mpsc, time::Instant};
 use tracing::{debug, info};
 
-const MAX_OPENED_FILES: usize = 16; // TODO: read/set `ulimit -n`
+const MAX_OPENED_FILES: u64 = 1024;
 const MAX_DOWNLOADERS: usize = 8;
 const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
 
@@ -33,13 +34,14 @@ pub struct DownloaderConfig {
     max_buffer_size: usize,
 }
 
-impl Default for DownloaderConfig {
-    fn default() -> Self {
-        Self {
-            max_opened_files: MAX_OPENED_FILES,
+impl DownloaderConfig {
+    pub fn new() -> Result<Self> {
+        let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
+        Ok(Self {
+            max_opened_files,
             max_downloaders: MAX_DOWNLOADERS,
             max_buffer_size: MAX_BUFFER_SIZE,
-        }
+        })
     }
 }
 
@@ -318,7 +320,7 @@ impl Writer {
                         file.write_all_at(&part.data, part.pos)?;
                     }
                 }
-                if self.opened_files.len() > self.max_opened_files {
+                if self.opened_files.len() >= self.max_opened_files {
                     // can't have to many files opened at the same time, so close one with
                     // oldest timestamp
                     if let Some(oldest) = self
@@ -495,7 +497,7 @@ mod tests {
             manifest_wo_destination,
             tmp_dir.path().to_path_buf(),
             RestartPolicy::Never,
-            Default::default(),
+            DownloaderConfig::new()?,
         )?
         .download(RunFlag::default())
         .await
@@ -531,7 +533,7 @@ mod tests {
             manifest_inconsistent_destination,
             tmp_dir.path().to_path_buf(),
             RestartPolicy::Never,
-            Default::default(),
+            DownloaderConfig::new()?,
         )?
         .download(RunFlag::default())
         .await
@@ -576,7 +578,7 @@ mod tests {
             manifest,
             tmp_dir.path().to_path_buf(),
             RestartPolicy::Never,
-            Default::default(),
+            DownloaderConfig::new()?,
         )?
         .download(RunFlag::default())
         .await
@@ -614,7 +616,7 @@ mod tests {
             manifest,
             tmp_dir.path().to_path_buf(),
             RestartPolicy::Never,
-            Default::default(),
+            DownloaderConfig::new()?,
         )?
         .download(RunFlag::default())
         .await
@@ -644,7 +646,7 @@ mod tests {
             manifest,
             tmp_dir.path().to_path_buf(),
             RestartPolicy::Never,
-            Default::default(),
+            DownloaderConfig::new()?,
         )?
         .download(RunFlag::default())
         .await

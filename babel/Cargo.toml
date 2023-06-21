@@ -49,6 +49,7 @@ tracing = "0.1.37"
 tokio-vsock = {version = "0.4.0", features = ["tonic-conn"]}
 libc = "0.2.78"
 nix = "0.26.2"
+rlimit = "0.9.1"
 
 [dev-dependencies]
 assert_fs = "1"
