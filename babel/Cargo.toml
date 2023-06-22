@@ -25,6 +25,7 @@ path = "src/bin/job_runner.rs"
 [dependencies]
 async-trait = "0.1.61"
 babel_api = {version = "*", path = "../babel_api"}
+blake3 = "1.4.0"
 bv_utils = {version = "*", path = "../bv_utils"}
 chrono = "0.4.24"
 crc = "3.0.0"

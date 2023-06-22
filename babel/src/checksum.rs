@@ -24,3 +24,13 @@ impl Checksum for sha2::Sha256 {
         self.finalize().to_vec()
     }
 }
+
+impl Checksum for blake3::Hasher {
+    fn update(&mut self, data: &[u8]) {
+        self.update(data);
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.finalize().as_bytes().to_vec()
+    }
+}

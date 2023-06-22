@@ -171,6 +171,9 @@ impl ChunkDownloader {
                 self.download_chunk(<sha2::Sha256 as sha2::Digest>::new(), checksum)
                     .await?;
             }
+            Checksum::Blake3(checksum) => {
+                self.download_chunk(blake3::Hasher::new(), checksum).await?;
+            }
         }
         Ok(())
     }
@@ -386,9 +389,9 @@ mod tests {
                 Chunk {
                     key: "first_chunk".to_string(),
                     url: Url::parse(&server.url("/first_chunk"))?,
-                    checksum: Checksum::Sha1(vec![
-                        169, 185, 254, 145, 238, 11, 74, 4, 251, 241, 28, 220, 137, 165, 91, 139,
-                        42, 59, 14, 92,
+                    checksum: Checksum::Blake3(vec![
+                        85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8,
+                        190, 219, 61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
                     ]),
                     size: 600,
                     destinations: vec![
