@@ -1,12 +1,3 @@
-# HARDWARE specs
-#For running a production grade public fullnode:
-#CPU: 8 cores, 16 threads (Intel Xeon Skylake or newer).
-#Memory: 32GB RAM.
-
-#For running the public fullnode for development or testing:
-#CPU: 2 cores.
-#Memory: 4GB RAM.
-
 application_name = "aptos"
 node_type = "node"
 version = "1.2.4-build.1"
@@ -24,6 +15,10 @@ cmds = [
   "rm /etc/resolv.conf",
   "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+  "wget -O aptos.tar.gz https://github.com/aptos-labs/aptos-core/archive/refs/tags/aptos-node-v1.2.4.tar.gz",
+  "tar xvzf aptos.tar.gz",
+  "cd aptos-core* && ./scripts/dev_setup.sh -b && cargo build -p aptos-nodedisk_size_gb = 1000",
+  "cp {{.YafimHome}}/target/release/aptos-node /blockjoy/aptos/",
 ] 
 
 [build_machine]
@@ -37,10 +32,9 @@ build_cmds =  [
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/aptos/node/mnt",
 		"echo aptos > {{.YafimHome}}/target/aptos/node/mnt/etc/hostname",
 		"mkdir -p {{.YafimHome}}/target/aptos/node/mnt/blockjoy/aptos",
-		"wget -O aptos.tar.gz https://github.com/aptos-labs/aptos-core/archive/refs/tags/aptos-node-v1.2.4.tar.gz",
-		"tar xvzf aptos.tar.gz",
-		"cd aptos-core* && ./scripts/dev_setup.sh -b && cargo build -p aptos-nodedisk_size_gb = 1000
- && cp {{.YafimHome}}/target/release/aptos-node ..{{.YafimHome}}/target/aptos/node/mnt/blockjoy/aptos/",
+		"curl -O https://raw.githubusercontent.com/aptos-labs/aptos-networks/main/mainnet/genesis.blob",
+        "curl -O https://raw.githubusercontent.com/aptos-labs/aptos-networks/main/mainnet/waypoint.txt",
+		"cp genesis.blob waypoint.txt {{.YafimHome}}/target/aptos/node/mnt/blockjoy/aptos/",
 		"cp {{.YafimHome}}/blockvisor/babel_api/yafim/aptos/supporting-files/fullnode.yaml {{.YafimHome}}/target/aptos/node/mnt/blockjoy/aptos/",
                    
 ]
