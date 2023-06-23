@@ -67,7 +67,11 @@ async fn main() -> eyre::Result<()> {
                 manifest.ok_or(anyhow!("missing DownloadManifest"))?,
                 destination,
                 job_config.restart,
-                DownloaderConfig::new()?,
+                DownloaderConfig::new(
+                    jobs::JOBS_DIR
+                        .join(jobs::STATUS_SUBDIR)
+                        .join(&format!("{job_name}.progress")),
+                )?,
             )?
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;

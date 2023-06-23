@@ -1,5 +1,6 @@
 use sha2::Digest;
 
+// TODO use FixedSize of return type instead of Vec
 pub trait Checksum {
     fn update(&mut self, data: &[u8]);
     fn into_bytes(self) -> Vec<u8>;

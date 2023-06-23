@@ -13,8 +13,10 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
 use std::{
     cmp::min,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
+    fs,
     fs::File,
+    io::Write,
     mem,
     ops::{Deref, DerefMut},
     os::unix::fs::FileExt,
@@ -33,15 +35,17 @@ pub struct DownloaderConfig {
     max_opened_files: usize,
     max_downloaders: usize,
     max_buffer_size: usize,
+    progress_file_path: PathBuf,
 }
 
 impl DownloaderConfig {
-    pub fn new() -> Result<Self> {
+    pub fn new(progress_file_path: PathBuf) -> Result<Self> {
         let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
         Ok(Self {
             max_opened_files,
             max_downloaders: MAX_DOWNLOADERS,
             max_buffer_size: MAX_BUFFER_SIZE,
+            progress_file_path,
         })
     }
 }
@@ -71,18 +75,19 @@ impl<T: AsyncTimer> DownloadJob<T> {
     }
 
     async fn download(&mut self, mut run: RunFlag) -> Result<()> {
+        // TODO check available disk space for self.destination_dir if not lower than self.manifest.total_size
         let (tx, rx) = mpsc::channel(self.config.max_downloaders);
-        let writer = tokio::spawn(
-            Writer::new(
-                rx,
-                self.destination_dir.clone(),
-                self.config.max_opened_files,
-            )
-            .run(run.clone()),
+        let writer = Writer::new(
+            rx,
+            self.destination_dir.clone(),
+            self.config.max_opened_files,
+            self.config.progress_file_path.clone(),
         );
+        let downloaded_chunks = writer.downloaded_chunks.clone();
+        let writer = tokio::spawn(writer.run(run.clone()));
 
         let mut downloaders = FuturesUnordered::new();
-        let mut chunks = self.manifest.chunks.clone();
+        let mut chunks = self.manifest.chunks.iter();
         // TODO add multipart download support for low number of chunks case
         // let max_parts = if chunks.len() < self.config.max_downloaders {
         //     self.config.max_downloaders / chunks.len()
@@ -91,9 +96,13 @@ impl<T: AsyncTimer> DownloadJob<T> {
         // };
         while run.load() {
             while downloaders.len() < self.config.max_downloaders {
-                if let Some(chunk) = chunks.pop() {
+                if let Some(chunk) = chunks.next() {
+                    if downloaded_chunks.contains(&chunk.key) {
+                        // skip chunks successfully downloaded in previous run
+                        continue;
+                    }
                     let downloader = ChunkDownloader::new(
-                        chunk,
+                        chunk.clone(),
                         // max_parts,
                         tx.clone(),
                         self.config.max_buffer_size,
@@ -138,21 +147,26 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
 }
 
 #[derive(Debug)]
-struct FilePart {
-    path: PathBuf,
-    pos: u64,
-    data: Vec<u8>,
+enum ChunkData {
+    FilePart {
+        path: PathBuf,
+        pos: u64,
+        data: Vec<u8>,
+    },
+    EndOfChunk {
+        key: String,
+    },
 }
 
 struct ChunkDownloader {
     chunk: Chunk,
-    tx: mpsc::Sender<FilePart>,
+    tx: mpsc::Sender<ChunkData>,
     client: reqwest::Client,
     max_buffer_size: usize,
 }
 
 impl ChunkDownloader {
-    fn new(chunk: Chunk, tx: mpsc::Sender<FilePart>, max_buffer_size: usize) -> Self {
+    fn new(chunk: Chunk, tx: mpsc::Sender<ChunkData>, max_buffer_size: usize) -> Self {
         Self {
             chunk,
             tx,
@@ -200,6 +214,11 @@ impl ChunkDownloader {
             calculated_checksum == expected_checksum,
             "chunk checksum mismatch - expected {expected_checksum:?}, actual {calculated_checksum:?}"
         );
+        self.tx
+            .send(ChunkData::EndOfChunk {
+                key: self.chunk.key.clone(),
+            })
+            .await?;
         Ok(())
     }
 
@@ -246,7 +265,7 @@ impl ChunkDownloader {
             let destination = destination.go_next()?;
             let reminder = buffer.split_off(destination.size as usize);
             self.tx
-                .send(FilePart {
+                .send(ChunkData::FilePart {
                     path: destination.path,
                     pos: destination.pos,
                     data: buffer,
@@ -257,7 +276,7 @@ impl ChunkDownloader {
         // send remaining
         let bytes_sent = u64::try_from(buffer.len())?;
         self.tx
-            .send(FilePart {
+            .send(ChunkData::FilePart {
                 path: destination.path.clone(),
                 pos: destination.pos,
                 data: buffer,
@@ -309,59 +328,93 @@ impl DerefMut for DestinationsIter {
 struct Writer {
     opened_files: HashMap<PathBuf, (Instant, File)>,
     destination_dir: PathBuf,
-    rx: mpsc::Receiver<FilePart>,
+    rx: mpsc::Receiver<ChunkData>,
     max_opened_files: usize,
+    progress_file_path: PathBuf,
+    downloaded_chunks: HashSet<String>,
 }
 
 impl Writer {
     fn new(
-        rx: mpsc::Receiver<FilePart>,
+        rx: mpsc::Receiver<ChunkData>,
         destination_dir: PathBuf,
         max_opened_files: usize,
+        progress_file_path: PathBuf,
     ) -> Self {
+        let downloaded_chunks = if progress_file_path.exists() {
+            fs::read_to_string(&progress_file_path)
+                .and_then(|json| Ok(serde_json::from_str(&json)?))
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        };
+
         Self {
             opened_files: HashMap::new(),
             destination_dir,
             rx,
             max_opened_files,
+            progress_file_path,
+            downloaded_chunks,
         }
     }
 
     async fn run(mut self, mut run: RunFlag) -> Result<()> {
         while run.load() {
-            if let Some(part) = self.rx.recv().await {
-                match self.opened_files.entry(part.path.clone()) {
-                    Entry::Occupied(mut entry) => {
-                        // already have opened handle to the file, so just update timestamp
-                        let (timestamp, file) = entry.get_mut();
-                        *timestamp = Instant::now();
-                        file.write_all_at(&part.data, part.pos)?;
+            if let Some(chunk_data) = self.rx.recv().await {
+                match chunk_data {
+                    ChunkData::FilePart { path, pos, data } => {
+                        self.write_to_file(path, pos, data).await?;
                     }
-                    Entry::Vacant(entry) => {
-                        // file not opened yet
-                        let file = File::options()
-                            .create(true)
-                            .write(true)
-                            .open(self.destination_dir.join(entry.key()))?;
-                        let (_, file) = entry.insert((Instant::now(), file));
-                        file.write_all_at(&part.data, part.pos)?;
-                    }
-                }
-                if self.opened_files.len() >= self.max_opened_files {
-                    // can't have to many files opened at the same time, so close one with
-                    // oldest timestamp
-                    if let Some(oldest) = self
-                        .opened_files
-                        .iter()
-                        .min_by(|(_, (a, _)), (_, (b, _))| a.cmp(b))
-                        .map(|(k, _)| k.clone())
-                    {
-                        self.opened_files.remove(&oldest);
+                    ChunkData::EndOfChunk { key } => {
+                        self.downloaded_chunks.insert(key);
+                        fs::write(
+                            &self.progress_file_path,
+                            serde_json::to_string(&self.downloaded_chunks)?,
+                        )?;
                     }
                 }
             } else {
                 // stop writer when all senders/downloaders are dropped
                 break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn write_to_file(&mut self, path: PathBuf, pos: u64, data: Vec<u8>) -> Result<()> {
+        // Instant::now() is used (instead of T: AsyncTimer) just for simplicity
+        // otherwise we would need to have 2 instances of T (one for job, second for Writer task),
+        // or T to be Cloneable, which complicates test code, but doesn't bring a lot of benefits.
+        match self.opened_files.entry(path) {
+            Entry::Occupied(mut entry) => {
+                // already have opened handle to the file, so just update timestamp
+                let (timestamp, file) = entry.get_mut();
+                *timestamp = Instant::now();
+                file.write_all_at(&data, pos)?;
+                file.flush()?;
+            }
+            Entry::Vacant(entry) => {
+                // file not opened yet
+                let file = File::options()
+                    .create(true)
+                    .write(true)
+                    .open(self.destination_dir.join(entry.key()))?;
+                let (_, file) = entry.insert((Instant::now(), file));
+                file.write_all_at(&data, pos)?;
+                file.flush()?;
+            }
+        }
+        if self.opened_files.len() >= self.max_opened_files {
+            // can't have to many files opened at the same time, so close one with
+            // oldest timestamp
+            if let Some(oldest) = self
+                .opened_files
+                .iter()
+                .min_by(|(_, (a, _)), (_, (b, _))| a.cmp(b))
+                .map(|(k, _)| k.clone())
+            {
+                self.opened_files.remove(&oldest);
             }
         }
         Ok(())
@@ -378,17 +431,56 @@ mod tests {
     use reqwest::Url;
     use std::fs;
 
+    struct TestEnv {
+        tmp_dir: PathBuf,
+        download_progress_path: PathBuf,
+        server: MockServer,
+    }
+
+    fn setup_test_env() -> Result<TestEnv> {
+        let tmp_dir = TempDir::new()?.to_path_buf();
+        fs::create_dir_all(&tmp_dir)?;
+        let server = MockServer::start();
+        let download_progress_path = tmp_dir.join("download.progress");
+        Ok(TestEnv {
+            tmp_dir,
+            server,
+            download_progress_path,
+        })
+    }
+
+    impl TestEnv {
+        fn download_job(&self, manifest: DownloadManifest) -> Result<DownloadJob<MockAsyncTimer>> {
+            DownloadJob::new(
+                MockAsyncTimer::new(),
+                manifest,
+                self.tmp_dir.clone(),
+                RestartPolicy::Never,
+                DownloaderConfig {
+                    max_opened_files: 1,
+                    max_downloaders: 4,
+                    max_buffer_size: 150,
+                    progress_file_path: self.download_progress_path.clone(),
+                },
+            )
+        }
+
+        fn url(&self, path: &str) -> Result<Url> {
+            Ok(Url::parse(&self.server.url(path))?)
+        }
+    }
+
     #[tokio::test]
     async fn full_download_ok() -> Result<()> {
-        let tmp_dir = TempDir::new()?;
-        let server = MockServer::start();
+        let test_env = setup_test_env()?;
+
         let manifest = DownloadManifest {
             total_size: 924,
             compression: None,
             chunks: vec![
                 Chunk {
                     key: "first_chunk".to_string(),
-                    url: Url::parse(&server.url("/first_chunk"))?,
+                    url: test_env.url("/first_chunk")?,
                     checksum: Checksum::Blake3(vec![
                         85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8,
                         190, 219, 61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
@@ -414,7 +506,7 @@ mod tests {
                 },
                 Chunk {
                     key: "second_chunk".to_string(),
-                    url: Url::parse(&server.url("/second_chunk"))?,
+                    url: test_env.url("/second_chunk")?,
                     checksum: Checksum::Sha256(vec![
                         104, 0, 168, 43, 116, 130, 25, 151, 217, 240, 13, 245, 96, 88, 86, 0, 75,
                         93, 168, 15, 58, 171, 248, 94, 149, 167, 72, 202, 179, 227, 164, 214,
@@ -429,7 +521,7 @@ mod tests {
             ],
         };
 
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=0-150")
                 .path("/first_chunk");
@@ -437,7 +529,7 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body([vec![0u8; 100], vec![1u8; 50]].concat());
         });
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=150-300")
                 .path("/first_chunk");
@@ -445,7 +537,7 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body(vec![1u8; 150]);
         });
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=300-450")
                 .path("/first_chunk");
@@ -453,7 +545,7 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body(vec![2u8; 150]);
         });
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=450-600")
                 .path("/first_chunk");
@@ -462,7 +554,7 @@ mod tests {
                 .body(vec![2u8; 150]);
         });
 
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=0-150")
                 .path("/second_chunk");
@@ -470,7 +562,7 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body(vec![3u8; 150]);
         });
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=150-300")
                 .path("/second_chunk");
@@ -478,7 +570,7 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body(vec![3u8; 150]);
         });
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=300-324")
                 .path("/second_chunk");
@@ -486,64 +578,55 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body(vec![3u8; 24]);
         });
-        DownloadJob::new(
-            MockAsyncTimer::new(),
-            manifest,
-            tmp_dir.path().to_path_buf(),
-            RestartPolicy::Never,
-            DownloaderConfig {
-                max_opened_files: 1,
-                max_downloaders: 4,
-                max_buffer_size: 150,
-            },
-        )?
-        .download(RunFlag::default())
-        .await?;
+        test_env
+            .download_job(manifest)?
+            .download(RunFlag::default())
+            .await?;
 
-        assert_eq!(vec![0u8; 100], fs::read(tmp_dir.path().join("zero.file"))?);
-        assert_eq!(vec![1u8; 200], fs::read(tmp_dir.path().join("first.file"))?);
+        assert_eq!(
+            vec![0u8; 100],
+            fs::read(test_env.tmp_dir.join("zero.file"))?
+        );
+        assert_eq!(
+            vec![1u8; 200],
+            fs::read(test_env.tmp_dir.join("first.file"))?
+        );
         assert_eq!(
             [vec![2u8; 300], vec![3u8; 324]].concat(),
-            fs::read(tmp_dir.path().join("second.file"))?
+            fs::read(test_env.tmp_dir.join("second.file"))?
         );
         Ok(())
     }
 
     #[tokio::test]
     async fn invalid_manifest() -> Result<()> {
-        let tmp_dir = TempDir::new()?;
-        let server = MockServer::start();
+        let test_env = setup_test_env()?;
 
         let manifest_wo_destination = DownloadManifest {
             total_size: 600,
             compression: None,
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
-                url: Url::parse(&server.url("/first_chunk"))?,
+                url: test_env.url("/first_chunk")?,
                 checksum: Checksum::Sha1(vec![]),
                 size: 600,
                 destinations: vec![],
             }],
         };
-        assert!(DownloadJob::new(
-            MockAsyncTimer::new(),
-            manifest_wo_destination,
-            tmp_dir.path().to_path_buf(),
-            RestartPolicy::Never,
-            DownloaderConfig::new()?,
-        )?
-        .download(RunFlag::default())
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("corrupted manifest - expected at least one destination file in chunk"));
+        assert!(test_env
+            .download_job(manifest_wo_destination)?
+            .download(RunFlag::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("corrupted manifest - expected at least one destination file in chunk"));
 
         let manifest_inconsistent_destination = DownloadManifest {
             total_size: 200,
             compression: None,
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
-                url: Url::parse(&server.url("/chunk"))?,
+                url: test_env.url("/chunk")?,
                 checksum: Checksum::Sha1(vec![]),
                 size: 200,
                 destinations: vec![FileLocation {
@@ -553,40 +636,35 @@ mod tests {
                 }],
             }],
         };
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-200")
+                .header("range", "bytes=0-150")
                 .path("/chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
-                .body(vec![0u8; 200]);
+                .body(vec![0u8; 150]);
         });
-        assert!(DownloadJob::new(
-            MockAsyncTimer::new(),
-            manifest_inconsistent_destination,
-            tmp_dir.path().to_path_buf(),
-            RestartPolicy::Never,
-            DownloaderConfig::new()?,
-        )?
-        .download(RunFlag::default())
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("corrupted manifest - expected destination, but not found"));
+        assert!(test_env
+            .download_job(manifest_inconsistent_destination)?
+            .download(RunFlag::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("corrupted manifest - expected destination, but not found"));
 
         Ok(())
     }
 
     #[tokio::test]
     async fn server_errors() -> Result<()> {
-        let tmp_dir = TempDir::new()?;
-        let server = MockServer::start();
+        let test_env = setup_test_env()?;
+
         let manifest = DownloadManifest {
             total_size: 100,
             compression: None,
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
-                url: Url::parse(&server.url("/first_chunk"))?,
+                url: test_env.url("/first_chunk")?,
                 checksum: Checksum::Sha1(vec![]),
                 size: 100,
                 destinations: vec![FileLocation {
@@ -597,7 +675,7 @@ mod tests {
             }],
         };
 
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=0-100")
                 .path("/first_chunk");
@@ -606,25 +684,20 @@ mod tests {
                 .body(vec![0u8; 150]);
         });
 
-        assert!(DownloadJob::new(
-            MockAsyncTimer::new(),
-            manifest,
-            tmp_dir.path().to_path_buf(),
-            RestartPolicy::Never,
-            DownloaderConfig::new()?,
-        )?
-        .download(RunFlag::default())
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("server error: received more bytes than requested"));
+        assert!(test_env
+            .download_job(manifest)?
+            .download(RunFlag::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("server error: received more bytes than requested"));
 
         let manifest = DownloadManifest {
             total_size: 100,
             compression: None,
             chunks: vec![Chunk {
                 key: "second_chunk".to_string(),
-                url: Url::parse(&server.url("/second_chunk"))?,
+                url: test_env.url("/second_chunk")?,
                 checksum: Checksum::Sha1(vec![]),
                 size: 100,
                 destinations: vec![FileLocation {
@@ -635,7 +708,7 @@ mod tests {
             }],
         };
 
-        server.mock(|when, then| {
+        test_env.server.mock(|when, then| {
             when.method(GET)
                 .header("range", "bytes=0-100")
                 .path("/second_chunk");
@@ -644,25 +717,20 @@ mod tests {
                 .body(vec![0u8; 50]);
         });
 
-        assert!(DownloadJob::new(
-            MockAsyncTimer::new(),
-            manifest,
-            tmp_dir.path().to_path_buf(),
-            RestartPolicy::Never,
-            DownloaderConfig::new()?,
-        )?
-        .download(RunFlag::default())
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("server error: received less bytes than requested"));
+        assert!(test_env
+            .download_job(manifest)?
+            .download(RunFlag::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("server error: received less bytes than requested"));
 
         let manifest = DownloadManifest {
             total_size: 100,
             compression: None,
             chunks: vec![Chunk {
                 key: "third_chunk".to_string(),
-                url: Url::parse(&server.url("/third_chunk"))?,
+                url: test_env.url("/third_chunk")?,
                 checksum: Checksum::Sha1(vec![]),
                 size: 100,
                 destinations: vec![FileLocation {
@@ -672,21 +740,116 @@ mod tests {
                 }],
             }],
         };
-        drop(server);
 
-        assert!(DownloadJob::new(
-            MockAsyncTimer::new(),
-            manifest,
-            tmp_dir.path().to_path_buf(),
-            RestartPolicy::Never,
-            DownloaderConfig::new()?,
-        )?
-        .download(RunFlag::default())
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("server responded with 404"));
+        assert!(test_env
+            .download_job(manifest)?
+            .download(RunFlag::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("server responded with 404"));
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restore_download_ok() -> Result<()> {
+        let test_env = setup_test_env()?;
+
+        let manifest = DownloadManifest {
+            total_size: 450,
+            compression: None,
+            chunks: vec![
+                Chunk {
+                    key: "first_chunk".to_string(),
+                    url: test_env.url("/first_chunk")?,
+                    checksum: Checksum::Sha1(vec![]),
+                    size: 150,
+                    destinations: vec![
+                        FileLocation {
+                            path: PathBuf::from("zero.file"),
+                            pos: 0,
+                            size: 50,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("first.file"),
+                            pos: 0,
+                            size: 100,
+                        },
+                    ],
+                },
+                Chunk {
+                    key: "second_chunk".to_string(),
+                    url: test_env.url("/second_chunk")?,
+                    checksum: Checksum::Sha256(vec![
+                        11, 56, 53, 195, 145, 248, 22, 92, 171, 157, 42, 156, 246, 231, 150, 119,
+                        131, 159, 119, 111, 149, 123, 206, 70, 180, 149, 29, 147, 17, 24, 186, 145,
+                    ]),
+                    size: 150,
+                    destinations: vec![FileLocation {
+                        path: PathBuf::from("second.file"),
+                        pos: 0,
+                        size: 150,
+                    }],
+                },
+                Chunk {
+                    key: "third_chunk".to_string(),
+                    url: test_env.url("/third_chunk")?,
+                    checksum: Checksum::Blake3(vec![
+                        114, 218, 36, 156, 123, 105, 39, 122, 74, 248, 114, 114, 183, 65, 158, 200,
+                        195, 188, 214, 91, 49, 183, 140, 241, 231, 214, 189, 190, 156, 159, 217,
+                        254,
+                    ]),
+                    size: 150,
+                    destinations: vec![FileLocation {
+                        path: PathBuf::from("third.file"),
+                        pos: 0,
+                        size: 150,
+                    }],
+                },
+            ],
+        };
+
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=0-150")
+                .path("/second_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![2u8; 150]);
+        });
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=0-150")
+                .path("/third_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![3u8; 150]);
+        });
+
+        // mark first file as downloaded
+        let mut progress = HashSet::new();
+        progress.insert("first_chunk");
+        fs::write(
+            &test_env.download_progress_path,
+            serde_json::to_string(&progress)?,
+        )?;
+        // partially downloaded second file
+        fs::write(&test_env.tmp_dir.join("second.file"), vec![1u8; 55])?;
+
+        let mut job = test_env.download_job(manifest)?;
+        job.config.max_downloaders = 1;
+        job.download(RunFlag::default()).await?;
+
+        assert!(!test_env.tmp_dir.join("zero.file").exists());
+        assert_eq!(
+            vec![2u8; 150],
+            fs::read(test_env.tmp_dir.join("second.file"))?
+        );
+        assert_eq!(
+            vec![3u8; 150],
+            fs::read(test_env.tmp_dir.join("third.file"))?
+        );
         Ok(())
     }
 }
