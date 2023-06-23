@@ -8,7 +8,7 @@ use babel_api::engine::{
     Checksum, Chunk, DownloadManifest, FileLocation, JobStatus, RestartPolicy,
 };
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use eyre::{anyhow, ensure, Result};
+use eyre::{anyhow, bail, ensure, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
 use std::{
@@ -24,6 +24,7 @@ use std::{
     usize,
     vec::IntoIter,
 };
+use sysinfo::{DiskExt, System, SystemExt};
 use tokio::{sync::mpsc, time::Instant};
 use tracing::{debug, info};
 
@@ -75,7 +76,7 @@ impl<T: AsyncTimer> DownloadJob<T> {
     }
 
     async fn download(&mut self, mut run: RunFlag) -> Result<()> {
-        // TODO check available disk space for self.destination_dir if not lower than self.manifest.total_size
+        self.check_disk_space()?;
         let (tx, rx) = mpsc::channel(self.config.max_downloaders);
         let writer = Writer::new(
             rx,
@@ -128,6 +129,22 @@ impl<T: AsyncTimer> DownloadJob<T> {
         drop(tx); // drop last sender so writer know that download is done.
 
         writer.await??;
+        Ok(())
+    }
+
+    fn check_disk_space(&self) -> Result<()> {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+        let available_space = bv_utils::system::find_disk_by_path(&sys, &self.destination_dir)
+            .map(|disk| disk.available_space())
+            .ok_or_else(|| anyhow!("Cannot get available disk space"))?;
+        if self.manifest.total_size > available_space {
+            bail!(
+                "Can't download {} bytes of data while only {} available",
+                self.manifest.total_size,
+                available_space
+            )
+        }
         Ok(())
     }
 }
@@ -850,6 +867,28 @@ mod tests {
             vec![3u8; 150],
             fs::read(test_env.tmp_dir.join("third.file"))?
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn not_enough_disk_space() -> Result<()> {
+        let test_env = setup_test_env()?;
+
+        let manifest_wo_destination = DownloadManifest {
+            total_size: u64::MAX,
+            compression: None,
+            chunks: vec![],
+        };
+        assert!(test_env
+            .download_job(manifest_wo_destination)?
+            .download(RunFlag::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains(&format!(
+                "Can't download {} bytes of data while only",
+                u64::MAX
+            )));
         Ok(())
     }
 }

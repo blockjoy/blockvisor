@@ -415,7 +415,7 @@ dependencies = [
  "serde_variant",
  "sha1_smol",
  "sha2",
- "sysinfo",
+ "sysinfo 0.29.2",
  "tera",
  "thiserror",
  "tokio",
@@ -572,7 +572,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "sysinfo",
+ "sysinfo 0.29.2",
  "systemstat",
  "thiserror",
  "tokio",
@@ -610,6 +610,7 @@ dependencies = [
  "async-trait",
  "ctrlc",
  "mockall",
+ "sysinfo 0.29.2",
  "tokio",
  "tracing",
  "tracing-journald",
@@ -1182,7 +1183,7 @@ dependencies = [
  "hyperlocal",
  "serde",
  "serde_json",
- "sysinfo",
+ "sysinfo 0.27.7",
  "thiserror",
  "tokio",
  "tracing",
@@ -1832,9 +1833,9 @@ checksum = "db13adb97ab515a3691f56e4dbab09283d0b86cb45abd991d8634a9d6f501760"
 
 [[package]]
 name = "libc"
-version = "0.2.139"
+version = "0.2.146"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
+checksum = "f92be4933c13fd498862a9e02a3055f8a8d9c039ce33db97306fd5a6caa7f29b"
 
 [[package]]
 name = "libnghttp2-sys"
@@ -3212,6 +3213,21 @@ name = "sysinfo"
 version = "0.27.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "975fe381e0ecba475d4acff52466906d95b153a40324956552e027b2a9eaa89e"
+dependencies = [
+ "cfg-if",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "winapi",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.29.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9557d0845b86eea8182f7b10dff120214fb6cd9fd937b6f4917714e546a38695"
 dependencies = [
  "cfg-if",
  "core-foundation-sys",
