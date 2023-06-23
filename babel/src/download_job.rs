@@ -209,10 +209,10 @@ impl ChunkDownloader {
         Ok(())
     }
 
-    async fn download_chunk(
+    async fn download_chunk<C: checksum::Checksum>(
         &self,
-        mut digest: impl checksum::Checksum,
-        expected_checksum: &[u8],
+        mut digest: C,
+        expected_checksum: &C::Bytes,
     ) -> Result<()> {
         let chunk_size = usize::try_from(self.chunk.size)?;
         let mut pos = 0;
@@ -228,7 +228,7 @@ impl ChunkDownloader {
         }
         let calculated_checksum = digest.into_bytes();
         ensure!(
-            calculated_checksum == expected_checksum,
+            &calculated_checksum == expected_checksum,
             "chunk checksum mismatch - expected {expected_checksum:?}, actual {calculated_checksum:?}"
         );
         self.tx
@@ -498,7 +498,7 @@ mod tests {
                 Chunk {
                     key: "first_chunk".to_string(),
                     url: test_env.url("/first_chunk")?,
-                    checksum: Checksum::Blake3(vec![
+                    checksum: Checksum::Blake3([
                         85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8,
                         190, 219, 61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
                     ]),
@@ -524,7 +524,7 @@ mod tests {
                 Chunk {
                     key: "second_chunk".to_string(),
                     url: test_env.url("/second_chunk")?,
-                    checksum: Checksum::Sha256(vec![
+                    checksum: Checksum::Sha256([
                         104, 0, 168, 43, 116, 130, 25, 151, 217, 240, 13, 245, 96, 88, 86, 0, 75,
                         93, 168, 15, 58, 171, 248, 94, 149, 167, 72, 202, 179, 227, 164, 214,
                     ]),
@@ -625,7 +625,7 @@ mod tests {
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
                 url: test_env.url("/first_chunk")?,
-                checksum: Checksum::Sha1(vec![]),
+                checksum: Checksum::Sha1([0u8; 20]),
                 size: 600,
                 destinations: vec![],
             }],
@@ -644,7 +644,7 @@ mod tests {
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
                 url: test_env.url("/chunk")?,
-                checksum: Checksum::Sha1(vec![]),
+                checksum: Checksum::Sha1([0u8; 20]),
                 size: 200,
                 destinations: vec![FileLocation {
                     path: PathBuf::from("zero.file"),
@@ -682,7 +682,7 @@ mod tests {
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
                 url: test_env.url("/first_chunk")?,
-                checksum: Checksum::Sha1(vec![]),
+                checksum: Checksum::Sha1([0u8; 20]),
                 size: 100,
                 destinations: vec![FileLocation {
                     path: PathBuf::from("zero.file"),
@@ -715,7 +715,7 @@ mod tests {
             chunks: vec![Chunk {
                 key: "second_chunk".to_string(),
                 url: test_env.url("/second_chunk")?,
-                checksum: Checksum::Sha1(vec![]),
+                checksum: Checksum::Sha1([0u8; 20]),
                 size: 100,
                 destinations: vec![FileLocation {
                     path: PathBuf::from("zero.file"),
@@ -748,7 +748,7 @@ mod tests {
             chunks: vec![Chunk {
                 key: "third_chunk".to_string(),
                 url: test_env.url("/third_chunk")?,
-                checksum: Checksum::Sha1(vec![]),
+                checksum: Checksum::Sha1([0u8; 20]),
                 size: 100,
                 destinations: vec![FileLocation {
                     path: PathBuf::from("zero.file"),
@@ -780,7 +780,7 @@ mod tests {
                 Chunk {
                     key: "first_chunk".to_string(),
                     url: test_env.url("/first_chunk")?,
-                    checksum: Checksum::Sha1(vec![]),
+                    checksum: Checksum::Sha1([0u8; 20]),
                     size: 150,
                     destinations: vec![
                         FileLocation {
@@ -798,9 +798,9 @@ mod tests {
                 Chunk {
                     key: "second_chunk".to_string(),
                     url: test_env.url("/second_chunk")?,
-                    checksum: Checksum::Sha256(vec![
-                        11, 56, 53, 195, 145, 248, 22, 92, 171, 157, 42, 156, 246, 231, 150, 119,
-                        131, 159, 119, 111, 149, 123, 206, 70, 180, 149, 29, 147, 17, 24, 186, 145,
+                    checksum: Checksum::Sha1([
+                        152, 150, 127, 36, 91, 230, 29, 94, 132, 21, 41, 252, 81, 126, 200, 137,
+                        69, 117, 117, 134,
                     ]),
                     size: 150,
                     destinations: vec![FileLocation {
@@ -812,10 +812,9 @@ mod tests {
                 Chunk {
                     key: "third_chunk".to_string(),
                     url: test_env.url("/third_chunk")?,
-                    checksum: Checksum::Blake3(vec![
-                        114, 218, 36, 156, 123, 105, 39, 122, 74, 248, 114, 114, 183, 65, 158, 200,
-                        195, 188, 214, 91, 49, 183, 140, 241, 231, 214, 189, 190, 156, 159, 217,
-                        254,
+                    checksum: Checksum::Sha1([
+                        250, 1, 243, 45, 249, 202, 133, 7, 222, 104, 232, 37, 207, 74, 223, 126, 2,
+                        142, 95, 170,
                     ]),
                     size: 150,
                     destinations: vec![FileLocation {
