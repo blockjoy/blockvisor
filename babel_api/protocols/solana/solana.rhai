@@ -6,7 +6,7 @@ const METADATA = #{
     description: "Solana node",
     requirements: #{
         vcpu_count: 32,
-        mem_size_mb: 131072,
+        mem_size_mb: 524288,
         disk_size_gb: 1500,
     },
     nets: #{
@@ -22,7 +22,7 @@ const METADATA = #{
     babel_config: #{
         data_directory_mount_point: "/blockjoy/solana/",
         log_buffer_capacity_ln: 1000,
-        swap_size_mb: 1024,
+        swap_size_mb: 393216,
     },
     firewall: #{
         enabled: true,
@@ -46,7 +46,6 @@ const API_HOST = "http://localhost:8899/";
 
 // TODO
 // start node/create start file/ other way to start solana?
-// configure swap?
 
 fn init() {
     debug("Executing startup scripts...");
@@ -94,7 +93,7 @@ fn application_status() {
     return result;
 }
 
-fn get_block_height() {
+fn address() {
     let url = GLOBAL::API_HOST;
 
     let body = {
