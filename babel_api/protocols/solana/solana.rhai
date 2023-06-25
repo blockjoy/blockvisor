@@ -45,22 +45,21 @@ const METADATA = #{
 const API_HOST = "http://localhost:8899/";
 
 // TODO
-// fn to start node
-// possible to use babel vars below ,data_directory_mount_point as example ?
+// start node/create start file/ other way to start solana?
 // configure swap?
 
 fn init() {
     debug("Executing startup scripts...");
     let net = sanitize_sh_param(node_params().NETWORK);
-    let metadata = global::METADATA.nets[net]
+    let metadata = GLOBAL::METADATA.nets[net];
+    let data_directory = GLOBAL::METADATA.babel_config.data_directory_mount_point;
+    
     start_job("Running the Solana validator node", #{
-        body: `
-        mkdir -p /blockjoy/solana/accounts
-        mkdir /blockjoy/solana/config
-        curl -sSf https://release.solana.com/v1.16.0/install | sh
-        solana config set --url https://api.mainnet.solana.com
-        solana-keygen new -o /blockjoy/solana/config/validator-keypair.json
-        `,
+        body: format!(
+            "solana config set --url {}\nsolana-keygen new -o {}/config/validator-keypair.json",
+            metadata.url,
+            data_directory
+        ),
         restart: #{
             "always": #{
                 backoff_timeout_ms: 60000,
@@ -73,7 +72,7 @@ fn init() {
 
 fn application_status() {
     let url = GLOBAL::API_HOST;
-    let headers = #{
+    let headers = {
         "Content-Type": "application/json"
     };
 
@@ -83,22 +82,16 @@ fn application_status() {
         "method": "getHealth"
     };
 
-    let response = http_post(url, body, headers);
+    let resp = run_jrpc(url, body, headers);
 
-    if response["status_code"] != 200 {
-        throw response["body"].to_string();
+    if resp["status_code"] != 200 {
+        throw resp["body"].to_string();
     }
 
-    let body_json = json::parse(response["body"]).unwrap();
-    let result = body_json["result"].to_string();
+    let body_json = json::parse(resp["body"]).unwrap();
+    let result = body_json["result"];
 
-    if result == "\"ok\"" {
-        return "Healthy".to_string();
-    } else if result == "\"Node is unhealthy\"" {
-        throw result.to_string();
-    } else {
-        throw response["body"].to_string();
-    }
+    return result;
 }
 
 fn get_block_height() {
@@ -114,8 +107,8 @@ fn get_block_height() {
         "Content-Type": "application/json"
     };
 
-    let resp = http_post(url, json::stringify(body), headers);
-    let response_json = json::parse(resp.body);
+    let resp = run_jrpc(url, body, headers);
+    let response_json = json::parse(resp["body"]);
 
     let block_height = response_json["result"].to_string();
 
@@ -128,7 +121,7 @@ fn get_block_height() {
 
 fn get_identity() {
     let url = GLOBAL::API_HOST;
-    let headers = #{
+    let headers = {
         "Content-Type": "application/json",
     };
     let body = {
@@ -137,12 +130,12 @@ fn get_identity() {
         "method": "getIdentity"
     };
 
-    let resp = http_post(url, body, headers);
+    let resp = run_jrpc(url, body, headers);
 
     if resp["status_code"] != 200 {
         throw resp["body"];
     }
-  
+
     let body_json = json::parse(resp["body"]);
 
     if body_json.is_err() {
@@ -156,7 +149,7 @@ fn get_identity() {
 
 fn get_node_version() {
     let url = GLOBAL::API_HOST;
-    let headers = #{
+    let headers = {
         "Content-Type": "application/json",
     };
     let body = {
@@ -165,12 +158,12 @@ fn get_node_version() {
         "method": "getVersion"
     };
 
-    let resp = http_post(url, body, headers);
+    let resp = run_jrpc(url, body, headers);
 
     if resp["status_code"] != 200 {
         throw resp["body"];
     }
-  
+
     let body_json = json::parse(resp["body"]);
 
     if body_json.is_err() {

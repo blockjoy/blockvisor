@@ -16,9 +16,8 @@ cmds = [
   "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
   "sudo apt update",
   "sudo apt upgrade -y",
-  "sh -c \"$(curl -sSfL https://release.solana.com/v1.15.2/install)\"",
-  "solana --version",
-
+  "mkdir -p /blockjoy/solana/{accounts,config}",
+  "curl -sSf https://release.solana.com/v1.16.0/install | sh",
 ]
 
 [build_machine]
