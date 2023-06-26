@@ -1,15 +1,18 @@
-/// This module implements job runner for fetching blockchain data. It downloads blockchain data
-/// according to to given manifest and destination dir. In case of recoverable errors download
-/// is retried according to given `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
+/// This module implements job runner for downloading data. It downloads data according to to given
+/// manifest and destination dir. In case of recoverable errors download is retried according to given
+/// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
 /// Backoff timeout and retry count are reset if download continue without errors for at least `backoff_timeout_ms`.
-use crate::{checksum, job_runner::JobRunnerImpl};
+use crate::{
+    checksum,
+    job_runner::{JobBackoff, JobRunnerImpl},
+};
 use async_trait::async_trait;
 use babel_api::engine::{
     Checksum, Chunk, DownloadManifest, FileLocation, JobStatus, RestartPolicy,
 };
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use eyre::{anyhow, bail, ensure, Result};
-use futures::{stream::FuturesUnordered, StreamExt};
+use eyre::{anyhow, bail, ensure, Context, Result};
+use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
 use std::{
     cmp::min,
@@ -21,17 +24,19 @@ use std::{
     ops::{Deref, DerefMut},
     os::unix::fs::FileExt,
     path::PathBuf,
+    slice::Iter,
     usize,
     vec::IntoIter,
 };
 use sysinfo::{DiskExt, System, SystemExt};
-use tokio::{sync::mpsc, time::Instant};
+use tokio::{select, sync::mpsc, task::JoinHandle, time::Instant};
 use tracing::{debug, info};
 
 const MAX_OPENED_FILES: u64 = 1024;
 const MAX_DOWNLOADERS: usize = 8;
 const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
 
+#[derive(Clone)]
 pub struct DownloaderConfig {
     max_opened_files: usize,
     max_downloaders: usize,
@@ -52,13 +57,18 @@ impl DownloaderConfig {
 }
 
 pub struct DownloadJob<T> {
-    manifest: DownloadManifest,
-    destination_dir: PathBuf,
+    downloader: Downloader,
     restart_policy: RestartPolicy,
     timer: T,
+}
+
+struct Downloader {
+    manifest: DownloadManifest,
+    destination_dir: PathBuf,
     config: DownloaderConfig,
 }
-impl<T: AsyncTimer> DownloadJob<T> {
+
+impl<T: AsyncTimer + Send> DownloadJob<T> {
     pub fn new(
         timer: T,
         manifest: DownloadManifest,
@@ -67,66 +77,42 @@ impl<T: AsyncTimer> DownloadJob<T> {
         config: DownloaderConfig,
     ) -> Result<Self> {
         Ok(Self {
-            manifest,
-            destination_dir,
+            downloader: Downloader {
+                manifest,
+                destination_dir,
+                config,
+            },
             restart_policy,
             timer,
-            config,
         })
     }
+}
 
+impl Downloader {
     async fn download(&mut self, mut run: RunFlag) -> Result<()> {
         self.check_disk_space()?;
         let (tx, rx) = mpsc::channel(self.config.max_downloaders);
-        let writer = Writer::new(
-            rx,
-            self.destination_dir.clone(),
-            self.config.max_opened_files,
-            self.config.progress_file_path.clone(),
-        );
-        let downloaded_chunks = writer.downloaded_chunks.clone();
-        let writer = tokio::spawn(writer.run(run.clone()));
+        let (downloaded_chunks, writer) = self.init_writer(run.clone(), rx);
 
-        let mut downloaders = FuturesUnordered::new();
-        let mut chunks = self.manifest.chunks.iter();
-        // TODO add multipart download support for low number of chunks case
-        // let max_parts = if chunks.len() < self.config.max_downloaders {
-        //     self.config.max_downloaders / chunks.len()
-        // } else {
-        //     1
-        // };
+        let mut downloaders = ParallelChunkDownloaders::new(
+            run.clone(),
+            tx,
+            downloaded_chunks,
+            &self.manifest.chunks,
+            self.config.clone(),
+        );
         while run.load() {
-            while downloaders.len() < self.config.max_downloaders {
-                if let Some(chunk) = chunks.next() {
-                    if downloaded_chunks.contains(&chunk.key) {
-                        // skip chunks successfully downloaded in previous run
-                        continue;
-                    }
-                    let downloader = ChunkDownloader::new(
-                        chunk.clone(),
-                        // max_parts,
-                        tx.clone(),
-                        self.config.max_buffer_size,
-                    );
-                    downloaders.push(downloader.run());
-                } else {
-                    break;
+            downloaders.launch_more();
+            match downloaders.wait_for_next().await {
+                Some(Err(err)) => {
+                    run.stop();
+                    bail!(err);
                 }
-            }
-            if let Some(result) = downloaders.next().await {
-                match self.restart_policy {
-                    RestartPolicy::Never => result?,
-                    _ => {
-                        // TODO implement retry
-                        self.timer.now();
-                        unimplemented!()
-                    }
-                }
-            } else {
-                break;
+                Some(Ok(_)) => {}
+                None => break,
             }
         }
-        drop(tx); // drop last sender so writer know that download is done.
+        drop(downloaders); // drop last sender so writer know that download is done
 
         writer.await??;
         Ok(())
@@ -147,19 +133,99 @@ impl<T: AsyncTimer> DownloadJob<T> {
         }
         Ok(())
     }
+
+    fn init_writer(
+        &self,
+        mut run: RunFlag,
+        rx: mpsc::Receiver<ChunkData>,
+    ) -> (HashSet<String>, JoinHandle<Result<()>>) {
+        let writer = Writer::new(
+            rx,
+            self.destination_dir.clone(),
+            self.config.max_opened_files,
+            self.config.progress_file_path.clone(),
+        );
+        (
+            writer.downloaded_chunks.clone(),
+            tokio::spawn(writer.run(run.clone())),
+        )
+    }
+}
+
+struct ParallelChunkDownloaders<'a> {
+    run: RunFlag,
+    tx: mpsc::Sender<ChunkData>,
+    downloaded_chunks: HashSet<String>,
+    config: DownloaderConfig,
+    futures: FuturesUnordered<BoxFuture<'a, Result<()>>>,
+    chunks: Iter<'a, Chunk>,
+}
+
+impl<'a> ParallelChunkDownloaders<'a> {
+    fn new(
+        run: RunFlag,
+        tx: mpsc::Sender<ChunkData>,
+        downloaded_chunks: HashSet<String>,
+        chunks: &'a Vec<Chunk>,
+        config: DownloaderConfig,
+    ) -> Self {
+        Self {
+            run,
+            tx,
+            downloaded_chunks,
+            config,
+            futures: FuturesUnordered::new(),
+            chunks: chunks.iter(),
+        }
+    }
+
+    fn launch_more(&mut self) {
+        while self.futures.len() < self.config.max_downloaders {
+            if let Some(chunk) = self.chunks.next() {
+                if self.downloaded_chunks.contains(&chunk.key) {
+                    // skip chunks successfully downloaded in previous run
+                    continue;
+                }
+                let downloader = ChunkDownloader::new(
+                    chunk.clone(),
+                    self.tx.clone(),
+                    self.config.max_buffer_size,
+                );
+                self.futures
+                    .push(Box::pin(downloader.run(self.run.clone())));
+            } else {
+                break;
+            }
+        }
+    }
+
+    async fn wait_for_next(&mut self) -> Option<Result<()>> {
+        self.futures.next().await
+    }
 }
 
 #[async_trait]
-impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
-    /// Run and restart job child process until `backoff.stopped` return `JobStatus` or job runner
+impl<T: AsyncTimer + Send + Sync> JobRunnerImpl for DownloadJob<T> {
+    /// Run and restart downloader until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
-    async fn try_run_job(&mut self, run: RunFlag, name: &str) -> Result<(), JobStatus> {
+    async fn try_run_job(&mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
         info!("download job '{name}' started");
-        debug!("with manifest: {:?}", self.manifest);
-        self.download(run).await.map_err(|err| JobStatus::Finished {
-            exit_code: Some(-1),
-            message: err.to_string(),
-        })
+        debug!("with manifest: {:?}", self.downloader.manifest);
+
+        let mut backoff = JobBackoff::new(&self.timer, run.clone(), &self.restart_policy);
+        while run.load() {
+            backoff.start();
+            match self.downloader.download(run.clone()).await {
+                Ok(_) => {
+                    let message = format!("download job '{name}' finished");
+                    backoff.stopped(Some(0), message).await?;
+                }
+                Err(err) => {
+                    backoff.stopped(Some(-1), format!("{err:#}")).await?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -192,39 +258,46 @@ impl ChunkDownloader {
         }
     }
 
-    async fn run(self) -> Result<()> {
+    async fn run(self, run: RunFlag) -> Result<()> {
         match &self.chunk.checksum {
             Checksum::Sha1(checksum) => {
-                self.download_chunk(sha1_smol::Sha1::new(), checksum)
-                    .await?;
+                self.download_chunk(run, sha1_smol::Sha1::new(), checksum)
+                    .await
             }
             Checksum::Sha256(checksum) => {
-                self.download_chunk(<sha2::Sha256 as sha2::Digest>::new(), checksum)
-                    .await?;
+                self.download_chunk(run, <sha2::Sha256 as sha2::Digest>::new(), checksum)
+                    .await
             }
             Checksum::Blake3(checksum) => {
-                self.download_chunk(blake3::Hasher::new(), checksum).await?;
+                self.download_chunk(run, blake3::Hasher::new(), checksum)
+                    .await
             }
         }
-        Ok(())
+        .with_context(|| format!("chunk '{}' download failed", self.chunk.key))
     }
 
     async fn download_chunk<C: checksum::Checksum>(
         &self,
+        mut run: RunFlag,
         mut digest: C,
         expected_checksum: &C::Bytes,
     ) -> Result<()> {
         let chunk_size = usize::try_from(self.chunk.size)?;
         let mut pos = 0;
         let mut destination = DestinationsIter::new(self.chunk.destinations.clone().into_iter())?;
-        while pos < chunk_size {
-            let buffer = self.download_part(pos, chunk_size).await?;
-            pos += buffer.len();
-            digest.update(&buffer);
+        while run.load() && pos < chunk_size {
+            select!(
+                res = self.download_part(pos, chunk_size) => {//TODO with_retry!
+                    let buffer = res?;
+                    pos += buffer.len();
+                    digest.update(&buffer);
 
-            // TODO add decompression support here
+                    // TODO add decompression support here
 
-            self.send_to_writer(buffer, &mut destination).await?;
+                    self.send_to_writer(buffer, &mut destination).await?;
+                }
+                _ = run.wait() => {}
+            );
         }
         let calculated_checksum = digest.into_bytes();
         ensure!(
@@ -240,7 +313,6 @@ impl ChunkDownloader {
     }
 
     async fn download_part(&self, pos: usize, chunk_size: usize) -> Result<Vec<u8>> {
-        // TODO add multipart download support
         let buffer_size = min(chunk_size - pos, self.max_buffer_size);
         let mut buffer = Vec::with_capacity(buffer_size);
         let mut resp = self
@@ -451,7 +523,6 @@ mod tests {
     use super::*;
     use assert_fs::TempDir;
     use babel_api::engine::Checksum;
-    use bv_utils::timer::MockAsyncTimer;
     use httpmock::prelude::*;
     use reqwest::Url;
     use std::fs;
@@ -475,19 +546,17 @@ mod tests {
     }
 
     impl TestEnv {
-        fn download_job(&self, manifest: DownloadManifest) -> Result<DownloadJob<MockAsyncTimer>> {
-            DownloadJob::new(
-                MockAsyncTimer::new(),
+        fn downloader(&self, manifest: DownloadManifest) -> Downloader {
+            Downloader {
                 manifest,
-                self.tmp_dir.clone(),
-                RestartPolicy::Never,
-                DownloaderConfig {
+                destination_dir: self.tmp_dir.clone(),
+                config: DownloaderConfig {
                     max_opened_files: 1,
                     max_downloaders: 4,
                     max_buffer_size: 150,
                     progress_file_path: self.download_progress_path.clone(),
                 },
-            )
+            }
         }
 
         fn url(&self, path: &str) -> Result<Url> {
@@ -604,7 +673,7 @@ mod tests {
                 .body(vec![3u8; 24]);
         });
         test_env
-            .download_job(manifest)?
+            .downloader(manifest)
             .download(RunFlag::default())
             .await?;
 
@@ -638,13 +707,17 @@ mod tests {
                 destinations: vec![],
             }],
         };
-        assert!(test_env
-            .download_job(manifest_wo_destination)?
-            .download(RunFlag::default())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("corrupted manifest - expected at least one destination file in chunk"));
+        assert_eq!(
+            format!(
+                "{:#}",
+                test_env
+                    .downloader(manifest_wo_destination)
+                    .download(RunFlag::default())
+                    .await
+                    .unwrap_err()
+            ),
+            "chunk 'first_chunk' download failed: corrupted manifest - expected at least one destination file in chunk"
+        );
 
         let manifest_inconsistent_destination = DownloadManifest {
             total_size: 200,
@@ -669,13 +742,17 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body(vec![0u8; 150]);
         });
-        assert!(test_env
-            .download_job(manifest_inconsistent_destination)?
-            .download(RunFlag::default())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("corrupted manifest - expected destination, but not found"));
+        assert_eq!(
+            format!(
+                "{:#}",
+                test_env
+                    .downloader(manifest_inconsistent_destination)
+                    .download(RunFlag::default())
+                    .await
+                    .unwrap_err()
+            ),
+            "chunk 'first_chunk' download failed: corrupted manifest - expected destination, but not found"
+        );
 
         Ok(())
     }
@@ -709,13 +786,17 @@ mod tests {
                 .body(vec![0u8; 150]);
         });
 
-        assert!(test_env
-            .download_job(manifest)?
-            .download(RunFlag::default())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("server error: received more bytes than requested"));
+        assert_eq!(
+            format!(
+                "{:#}",
+                test_env
+                    .downloader(manifest)
+                    .download(RunFlag::default())
+                    .await
+                    .unwrap_err()
+            ),
+            "chunk 'first_chunk' download failed: server error: received more bytes than requested"
+        );
 
         let manifest = DownloadManifest {
             total_size: 100,
@@ -742,13 +823,17 @@ mod tests {
                 .body(vec![0u8; 50]);
         });
 
-        assert!(test_env
-            .download_job(manifest)?
-            .download(RunFlag::default())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("server error: received less bytes than requested"));
+        assert_eq!(
+            format!(
+                "{:#}",
+                test_env
+                    .downloader(manifest)
+                    .download(RunFlag::default())
+                    .await
+                    .unwrap_err()
+            ),
+            "chunk 'second_chunk' download failed: server error: received less bytes than requested"
+        );
 
         let manifest = DownloadManifest {
             total_size: 100,
@@ -766,13 +851,17 @@ mod tests {
             }],
         };
 
-        assert!(test_env
-            .download_job(manifest)?
-            .download(RunFlag::default())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("server responded with 404"));
+        assert_eq!(
+            format!(
+                "{:#}",
+                test_env
+                    .downloader(manifest)
+                    .download(RunFlag::default())
+                    .await
+                    .unwrap_err()
+            ),
+            "chunk 'third_chunk' download failed: server responded with 404 Not Found"
+        );
 
         Ok(())
     }
@@ -861,7 +950,7 @@ mod tests {
         // partially downloaded second file
         fs::write(&test_env.tmp_dir.join("second.file"), vec![1u8; 55])?;
 
-        let mut job = test_env.download_job(manifest)?;
+        let mut job = test_env.downloader(manifest);
         job.config.max_downloaders = 1;
         job.download(RunFlag::default()).await?;
 
@@ -887,7 +976,7 @@ mod tests {
             chunks: vec![],
         };
         assert!(test_env
-            .download_job(manifest_wo_destination)?
+            .downloader(manifest_wo_destination)
             .download(RunFlag::default())
             .await
             .unwrap_err()
@@ -931,7 +1020,7 @@ mod tests {
                 .body(vec![0u8; 100]);
         });
 
-        let mut job = test_env.download_job(manifest)?;
+        let mut job = test_env.downloader(manifest);
         job.destination_dir = PathBuf::from("/tmp/non/existing/destination");
 
         assert!(job
