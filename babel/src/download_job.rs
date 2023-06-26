@@ -379,21 +379,29 @@ impl Writer {
     async fn run(mut self, mut run: RunFlag) -> Result<()> {
         while run.load() {
             if let Some(chunk_data) = self.rx.recv().await {
-                match chunk_data {
-                    ChunkData::FilePart { path, pos, data } => {
-                        self.write_to_file(path, pos, data).await?;
-                    }
-                    ChunkData::EndOfChunk { key } => {
-                        self.downloaded_chunks.insert(key);
-                        fs::write(
-                            &self.progress_file_path,
-                            serde_json::to_string(&self.downloaded_chunks)?,
-                        )?;
-                    }
+                if let Err(err) = self.handle_chunk_data(chunk_data).await {
+                    run.stop();
+                    bail!("Writer IO error: {err}")
                 }
             } else {
                 // stop writer when all senders/downloaders are dropped
                 break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_chunk_data(&mut self, chunk_data: ChunkData) -> Result<()> {
+        match chunk_data {
+            ChunkData::FilePart { path, pos, data } => {
+                self.write_to_file(path, pos, data).await?;
+            }
+            ChunkData::EndOfChunk { key } => {
+                self.downloaded_chunks.insert(key);
+                fs::write(
+                    &self.progress_file_path,
+                    serde_json::to_string(&self.downloaded_chunks)?,
+                )?;
             }
         }
         Ok(())
@@ -888,6 +896,51 @@ mod tests {
                 "Can't download {} bytes of data while only",
                 u64::MAX
             )));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn writer_error() -> Result<()> {
+        let test_env = setup_test_env()?;
+
+        let manifest = DownloadManifest {
+            total_size: 100,
+            compression: None,
+            chunks: vec![Chunk {
+                key: "first_chunk".to_string(),
+                url: test_env.url("/first_chunk")?,
+                checksum: Checksum::Sha1([
+                    237, 74, 119, 209, 181, 106, 17, 137, 56, 120, 143, 197, 48, 55, 117, 155, 108,
+                    80, 30, 61,
+                ]),
+                size: 100,
+                destinations: vec![FileLocation {
+                    path: PathBuf::from("zero.file"),
+                    pos: 0,
+                    size: 100,
+                }],
+            }],
+        };
+
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=0-100")
+                .path("/first_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![0u8; 100]);
+        });
+
+        let mut job = test_env.download_job(manifest)?;
+        job.destination_dir = PathBuf::from("/tmp/non/existing/destination");
+
+        assert!(job
+            .download(RunFlag::default())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Writer IO error: No such file or directory"));
+
         Ok(())
     }
 }
