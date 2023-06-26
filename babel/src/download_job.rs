@@ -381,7 +381,7 @@ impl Writer {
             if let Some(chunk_data) = self.rx.recv().await {
                 if let Err(err) = self.handle_chunk_data(chunk_data).await {
                     run.stop();
-                    bail!("Writer IO error: {err}")
+                    bail!("Writer error: {err}")
                 }
             } else {
                 // stop writer when all senders/downloaders are dropped
@@ -939,7 +939,7 @@ mod tests {
             .await
             .unwrap_err()
             .to_string()
-            .contains("Writer IO error: No such file or directory"));
+            .contains("Writer error: No such file or directory"));
 
         Ok(())
     }

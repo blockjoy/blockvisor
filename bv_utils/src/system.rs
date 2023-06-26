@@ -5,7 +5,7 @@ use sysinfo::{Disk, DiskExt, System, SystemExt};
 /// Find drive that depth of canonical mount point path is the biggest and at the same time
 /// given `path` starts with it.
 /// May return `None` if can't find such, but in worst case it should return `/` disk.
-pub fn find_disk_by_path<'a, 'b>(sys: &'a System, path: &'b Path) -> Option<&'a Disk> {
+pub fn find_disk_by_path<'a>(sys: &'a System, path: &Path) -> Option<&'a Disk> {
     sys.disks()
         .iter()
         .max_by(|a, b| {

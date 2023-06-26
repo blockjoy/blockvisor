@@ -1,7 +1,6 @@
 use sha2::Digest;
 use std::fmt::Debug;
 
-// TODO use FixedSize of return type instead of Vec
 pub trait Checksum {
     type Bytes: Debug + PartialEq;
 
@@ -17,7 +16,7 @@ impl Checksum for sha1_smol::Sha1 {
     }
 
     fn into_bytes(self) -> Self::Bytes {
-        self.digest().bytes().into()
+        self.digest().bytes()
     }
 }
 
