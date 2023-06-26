@@ -1,4 +1,4 @@
-/// This module implements job runner for downloading data. It downloads data according to to given
+/// This module implements job runner for downloading data. It downloads data according to given
 /// manifest and destination dir. In case of recoverable errors download is retried according to given
 /// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
 /// Backoff timeout and retry count are reset if download continue without errors for at least `backoff_timeout_ms`.
@@ -221,7 +221,12 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
                     backoff.stopped(Some(0), message).await?;
                 }
                 Err(err) => {
-                    backoff.stopped(Some(-1), format!("{err:#}")).await?;
+                    backoff
+                        .stopped(
+                            Some(-1),
+                            format!("download_job '{name}' failed with: {err:#}"),
+                        )
+                        .await?;
                 }
             }
         }

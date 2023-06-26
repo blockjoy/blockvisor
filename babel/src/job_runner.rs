@@ -114,3 +114,120 @@ impl<T: AsyncTimer> JobBackoff<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use babel_api::engine::RestartConfig;
+    use bv_utils::timer::MockAsyncTimer;
+    use eyre::Result;
+
+    #[tokio::test]
+    async fn test_stopped_restart_never() -> Result<()> {
+        let test_run = RunFlag::default();
+        let timer_mock = MockAsyncTimer::new();
+        let mut backoff = JobBackoff::new(timer_mock, test_run, &RestartPolicy::Never);
+        backoff.start(); // should do nothing
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: None,
+                message: "test message".to_string()
+            },
+            backoff
+                .stopped(None, "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            backoff
+                .stopped(Some(0), "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stopped_restart_always() -> Result<()> {
+        let test_run = RunFlag::default();
+        let mut timer_mock = MockAsyncTimer::new();
+        let now = std::time::Instant::now();
+        timer_mock.expect_now().returning(move || now);
+        timer_mock.expect_sleep().returning(|_| ());
+
+        let mut backoff = JobBackoff::new(
+            timer_mock,
+            test_run,
+            &RestartPolicy::Always(RestartConfig {
+                backoff_timeout_ms: 1000,
+                backoff_base_ms: 100,
+                max_retries: Some(1),
+            }),
+        );
+        backoff.start();
+        backoff
+            .stopped(Some(0), "test message".to_owned())
+            .await
+            .unwrap();
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(1),
+                message: "test message".to_string()
+            },
+            backoff
+                .stopped(Some(1), "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stopped_restart_on_failure() -> Result<()> {
+        let test_run = RunFlag::default();
+        let mut timer_mock = MockAsyncTimer::new();
+        let now = std::time::Instant::now();
+        timer_mock.expect_now().returning(move || now);
+        timer_mock.expect_sleep().returning(|_| ());
+
+        let mut backoff = JobBackoff::new(
+            timer_mock,
+            test_run,
+            &RestartPolicy::OnFailure(RestartConfig {
+                backoff_timeout_ms: 1000,
+                backoff_base_ms: 100,
+                max_retries: Some(1),
+            }),
+        );
+        backoff.start();
+        backoff
+            .stopped(Some(1), "test message".to_owned())
+            .await
+            .unwrap();
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(1),
+                message: "test message".to_string()
+            },
+            backoff
+                .stopped(Some(1), "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            backoff
+                .stopped(Some(0), "test message".to_owned())
+                .await
+                .unwrap_err()
+        );
+        Ok(())
+    }
+}
