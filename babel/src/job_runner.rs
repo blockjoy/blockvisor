@@ -10,17 +10,17 @@ use tracing::{debug, error, info, warn};
 
 #[async_trait]
 pub trait JobRunnerImpl {
-    async fn try_run_job(&mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus>;
+    async fn try_run_job(self, mut run: RunFlag, name: &str) -> Result<(), JobStatus>;
 }
 
 #[async_trait]
 pub trait JobRunner {
-    async fn run(&mut self, mut run: RunFlag, name: &str, jobs_dir: &Path);
+    async fn run(self, mut run: RunFlag, name: &str, jobs_dir: &Path);
 }
 
 #[async_trait]
 impl<T: JobRunnerImpl + Send> JobRunner for T {
-    async fn run(&mut self, mut run: RunFlag, name: &str, jobs_dir: &Path) {
+    async fn run(self, mut run: RunFlag, name: &str, jobs_dir: &Path) {
         if let Err(status) = self.try_run_job(run.clone(), name).await {
             if let Err(err) = jobs::save_status(&status, name, &jobs_dir.join(jobs::STATUS_SUBDIR))
             {
@@ -31,15 +31,15 @@ impl<T: JobRunnerImpl + Send> JobRunner for T {
     }
 }
 
-pub struct JobBackoff<'a, T> {
-    backoff: Option<Backoff<'a, T>>,
+pub struct JobBackoff<T> {
+    backoff: Option<Backoff<T>>,
     max_retries: Option<u32>,
     restart_always: bool,
 }
 
-impl<'a, T: AsyncTimer> JobBackoff<'a, T> {
-    pub fn new(timer: &'a T, mut run: RunFlag, policy: &RestartPolicy) -> Self {
-        let mut build_backoff = move |cfg: &RestartConfig| {
+impl<T: AsyncTimer> JobBackoff<T> {
+    pub fn new(timer: T, mut run: RunFlag, policy: &RestartPolicy) -> Self {
+        let build_backoff = move |cfg: &RestartConfig| {
             Some(Backoff::new(
                 timer,
                 run.clone(),

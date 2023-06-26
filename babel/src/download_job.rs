@@ -166,7 +166,7 @@ impl<'a> ParallelChunkDownloaders<'a> {
         run: RunFlag,
         tx: mpsc::Sender<ChunkData>,
         downloaded_chunks: HashSet<String>,
-        chunks: &'a Vec<Chunk>,
+        chunks: &'a [Chunk],
         config: DownloaderConfig,
     ) -> Self {
         Self {
@@ -205,14 +205,14 @@ impl<'a> ParallelChunkDownloaders<'a> {
 }
 
 #[async_trait]
-impl<T: AsyncTimer + Send + Sync> JobRunnerImpl for DownloadJob<T> {
+impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
     /// Run and restart downloader until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
-    async fn try_run_job(&mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
+    async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
         info!("download job '{name}' started");
         debug!("with manifest: {:?}", self.downloader.manifest);
 
-        let mut backoff = JobBackoff::new(&self.timer, run.clone(), &self.restart_policy);
+        let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
         while run.load() {
             backoff.start();
             match self.downloader.download(run.clone()).await {

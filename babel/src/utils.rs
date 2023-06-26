@@ -87,13 +87,13 @@ pub fn find_processes<'a>(
 }
 
 /// Restart backoff procedure helper.
-pub struct Backoff<'a, T> {
+pub struct Backoff<T> {
     counter: u32,
     timestamp: Instant,
     backoff_base_ms: u64,
     reset_timeout: Duration,
     run: RunFlag,
-    timer: &'a T,
+    timer: T,
 }
 
 #[derive(PartialEq)]
@@ -108,9 +108,9 @@ pub enum LimitStatus {
     Exceeded,
 }
 
-impl<'a, T: AsyncTimer> Backoff<'a, T> {
+impl<T: AsyncTimer> Backoff<T> {
     /// Create new backoff state object.
-    pub fn new(timer: &'a T, run: RunFlag, backoff_base_ms: u64, reset_timeout: Duration) -> Self {
+    pub fn new(timer: T, run: RunFlag, backoff_base_ms: u64, reset_timeout: Duration) -> Self {
         Self {
             counter: 0,
             timestamp: timer.now(),
@@ -159,11 +159,10 @@ impl<'a, T: AsyncTimer> Backoff<'a, T> {
     }
 
     async fn backoff(&mut self) {
-        self.run
-            .select(self.timer.sleep(Duration::from_millis(
-                self.backoff_base_ms * 2u64.pow(self.counter),
-            )))
-            .await;
+        let sleep = self.timer.sleep(Duration::from_millis(
+            self.backoff_base_ms * 2u64.pow(self.counter),
+        ));
+        self.run.select(sleep).await;
         self.counter += 1;
     }
 }

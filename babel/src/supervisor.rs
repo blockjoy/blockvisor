@@ -76,10 +76,10 @@ impl<T: AsyncTimer> Supervisor<T> {
         }
     }
 
-    async fn run_babel(&self, mut run: RunFlag, mut babel_change_rx: BabelChangeRx) {
+    async fn run_babel(self, mut run: RunFlag, mut babel_change_rx: BabelChangeRx) {
         let mut cmd = Command::new(&self.babel_path);
         let mut backoff = Backoff::new(
-            &self.timer,
+            self.timer,
             run.clone(),
             self.config.backoff_base_ms,
             Duration::from_millis(self.config.backoff_timeout_ms),

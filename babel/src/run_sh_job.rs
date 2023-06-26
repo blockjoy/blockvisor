@@ -23,7 +23,7 @@ pub struct RunShJob<T> {
     log_buffer: LogBuffer,
 }
 
-impl<T: AsyncTimer + Send + Sync> RunShJob<T> {
+impl<T: AsyncTimer + Send> RunShJob<T> {
     pub fn new(
         timer: T,
         sh_body: String,
@@ -38,24 +38,24 @@ impl<T: AsyncTimer + Send + Sync> RunShJob<T> {
         })
     }
 
-    pub async fn run(mut self, run: RunFlag, name: &str, jobs_dir: &Path) {
+    pub async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) {
         // Check if there are no remnant child process after previous run.
         // If so, just kill it.
         let (cmd, args) = utils::bv_shell(&self.sh_body);
         utils::kill_all_processes(&cmd, args);
-        <Self as JobRunner>::run(&mut self, run, name, jobs_dir).await;
+        <Self as JobRunner>::run(self, run, name, jobs_dir).await;
     }
 }
 
 #[async_trait]
-impl<T: AsyncTimer + Send + Sync> JobRunnerImpl for RunShJob<T> {
+impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
     /// Run and restart job child process until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
-    async fn try_run_job(&mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
+    async fn try_run_job(self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
         let (cmd, args) = utils::bv_shell(&self.sh_body);
         let mut cmd = Command::new(cmd);
         cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut backoff = JobBackoff::new(&self.timer, run.clone(), &self.restart_policy);
+        let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
         while run.load() {
             backoff.start();
             match cmd.spawn() {
@@ -102,7 +102,7 @@ mod tests {
     async fn test_stopped_restart_never() -> Result<()> {
         let test_run = RunFlag::default();
         let timer_mock = MockAsyncTimer::new();
-        let mut backoff = JobBackoff::new(&timer_mock, test_run, &RestartPolicy::Never);
+        let mut backoff = JobBackoff::new(timer_mock, test_run, &RestartPolicy::Never);
         backoff.start(); // should do nothing
         assert_eq!(
             JobStatus::Finished {
@@ -136,7 +136,7 @@ mod tests {
         timer_mock.expect_sleep().returning(|_| ());
 
         let mut backoff = JobBackoff::new(
-            &timer_mock,
+            timer_mock,
             test_run,
             &RestartPolicy::Always(RestartConfig {
                 backoff_timeout_ms: 1000,
@@ -171,7 +171,7 @@ mod tests {
         timer_mock.expect_sleep().returning(|_| ());
 
         let mut backoff = JobBackoff::new(
-            &timer_mock,
+            timer_mock,
             test_run,
             &RestartPolicy::OnFailure(RestartConfig {
                 backoff_timeout_ms: 1000,
