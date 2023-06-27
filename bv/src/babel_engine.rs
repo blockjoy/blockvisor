@@ -13,9 +13,8 @@ use crate::{
     utils::with_timeout, with_retry,
 };
 use anyhow::{anyhow, bail, Error, Result};
-use babel_api::engine::JobType;
 use babel_api::{
-    engine::{HttpResponse, JobConfig, JobStatus, ShResponse},
+    engine::{HttpResponse, JobConfig, JobStatus, JobType, ShResponse},
     metadata::KeysConfig,
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
@@ -432,6 +431,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 // TODO fetch manifest from cookbook
                 unimplemented!()
             } // if already set it mean that plugin use some custom manifest source - other than cookbook
+            if let Some(manifest) = manifest {
+                manifest.validate()?
+            }
         }
         with_retry!(babel_client.start_job((job_name.clone(), job_config.clone())))
             .map_err(|err| self.handle_connection_errors(err))

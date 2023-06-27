@@ -30,7 +30,7 @@ use std::{
 };
 use sysinfo::{DiskExt, System, SystemExt};
 use tokio::{select, sync::mpsc, task::JoinHandle, time::Instant};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 const MAX_OPENED_FILES: u64 = 1024;
 const MAX_DOWNLOADERS: usize = 8;
@@ -390,9 +390,15 @@ struct DestinationsIter {
 
 impl DestinationsIter {
     fn new(mut iter: IntoIter<FileLocation>) -> Result<Self> {
-        let current = iter.next().ok_or(anyhow!(
-            "corrupted manifest - expected at least one destination file in chunk"
-        ))?;
+        let current = match iter.next() {
+            None => {
+                error!("corrupted manifest - this is internal BV error, manifest shall be already validated");
+                Err(anyhow!(
+                    "corrupted manifest - expected at least one destination file in chunk"
+                ))
+            }
+            Some(current) => Ok(current),
+        }?;
         Ok(Self { iter, current })
     }
 
@@ -400,7 +406,7 @@ impl DestinationsIter {
         Ok(mem::replace(
             &mut self.current,
             self.iter.next().ok_or(anyhow!(
-                "corrupted manifest - expected destination, but not found"
+                "(decompressed) chunk size doesn't mach expected one"
             ))?,
         ))
     }
@@ -756,7 +762,7 @@ mod tests {
                     .await
                     .unwrap_err()
             ),
-            "chunk 'first_chunk' download failed: corrupted manifest - expected destination, but not found"
+            "chunk 'first_chunk' download failed: (decompressed) chunk size doesn't mach expected one"
         );
 
         Ok(())

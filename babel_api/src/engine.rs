@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{collections::HashMap, path::Path, time::Duration};
@@ -233,4 +233,16 @@ pub struct ShResponse {
     pub stdout: String,
     /// stderr
     pub stderr: String,
+}
+
+impl DownloadManifest {
+    /// Validate manifest internal consistency.
+    pub fn validate(&self) -> Result<()> {
+        for chunk in &self.chunks {
+            if chunk.destinations.is_empty() {
+                bail!("corrupted manifest - expected at least one destination file in chunk");
+            }
+        }
+        Ok(())
+    }
 }
