@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{collections::HashMap, path::Path, time::Duration};
-use tracing::log::Level;
+use tracing::Level;
 use url::Url;
 
 /// Plugin engin must implement this interface, so it can be used by babel plugins.

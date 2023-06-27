@@ -12,7 +12,7 @@ use rhai::{
 };
 use std::time::Duration;
 use std::{collections::HashMap, path::Path, sync::Arc};
-use tracing::log::Level;
+use tracing::Level;
 
 #[derive(Debug)]
 pub struct RhaiPlugin<E> {
@@ -155,21 +155,21 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("debug", move |msg: &str| {
-            babel_engine.log(Level::Debug, msg);
+            babel_engine.log(Level::DEBUG, msg);
             // debug is built-in function, so to override it, we need to return the same type
             Result::<_, Box<rhai::EvalAltResult>>::Ok("")
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("info", move |msg: &str| {
-            babel_engine.log(Level::Info, msg);
+            babel_engine.log(Level::INFO, msg);
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("warn", move |msg: &str| {
-            babel_engine.log(Level::Warn, msg);
+            babel_engine.log(Level::WARN, msg);
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("error", move |msg: &str| {
-            babel_engine.log(Level::Error, msg);
+            babel_engine.log(Level::ERROR, msg);
         });
 
         // register other utils
@@ -451,19 +451,19 @@ mod tests {
         let mut babel = MockBabelEngine::new();
         babel
             .expect_log()
-            .with(predicate::eq(Level::Debug), predicate::eq("debug message"))
+            .with(predicate::eq(Level::DEBUG), predicate::eq("debug message"))
             .return_once(|_, _| ());
         babel
             .expect_log()
-            .with(predicate::eq(Level::Info), predicate::eq("info message"))
+            .with(predicate::eq(Level::INFO), predicate::eq("info message"))
             .return_once(|_, _| ());
         babel
             .expect_log()
-            .with(predicate::eq(Level::Warn), predicate::eq("warn message"))
+            .with(predicate::eq(Level::WARN), predicate::eq("warn message"))
             .return_once(|_, _| ());
         babel
             .expect_log()
-            .with(predicate::eq(Level::Error), predicate::eq("error message"))
+            .with(predicate::eq(Level::ERROR), predicate::eq("error message"))
             .return_once(|_, _| ());
         babel
             .expect_start_job()

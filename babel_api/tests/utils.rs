@@ -22,6 +22,6 @@ mock! {
         fn node_params(&self) -> HashMap<String, String>;
         fn save_data(&self, value: &str) -> anyhow::Result<()>;
         fn load_data(&self) -> anyhow::Result<String>;
-        fn log(&self, level: tracing::log::Level, message: &str);
+        fn log(&self, level: tracing::Level, message: &str);
     }
 }
