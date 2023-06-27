@@ -260,22 +260,14 @@ async fn test_bv_service_e2e() {
     println!("list created node, should be auto-started");
     test_env::wait_for_node_status(&node_id, "Running", Duration::from_secs(120), None).await;
 
-    let mut client = pb::command_service_client::CommandServiceClient::connect(url)
-        .await
-        .unwrap();
-
     println!("check node keys");
     test_env::bv_run(&["node", "keys", &node_id], "first", None);
 
-    let node_stop = pb::CommandServiceCreateRequest {
-        command: Some(pb::command_service_create_request::Command::StopNode(
-            pb::StopNodeCommand {
-                node_id: node_id.clone(),
-            },
-        )),
+    let node_stop = pb::NodeServiceStopRequest {
+        id: node_id.clone(),
     };
-    let resp = client
-        .create(with_auth(node_stop, &auth_token))
+    let resp = node_client
+        .stop(with_auth(node_stop, &auth_token))
         .await
         .unwrap()
         .into_inner();

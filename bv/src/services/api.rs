@@ -392,8 +392,11 @@ impl NodesService {
     }
 
     #[instrument(skip(self))]
-    pub async fn send_node_update(&mut self, update: pb::NodeServiceUpdateRequest) -> Result<()> {
-        self.client.update(update).await?;
+    pub async fn send_node_status_update(
+        &mut self,
+        update: pb::NodeServiceUpdateStatusRequest,
+    ) -> Result<()> {
+        self.client.update_status(update).await?;
         Ok(())
     }
 }

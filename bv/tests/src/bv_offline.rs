@@ -295,8 +295,8 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         id: command_id.clone(),
         response: None,
         exit_code: None,
-        command: Some(cmd),
         acked_at: None,
+        command: Some(cmd),
     };
     let commands = vec![
         // create
@@ -312,7 +312,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.195".to_string(),
                 gateway: "216.18.214.193".to_string(),
-                self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
                 network: "test".to_string(),
@@ -331,7 +330,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.196".to_string(),
                 gateway: "216.18.214.193".to_string(),
-                self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
                 network: "test".to_string(),
@@ -350,7 +348,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.197".to_string(),
                 gateway: "216.18.214.193".to_string(),
-                self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
                 network: "test".to_string(),
@@ -369,7 +366,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.195".to_string(),
                 gateway: "216.18.214.193".to_string(),
-                self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
                 network: "test".to_string(),
@@ -388,7 +384,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 node_type: pb::NodeType::Validator.into(),
                 ip: "invalid_ip".to_string(),
                 gateway: "216.18.214.193".to_string(),
-                self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
                 network: "test".to_string(),
@@ -407,7 +402,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 node_type: pb::NodeType::Validator.into(),
                 ip: "216.18.214.195".to_string(),
                 gateway: "invalid_ip".to_string(),
-                self_update: false,
                 rules: rules.clone(),
                 properties: properties.clone(),
                 network: "test".to_string(),
@@ -478,7 +472,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             created_at: None,
             host_id: host_id.clone(),
             command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
-                self_update: None,
                 rules: vec![pb::Rule {
                     name: "Rule B".to_string(),
                     action: pb::Action::Allow as i32,
@@ -496,7 +489,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             created_at: None,
             host_id: host_id.clone(),
             command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
-                self_update: None,
                 rules: rules.into_iter().cycle().take(129).collect(),
             })),
         })),
@@ -507,7 +499,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             created_at: None,
             host_id: host_id.clone(),
             command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
-                self_update: None,
                 rules: vec![pb::Rule {
                     name: "Rule A".to_string(),
                     action: pb::Action::Allow as i32,

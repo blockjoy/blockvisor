@@ -284,19 +284,15 @@ where
                     NodeStatus::Stopped => pb::ContainerStatus::Stopped,
                     NodeStatus::Failed => pb::ContainerStatus::Unspecified,
                 };
-                let mut update = pb::NodeServiceUpdateRequest {
+                let mut update = pb::NodeServiceUpdateStatusRequest {
                     id: node_id.to_string(),
                     container_status: None, // We use the setter to set this field for type-safety
                     address: address.clone(),
                     version: None,
-                    self_update: None,
-                    // in current implementation it means do not update ips
-                    allow_ips: vec![],
-                    deny_ips: vec![],
                 };
                 update.set_container_status(container_status);
 
-                match Self::send_node_info_update(&config, update).await {
+                match Self::send_node_status_update(&config, update).await {
                     Ok(_) => {
                         // cache to not send the same data if it has not changed
                         known_addresses.entry(node_id).or_insert(address);
@@ -412,15 +408,15 @@ where
     }
 
     // Send node info update to control plane
-    async fn send_node_info_update(
+    async fn send_node_status_update(
         config: &SharedConfig,
-        update: pb::NodeServiceUpdateRequest,
+        update: pb::NodeServiceUpdateStatusRequest,
     ) -> Result<()> {
         let mut client = api::NodesService::connect(config)
             .await
             .with_context(|| "Error connecting to api".to_string())?;
         client
-            .send_node_update(update)
+            .send_node_status_update(update)
             .await
             .with_context(|| "Cannot send node update".to_string())?;
         Ok(())

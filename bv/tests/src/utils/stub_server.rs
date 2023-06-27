@@ -71,6 +71,27 @@ impl pb::host_service_server::HostService for StubHostsServer {
 
         Ok(Response::new(reply))
     }
+
+    async fn start(
+        &self,
+        _request: Request<pb::HostServiceStartRequest>,
+    ) -> Result<pb::HostServiceStartResponse> {
+        unimplemented!()
+    }
+
+    async fn stop(
+        &self,
+        _request: Request<pb::HostServiceStopRequest>,
+    ) -> Result<pb::HostServiceStopResponse> {
+        unimplemented!()
+    }
+
+    async fn restart(
+        &self,
+        _request: Request<pb::HostServiceRestartRequest>,
+    ) -> Result<pb::HostServiceRestartResponse> {
+        unimplemented!()
+    }
 }
 
 pub struct StubCommandsServer {
@@ -80,31 +101,6 @@ pub struct StubCommandsServer {
 
 #[tonic::async_trait]
 impl pb::command_service_server::CommandService for StubCommandsServer {
-    async fn pending(
-        &self,
-        _: Request<pb::CommandServicePendingRequest>,
-    ) -> Result<pb::CommandServicePendingResponse> {
-        let reply = pb::CommandServicePendingResponse {
-            commands: std::mem::take(&mut *self.commands.lock().await),
-        };
-
-        Ok(Response::new(reply))
-    }
-
-    async fn get(
-        &self,
-        _: Request<pb::CommandServiceGetRequest>,
-    ) -> Result<pb::CommandServiceGetResponse> {
-        unimplemented!()
-    }
-
-    async fn create(
-        &self,
-        _: Request<pb::CommandServiceCreateRequest>,
-    ) -> Result<pb::CommandServiceCreateResponse> {
-        unimplemented!()
-    }
-
     async fn update(
         &self,
         request: Request<pb::CommandServiceUpdateRequest>,
@@ -117,9 +113,20 @@ impl pb::command_service_server::CommandService for StubCommandsServer {
 
     async fn ack(
         &self,
-        _: Request<pb::CommandServiceAckRequest>,
+        _request: Request<pb::CommandServiceAckRequest>,
     ) -> Result<pb::CommandServiceAckResponse> {
-        unimplemented!()
+        Ok(Response::new(pb::CommandServiceAckResponse {}))
+    }
+
+    async fn pending(
+        &self,
+        _: Request<pb::CommandServicePendingRequest>,
+    ) -> Result<pb::CommandServicePendingResponse> {
+        let reply = pb::CommandServicePendingResponse {
+            commands: std::mem::take(&mut *self.commands.lock().await),
+        };
+
+        Ok(Response::new(reply))
     }
 }
 
