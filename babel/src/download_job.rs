@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use babel_api::engine::{
     Checksum, Chunk, DownloadManifest, FileLocation, JobStatus, RestartPolicy,
 };
-use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
+use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
@@ -35,12 +35,16 @@ use tracing::{debug, error, info};
 const MAX_OPENED_FILES: u64 = 1024;
 const MAX_DOWNLOADERS: usize = 8;
 const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
+const MAX_RETRIES: u32 = 5;
+const BACKOFF_BASE_MS: u64 = 500;
 
 #[derive(Clone)]
 pub struct DownloaderConfig {
     max_opened_files: usize,
     max_downloaders: usize,
     max_buffer_size: usize,
+    max_retries: u32,
+    backoff_base_ms: u64,
     progress_file_path: PathBuf,
 }
 
@@ -51,6 +55,8 @@ impl DownloaderConfig {
             max_opened_files,
             max_downloaders: MAX_DOWNLOADERS,
             max_buffer_size: MAX_BUFFER_SIZE,
+            max_retries: MAX_RETRIES,
+            backoff_base_ms: BACKOFF_BASE_MS,
             progress_file_path,
         })
     }
@@ -186,11 +192,8 @@ impl<'a> ParallelChunkDownloaders<'a> {
                     // skip chunks successfully downloaded in previous run
                     continue;
                 }
-                let downloader = ChunkDownloader::new(
-                    chunk.clone(),
-                    self.tx.clone(),
-                    self.config.max_buffer_size,
-                );
+                let downloader =
+                    ChunkDownloader::new(chunk.clone(), self.tx.clone(), self.config.clone());
                 self.futures
                     .push(Box::pin(downloader.run(self.run.clone())));
             } else {
@@ -250,16 +253,16 @@ struct ChunkDownloader {
     chunk: Chunk,
     tx: mpsc::Sender<ChunkData>,
     client: reqwest::Client,
-    max_buffer_size: usize,
+    config: DownloaderConfig,
 }
 
 impl ChunkDownloader {
-    fn new(chunk: Chunk, tx: mpsc::Sender<ChunkData>, max_buffer_size: usize) -> Self {
+    fn new(chunk: Chunk, tx: mpsc::Sender<ChunkData>, config: DownloaderConfig) -> Self {
         Self {
             chunk,
             tx,
             client: reqwest::Client::new(),
-            max_buffer_size,
+            config,
         }
     }
 
@@ -292,7 +295,7 @@ impl ChunkDownloader {
         let mut destination = DestinationsIter::new(self.chunk.destinations.clone().into_iter())?;
         while run.load() && pos < chunk_size {
             select!(
-                res = self.download_part(pos, chunk_size) => {//TODO with_retry!
+                res = self.download_part_with_retry(pos, chunk_size) => {
                     let buffer = res?;
                     pos += buffer.len();
                     digest.update(&buffer);
@@ -317,8 +320,16 @@ impl ChunkDownloader {
         Ok(())
     }
 
+    async fn download_part_with_retry(&self, pos: usize, chunk_size: usize) -> Result<Vec<u8>> {
+        with_retry!(
+            self.download_part(pos, chunk_size),
+            self.config.max_retries,
+            self.config.backoff_base_ms
+        )
+    }
+
     async fn download_part(&self, pos: usize, chunk_size: usize) -> Result<Vec<u8>> {
-        let buffer_size = min(chunk_size - pos, self.max_buffer_size);
+        let buffer_size = min(chunk_size - pos, self.config.max_buffer_size);
         let mut buffer = Vec::with_capacity(buffer_size);
         let mut resp = self
             .client
@@ -411,6 +422,7 @@ impl DestinationsIter {
         ))
     }
 }
+
 impl Deref for DestinationsIter {
     type Target = FileLocation;
 
@@ -565,6 +577,8 @@ mod tests {
                     max_opened_files: 1,
                     max_downloaders: 4,
                     max_buffer_size: 150,
+                    max_retries: 0,
+                    backoff_base_ms: 1,
                     progress_file_path: self.download_progress_path.clone(),
                 },
             }

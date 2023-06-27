@@ -1,8 +1,9 @@
 use crate::{
     services::api::AuthenticatedService,
-    {config::SharedConfig, services, services::api::pb, with_retry},
+    {config::SharedConfig, services, services::api::pb},
 };
 use anyhow::{anyhow, Context, Result};
+use bv_utils::with_retry;
 use tonic::transport::Endpoint;
 use uuid::Uuid;
 

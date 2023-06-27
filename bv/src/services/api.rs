@@ -1,16 +1,17 @@
 use crate::{
     config::SharedConfig,
+    get_bv_status,
     node_data::NodeImage,
     nodes,
     nodes::Nodes,
     pal::Pal,
     server::bv_pb,
     services::api::pb::{Action, Direction, Protocol, Rule},
-    {get_bv_status, with_retry},
 };
 use anyhow::{anyhow, bail, Context, Result};
 use babel_api::metadata::firewall;
 use base64::Engine;
+use bv_utils::with_retry;
 use metrics::{register_counter, Counter};
 use pb::{
     command_service_client::CommandServiceClient, discovery_service_client::DiscoveryServiceClient,

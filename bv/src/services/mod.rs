@@ -1,5 +1,6 @@
-use crate::{config::SharedConfig, services::api::DiscoveryService, with_retry};
+use crate::{config::SharedConfig, services::api::DiscoveryService};
 use anyhow::{Context, Result};
+use bv_utils::with_retry;
 use std::future::Future;
 
 pub mod api;

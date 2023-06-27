@@ -10,15 +10,16 @@
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{
     node_connection::RPC_REQUEST_TIMEOUT, node_data::NodeProperties, pal::NodeConnection,
-    utils::with_timeout, with_retry,
+    utils::with_timeout,
 };
+
 use anyhow::{anyhow, bail, Error, Result};
 use babel_api::{
     engine::{HttpResponse, JobConfig, JobStatus, JobType, ShResponse},
     metadata::KeysConfig,
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
-use bv_utils::run_flag::RunFlag;
+use bv_utils::{run_flag::RunFlag, with_retry};
 use futures_util::StreamExt;
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -40,7 +41,7 @@ lazy_static::lazy_static! {
 macro_rules! with_selective_retry {
     ($fun:expr) => {{
         const RPC_RETRY_MAX: u32 = 3;
-        const RPC_BACKOFF_BASE_MSEC: u64 = 300;
+        const RPC_BACKOFF_BASE_MS: u64 = 300;
         let mut retry_count = 0;
         loop {
             match $fun.await {
@@ -48,7 +49,7 @@ macro_rules! with_selective_retry {
                 Err(err) if !NON_RETRIABLE.contains(&err.code()) => {
                     if retry_count < RPC_RETRY_MAX {
                         retry_count += 1;
-                        let backoff = RPC_BACKOFF_BASE_MSEC * 2u64.pow(retry_count);
+                        let backoff = RPC_BACKOFF_BASE_MS * 2u64.pow(retry_count);
                         tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
                         continue;
                     } else {

@@ -9,7 +9,7 @@ use crate::{
         CookbookService, BABEL_PLUGIN_NAME, DATA_FILE, KERNEL_FILE, ROOT_FS_FILE,
     },
     utils::with_timeout,
-    with_retry, BV_VAR_PATH,
+    BV_VAR_PATH,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use babel_api::{
@@ -18,7 +18,7 @@ use babel_api::{
     rhai_plugin,
     rhai_plugin::RhaiPlugin,
 };
-use bv_utils::cmd::run_cmd;
+use bv_utils::{cmd::run_cmd, with_retry};
 use chrono::{DateTime, Utc};
 use std::{
     ffi::OsStr,

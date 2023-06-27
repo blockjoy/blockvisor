@@ -13,30 +13,6 @@ use tokio::time::sleep;
 use tonic::Request;
 use tracing::{debug, warn};
 
-#[macro_export]
-macro_rules! with_retry {
-    ($fun:expr) => {{
-        const RPC_RETRY_MAX: u32 = 3;
-        const RPC_BACKOFF_BASE_MSEC: u64 = 300;
-        let mut retry_count = 0;
-        loop {
-            match $fun.await {
-                Ok(res) => break Ok(res),
-                Err(err) => {
-                    if retry_count < RPC_RETRY_MAX {
-                        retry_count += 1;
-                        let backoff = RPC_BACKOFF_BASE_MSEC * 2u64.pow(retry_count);
-                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
-                        continue;
-                    } else {
-                        break Err(err);
-                    }
-                }
-            }
-        }
-    }};
-}
-
 /// Get the pid of the running VM process knowing its process name and part of command line.
 pub fn get_process_pid(process_name: &str, cmd: &str) -> Result<u32> {
     let mut sys = System::new();

@@ -3,10 +3,11 @@ use crate::{
     node_data::NodeImage,
     services,
     services::api::{self, AuthenticatedService},
-    utils, with_retry, BV_VAR_PATH,
+    utils, BV_VAR_PATH,
 };
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
+use bv_utils::with_retry;
 use std::path::{Path, PathBuf};
 use tokio::{
     fs::{self, DirBuilder, File},

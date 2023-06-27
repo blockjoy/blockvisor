@@ -3,11 +3,10 @@ use crate::{
     linux_platform::BRIDGE_IFACE,
     server::bv_pb,
     server::bv_pb::blockvisor_client::BlockvisorClient,
-    with_retry,
 };
 use anyhow::{anyhow, bail, ensure, Context, Error, Result};
 use async_trait::async_trait;
-use bv_utils::timer::Timer;
+use bv_utils::{timer::Timer, with_retry};
 use semver::Version;
 use std::{
     io::Write,
