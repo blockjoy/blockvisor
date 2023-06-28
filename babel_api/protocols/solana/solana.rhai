@@ -53,11 +53,9 @@ const METADATA = {
     keys: {},
   };
   
-  const API_HOST = "http://localhost:8899/";
+const API_HOST = "http://localhost:8899/";
   
-  // ...
-  
-  fn init() {
+fn init() {
     debug("Executing startup scripts...");
     let net = sanitize_sh_param(node_params().NETWORK);
     let metadata = GLOBAL::METADATA.nets[net];
@@ -65,18 +63,18 @@ const METADATA = {
     let entrypoints = metadata.entrypoints.map(entrypoint => `--entrypoint ${entrypoint}`).join(" ");
   
     start_job("Init of the Solana validator node", {
-      body: `solana config set --url ${metadata.url}\nsolana-keygen new -o ${data_directory}/config/validator-keypair.json`,
-      restart: {
-        "always": {
-          backoff_timeout_ms: 60000,
-          backoff_base_ms: 10000
-        },
-      },
-      needs: [],
+        body: `solana config set --url ${metadata.url}\nsolana-keygen new -o ${data_directory}/config/validator-keypair.json`,
+            restart: {
+                "always": {
+                    backoff_timeout_ms: 60000,
+                    backoff_base_ms: 10000
+                },
+            },
+        needs: [],
     });
   
     start_job("Starting the Solana node", {
-      body: `solana-validator --accounts ${data_directory}/accounts \
+        body: `solana-validator --accounts ${data_directory}/accounts \
               --ledger ${data_directory}/ledger \
               --identity ${data_directory}/config/validator-keypair.json \
               --expected-genesis-hash ???? \
@@ -103,115 +101,106 @@ const METADATA = {
               --account-index-exclude-key ??? \
               --account-index-exclude-key ??? \
               --full-rpc-api`,
-      restart: {
-        "always": {
-          backoff_timeout_ms: 60000,
-          backoff_base_ms: 10000,
+        restart: {
+            "always": {
+                backoff_timeout_ms: 60000,
+                backoff_base_ms: 10000,
+            },
         },
-      },
-      needs: ["Init of the Solana validator node"],
+        needs: ["Init of the Solana validator node"],
     });
-  }  
-
-fn application_status() {
-    let url = GLOBAL::API_HOST;
-    let headers = {
-        "Content-Type": "application/json",
-    };
-
-    let body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getHealth"
-      };
-
-    let resp = run_jrpc(url, body, headers);
-
-    if resp["status_code"] != 200 {
-        throw resp["body"].to_string();
-    }
-
-    let body_json = json::parse(resp["body"]).unwrap();
-    let result = body_json["result"];
-
-    return result;
-}
-
-fn address() {
-    let url = GLOBAL::API_HOST;
-    let headers = {
-        "Content-Type": "application/json",
-    };
+}  
   
+fn make_jrpc_request(method, params, callback) {
+    let url = GLOBAL::API_HOST;
+    let headers = {
+      "Content-Type": "application/json",
+    };
     let body = {
       "jsonrpc": "2.0",
       "id": 1,
-      "method": "getBlockHeight"
+      "method": method,
+      "params": params,
     };
   
     let resp = run_jrpc(url, body, headers);
-    let response_json = json::parse(resp["body"]).unwrap();
-    let block_height = response_json["result"].to_string();
   
-    if block_height.is_empty() {
-      throw "Failed to retrieve block height";
+    if resp["status_code"] != 200 {
+      throw resp["body"];
     }
   
-    block_height
+    let body_json = json::parse(resp["body"]);
+  
+    if body_json.is_err() {
+      throw "Invalid response body";
+    }
+  
+    let result = callback(body_json.unwrap());
+  
+    return result;
 }
-
+  
+fn application_status() {
+    let method = "getHealth";
+    let params = {};
+  
+    return make_jrpc_request(method, params, |response| {
+      if response["status_code"] != 200 {
+        throw response["body"].to_string();
+      }
+      
+      let body_json = json::parse(response["body"]).unwrap();
+      let result = body_json["result"];
+      
+      result
+    });
+}
+  
+fn address() {
+    let method = "getBlockHeight";
+    let params = {};
+  
+    return make_jrpc_request(method, params, |response| {
+      let response_json = json::parse(response["body"]).unwrap();
+      let block_height = response_json["result"].to_string();
+  
+      if block_height.is_empty() {
+        throw "Failed to retrieve block height";
+      }
+  
+      block_height
+    });
+}
+  
 fn get_identity() {
-    let url = GLOBAL::API_HOST;
-    let headers = {
-        "Content-Type": "application/json",
-    };
-    let body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getIdentity"
-    };
-
-    let resp = run_jrpc(url, body, headers);
-
-    if resp["status_code"] != 200 {
-        throw resp["body"];
-    }
-
-    let body_json = json::parse(resp["body"]);
-
-    if body_json.is_err() {
+    let method = "getIdentity";
+    let params = {};
+    
+    return make_jrpc_request(method, params, |response| {
+      if response["status_code"] != 200 {
+        throw response["body"];
+      }
+    
+      let body_json = json::parse(response["body"]);
+    
+      if body_json.is_err() {
         throw "Invalid response body";
-    }
-
-    let identity = body_json.unwrap()["result"]["identity"];
-
-    return identity;
+      }
+    
+      let identity = body_json.unwrap()["result"]["identity"];
+    
+      identity
+    });
 }
-
+  
 fn get_node_version() {
-    let url = GLOBAL::API_HOST;
-    let headers = {
-        "Content-Type": "application/json",
-    };
-    let body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getVersion"
-    };
-
-    let resp = run_jrpc(url, body, headers);
-
-    if resp["status_code"] != 200 {
-        throw resp["body"];
-    }
-
-    let body_json = json::parse(resp["body"]);
-
-    if body_json.is_err() {
-        throw "Invalid response body";
-    }
-
-    let version = body_json.unwrap()["result"]["solana-core"];
-
-    return version;
+    let method = "getVersion";
+    let params = {};
+  
+    return make_jrpc_request(method, params, |response| {
+      let response_json = json::parse(response["body"]).unwrap();
+      let version = response_json["result"]["solana-core"];
+  
+      version
+    });
 }
