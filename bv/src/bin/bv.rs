@@ -15,7 +15,7 @@ use bv_utils::cmd::run_cmd;
 use clap::Parser;
 use cli_table::print_stdout;
 use petname::Petnames;
-use std::{collections::HashMap, io::BufRead};
+use std::{collections::HashMap, fs, io::BufRead};
 use tokio::time::{sleep, Duration};
 use tonic::{transport, transport::Channel, Code};
 use uuid::Uuid;
@@ -417,12 +417,23 @@ impl NodeClient {
                 id_or_name,
                 method,
                 param,
+                param_file,
             } => {
                 let node_id = self.resolve_id_or_name(&id_or_name).await?;
+                let param = match param {
+                    Some(param) => param,
+                    None => {
+                        if let Some(path) = param_file {
+                            fs::read_to_string(path)?
+                        } else {
+                            Default::default()
+                        }
+                    }
+                };
                 let req = bv_pb::BlockchainRequest {
                     method,
                     node_id: node_id.to_string(),
-                    param: param.unwrap_or_default(),
+                    param,
                 };
                 match self.client.blockchain(req).await {
                     Ok(result) => println!("{}", result.into_inner().value),

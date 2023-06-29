@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[clap(name = "bv", author, version, about)]
@@ -179,6 +180,9 @@ pub enum NodeCommand {
         /// The payload that should be passed to the endpoint. This should be a string.
         #[clap(long)]
         param: Option<String>,
+        /// The payload that should be passed to the endpoint. This should be a path to file with param.
+        #[clap(long)]
+        param_file: Option<PathBuf>,
     },
 
     /// Collect metrics defining the current state of the node.
