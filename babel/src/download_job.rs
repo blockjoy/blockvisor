@@ -334,7 +334,7 @@ impl ChunkDownloader {
         let mut resp = self
             .client
             .get(self.chunk.url.clone())
-            .header(RANGE, format!("bytes={}-{}", pos, pos + buffer_size))
+            .header(RANGE, format!("bytes={}-{}", pos, pos + buffer_size - 1))
             .send()
             .await?;
         ensure!(
@@ -642,7 +642,7 @@ mod tests {
 
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-150")
+                .header("range", "bytes=0-149")
                 .path("/first_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -650,7 +650,7 @@ mod tests {
         });
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=150-300")
+                .header("range", "bytes=150-299")
                 .path("/first_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -658,7 +658,7 @@ mod tests {
         });
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=300-450")
+                .header("range", "bytes=300-449")
                 .path("/first_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -666,7 +666,7 @@ mod tests {
         });
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=450-600")
+                .header("range", "bytes=450-599")
                 .path("/first_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -675,7 +675,7 @@ mod tests {
 
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-150")
+                .header("range", "bytes=0-149")
                 .path("/second_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -683,7 +683,7 @@ mod tests {
         });
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=150-300")
+                .header("range", "bytes=150-299")
                 .path("/second_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -691,7 +691,7 @@ mod tests {
         });
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=300-324")
+                .header("range", "bytes=300-323")
                 .path("/second_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -761,7 +761,7 @@ mod tests {
         };
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-150")
+                .header("range", "bytes=0-149")
                 .path("/chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -804,7 +804,7 @@ mod tests {
 
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-100")
+                .header("range", "bytes=0-99")
                 .path("/first_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -841,7 +841,7 @@ mod tests {
 
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-100")
+                .header("range", "bytes=0-99")
                 .path("/second_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -950,7 +950,7 @@ mod tests {
 
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-150")
+                .header("range", "bytes=0-149")
                 .path("/second_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -958,7 +958,7 @@ mod tests {
         });
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-150")
+                .header("range", "bytes=0-149")
                 .path("/third_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
@@ -1038,7 +1038,7 @@ mod tests {
 
         test_env.server.mock(|when, then| {
             when.method(GET)
-                .header("range", "bytes=0-100")
+                .header("range", "bytes=0-99")
                 .path("/first_chunk");
             then.status(200)
                 .header("content-type", "application/octet-stream")
