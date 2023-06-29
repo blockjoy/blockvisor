@@ -34,7 +34,13 @@ impl<E: Engine + Sync + Send + 'static> Clone for RhaiPlugin<E> {
 }
 
 pub fn read_metadata(script: &str) -> Result<BlockchainMetadata> {
-    find_metadata_in_ast(&rhai::Engine::new().compile(script)?)
+    find_metadata_in_ast(&new_rhai_engine().compile(script)?)
+}
+
+fn new_rhai_engine() -> rhai::Engine {
+    let mut engine = rhai::Engine::new();
+    engine.set_max_expr_depths(64, 32);
+    engine
 }
 
 fn find_metadata_in_ast(ast: &AST) -> Result<BlockchainMetadata> {
@@ -51,7 +57,7 @@ fn find_metadata_in_ast(ast: &AST) -> Result<BlockchainMetadata> {
 
 impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
     pub fn new(script: &str, babel_engine: E) -> Result<Self> {
-        let rhai_engine = rhai::Engine::new();
+        let rhai_engine = new_rhai_engine();
         // compile script to AST
         let ast = rhai_engine.compile(script)?;
         let mut plugin = RhaiPlugin {
