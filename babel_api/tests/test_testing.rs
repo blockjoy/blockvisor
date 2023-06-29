@@ -1,5 +1,5 @@
 mod utils;
-use babel_api::engine::{HttpResponse, ShResponse};
+use babel_api::engine::{HttpResponse, JobType, ShResponse};
 use babel_api::plugin::{ApplicationStatus, StakingStatus, SyncStatus};
 use babel_api::{engine::JobStatus, plugin::Plugin, rhai_plugin};
 use mockall::*;
@@ -11,6 +11,19 @@ fn test_testing() -> anyhow::Result<()> {
     let mut babel = utils::MockBabelEngine::new();
     babel.expect_save_data().returning(|_| Ok(()));
 
+    babel
+        .expect_start_job()
+        .withf(|name, config| {
+            if let JobType::Download {
+                manifest: Some(_), ..
+            } = &config.job_type
+            {
+                name == "download"
+            } else {
+                false
+            }
+        })
+        .returning(|_, _| Ok(()));
     babel.expect_start_job().returning(|_, _| Ok(()));
     babel.expect_stop_job().returning(|_| Ok(()));
     babel
@@ -67,6 +80,29 @@ fn test_testing() -> anyhow::Result<()> {
 
     let script = fs::read_to_string("protocols/testing/babel.rhai")?;
     let plugin = rhai_plugin::RhaiPlugin::new(&script, babel)?;
+    plugin.call_custom_method(
+        "custom_download",
+        r#"{
+            "total_size": 1024,
+            "chunks": [
+                {
+                    "key": "part_key_1",
+                    "url": "some://valid.url",
+                    "checksum": {
+                        "sha1": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+                    },
+                    "size": 1024,
+                    "destinations": [
+                        {
+                            "path": "f1.data",
+                            "pos": 0,
+                            "size": 1024
+                        }
+                    ]
+                },
+            ]
+        }"#,
+    )?;
 
     assert!(plugin.has_capability("init"));
     plugin.init(&HashMap::from_iter([(

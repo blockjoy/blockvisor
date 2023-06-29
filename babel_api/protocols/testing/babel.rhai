@@ -142,3 +142,17 @@ fn info(param) {
     };
     info
 }
+
+fn custom_download(param) {
+    start_job("download", #{
+        job_type: #{
+            download: #{
+                destination: "/var/lib/babel/",
+                manifest: parse_json(param),
+            }
+        },
+        // Job restart policy.
+        restart: "never",
+    });
+    ""
+}
