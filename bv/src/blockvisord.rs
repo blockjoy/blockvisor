@@ -125,14 +125,13 @@ where
                 .await?
                 .run();
 
-        // send up to date information about host software
-        if let Err(e) = hosts::send_info_update(self.config.clone()).await {
-            warn!("Cannot send host info update: {e:?}");
-        }
-
         if std::env::var(ENV_BV_STANDALONE_MODE).is_ok() {
             let _ = internal_api_server_future.await;
         } else {
+            // send up to date information about host software
+            if let Err(e) = hosts::send_info_update(self.config.clone()).await {
+                warn!("Cannot send host info update: {e:?}");
+            }
             let _ = tokio::join!(
                 internal_api_server_future,
                 external_api_client_future,
