@@ -4,7 +4,7 @@
 /// Backoff timeout and retry count are reset if download continue without errors for at least `backoff_timeout_ms`.
 use crate::{
     checksum,
-    job_runner::{JobBackoff, JobRunnerImpl},
+    job_runner::{JobBackoff, JobRunner, JobRunnerImpl},
 };
 use async_trait::async_trait;
 use babel_api::engine::{
@@ -23,14 +23,14 @@ use std::{
     mem,
     ops::{Deref, DerefMut},
     os::unix::fs::FileExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     slice::Iter,
     usize,
     vec::IntoIter,
 };
 use sysinfo::{DiskExt, System, SystemExt};
 use tokio::{select, sync::mpsc, task::JoinHandle, time::Instant};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 const MAX_OPENED_FILES: u64 = 1024;
 const MAX_DOWNLOADERS: usize = 8;
@@ -92,6 +92,68 @@ impl<T: AsyncTimer + Send> DownloadJob<T> {
             timer,
         })
     }
+
+    pub async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus {
+        let progress_file_path = self.downloader.config.progress_file_path.clone();
+        let destination_dir = self.downloader.destination_dir.clone();
+        let chunks = self.downloader.manifest.chunks.clone();
+        let job_status = <Self as JobRunner>::run(self, run, name, jobs_dir).await;
+        match &job_status {
+            JobStatus::Finished {
+                exit_code: Some(0), ..
+            }
+            | JobStatus::Pending
+            | JobStatus::Running => {
+                // job finished successfully or is going to be continued after restart, so do nothing
+            }
+            JobStatus::Finished { .. } | JobStatus::Stopped => {
+                // job failed or manually stopped - remove both progress metadata and partially downloaded files
+                cleanup_progress_data(&progress_file_path);
+                for chunk in chunks {
+                    for destination in chunk.destinations {
+                        let _ = fs::remove_file(destination_dir.join(destination.path));
+                    }
+                }
+            }
+        }
+        job_status
+    }
+}
+
+#[async_trait]
+impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
+    /// Run and restart downloader until `backoff.stopped` return `JobStatus` or job runner
+    /// is stopped explicitly.  
+    async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
+        info!("download job '{name}' started");
+        debug!("with manifest: {:?}", self.downloader.manifest);
+
+        let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
+        while run.load() {
+            backoff.start();
+            match self.downloader.download(run.clone()).await {
+                Ok(_) => {
+                    let message = format!("download job '{name}' finished");
+                    backoff.stopped(Some(0), message).await?;
+                }
+                Err(err) => {
+                    backoff
+                        .stopped(
+                            Some(-1),
+                            format!("download_job '{name}' failed with: {err:#}"),
+                        )
+                        .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn cleanup_progress_data(progress_file_path: &Path) {
+    if let Err(err) = fs::remove_file(progress_file_path) {
+        warn!("failed to remove progress metadata file, after finished download: {err:#}");
+    }
 }
 
 impl Downloader {
@@ -121,6 +183,7 @@ impl Downloader {
         drop(downloaders); // drop last sender so writer know that download is done
 
         writer.await??;
+        cleanup_progress_data(&self.config.progress_file_path);
         Ok(())
     }
 
@@ -204,36 +267,6 @@ impl<'a> ParallelChunkDownloaders<'a> {
 
     async fn wait_for_next(&mut self) -> Option<Result<()>> {
         self.futures.next().await
-    }
-}
-
-#[async_trait]
-impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
-    /// Run and restart downloader until `backoff.stopped` return `JobStatus` or job runner
-    /// is stopped explicitly.  
-    async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
-        info!("download job '{name}' started");
-        debug!("with manifest: {:?}", self.downloader.manifest);
-
-        let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
-        while run.load() {
-            backoff.start();
-            match self.downloader.download(run.clone()).await {
-                Ok(_) => {
-                    let message = format!("download job '{name}' finished");
-                    backoff.stopped(Some(0), message).await?;
-                }
-                Err(err) => {
-                    backoff
-                        .stopped(
-                            Some(-1),
-                            format!("download_job '{name}' failed with: {err:#}"),
-                        )
-                        .await?;
-                }
-            }
-        }
-        Ok(())
     }
 }
 
@@ -546,6 +579,7 @@ mod tests {
     use super::*;
     use assert_fs::TempDir;
     use babel_api::engine::Checksum;
+    use bv_utils::timer::SysTimer;
     use httpmock::prelude::*;
     use reqwest::Url;
     use std::fs;
@@ -569,18 +603,22 @@ mod tests {
     }
 
     impl TestEnv {
-        fn downloader(&self, manifest: DownloadManifest) -> Downloader {
-            Downloader {
-                manifest,
-                destination_dir: self.tmp_dir.clone(),
-                config: DownloaderConfig {
-                    max_opened_files: 1,
-                    max_downloaders: 4,
-                    max_buffer_size: 150,
-                    max_retries: 0,
-                    backoff_base_ms: 1,
-                    progress_file_path: self.download_progress_path.clone(),
+        fn download_job(&self, manifest: DownloadManifest) -> DownloadJob<SysTimer> {
+            DownloadJob {
+                downloader: Downloader {
+                    manifest,
+                    destination_dir: self.tmp_dir.clone(),
+                    config: DownloaderConfig {
+                        max_opened_files: 1,
+                        max_downloaders: 4,
+                        max_buffer_size: 150,
+                        max_retries: 0,
+                        backoff_base_ms: 1,
+                        progress_file_path: self.download_progress_path.clone(),
+                    },
                 },
+                restart_policy: RestartPolicy::Never,
+                timer: SysTimer,
             }
         }
 
@@ -590,7 +628,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn full_download_ok() -> Result<()> {
+    async fn test_full_download_ok() -> Result<()> {
         let test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
@@ -697,10 +735,16 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body(vec![3u8; 24]);
         });
-        test_env
-            .downloader(manifest)
-            .download(RunFlag::default())
-            .await?;
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            test_env
+                .download_job(manifest)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
+        );
 
         assert_eq!(
             vec![0u8; 100],
@@ -714,11 +758,12 @@ mod tests {
             [vec![2u8; 300], vec![3u8; 324]].concat(),
             fs::read(test_env.tmp_dir.join("second.file"))?
         );
+        assert!(!test_env.download_progress_path.exists());
         Ok(())
     }
 
     #[tokio::test]
-    async fn invalid_manifest() -> Result<()> {
+    async fn test_invalid_manifest() -> Result<()> {
         let test_env = setup_test_env()?;
 
         let manifest_wo_destination = DownloadManifest {
@@ -733,15 +778,14 @@ mod tests {
             }],
         };
         assert_eq!(
-            format!(
-                "{:#}",
-                test_env
-                    .downloader(manifest_wo_destination)
-                    .download(RunFlag::default())
-                    .await
-                    .unwrap_err()
-            ),
-            "chunk 'first_chunk' download failed: corrupted manifest - expected at least one destination file in chunk"
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "download_job 'name' failed with: chunk 'first_chunk' download failed: corrupted manifest - expected at least one destination file in chunk".to_string()
+            },
+            test_env
+                .download_job(manifest_wo_destination)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
         );
 
         let manifest_inconsistent_destination = DownloadManifest {
@@ -767,23 +811,22 @@ mod tests {
                 .header("content-type", "application/octet-stream")
                 .body(vec![0u8; 150]);
         });
-        assert_eq!(
-            format!(
-                "{:#}",
-                test_env
-                    .downloader(manifest_inconsistent_destination)
-                    .download(RunFlag::default())
-                    .await
-                    .unwrap_err()
-            ),
-            "chunk 'first_chunk' download failed: (decompressed) chunk size doesn't mach expected one"
-        );
 
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "download_job 'name' failed with: chunk 'first_chunk' download failed: (decompressed) chunk size doesn't mach expected one".to_string()
+            },
+            test_env
+                .download_job(manifest_inconsistent_destination)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
+        );
         Ok(())
     }
 
     #[tokio::test]
-    async fn server_errors() -> Result<()> {
+    async fn test_server_errors() -> Result<()> {
         let test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
@@ -812,15 +855,15 @@ mod tests {
         });
 
         assert_eq!(
-            format!(
-                "{:#}",
-                test_env
-                    .downloader(manifest)
-                    .download(RunFlag::default())
-                    .await
-                    .unwrap_err()
-            ),
-            "chunk 'first_chunk' download failed: server error: received more bytes than requested"
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "download_job 'name' failed with: chunk 'first_chunk' download failed: server error: received more bytes than requested"
+                    .to_string()
+            },
+            test_env
+                .download_job(manifest)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
         );
 
         let manifest = DownloadManifest {
@@ -849,15 +892,15 @@ mod tests {
         });
 
         assert_eq!(
-            format!(
-                "{:#}",
-                test_env
-                    .downloader(manifest)
-                    .download(RunFlag::default())
-                    .await
-                    .unwrap_err()
-            ),
-            "chunk 'second_chunk' download failed: server error: received less bytes than requested"
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "download_job 'name' failed with: chunk 'second_chunk' download failed: server error: received less bytes than requested"
+                    .to_string()
+            },
+            test_env
+                .download_job(manifest)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
         );
 
         let manifest = DownloadManifest {
@@ -877,22 +920,21 @@ mod tests {
         };
 
         assert_eq!(
-            format!(
-                "{:#}",
-                test_env
-                    .downloader(manifest)
-                    .download(RunFlag::default())
-                    .await
-                    .unwrap_err()
-            ),
-            "chunk 'third_chunk' download failed: server responded with 404 Not Found"
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "download_job 'name' failed with: chunk 'third_chunk' download failed: server responded with 404 Not Found"
+                    .to_string()
+            },
+            test_env
+                .download_job(manifest)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
         );
-
         Ok(())
     }
 
     #[tokio::test]
-    async fn restore_download_ok() -> Result<()> {
+    async fn test_restore_download_ok() -> Result<()> {
         let test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
@@ -975,9 +1017,15 @@ mod tests {
         // partially downloaded second file
         fs::write(&test_env.tmp_dir.join("second.file"), vec![1u8; 55])?;
 
-        let mut job = test_env.downloader(manifest);
-        job.config.max_downloaders = 1;
-        job.download(RunFlag::default()).await?;
+        let mut job = test_env.download_job(manifest);
+        job.downloader.config.max_downloaders = 1;
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
+        );
 
         assert!(!test_env.tmp_dir.join("zero.file").exists());
         assert_eq!(
@@ -992,29 +1040,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn not_enough_disk_space() -> Result<()> {
+    async fn test_not_enough_disk_space() -> Result<()> {
         let test_env = setup_test_env()?;
 
-        let manifest_wo_destination = DownloadManifest {
+        let manifest = DownloadManifest {
             total_size: u64::MAX,
             compression: None,
             chunks: vec![],
         };
-        assert!(test_env
-            .downloader(manifest_wo_destination)
-            .download(RunFlag::default())
+
+        if let JobStatus::Finished {
+            exit_code: Some(-1),
+            message,
+        } = test_env
+            .download_job(manifest)
+            .run(RunFlag::default(), "name", &test_env.tmp_dir)
             .await
-            .unwrap_err()
-            .to_string()
-            .contains(&format!(
-                "Can't download {} bytes of data while only",
+        {
+            assert!(message.starts_with(&format!(
+                "download_job 'name' failed with: Can't download {} bytes of data while only",
                 u64::MAX
             )));
+        } else {
+            bail!("unexpected success")
+        }
         Ok(())
     }
 
     #[tokio::test]
-    async fn writer_error() -> Result<()> {
+    async fn test_writer_error() -> Result<()> {
         let test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
@@ -1045,16 +1099,141 @@ mod tests {
                 .body(vec![0u8; 100]);
         });
 
-        let mut job = test_env.downloader(manifest);
-        job.destination_dir = PathBuf::from("/tmp/non/existing/destination");
+        let mut job = test_env.download_job(manifest);
+        job.downloader.destination_dir = PathBuf::from("/tmp/non/existing/destination");
 
-        assert!(job
-            .download(RunFlag::default())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("Writer error: No such file or directory"));
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "download_job 'name' failed with: Writer error: No such file or directory (os error 2)".to_string()
+            },
+            job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
+        );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_after_fail() -> Result<()> {
+        let test_env = setup_test_env()?;
+
+        let manifest = DownloadManifest {
+            total_size: 924,
+            compression: None,
+            chunks: vec![
+                Chunk {
+                    key: "first_chunk".to_string(),
+                    url: test_env.url("/first_chunk")?,
+                    checksum: Checksum::Blake3([
+                        85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8,
+                        190, 219, 61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
+                    ]),
+                    size: 600,
+                    destinations: vec![
+                        FileLocation {
+                            path: PathBuf::from("zero.file"),
+                            pos: 0,
+                            size: 100,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("first.file"),
+                            pos: 0,
+                            size: 200,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("second.file"),
+                            pos: 0,
+                            size: 300,
+                        },
+                    ],
+                },
+                Chunk {
+                    key: "second_chunk".to_string(),
+                    url: test_env.url("/second_chunk")?,
+                    checksum: Checksum::Sha1([0u8; 20]),
+                    size: 324,
+                    destinations: vec![FileLocation {
+                        path: PathBuf::from("third.file"),
+                        pos: 0,
+                        size: 324,
+                    }],
+                },
+            ],
+        };
+
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=0-149")
+                .path("/first_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body([vec![0u8; 100], vec![1u8; 50]].concat());
+        });
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=150-299")
+                .path("/first_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![1u8; 150]);
+        });
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=300-449")
+                .path("/first_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![2u8; 150]);
+        });
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=450-599")
+                .path("/first_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![2u8; 150]);
+        });
+
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=0-149")
+                .path("/second_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![3u8; 150]);
+        });
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=150-299")
+                .path("/second_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![3u8; 150]);
+        });
+        test_env.server.mock(|when, then| {
+            when.method(GET)
+                .header("range", "bytes=300-323")
+                .path("/second_chunk");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(vec![3u8; 24]);
+        });
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "download_job 'name' failed with: chunk 'second_chunk' download failed: chunk checksum mismatch - expected [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], actual [223, 133, 134, 120, 124, 112, 193, 150, 43, 123, 78, 114, 164, 121, 55, 99, 61, 88, 63, 101]".to_string()
+            },
+            test_env
+                .download_job(manifest)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
+        );
+
+        assert!(!test_env.tmp_dir.join("zero.file").exists());
+        assert!(!test_env.tmp_dir.join("first.file").exists());
+        assert!(!test_env.tmp_dir.join("second.file").exists());
+        assert!(!test_env.tmp_dir.join("third.file").exists());
+        assert!(!test_env.download_progress_path.exists());
         Ok(())
     }
 }

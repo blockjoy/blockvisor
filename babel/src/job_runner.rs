@@ -15,18 +15,21 @@ pub trait JobRunnerImpl {
 
 #[async_trait]
 pub trait JobRunner {
-    async fn run(self, mut run: RunFlag, name: &str, jobs_dir: &Path);
+    async fn run(self, mut run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus;
 }
 
 #[async_trait]
 impl<T: JobRunnerImpl + Send> JobRunner for T {
-    async fn run(self, mut run: RunFlag, name: &str, jobs_dir: &Path) {
+    async fn run(self, mut run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus {
         if let Err(status) = self.try_run_job(run.clone(), name).await {
             if let Err(err) = jobs::save_status(&status, name, &jobs_dir.join(jobs::STATUS_SUBDIR))
             {
                 error!("job status changed to {status:?}, but failed to save job data: {err}")
             }
             run.stop();
+            status
+        } else {
+            JobStatus::Running
         }
     }
 }
