@@ -1,0 +1,40 @@
+application_name = "erigon"
+node_type = "node"
+version = "4.2.0-build.10"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = ["jq"]
+apt_source = ["universe"]
+cmds = [
+  "wget -O /tmp/netdata-kickstart.sh https://my-netdata.io/kickstart.sh && sh /tmp/netdata-kickstart.sh --disable-telemetry --non-interactive --dont-start-it --disable-cloud --static-only",
+  "wget -O lighthouse.tar.gz https://github.com/sigp/lighthouse/releases/download/v4.2.0/lighthouse-v4.2.0-x86_64-unknown-linux-gnu.tar.gz",
+  "mkdir -p /blockjoy/lighthouse",
+  "tar xvzf lighthouse.tar.gz --directory /usr/bin/",
+  "wget -O erigon.tar.gz https://github.com/ledgerwatch/erigon/releases/download/v2.47.0/erigon_2.47.0_linux_amd64.tar.gz",
+  "mkdir -p /blockjoy/erigon",
+  "tar xvzf erigon.tar.gz --directory /usr/bin/",
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+] 
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+	  "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/erigon/node/mnt/usr/bin/",
+#this is wrong below: 
+		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/erigon/node/mnt/etc/systemd/system/",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/erigon/babel.toml {{.YafimHome}}/target/erigon/node/mnt/etc/babel.conf",
+        "mkdir -p {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
+        "cp {{.YafimHome}}/blockvisor/netdata/stream.conf {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/erigon/node/mnt",
+		"echo eth-rpc > {{.YafimHome}}/target/erigon/node/mnt/etc/hostname"
+]
