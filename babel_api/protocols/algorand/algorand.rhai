@@ -1,35 +1,39 @@
-const METADATA = {
+// TODO
+// fn height() {} 
+// fn address() {} 
+
+const METADATA = #{
     min_babel_version: "0.15.4",
     node_version: "3.16.3",
     protocol: "algorand",
     node_type: "validator",
     description: "Algorand node",
-    requirements: {
+    requirements: #{
       vcpu_count: 32,
       mem_size_mb: 32768,
       disk_size_gb: 1500
     },
-    nets: {
-      mainnet: {
+    nets: #{
+      mainnet: #{
         url: "https://algorand-catchpoints.s3.us-east-2.amazonaws.com/channel/mainnet/latest.catchpoint",
         net_type: "main",
       },
-      testnet: {
+      testnet: #{
         url: "https://algorand-catchpoints.s3.us-east-2.amazonaws.com/channel/testnet/latest.catchpoint",
         net_type: "test",
       },
     },
-    babel_config: {
+    babel_config: #{
       data_directory_mount_point: "/blockjoy/algorand",
       log_buffer_capacity_ln: 1000,
       swap_size_mb: 393216
     },
-    firewall: {
+    firewall: #{
       enabled: true,
       default_in: "deny",
       default_out: "allow",
-      rules: [
-        {
+      rules: [  
+        #{
           name: "Allowed incoming traffic on port",
           action: "allow",
           direction: "in",
@@ -38,105 +42,54 @@ const METADATA = {
         },
       ],
     },
-    keys: {},
-};
+    keys: #{},
+  };
   
-const API_HOST = "http://localhost:8080";
+  const API_HOST = "http://localhost:8080/";
   
-fn init() {
+  fn init(keys) {
     debug("Executing startup scripts...");
   
     let net = sanitize_sh_param(node_params().NETWORK);
     let metadata = GLOBAL::METADATA.nets[net];
     let data_directory = GLOBAL::METADATA.babel_config.data_directory_mount_point;
   
-    start_job("Entrypoint for the Algorand validator node", {
-        body: format!(
-            "/usr/bin/algod -d {}/data -g {}/genesis/{}/genesis.json -o",
-            data_directory, data_directory, net
-        ),
-        restart: {
-            "always": {
+    start_job("Entrypoint for the Algorand validator node", #{
+        job_type: #{ 
+            run_sh:
+            `/usr/bin/algod -d ${data_directory}/data -g ${data_directory}/genesis/${net}/genesis.json -o`
+        },
+        restart: #{
+            "always": #{
                 backoff_timeout_ms: 60000,
                 backoff_base_ms: 10000
             },
         },
         needs: [],
     });
-}
+  }
   
-fn make_jrpc_request(path, params) {
-    //main jrpc function to reduce duplications
-    let headers = {
-        "Content-Type": "application/json",
-    };
-
-    let body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "GET",
-    };
-
-    let full_url = format!("{}{}", API_HOST, path);
-    let resp = run_jrpc(full_url, body, headers);
-
-    if resp["status_code"] != 200 {
-        throw format!("Request failed with error: {}", resp["status_code"]);
+  fn application_status() {
+    let status = run_jrpc(global::API_HOST, "health");
+    if parse_json(status.body).result != "OK" {
+        "delinquent"
+    } else {
+        "broadcasting"
     }
-
-    resp["body"]
-}
-
-fn get_genesis_info() {
-    // Gets the genesis information.
-
-    let path = "/genesis";
-    let response = make_jrpc_request(path, {});
-
-    let genesis_info = json::parse(response);
-
-    if let Err(err) = genesis_info {
-        throw format!("Failed to parse genesis information: {}", err);
+  }
+  
+  fn get_genesis_info() {
+    let res = run_jrpc(global::API_HOST, "genesis");
+    if res.status_code != 200 {
+        throw res.status_code;
     }
-
-    genesis_info.unwrap()
-}
-
-fn application_status() {
-    // Returns OK if healthy and fully caught up.
-
-    let path = "/ready";
-    let response = make_jrpc_request(path, {});
-
-    if response["status_code"] != 200 {
-        throw format!("Node readiness check failed with error: {}", response["status_code"]);
+    parse_json(res.result)
+  }
+  
+  fn sync_status() {
+    let res = run_jrpc(global::API_HOST, "ready");
+    if res.status_code != 200 {
+        throw res.status_code;
     }
-
-    response["body"]
-}
-
-fn metrics() {
-    // Returns metrics about algod functioning.
-
-    let path = "/metrics";
-    let response = make_jrpc_request(path, {});
-
-    if response["status_code"] != 200 {
-        throw format!("Failed to retrieve node metrics with error: {}", response["status_code"]);
-    }
-
-    response["body"]
-}
-
-fn health() {
-    // Returns OK if healthy.
-
-    let path = "/health";
-    let response = make_jrpc_request(path, {});
-
-    if response["status_code"] != 200 {
-        throw format!("Node health check failed with error: {}", response["status_code"]);
-    }
-
-    response["body"]
-}
+    parse_json(res.result)    
+  }
