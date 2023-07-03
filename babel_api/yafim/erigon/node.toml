@@ -34,7 +34,7 @@ build_cmds =  [
 		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/erigon/node/mnt/etc/systemd/system/",
 		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/erigon/babel.toml {{.YafimHome}}/target/erigon/node/mnt/etc/babel.conf",
         "mkdir -p {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
-        "cp {{.YafimHome}}/blockvisor/netdata/stream.conf {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
+        "cp {{.YafimHome}}/blockvisor/babel_api/netdata/stream.conf {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/erigon/node/mnt",
 		"echo eth-rpc > {{.YafimHome}}/target/erigon/node/mnt/etc/hostname"
 ]
