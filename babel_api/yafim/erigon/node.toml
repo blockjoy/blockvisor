@@ -1,6 +1,6 @@
 application_name = "erigon"
 node_type = "node"
-version = "4.2.0-build.10"
+version = "4.2.0-build.12"
 
 [image]
 debian_version = "focal"
@@ -32,7 +32,7 @@ build_cmds =  [
 	  "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/erigon/node/mnt/usr/bin/",
 #this is wrong below: 
 		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/erigon/node/mnt/etc/systemd/system/",
-		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/erigon/babel.toml {{.YafimHome}}/target/erigon/node/mnt/etc/babel.conf",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/erigon/node.toml {{.YafimHome}}/target/erigon/node/mnt/etc/babel.conf",
         "mkdir -p {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
         "cp {{.YafimHome}}/blockvisor/babel_api/netdata/stream.conf {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/erigon/node/mnt",
