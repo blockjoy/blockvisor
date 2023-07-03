@@ -86,6 +86,7 @@ pub struct NodeConfig {
     pub gateway: String,
     pub rules: Vec<firewall::Rule>,
     pub properties: NodeProperties,
+    pub network: String,
 }
 
 #[derive(Error, Debug)]
@@ -171,12 +172,13 @@ impl<P: Pal + Debug> Nodes<P> {
             network_interface,
             requirements,
             properties,
+            network: config.network,
             firewall_rules: config.rules,
             initialized: false,
         };
         self.save().await?;
 
-        let node = Node::create(self.pal.clone(), node_data).await?;
+        let node = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
         self.nodes.write().await.insert(id, RwLock::new(node));
         self.node_ids.write().await.insert(config.name, id);
         self.node_data_cache
@@ -499,7 +501,7 @@ impl<P: Pal + Debug> Nodes<P> {
             // If some files are corrupted, the files will be recreated.
             // Some intermediate data could be lost in that case.
             self.fetch_image_data(&node_data.image).await?;
-            let new = Node::create(self.pal.clone(), node_data).await?;
+            let new = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
             self.nodes.write().await.insert(id, RwLock::new(new));
             info!("Recovery: node with ID `{id}` recreated");
         }
@@ -601,7 +603,7 @@ impl<P: Pal + Debug> Nodes<P> {
         Ok(if registry_path.exists() {
             let data = Self::load_data(&registry_path).await?;
             let (nodes, node_ids, node_data_cache) =
-                Self::load_nodes(pal.clone(), &registry_dir).await?;
+                Self::load_nodes(pal.clone(), api_config.clone(), &registry_dir).await?;
 
             Self {
                 api_config,
@@ -638,6 +640,7 @@ impl<P: Pal + Debug> Nodes<P> {
 
     async fn load_nodes(
         pal: Arc<P>,
+        api_config: SharedConfig,
         registry_dir: &Path,
     ) -> Result<(
         HashMap<Uuid, RwLock<Node<P>>>,
@@ -665,7 +668,9 @@ impl<P: Pal + Debug> Nodes<P> {
                 continue; // ignore other files in registry dir
             }
             match NodeData::load(&path)
-                .and_then(|data| async { Node::attach(pal.clone(), data).await })
+                .and_then(|data| async {
+                    Node::attach(pal.clone(), api_config.clone(), data).await
+                })
                 .await
             {
                 Ok(node) => {

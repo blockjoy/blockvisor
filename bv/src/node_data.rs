@@ -52,6 +52,7 @@ pub struct NodeData<N> {
     pub firewall_rules: Vec<firewall::Rule>,
     #[serde(default)]
     pub properties: NodeProperties,
+    pub network: String,
 }
 
 impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {

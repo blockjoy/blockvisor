@@ -1,5 +1,7 @@
+use crate::babel_engine::NodeInfo;
 use crate::{
     babel_engine,
+    config::SharedConfig,
     node_data::{NodeData, NodeImage, NodeStatus},
     pal,
     pal::NodeConnection,
@@ -106,7 +108,11 @@ impl Paths {
 impl<P: Pal + Debug> Node<P> {
     /// Creates a new node according to specs.
     #[instrument(skip(data))]
-    pub async fn create(pal: Arc<P>, data: NodeData<P::NetInterface>) -> Result<Self> {
+    pub async fn create(
+        pal: Arc<P>,
+        api_config: SharedConfig,
+        data: NodeData<P::NetInterface>,
+    ) -> Result<Self> {
         info!("Creating node with data: {data:?}");
         let node_id = data.id;
         let paths = Paths::build(pal.as_ref(), node_id);
@@ -120,10 +126,15 @@ impl<P: Pal + Debug> Node<P> {
         data.save(&paths.registry).await?;
 
         let babel_engine = BabelEngine::new(
-            node_id,
+            NodeInfo {
+                node_id,
+                image: data.image.clone(),
+                properties: data.properties.clone(),
+                network: data.network.clone(),
+            },
             pal.create_node_connection(node_id),
+            api_config,
             |engine| RhaiPlugin::new(&script, engine),
-            data.properties.clone(),
             paths.plugin_data.clone(),
         )?;
         Ok(Self {
@@ -139,7 +150,11 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Returns node previously created on this host.
     #[instrument(skip(data))]
-    pub async fn attach(pal: Arc<P>, data: NodeData<P::NetInterface>) -> Result<Self> {
+    pub async fn attach(
+        pal: Arc<P>,
+        api_config: SharedConfig,
+        data: NodeData<P::NetInterface>,
+    ) -> Result<Self> {
         info!("Attaching to node with data: {data:?}");
         let paths = Paths::build(pal.as_ref(), data.id);
 
@@ -166,10 +181,15 @@ impl<P: Pal + Debug> Node<P> {
             }
         }
         let babel_engine = BabelEngine::new(
-            node_id,
+            NodeInfo {
+                node_id,
+                image: data.image.clone(),
+                properties: data.properties.clone(),
+                network: data.network.clone(),
+            },
             node_conn,
+            api_config,
             |engine| RhaiPlugin::new(&script, engine),
-            data.properties.clone(),
             paths.plugin_data.clone(),
         )?;
         Ok(Self {

@@ -278,6 +278,7 @@ impl NodeClient {
                 ip,
                 gateway,
                 props,
+                network,
             } => {
                 let id = Uuid::new_v4();
                 let name = Petnames::default().generate_one(3, "_");
@@ -299,6 +300,7 @@ impl NodeClient {
                         ip,
                         gateway,
                         properties,
+                        network,
                     })
                     .await?;
                 println!("Created new node from `{image}` image with ID `{id}` and name `{name}`");

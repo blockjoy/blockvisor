@@ -250,18 +250,17 @@ impl<'a> ParallelChunkDownloaders<'a> {
 
     fn launch_more(&mut self) {
         while self.futures.len() < self.config.max_downloaders {
-            if let Some(chunk) = self.chunks.next() {
-                if self.downloaded_chunks.contains(&chunk.key) {
-                    // skip chunks successfully downloaded in previous run
-                    continue;
-                }
-                let downloader =
-                    ChunkDownloader::new(chunk.clone(), self.tx.clone(), self.config.clone());
-                self.futures
-                    .push(Box::pin(downloader.run(self.run.clone())));
-            } else {
+            let Some(chunk) = self.chunks.next() else {
                 break;
+            };
+            if self.downloaded_chunks.contains(&chunk.key) {
+                // skip chunks successfully downloaded in previous run
+                continue;
             }
+            let downloader =
+                ChunkDownloader::new(chunk.clone(), self.tx.clone(), self.config.clone());
+            self.futures
+                .push(Box::pin(downloader.run(self.run.clone())));
         }
     }
 
@@ -366,7 +365,7 @@ impl ChunkDownloader {
         let mut buffer = Vec::with_capacity(buffer_size);
         let mut resp = self
             .client
-            .get(self.chunk.url.clone())
+            .get(&self.chunk.url)
             .header(RANGE, format!("bytes={}-{}", pos, pos + buffer_size - 1))
             .send()
             .await?;
@@ -506,14 +505,13 @@ impl Writer {
 
     async fn run(mut self, mut run: RunFlag) -> Result<()> {
         while run.load() {
-            if let Some(chunk_data) = self.rx.recv().await {
-                if let Err(err) = self.handle_chunk_data(chunk_data).await {
-                    run.stop();
-                    bail!("Writer error: {err}")
-                }
-            } else {
+            let Some(chunk_data) = self.rx.recv().await else {
                 // stop writer when all senders/downloaders are dropped
                 break;
+            };
+            if let Err(err) = self.handle_chunk_data(chunk_data).await {
+                run.stop();
+                bail!("Writer error: {err}")
             }
         }
         Ok(())
@@ -581,7 +579,6 @@ mod tests {
     use babel_api::engine::Checksum;
     use bv_utils::timer::SysTimer;
     use httpmock::prelude::*;
-    use reqwest::Url;
     use std::fs;
 
     struct TestEnv {
@@ -622,8 +619,8 @@ mod tests {
             }
         }
 
-        fn url(&self, path: &str) -> Result<Url> {
-            Ok(Url::parse(&self.server.url(path))?)
+        fn url(&self, path: &str) -> Result<String> {
+            Ok(self.server.url(path))
         }
     }
 

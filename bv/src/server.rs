@@ -92,6 +92,7 @@ where
                     gateway: request.gateway,
                     rules: vec![],
                     properties,
+                    network: request.network,
                 },
             )
             .await

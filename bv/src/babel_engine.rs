@@ -9,11 +9,14 @@
 /// Engine methods that implementation needs to interact with node via BV are sent as `NodeRequest`.
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{
-    node_connection::RPC_REQUEST_TIMEOUT, node_data::NodeProperties, pal::NodeConnection,
+    config::SharedConfig,
+    node_connection::RPC_REQUEST_TIMEOUT,
+    node_data::{NodeImage, NodeProperties},
+    pal::NodeConnection,
+    services::api::ManifestService,
     utils::with_timeout,
 };
-
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, bail, Context, Error, Result};
 use babel_api::{
     engine::{HttpResponse, JobConfig, JobStatus, JobType, ShResponse},
     metadata::KeysConfig,
@@ -65,10 +68,18 @@ macro_rules! with_selective_retry {
 }
 
 #[derive(Debug)]
+pub struct NodeInfo {
+    pub node_id: Uuid,
+    pub image: NodeImage,
+    pub properties: NodeProperties,
+    pub network: String,
+}
+
+#[derive(Debug)]
 pub struct BabelEngine<N, P> {
-    node_id: Uuid,
+    node_info: NodeInfo,
     pub node_connection: N,
-    properties: NodeProperties,
+    api_config: SharedConfig,
     plugin: P,
     plugin_data_path: PathBuf,
     node_rx: tokio::sync::mpsc::Receiver<NodeRequest>,
@@ -77,24 +88,24 @@ pub struct BabelEngine<N, P> {
 
 impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     pub fn new<F: FnOnce(Engine) -> Result<P>>(
-        node_id: Uuid,
+        node_info: NodeInfo,
         node_connection: N,
+        api_config: SharedConfig,
         plugin_builder: F,
-        properties: NodeProperties,
         plugin_data_path: PathBuf,
     ) -> Result<Self> {
         let (node_tx, node_rx) = tokio::sync::mpsc::channel(16);
         let engine = Engine {
-            node_id,
+            node_id: node_info.node_id,
             tx: node_tx.clone(),
-            params: properties.clone(),
+            params: node_info.properties.clone(),
             plugin_data_path: plugin_data_path.clone(),
         };
         Ok(Self {
-            node_id,
+            node_info,
             node_connection,
+            api_config,
             plugin: plugin_builder(engine)?,
-            properties,
             plugin_data_path,
             node_rx,
             node_tx,
@@ -106,9 +117,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         plugin_builder: F,
     ) -> Result<()> {
         let engine = Engine {
-            node_id: self.node_id,
+            node_id: self.node_info.node_id,
             tx: self.node_tx.clone(),
-            params: self.properties.clone(),
+            params: self.node_info.properties.clone(),
             plugin_data_path: self.plugin_data_path.clone(),
         };
         self.plugin = plugin_builder(engine)?;
@@ -159,6 +170,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
 
     pub async fn init(&mut self, secret_keys: HashMap<String, Vec<u8>>) -> Result<()> {
         let mut node_keys = self
+            .node_info
             .properties
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -185,7 +197,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     /// This function calls babel by sending a blockchain command using the specified method name.
-    #[instrument(skip(self), fields(id = % self.node_id, name = name.to_string()), err, ret(Debug))]
+    #[instrument(skip(self), fields(id = % self.node_info.node_id, name = name.to_string()), err, ret(Debug))]
     pub async fn call_method(&mut self, name: &str, param: &str) -> Result<String> {
         Ok(match name {
             "init" => {
@@ -408,7 +420,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         }
     }
 
-    fn handle_connection_errors(&mut self, err: Status) -> anyhow::Error {
+    fn handle_connection_errors(&mut self, err: Status) -> Error {
         match err.code() {
             // just forward internal errors
             tonic::Code::Internal => err,
@@ -429,8 +441,20 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         let babel_client = self.node_connection.babel_client().await?;
         if let JobType::Download { manifest, .. } = &mut job_config.job_type {
             if manifest.is_none() {
-                // TODO fetch manifest from cookbook
-                unimplemented!()
+                let mut manifest_service = ManifestService::connect(&self.api_config)
+                    .await
+                    .with_context(|| "cannot connect to cookbook service")?;
+                manifest.replace(
+                    manifest_service
+                        .retrieve_manifest(&self.node_info.image, &self.node_info.network)
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "cannot retrieve download manifest for {:?}-{}",
+                                self.node_info.image, self.node_info.network
+                            )
+                        })?,
+                );
             } // if already set it mean that plugin use some custom manifest source - other than cookbook
             if let Some(manifest) = manifest {
                 manifest.validate()?
@@ -624,6 +648,7 @@ fn escape_sh_char(c: char) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use crate::pal::{BabelClient, BabelSupClient, DefaultTimeout};
     use crate::utils;
     use crate::utils::tests::test_channel;
@@ -838,10 +863,33 @@ mod tests {
                 ),
             };
             let engine = BabelEngine::new(
-                Uuid::new_v4(),
+                NodeInfo {
+                    node_id: Uuid::new_v4(),
+                    image: NodeImage {
+                        protocol: "".to_string(),
+                        node_type: "".to_string(),
+                        node_version: "".to_string(),
+                    },
+                    properties: HashMap::from_iter([(
+                        "some_key".to_string(),
+                        "some value".to_string(),
+                    )]),
+                    network: "test".to_string(),
+                },
                 connection,
+                SharedConfig::new(
+                    Config {
+                        id: "".to_string(),
+                        token: "".to_string(),
+                        refresh_token: "".to_string(),
+                        blockjoy_api_url: "".to_string(),
+                        blockjoy_mqtt_url: None,
+                        update_check_interval_secs: None,
+                        blockvisor_port: 0,
+                    },
+                    tmp_root.clone(),
+                ),
                 |engine| Ok(DummyPlugin { engine }),
-                HashMap::from_iter([("some_key".to_string(), "some value".to_string())]),
                 data_path.clone(),
             )?;
 

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{collections::HashMap, path::Path, time::Duration};
 use tracing::log::Level;
-use url::Url;
+pub use url::Url;
 
 /// Plugin engin must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -50,7 +50,7 @@ pub trait Engine {
     fn log(&self, level: Level, message: &str);
 }
 
-/// Structure describing where decompressed data shall be written to and how many byte.
+/// Structure describing where decompressed data shall be written to and how many bytes.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct FileLocation {
     /// Relative file path
@@ -70,9 +70,10 @@ pub enum Checksum {
     Blake3([u8; 32]),
 }
 
-/// Data are stored on the cloud in chunks. Each chunk may map into part of single file
-/// or multiple files (i.e. original disk representation).
-/// Downloaded chunks, after decompression, shall be written into disk location(s) described by destinations.
+/// Data is stored on the cloud in chunks. Each chunk may map into part
+/// of a single file or multiple files (i.e. original disk representation).
+/// Downloaded chunks, after decompression, shall be written into disk
+/// location(s) described by the destinations.
 ///
 /// Example of chunk-file mapping:
 ///```ascii flow
@@ -115,8 +116,9 @@ pub enum Checksum {
 pub struct Chunk {
     /// Persistent chunk key
     pub key: String,
-    /// Pre-signed download url (may be temporary)
-    pub url: Url,
+    /// Pre-signed download url (may be temporary),
+    /// May be empty when uploading manifest blueprint
+    pub url: String,
     /// Chunk data checksum
     pub checksum: Checksum,
     /// Chunk size in bytes
@@ -132,9 +134,9 @@ pub enum Compression {
     // no compression is supported yet
 }
 
-/// Download manifest, describing cloud to disk mapping.
-/// Sometimes it is necessary to put data into cloud in a different form, because of cloud
-/// limitations or needed optimization.
+/// Download manifest, describing a cloud to disk mapping.
+/// Sometimes it is necessary to put data into the cloud in a different form,
+/// because of cloud limitations or needed optimization.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DownloadManifest {
     /// Total size of uncompressed data

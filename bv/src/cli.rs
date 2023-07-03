@@ -82,6 +82,10 @@ pub enum NodeCommand {
         /// starts with `key` is passed here like so: `bv node create --props '{"key1": "asdf"}'`.
         #[clap(long)]
         props: Option<String>,
+
+        /// Blockchain network name
+        #[clap(long)]
+        network: String,
     },
 
     /// Upgrade node

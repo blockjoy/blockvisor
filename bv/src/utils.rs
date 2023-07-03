@@ -53,23 +53,20 @@ impl Archive {
     }
 
     pub async fn untar(self) -> Result<Self> {
-        if let Some(parent_dir) = self.0.parent() {
-            run_cmd(
-                "tar",
-                [
-                    OsStr::new("-C"),
-                    parent_dir.as_os_str(),
-                    OsStr::new("-xf"),
-                    self.0.as_os_str(),
-                ],
-            )
-            .await?;
-            let _ = fs::remove_file(&self.0).await;
+        let Some(parent_dir) = self.0.parent() else { bail!("invalid tar file path {}", self.0.to_string_lossy()) };
+        run_cmd(
+            "tar",
+            [
+                OsStr::new("-C"),
+                parent_dir.as_os_str(),
+                OsStr::new("-xf"),
+                self.0.as_os_str(),
+            ],
+        )
+        .await?;
+        let _ = fs::remove_file(&self.0).await;
 
-            Ok(Self(parent_dir.into()))
-        } else {
-            bail!("invalid tar file path {}", self.0.to_string_lossy())
-        }
+        Ok(Self(parent_dir.into()))
     }
 }
 

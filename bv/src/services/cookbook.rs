@@ -164,13 +164,3 @@ impl CookbookService {
             && fs::metadata(plugin).await?.len() > 0)
     }
 }
-
-impl From<NodeImage> for pb::ConfigIdentifier {
-    fn from(image: NodeImage) -> Self {
-        Self {
-            protocol: image.protocol,
-            node_type: image.node_type,
-            node_version: image.node_version,
-        }
-    }
-}

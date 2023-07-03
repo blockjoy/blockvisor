@@ -6,20 +6,24 @@ use crate::{
     nodes::Nodes,
     pal::Pal,
     server::bv_pb,
-    services::api::pb::{Action, Direction, Protocol, Rule},
+    services::api::pb::{Action, ChecksumType, Direction, Protocol, Rule},
 };
 use anyhow::{anyhow, bail, Context, Result};
-use babel_api::metadata::firewall;
+use babel_api::{
+    engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation},
+    metadata::firewall,
+};
 use base64::Engine;
 use bv_utils::with_retry;
 use metrics::{register_counter, Counter};
 use pb::{
     command_service_client::CommandServiceClient, discovery_service_client::DiscoveryServiceClient,
-    host_service_client::HostServiceClient, metrics_service_client, node_command::Command,
-    node_service_client,
+    host_service_client::HostServiceClient, manifest_service_client::ManifestServiceClient,
+    metrics_service_client, node_command::Command, node_service_client,
 };
 use std::{
     fmt::Debug,
+    path::PathBuf,
     {str::FromStr, sync::Arc},
 };
 use tokio::time::Instant;
@@ -298,7 +302,7 @@ async fn process_node_command<P: Pal + Debug>(
                     .properties
                     .into_iter()
                     .map(|p| (p.name, p.value))
-                    .chain([("network".to_string(), args.network)])
+                    .chain([("network".to_string(), args.network.clone())])
                     .collect();
                 let rules = args
                     .rules
@@ -315,6 +319,7 @@ async fn process_node_command<P: Pal + Debug>(
                             gateway: args.gateway,
                             rules,
                             properties,
+                            network: args.network,
                         },
                     )
                     .await?;
@@ -448,6 +453,42 @@ impl HostsService {
     }
 }
 
+pub struct ManifestService {
+    client: ManifestServiceClient<AuthenticatedService>,
+}
+
+impl ManifestService {
+    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+        let url = &config.read().await.blockjoy_api_url;
+        let endpoint = Endpoint::from_str(url)?;
+        let channel = Endpoint::connect(&endpoint)
+            .await
+            .with_context(|| format!("Failed to connect to manifest service at {url}"))?;
+        let client = ManifestServiceClient::with_interceptor(channel, config.token().await?);
+        Ok(Self { client })
+    }
+
+    #[instrument(skip(self))]
+    pub async fn retrieve_manifest(
+        &mut self,
+        image: &NodeImage,
+        network: &str,
+    ) -> Result<DownloadManifest> {
+        let manifest = self
+            .client
+            .retrieve_download_manifest(pb::ManifestServiceRetrieveDownloadManifestRequest {
+                id: Some(image.clone().into()),
+                network: network.to_owned(),
+            })
+            .await?
+            .into_inner();
+        manifest
+            .manifest
+            .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
+            .try_into()
+    }
+}
+
 impl From<pb::ContainerImage> for NodeImage {
     fn from(image: pb::ContainerImage) -> Self {
         Self {
@@ -525,4 +566,79 @@ impl TryFrom<Rule> for firewall::Rule {
             ports: rule.ports.into_iter().map(|p| p as u16).collect(),
         })
     }
+}
+
+impl From<NodeImage> for pb::ConfigIdentifier {
+    fn from(image: NodeImage) -> Self {
+        Self {
+            protocol: image.protocol,
+            node_type: image.node_type,
+            node_version: image.node_version,
+        }
+    }
+}
+
+impl TryFrom<pb::Compression> for Compression {
+    type Error = anyhow::Error;
+    fn try_from(_value: pb::Compression) -> Result<Self, Self::Error> {
+        bail!("Invalid compression type");
+    }
+}
+
+impl TryFrom<pb::DownloadManifest> for DownloadManifest {
+    type Error = anyhow::Error;
+    fn try_from(manifest: pb::DownloadManifest) -> Result<Self, Self::Error> {
+        let compression = if manifest.compression.is_some() {
+            Some(manifest.compression().try_into()?)
+        } else {
+            None
+        };
+        let chunks = manifest
+            .chunks
+            .into_iter()
+            .map(|value| {
+                let checksum = match value.checksum_type() {
+                    ChecksumType::Unspecified => {
+                        bail!("Invalid checksum type")
+                    }
+                    ChecksumType::Sha1 => Checksum::Sha1(try_into_array(value.checksum)?),
+                    ChecksumType::Sha256 => Checksum::Sha256(try_into_array(value.checksum)?),
+                    ChecksumType::Blake3 => Checksum::Blake3(try_into_array(value.checksum)?),
+                };
+                let destinations = value
+                    .destinations
+                    .into_iter()
+                    .map(|value| {
+                        Ok(FileLocation {
+                            path: PathBuf::from_str(&value.path)?,
+                            pos: value.position_bytes,
+                            size: value.size_bytes,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Chunk {
+                    key: value.key,
+                    url: value.url,
+                    checksum,
+                    size: value.size,
+                    destinations,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            total_size: manifest.total_size,
+            compression,
+            chunks,
+        })
+    }
+}
+
+fn try_into_array<const S: usize>(vec: Vec<u8>) -> Result<[u8; S], anyhow::Error> {
+    vec.try_into().map_err(|vec: Vec<u8>| {
+        anyhow!(
+            "expected {} bytes checksum, but {} bytes found",
+            S,
+            vec.len()
+        )
+    })
 }

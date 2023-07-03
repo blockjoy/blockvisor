@@ -156,6 +156,8 @@ impl TestEnv {
                 "216.18.214.193",
                 "--ip",
                 ip,
+                "--network",
+                "test",
             ])
             .env("BV_ROOT", &self.bv_root);
         let output = cmd.output().unwrap();
