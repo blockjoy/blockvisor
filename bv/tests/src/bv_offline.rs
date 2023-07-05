@@ -88,11 +88,18 @@ async fn test_bv_cmd_logs() -> Result<()> {
     println!("start node");
     test_env.bv_run(&["node", "start", vm_id], "Started node");
 
-    println!("get logs");
-    test_env.bv_run(
+    println!("wait for logs");
+    let start = std::time::Instant::now();
+    while !test_env.try_bv_run(
         &["node", "logs", vm_id],
         "Testing entry_point not configured, but parametrized with anything!",
-    );
+    ) {
+        if start.elapsed() < Duration::from_secs(15) {
+            sleep(Duration::from_secs(1)).await;
+        } else {
+            panic!("timeout expired")
+        }
+    }
 
     println!("get babel logs");
     test_env.bv_run(
