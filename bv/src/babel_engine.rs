@@ -439,26 +439,35 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         mut job_config: JobConfig,
     ) -> std::result::Result<(), Error> {
         let babel_client = self.node_connection.babel_client().await?;
-        if let JobType::Download { manifest, .. } = &mut job_config.job_type {
-            if manifest.is_none() {
-                let mut manifest_service = ManifestService::connect(&self.api_config)
-                    .await
-                    .with_context(|| "cannot connect to cookbook service")?;
-                manifest.replace(
-                    manifest_service
-                        .retrieve_manifest(&self.node_info.image, &self.node_info.network)
+        match &mut job_config.job_type {
+            JobType::Download { manifest, .. } => {
+                if manifest.is_none() {
+                    let mut manifest_service = ManifestService::connect(&self.api_config)
                         .await
-                        .with_context(|| {
-                            format!(
-                                "cannot retrieve download manifest for {:?}-{}",
-                                self.node_info.image, self.node_info.network
-                            )
-                        })?,
-                );
-            } // if already set it mean that plugin use some custom manifest source - other than cookbook
-            if let Some(manifest) = manifest {
-                manifest.validate()?
+                        .with_context(|| "cannot connect to cookbook service")?;
+                    manifest.replace(
+                        manifest_service
+                            .retrieve_manifest(&self.node_info.image, &self.node_info.network)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "cannot retrieve download manifest for {:?}-{}",
+                                    self.node_info.image, self.node_info.network
+                                )
+                            })?,
+                    );
+                } // if already set it mean that plugin use some custom manifest source - other than the API
+                if let Some(manifest) = manifest {
+                    manifest.validate()?
+                }
             }
+            JobType::Upload { manifest, .. } => {
+                if manifest.is_none() {
+                    // TODO get source data size form babel, then ask the API for UploadManifest
+                    unimplemented!()
+                } // if already set it mean that plugin use some custom manifest source - other than the API
+            }
+            _ => {}
         }
         with_retry!(babel_client.start_job((job_name.clone(), job_config.clone())))
             .map_err(|err| self.handle_connection_errors(err))

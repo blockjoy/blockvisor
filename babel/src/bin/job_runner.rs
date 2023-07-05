@@ -76,6 +76,9 @@ async fn main() -> eyre::Result<()> {
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;
         }
+        JobType::Upload { .. } => {
+            //TODO MJR
+        }
     }
     Ok(())
 }

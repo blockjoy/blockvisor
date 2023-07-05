@@ -147,19 +147,48 @@ pub struct DownloadManifest {
     pub chunks: Vec<Chunk>,
 }
 
+/// Slot represents destination for chunk to be uploaded.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Slot {
+    /// Persistent slot/chunk key
+    pub key: String,
+    /// Pre-signed upload url (may be temporary)
+    pub url: String,
+}
+
+/// Upload manifest is a list of slots, which consists
+/// of pre-signed upload urls for each chunk to be uploaded.
+/// And extra slot for manifest file.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct UploadManifest {
+    pub slots: Vec<Slot>,
+    pub manifest_slot: Slot,
+}
+
 /// Type of long running job.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobType {
-    /// Shell script - takes script body as a `String`
+    /// Shell script - takes script body as a `String`.
     RunSh(String),
     /// Download data - according to given manifest.
     Download {
         /// Manifest to be used to download data.
-        /// If `None` BV will try to find manifest based on node `NodeImage` and `NetType`.  
+        /// If `None` BV will ask blockvisor-api for manifest
+        /// based on node `NodeImage` and `network`.  
         manifest: Option<DownloadManifest>,
-        /// Destination directory for downloaded files
+        /// Destination directory for downloaded files.
         destination: PathBuf,
+    },
+    /// Upload data - according to given manifest.
+    Upload {
+        /// Manifest to be used to upload data.
+        /// If `None` BV will ask blockvisor-api for manifest
+        /// based on node `NodeImage`, `network`, and size of data
+        /// stored in `source` directory.  
+        manifest: Option<UploadManifest>,
+        /// Source directory with files to be uploaded.
+        source: PathBuf,
     },
 }
 
