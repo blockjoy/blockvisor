@@ -1,7 +1,6 @@
-use babel::download_job::DownloaderConfig;
 use babel::{
-    download_job::DownloadJob, jobs, log_buffer::LogBuffer, run_sh_job::RunShJob,
-    BABEL_LOGS_UDS_PATH,
+    download_job::DownloadJob, job_runner::TransferConfig, jobs, log_buffer::LogBuffer,
+    run_sh_job::RunShJob, BABEL_LOGS_UDS_PATH,
 };
 use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobType};
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
@@ -67,7 +66,7 @@ async fn main() -> eyre::Result<()> {
                 manifest.ok_or(anyhow!("missing DownloadManifest"))?,
                 destination,
                 job_config.restart,
-                DownloaderConfig::new(
+                TransferConfig::new(
                     jobs::JOBS_DIR
                         .join(jobs::STATUS_SUBDIR)
                         .join(&format!("{job_name}.progress")),

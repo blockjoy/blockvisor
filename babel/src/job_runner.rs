@@ -5,8 +5,19 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::engine::{JobStatus, RestartConfig, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use std::{path::Path, time::Duration};
+use std::collections::HashSet;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tracing::{debug, error, info, warn};
+
+const MAX_OPENED_FILES: u64 = 1024;
+const MAX_RUNNERS: usize = 8;
+const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
+const MAX_RETRIES: u32 = 5;
+const BACKOFF_BASE_MS: u64 = 500;
 
 #[async_trait]
 pub trait JobRunnerImpl {
@@ -31,6 +42,56 @@ impl<T: JobRunnerImpl + Send> JobRunner for T {
         } else {
             JobStatus::Running
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct TransferConfig {
+    pub max_opened_files: usize,
+    pub max_runners: usize,
+    pub max_buffer_size: usize,
+    pub max_retries: u32,
+    pub backoff_base_ms: u64,
+    pub progress_file_path: PathBuf,
+}
+
+impl TransferConfig {
+    pub fn new(progress_file_path: PathBuf) -> eyre::Result<Self> {
+        let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
+        Ok(Self {
+            max_opened_files,
+            max_runners: MAX_RUNNERS,
+            max_buffer_size: MAX_BUFFER_SIZE,
+            max_retries: MAX_RETRIES,
+            backoff_base_ms: BACKOFF_BASE_MS,
+            progress_file_path,
+        })
+    }
+}
+
+pub fn read_progress_data(progress_file_path: &Path) -> HashSet<String> {
+    if progress_file_path.exists() {
+        fs::read_to_string(progress_file_path)
+            .and_then(|json| Ok(serde_json::from_str(&json)?))
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    }
+}
+
+pub fn write_progress_data(
+    progress_file_path: &Path,
+    progress_data: &HashSet<String>,
+) -> eyre::Result<()> {
+    Ok(fs::write(
+        progress_file_path,
+        serde_json::to_string(progress_data)?,
+    )?)
+}
+
+pub fn cleanup_progress_data(progress_file_path: &Path) {
+    if let Err(err) = fs::remove_file(progress_file_path) {
+        warn!("failed to remove progress metadata file, after finished data transfer: {err:#}");
     }
 }
 

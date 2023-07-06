@@ -4,7 +4,10 @@
 /// Backoff timeout and retry count are reset if download continue without errors for at least `backoff_timeout_ms`.
 use crate::{
     checksum,
-    job_runner::{JobBackoff, JobRunner, JobRunnerImpl},
+    job_runner::{
+        cleanup_progress_data, read_progress_data, write_progress_data, JobBackoff, JobRunner,
+        JobRunnerImpl, TransferConfig,
+    },
 };
 use async_trait::async_trait;
 use babel_api::engine::{
@@ -30,37 +33,7 @@ use std::{
 };
 use sysinfo::{DiskExt, System, SystemExt};
 use tokio::{select, sync::mpsc, task::JoinHandle, time::Instant};
-use tracing::{debug, error, info, warn};
-
-const MAX_OPENED_FILES: u64 = 1024;
-const MAX_DOWNLOADERS: usize = 8;
-const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
-const MAX_RETRIES: u32 = 5;
-const BACKOFF_BASE_MS: u64 = 500;
-
-#[derive(Clone)]
-pub struct DownloaderConfig {
-    max_opened_files: usize,
-    max_downloaders: usize,
-    max_buffer_size: usize,
-    max_retries: u32,
-    backoff_base_ms: u64,
-    progress_file_path: PathBuf,
-}
-
-impl DownloaderConfig {
-    pub fn new(progress_file_path: PathBuf) -> Result<Self> {
-        let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
-        Ok(Self {
-            max_opened_files,
-            max_downloaders: MAX_DOWNLOADERS,
-            max_buffer_size: MAX_BUFFER_SIZE,
-            max_retries: MAX_RETRIES,
-            backoff_base_ms: BACKOFF_BASE_MS,
-            progress_file_path,
-        })
-    }
-}
+use tracing::{debug, error, info};
 
 pub struct DownloadJob<T> {
     downloader: Downloader,
@@ -71,7 +44,7 @@ pub struct DownloadJob<T> {
 struct Downloader {
     manifest: DownloadManifest,
     destination_dir: PathBuf,
-    config: DownloaderConfig,
+    config: TransferConfig,
 }
 
 impl<T: AsyncTimer + Send> DownloadJob<T> {
@@ -80,7 +53,7 @@ impl<T: AsyncTimer + Send> DownloadJob<T> {
         manifest: DownloadManifest,
         destination_dir: PathBuf,
         restart_policy: RestartPolicy,
-        config: DownloaderConfig,
+        config: TransferConfig,
     ) -> Result<Self> {
         Ok(Self {
             downloader: Downloader {
@@ -150,16 +123,10 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
     }
 }
 
-fn cleanup_progress_data(progress_file_path: &Path) {
-    if let Err(err) = fs::remove_file(progress_file_path) {
-        warn!("failed to remove progress metadata file, after finished download: {err:#}");
-    }
-}
-
 impl Downloader {
     async fn download(&mut self, mut run: RunFlag) -> Result<()> {
         self.check_disk_space()?;
-        let (tx, rx) = mpsc::channel(self.config.max_downloaders);
+        let (tx, rx) = mpsc::channel(self.config.max_runners);
         let (downloaded_chunks, writer) = self.init_writer(run.clone(), rx);
 
         let mut downloaders = ParallelChunkDownloaders::new(
@@ -225,7 +192,7 @@ struct ParallelChunkDownloaders<'a> {
     run: RunFlag,
     tx: mpsc::Sender<ChunkData>,
     downloaded_chunks: HashSet<String>,
-    config: DownloaderConfig,
+    config: TransferConfig,
     futures: FuturesUnordered<BoxFuture<'a, Result<()>>>,
     chunks: Iter<'a, Chunk>,
 }
@@ -236,7 +203,7 @@ impl<'a> ParallelChunkDownloaders<'a> {
         tx: mpsc::Sender<ChunkData>,
         downloaded_chunks: HashSet<String>,
         chunks: &'a [Chunk],
-        config: DownloaderConfig,
+        config: TransferConfig,
     ) -> Self {
         Self {
             run,
@@ -249,7 +216,7 @@ impl<'a> ParallelChunkDownloaders<'a> {
     }
 
     fn launch_more(&mut self) {
-        while self.futures.len() < self.config.max_downloaders {
+        while self.futures.len() < self.config.max_runners {
             let Some(chunk) = self.chunks.next() else {
                 break;
             };
@@ -285,11 +252,11 @@ struct ChunkDownloader {
     chunk: Chunk,
     tx: mpsc::Sender<ChunkData>,
     client: reqwest::Client,
-    config: DownloaderConfig,
+    config: TransferConfig,
 }
 
 impl ChunkDownloader {
-    fn new(chunk: Chunk, tx: mpsc::Sender<ChunkData>, config: DownloaderConfig) -> Self {
+    fn new(chunk: Chunk, tx: mpsc::Sender<ChunkData>, config: TransferConfig) -> Self {
         Self {
             chunk,
             tx,
@@ -485,14 +452,7 @@ impl Writer {
         max_opened_files: usize,
         progress_file_path: PathBuf,
     ) -> Self {
-        let downloaded_chunks = if progress_file_path.exists() {
-            fs::read_to_string(&progress_file_path)
-                .and_then(|json| Ok(serde_json::from_str(&json)?))
-                .unwrap_or_default()
-        } else {
-            Default::default()
-        };
-
+        let downloaded_chunks = read_progress_data(&progress_file_path);
         Self {
             opened_files: HashMap::new(),
             destination_dir,
@@ -524,10 +484,7 @@ impl Writer {
             }
             ChunkData::EndOfChunk { key } => {
                 self.downloaded_chunks.insert(key);
-                fs::write(
-                    &self.progress_file_path,
-                    serde_json::to_string(&self.downloaded_chunks)?,
-                )?;
+                write_progress_data(&self.progress_file_path, &self.downloaded_chunks)?;
             }
         }
         Ok(())
@@ -605,9 +562,9 @@ mod tests {
                 downloader: Downloader {
                     manifest,
                     destination_dir: self.tmp_dir.clone(),
-                    config: DownloaderConfig {
+                    config: TransferConfig {
                         max_opened_files: 1,
-                        max_downloaders: 4,
+                        max_runners: 4,
                         max_buffer_size: 150,
                         max_retries: 0,
                         backoff_base_ms: 1,
@@ -1015,7 +972,7 @@ mod tests {
         fs::write(&test_env.tmp_dir.join("second.file"), vec![1u8; 55])?;
 
         let mut job = test_env.download_job(manifest);
-        job.downloader.config.max_downloaders = 1;
+        job.downloader.config.max_runners = 1;
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(0),
