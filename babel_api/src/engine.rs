@@ -148,6 +148,7 @@ pub struct DownloadManifest {
 }
 
 /// Slot represents destination for chunk to be uploaded.
+/// This is just placeholder that MAY be used to upload chunk.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Slot {
     /// Persistent slot/chunk key
@@ -159,6 +160,7 @@ pub struct Slot {
 /// Upload manifest is a list of slots, which consists
 /// of pre-signed upload urls for each chunk to be uploaded.
 /// And extra slot for manifest file.
+/// This is just placeholder that MAY be used to upload data represented then by `DownloadManifest`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UploadManifest {
     pub slots: Vec<Slot>,

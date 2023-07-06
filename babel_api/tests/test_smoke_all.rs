@@ -9,7 +9,7 @@ pub fn rhai_smoke(path: &Path) -> anyhow::Result<BlockchainMetadata> {
     let script = fs::read_to_string(path)?;
     let mut babel = utils::MockBabelEngine::new();
     babel.expect_save_data().returning(|_| Ok(()));
-
+    babel.expect_log().returning(|_, _| {});
     babel.expect_start_job().returning(|_, _| Ok(()));
     babel.expect_stop_job().returning(|_| Ok(()));
     babel

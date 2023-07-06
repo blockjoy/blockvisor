@@ -11,6 +11,7 @@ pub mod logs_service;
 pub mod run_sh_job;
 pub mod supervisor;
 pub mod ufw_wrapper;
+pub mod upload_job;
 pub mod utils;
 
 use std::path::Path;

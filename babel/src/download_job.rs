@@ -303,7 +303,9 @@ impl ChunkDownloader {
 
                     self.send_to_writer(buffer, &mut destination).await?;
                 }
-                _ = run.wait() => {}
+                _ = run.wait() => {
+                    bail!("download interrupted");
+                }
             );
         }
         let calculated_checksum = digest.into_bytes();

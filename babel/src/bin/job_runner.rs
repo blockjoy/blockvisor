@@ -1,6 +1,6 @@
 use babel::{
     download_job::DownloadJob, job_runner::TransferConfig, jobs, log_buffer::LogBuffer,
-    run_sh_job::RunShJob, BABEL_LOGS_UDS_PATH,
+    run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH,
 };
 use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobType};
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
@@ -75,8 +75,20 @@ async fn main() -> eyre::Result<()> {
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;
         }
-        JobType::Upload { .. } => {
-            //TODO MJR
+        JobType::Upload { manifest, source } => {
+            UploadJob::new(
+                bv_utils::timer::SysTimer,
+                manifest.ok_or(anyhow!("missing UploadManifest"))?,
+                source,
+                job_config.restart,
+                TransferConfig::new(
+                    jobs::JOBS_DIR
+                        .join(jobs::STATUS_SUBDIR)
+                        .join(&format!("{job_name}.progress")),
+                )?,
+            )?
+            .run(run, &job_name, &jobs::JOBS_DIR)
+            .await;
         }
     }
     Ok(())
