@@ -279,3 +279,13 @@ impl DownloadManifest {
         Ok(())
     }
 }
+
+impl UploadManifest {
+    /// Validate manifest internal consistency.
+    pub fn validate(&self) -> Result<()> {
+        if self.slots.is_empty() {
+            bail!("corrupted manifest - expected at least one slot");
+        }
+        Ok(())
+    }
+}

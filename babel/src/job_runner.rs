@@ -5,7 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::engine::{JobStatus, RestartConfig, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use std::collections::HashSet;
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -69,7 +69,7 @@ impl TransferConfig {
     }
 }
 
-pub fn read_progress_data(progress_file_path: &Path) -> HashSet<String> {
+pub fn read_progress_data<T: DeserializeOwned + Default>(progress_file_path: &Path) -> T {
     if progress_file_path.exists() {
         fs::read_to_string(progress_file_path)
             .and_then(|json| Ok(serde_json::from_str(&json)?))
@@ -79,9 +79,9 @@ pub fn read_progress_data(progress_file_path: &Path) -> HashSet<String> {
     }
 }
 
-pub fn write_progress_data(
+pub fn write_progress_data<T: Serialize>(
     progress_file_path: &Path,
-    progress_data: &HashSet<String>,
+    progress_data: &T,
 ) -> eyre::Result<()> {
     Ok(fs::write(
         progress_file_path,
