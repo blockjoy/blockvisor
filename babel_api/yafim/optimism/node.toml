@@ -1,0 +1,53 @@
+application_name = "optimism"
+node_type = "node"
+version = "1.1.1-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = ["ufw"]
+apt_source = []
+cmds = [
+  # Install Netdata
+  "wget -O /tmp/netdata-kickstart.sh https://my-netdata.io/kickstart.sh && sh /tmp/netdata-kickstart.sh --disable-telemetry --non-interactive --dont-start-it --disable-cloud --static-only",
+
+  # Create babelsup service
+  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
+
+  # Nameserver config
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved", 
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+]
+
+[build_machine]
+apt_build_machine = []
+git_repo = ""
+git_tag = ""
+build_cmds =  [
+  # Netdata Streaming Configuration
+  "mkdir -p {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
+  "cp {{.YafimHome}}/blockvisor/babel_api/netdata/stream.conf {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
+
+  # Install and auto start Babelsup service
+  "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/optimism/node/mnt/usr/bin/",
+  "cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/optimism/node/mnt/etc/systemd/system/",
+
+  # Copy Babel conf
+  "cp {{.YafimHome}}/blockvisor/babel_api/protocols/optimism/babel.toml {{.YafimHome}}/target/optimism/node/mnt/etc/babel.conf",
+
+  # Change Root Password and Hostname
+  "echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/optimism/node/mnt",
+  "echo optimism > {{.YafimHome}}/target/optimism/node/mnt/etc/hostname",
+
+  # Apt Update
+  "sudo apt update -y",
+
+  # Copy Bin files of Optimism from local
+  "cp {{.YafimHome}}/op-geth/build/bin/geth {{.YafimHome}}/target/celo/node/mnt/usr/bin/geth",
+  "cp {{.YafimHome}}/optimism/op-node/bin/op-node {{.YafimHome}}/target/celo/node/mnt/usr/bin/op-node",
+  "mkdir -p {{.YafimHome}}/target/celo/node/mnt/blockjoy/optimism",
+]
