@@ -107,15 +107,15 @@ impl Paths {
 
 impl<P: Pal + Debug> Node<P> {
     /// Creates a new node according to specs.
-    #[instrument(skip(data))]
+    #[instrument(skip(pal, api_config))]
     pub async fn create(
         pal: Arc<P>,
         api_config: SharedConfig,
         data: NodeData<P::NetInterface>,
     ) -> Result<Self> {
-        info!("Creating node with data: {data:?}");
         let node_id = data.id;
         let paths = Paths::build(pal.as_ref(), node_id);
+        info!("Creating node with ID: {node_id}");
 
         let (script, metadata) = Self::copy_and_check_plugin(&paths, node_id, &data.image).await?;
 
@@ -149,19 +149,19 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     /// Returns node previously created on this host.
-    #[instrument(skip(data))]
+    #[instrument(skip(pal, api_config))]
     pub async fn attach(
         pal: Arc<P>,
         api_config: SharedConfig,
         data: NodeData<P::NetInterface>,
     ) -> Result<Self> {
-        info!("Attaching to node with data: {data:?}");
-        let paths = Paths::build(pal.as_ref(), data.id);
+        let node_id = data.id;
+        let paths = Paths::build(pal.as_ref(), node_id);
+        info!("Attaching to node with ID: {node_id}");
 
-        let script = fs::read_to_string(&Paths::script_file_path(&paths.registry, data.id)).await?;
+        let script = fs::read_to_string(&Paths::script_file_path(&paths.registry, node_id)).await?;
         let metadata = rhai_plugin::read_metadata(&script)?;
 
-        let node_id = data.id;
         let mut node_conn = pal.create_node_connection(node_id);
         let machine = pal.attach_vm(&data).await?;
         if machine.state() == pal::VmState::RUNNING {

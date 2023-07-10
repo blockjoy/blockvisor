@@ -1,6 +1,6 @@
 application_name = "algorand"
 node_type = "node"
-version = "3.14.2-build.1"
+version = "3.16.3-build.1"
 
 [image]
 debian_version = "focal"
@@ -13,7 +13,6 @@ cmds = [
   """add-apt-repository "deb [arch=amd64] https://releases.algorand.com/deb/ stable main" """,
   "apt-get update",
   "apt install -y algorand-devtools",
-  "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
   "systemctl disable systemd-resolved.service",
   "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
   "rm /etc/resolv.conf",
@@ -30,7 +29,8 @@ build_cmds =  [
 		"cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/algorand/node/mnt/usr/bin/",
 		"cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/algorand/node/mnt/etc/systemd/system/",
 		"cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimHome}}/target/algorand/node/mnt/etc/systemd/system/multi-user.target.wants/",
-		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/algorand/node.toml {{.YafimHome}}/target/algorand/node/mnt/etc/babel.conf",
+		"cp {{.YafimHome}}/blockvisor/babel_api/protocols/algorand/node.rhai {{.YafimHome}}/target/algorand/node/mnt/etc/babel.conf",
 		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/algorand/node/mnt",
 		"echo algorand > {{.YafimHome}}/target/algorand/node/mnt/etc/hostname"
 ]
+
