@@ -163,8 +163,14 @@ impl CommandsService {
         host_id: &str,
         nodes: Arc<Nodes<P>>,
     ) -> Result<()> {
-        let commands = self.get_pending_commands(host_id).await?;
-        self.process_commands(commands, nodes).await
+        let commands = self
+            .get_pending_commands(host_id)
+            .await
+            .with_context(|| "cannot get pending commands")?;
+        self.process_commands(commands, nodes)
+            .await
+            .with_context(|| "cannot process commands")?;
+        Ok(())
     }
 
     pub async fn get_pending_commands(&mut self, host_id: &str) -> Result<Vec<pb::Command>> {
@@ -196,9 +202,12 @@ impl CommandsService {
                     let service_status = get_bv_status().await;
                     if service_status != bv_pb::ServiceStatus::Ok {
                         self.send_service_status_update(command_id.clone(), service_status)
-                            .await?;
+                            .await
+                            .with_context(|| "cannot send system status update")?;
                     } else {
-                        self.send_command_ack(command_id.clone()).await?;
+                        self.send_command_ack(command_id.clone())
+                            .await
+                            .with_context(|| "cannot ack command")?;
                         // process the command
                         match process_node_command(nodes.clone(), node_command).await {
                             Err(error) => {

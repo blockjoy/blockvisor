@@ -186,7 +186,7 @@ where
                     match api::CommandsService::connect(config).await {
                         Ok(mut client) => {
                             if let Err(e) = client.get_and_process_pending_commands(&config.read().await.id, nodes.clone()).await {
-                                error!("Error processing pending commands: {:?}", e);
+                                error!("Error processing pending commands: {:#}", e);
                             }
                         }
                         Err(e) => warn!("Error connecting to api: {:?}", e),
