@@ -1,7 +1,7 @@
 const METADATA = #{
-    min_babel_version: "0.15.4",
-    node_version: "4.2.0",
-    protocol: "ethereum",
+    min_babel_version: "0.18.0",
+    node_version: "2.48.0",
+    protocol: "erigon",
     node_type: "node",
     description: "Ethereum Erigon",
     requirements: #{

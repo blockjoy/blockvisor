@@ -1,19 +1,19 @@
 application_name = "erigon"
 node_type = "node"
-version = "4.2.0-build.12"
+version = "2.48.0-build.1"
 
 [image]
 debian_version = "focal"
 rootfs_size = "10G"
 fs_type = "ext4"
-apt_image = ["jq"]
+apt_image = ["jq","ufw"]
 apt_source = ["universe"]
 cmds = [
   "wget -O /tmp/netdata-kickstart.sh https://my-netdata.io/kickstart.sh && sh /tmp/netdata-kickstart.sh --disable-telemetry --non-interactive --dont-start-it --disable-cloud --static-only",
-  "wget -O lighthouse.tar.gz https://github.com/sigp/lighthouse/releases/download/v4.2.0/lighthouse-v4.2.0-x86_64-unknown-linux-gnu.tar.gz",
+  "wget -O lighthouse.tar.gz  https://github.com/sigp/lighthouse/releases/download/v4.3.0/lighthouse-v4.3.0-x86_64-unknown-linux-gnu-portable.tar.gz",
   "mkdir -p /blockjoy/lighthouse",
   "tar xvzf lighthouse.tar.gz --directory /usr/bin/",
-  "wget -O erigon.tar.gz https://github.com/ledgerwatch/erigon/releases/download/v2.47.0/erigon_2.47.0_linux_amd64.tar.gz",
+  "wget -O erigon.tar.gz https://github.com/ledgerwatch/erigon/releases/download/v2.48.0/erigon_2.48.0_linux_amd64.tar.gz",
   "mkdir -p /blockjoy/erigon",
   "tar xvzf erigon.tar.gz --directory /usr/bin/",
   "ln -s /etc/systemd/system/babelsup.service /etc/systemd/system/multi-user.target.wants/babelsup.service",
@@ -31,7 +31,7 @@ git_tag = ""
 build_cmds =  [
 	  "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/erigon/node/mnt/usr/bin/",
 	  "cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimHome}}/target/erigon/node/mnt/etc/systemd/system/",
-	  "cp {{.YafimHome}}/blockvisor/babel_api/protocols/erigon/node.toml {{.YafimHome}}/target/erigon/node/mnt/etc/babel.conf",
+	  "cp {{.YafimHome}}/blockvisor/babel_api/protocols/erigon/node.rhai {{.YafimHome}}/target/erigon/node/mnt/etc/babel.conf",
           "mkdir -p {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
           "cp {{.YafimHome}}/blockvisor/babel_api/netdata/stream.conf {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
 	  "echo 'root:f&IS_rwh' | chpasswd -R {{.YafimHome}}/target/erigon/node/mnt",

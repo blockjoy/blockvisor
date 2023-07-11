@@ -1,6 +1,6 @@
 application_name = "algorand"
 node_type = "node"
-version = "3.16.3-build.1"
+version = "3.16.3-build.5"
 
 [image]
 debian_version = "focal"
