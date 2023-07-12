@@ -7,6 +7,8 @@ build-release:
 	strip target/x86_64-unknown-linux-musl/release/bv
 	strip target/x86_64-unknown-linux-musl/release/bvup
 	strip target/x86_64-unknown-linux-musl/release/blockvisord
+	cargo build -p upload_manifest_generator --target x86_64-unknown-linux-musl --release
+	strip target/x86_64-unknown-linux-musl/release/upload_manifest_generator
 	cargo build -p babel --target x86_64-unknown-linux-musl --release
 	strip target/x86_64-unknown-linux-musl/release/babel
 	strip target/x86_64-unknown-linux-musl/release/babel_job_runner
@@ -47,6 +49,10 @@ babelsup: build-release
 	cp babel/data/babelsup.service /tmp/babelsup/etc/systemd/system/
 	ln -sr /tmp/babelsup/etc/systemd/system/babelsup.service /tmp/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service
 	tar -C /tmp -czvf /tmp/babelsup.tar.gz babelsup
+
+upload_manifest_generator: build-release
+	rm -rf /tmp/upload_manifest_generator
+	cp target/x86_64-unknown-linux-musl/release/upload_manifest_generator /tmp/upload_manifest_generator
 
 install: bundle
 	rm -rf /opt/blockvisor

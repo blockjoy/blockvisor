@@ -1,0 +1,14 @@
+# How To Archive Blockchain Data 
+
+1. Make sure that Rhai script for the blockchain has `upload` and `upload_status` functions implemented. See [testing/babel.rhai](babel_api/protocols/testing/babel.rhai) for example.
+2. Start blockchain node and wait until blockchain data are ready to be archived.
+3. Stop blockchain synchronization. Blockchain data should not be modified since now.
+4. Generate upload manifest with [upload_manifest_generator](https://github.com/blockjoy/blockvisor/releases/latest). For example:
+```shell
+./um_generator https://19afdffb308beea3e9c1ef3a95085d3b.r2.cloudflarestorage.com cookbook-dev chains/testing/validator/0.0.1/test 8
+```
+See `./upload_manifest_generator --help` for more details.
+
+5. Start upload with `bv node run --param-file=manifest.json <NODE_NAME/ID> upload`.
+6. Check upload status with `bv node run <NODE_NAME/ID> upload_status`.
+7. Once it is `Finished` blockchain synchronization can be turned on again.

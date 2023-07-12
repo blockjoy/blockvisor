@@ -45,6 +45,9 @@ jobs:
       - name: Build babelsup
         run: >
           make babelsup
+      - name: Build babelsup
+        run: >
+          make upload_manifest_generator
       - name: Upload to R2
         run: |
           AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
@@ -65,6 +68,7 @@ jobs:
           files: |
             /tmp/bundle.tar.gz
             /tmp/babelsup.tar.gz
+            /tmp/upload_manifest_generator
       - name: Publish bvup
         run: |
           echo "{\"tag_name\":\"${{ env.GIT_VERSION }}\",\"name\":\"${{ env.GIT_VERSION }}\",\"target_commitish\":\"main\",\"draft\":false,\"prerelease\":false,\"generate_release_notes\":false,\"body\":\"$(hexdump -ve '"\\" 1/1 "u%04x"' host_setup_guide.md)\"}" > /tmp/body.json

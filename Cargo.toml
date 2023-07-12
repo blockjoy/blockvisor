@@ -4,6 +4,7 @@ members = [
     "babel",
     "bv",
     "bv_utils",
+    "upload_manifest_generator",
 ]
 
 [workspace.package]
