@@ -14,6 +14,25 @@ fn test_testing() -> anyhow::Result<()> {
     babel
         .expect_start_job()
         .withf(|name, config| {
+            if let JobType::Upload {
+                manifest: Some(_), ..
+            } = &config.job_type
+            {
+                name == "upload"
+            } else {
+                false
+            }
+        })
+        .returning(|_, _| Ok(()));
+    babel.expect_job_status().returning(|_| {
+        Ok(JobStatus::Finished {
+            exit_code: Some(0),
+            message: "".to_string(),
+        })
+    });
+    babel
+        .expect_start_job()
+        .withf(|name, config| {
             if let JobType::Download {
                 manifest: Some(_), ..
             } = &config.job_type
@@ -80,6 +99,25 @@ fn test_testing() -> anyhow::Result<()> {
 
     let script = fs::read_to_string("protocols/testing/babel.rhai")?;
     let plugin = rhai_plugin::RhaiPlugin::new(&script, babel)?;
+    plugin.call_custom_method(
+        "upload",
+        r#"{
+            "manifest_slot": {
+                "key": "manifest_key",
+                "url": "some://valid.url",
+            },
+            "slots": [
+                {
+                    "key": "part_key_1",
+                    "url": "some://valid.url",
+                },
+            ]
+        }"#,
+    )?;
+    assert_eq!(
+        r#"#{"finished": #{"exit_code": 0, "message": ""}}"#,
+        plugin.call_custom_method("upload_status", "",)?
+    );
     plugin.call_custom_method(
         "custom_download",
         r#"{

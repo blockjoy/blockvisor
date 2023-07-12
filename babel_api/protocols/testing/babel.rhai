@@ -151,8 +151,24 @@ fn custom_download(param) {
                 manifest: parse_json(param),
             }
         },
-        // Job restart policy.
         restart: "never",
     });
     ""
+}
+
+fn upload(param) {
+    start_job("upload", #{
+        job_type: #{
+            upload: #{
+                source: "/var/lib/babel/data/",
+                manifest: parse_json(param),
+            }
+        },
+        restart: "never",
+    });
+    ""
+}
+
+fn upload_status(param) {
+    job_status("upload").to_string()
 }
