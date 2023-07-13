@@ -6,7 +6,9 @@ use babel_api::{
     metadata::{firewall, BabelConfig, KeysConfig},
 };
 use eyre::{bail, eyre, Context, ContextCompat, Report, Result};
+use reqwest::RequestBuilder;
 use serde_json::json;
+use std::collections::HashMap;
 use std::{
     mem,
     ops::{Deref, DerefMut},
@@ -415,37 +417,19 @@ impl<J, P> BabelService<J, P> {
     async fn handle_jrpc(&self, request: Request<JrpcRequest>) -> Result<HttpResponse> {
         let timeout = extract_timeout(&request);
         let req = request.into_inner();
-        let mut req_builder = self
-            .post(&req.host)
-            .json(&json!({ "jsonrpc": "2.0", "id": 0, "method": req.method }));
-        if let Ok(timeout) = timeout {
-            req_builder = req_builder.timeout(timeout);
-        }
-        if let Some(headers) = req.headers {
-            req_builder = req_builder.headers((&headers).try_into()?);
-        }
-        let resp = req_builder.send().await?;
-        Ok(HttpResponse {
-            status_code: resp.status().as_u16(),
-            body: resp.text().await?,
-        })
+        send_http_request(
+            self.post(&req.host)
+                .json(&json!({ "jsonrpc": "2.0", "id": 0, "method": req.method })),
+            req.headers,
+            timeout,
+        )
+        .await
     }
 
     async fn handle_rest(&self, request: Request<RestRequest>) -> Result<HttpResponse> {
         let timeout = extract_timeout(&request);
         let req = request.into_inner();
-        let mut req_builder = self.get(req.url);
-        if let Ok(timeout) = timeout {
-            req_builder = req_builder.timeout(timeout);
-        }
-        if let Some(headers) = req.headers {
-            req_builder = req_builder.headers((&headers).try_into()?);
-        }
-        let resp = req_builder.send().await?;
-        Ok(HttpResponse {
-            status_code: resp.status().as_u16(),
-            body: resp.text().await?,
-        })
+        send_http_request(self.get(req.url), req.headers, timeout).await
     }
 
     async fn handle_sh(&self, request: Request<String>) -> Result<ShResponse> {
@@ -469,6 +453,26 @@ impl<J, P> BabelService<J, P> {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         })
     }
+}
+
+/// Takes RequestBuilder and add common http things (timeout, headers).
+/// Then send it and translates result into `HttpResponse`.
+async fn send_http_request(
+    mut req_builder: RequestBuilder,
+    headers: Option<HashMap<String, String>>,
+    timeout: Result<Duration>,
+) -> Result<HttpResponse> {
+    if let Some(headers) = headers {
+        req_builder = req_builder.headers((&headers).try_into()?);
+    }
+    if let Ok(timeout) = timeout {
+        req_builder = req_builder.timeout(timeout);
+    }
+    let resp = req_builder.send().await?;
+    Ok(HttpResponse {
+        status_code: resp.status().as_u16(),
+        body: resp.text().await?,
+    })
 }
 
 /// Extract request timeout value from "grpc-timeout" header. See [tonic::Request::set_timeout](https://docs.rs/tonic/latest/tonic/struct.Request.html#method.set_timeout).
