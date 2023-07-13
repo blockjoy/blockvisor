@@ -2,7 +2,7 @@ use crate::{jobs_manager::JobsManagerClient, ufw_wrapper::apply_firewall_config,
 use async_trait::async_trait;
 use babel_api::{
     babel::BlockchainKey,
-    engine::{HttpResponse, JobConfig, JobStatus, ShResponse},
+    engine::{HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig, KeysConfig},
 };
 use eyre::{bail, eyre, Context, ContextCompat, Report, Result};
@@ -283,14 +283,17 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 
     async fn run_jrpc(
         &self,
-        request: Request<(String, String)>,
+        request: Request<JrpcRequest>,
     ) -> Result<Response<HttpResponse>, Status> {
         Ok(Response::new(
             self.handle_jrpc(request).await.map_err(to_blockchain_err)?,
         ))
     }
 
-    async fn run_rest(&self, request: Request<String>) -> Result<Response<HttpResponse>, Status> {
+    async fn run_rest(
+        &self,
+        request: Request<RestRequest>,
+    ) -> Result<Response<HttpResponse>, Status> {
         Ok(Response::new(
             self.handle_rest(request).await.map_err(to_blockchain_err)?,
         ))
@@ -409,14 +412,17 @@ impl<J, P> BabelService<J, P> {
         Ok(())
     }
 
-    async fn handle_jrpc(&self, request: Request<(String, String)>) -> Result<HttpResponse> {
+    async fn handle_jrpc(&self, request: Request<JrpcRequest>) -> Result<HttpResponse> {
         let timeout = extract_timeout(&request);
-        let (host, method) = request.into_inner();
+        let req = request.into_inner();
         let mut req_builder = self
-            .post(host)
-            .json(&json!({ "jsonrpc": "2.0", "id": 0, "method": method }));
+            .post(&req.host)
+            .json(&json!({ "jsonrpc": "2.0", "id": 0, "method": req.method }));
         if let Ok(timeout) = timeout {
             req_builder = req_builder.timeout(timeout);
+        }
+        if let Some(headers) = req.headers {
+            req_builder = req_builder.headers((&headers).try_into()?);
         }
         let resp = req_builder.send().await?;
         Ok(HttpResponse {
@@ -425,12 +431,15 @@ impl<J, P> BabelService<J, P> {
         })
     }
 
-    async fn handle_rest(&self, request: Request<String>) -> Result<HttpResponse> {
+    async fn handle_rest(&self, request: Request<RestRequest>) -> Result<HttpResponse> {
         let timeout = extract_timeout(&request);
-        let url = request.into_inner();
-        let mut req_builder = self.get(url);
+        let req = request.into_inner();
+        let mut req_builder = self.get(req.url);
         if let Ok(timeout) = timeout {
             req_builder = req_builder.timeout(timeout);
+        }
+        if let Some(headers) = req.headers {
+            req_builder = req_builder.headers((&headers).try_into()?);
         }
         let resp = req_builder.send().await?;
         Ok(HttpResponse {
@@ -759,6 +768,7 @@ mod tests {
             when.method(POST)
                 .path("/")
                 .header("Content-Type", "application/json")
+                .header("custom_header", "some value")
                 .json_body(json!({
                     "id": 0,
                     "jsonrpc": "2.0",
@@ -775,10 +785,14 @@ mod tests {
 
         let service = build_babel_service_with_defaults().await?;
         let output = service
-            .run_jrpc(Request::new((
-                format!("http://{}", server.address()),
-                "info_get".to_string(),
-            )))
+            .run_jrpc(Request::new(JrpcRequest {
+                host: format!("http://{}", server.address()),
+                method: "info_get".to_string(),
+                headers: Some(HashMap::from_iter([(
+                    "custom_header".to_string(),
+                    "some value".to_string(),
+                )])),
+            }))
             .await?
             .into_inner();
 
@@ -796,7 +810,9 @@ mod tests {
         let server = MockServer::start();
 
         let mock = server.mock(|when, then| {
-            when.method(GET).path("/items");
+            when.method(GET)
+                .header("custom_header", "some value")
+                .path("/items");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(json!({"result": [1, 2, 3]}));
@@ -804,35 +820,19 @@ mod tests {
 
         let service = build_babel_service_with_defaults().await?;
         let output = service
-            .run_rest(Request::new(format!("http://{}/items", server.address())))
+            .run_rest(Request::new(RestRequest {
+                url: format!("http://{}/items", server.address()),
+                headers: Some(HashMap::from_iter([(
+                    "custom_header".to_string(),
+                    "some value".to_string(),
+                )])),
+            }))
             .await?
             .into_inner();
 
         mock.assert();
         assert_eq!(output.body, r#"{"result":[1,2,3]}"#);
         assert_eq!(output.status_code, 200);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_rest_json_full_response_ok() -> Result<()> {
-        let server = MockServer::start();
-
-        let mock = server.mock(|when, then| {
-            when.method(GET).path("/items");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(json!({"result": [1, 2, 3]}));
-        });
-
-        let service = build_babel_service_with_defaults().await?;
-        let output = service
-            .run_rest(Request::new(format!("http://{}/items", server.address())))
-            .await?
-            .into_inner();
-
-        mock.assert();
-        assert_eq!(output.body, "{\"result\":[1,2,3]}");
         Ok(())
     }
 

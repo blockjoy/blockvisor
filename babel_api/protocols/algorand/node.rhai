@@ -65,7 +65,7 @@ const METADATA = #{
   }
   
   fn application_status() {
-    let res = run_jrpc(global::API_HOST, "health");
+    let res = run_jrpc(#{ host: global::API_HOST, method: "health"});
     if res.status_code != 200 {
         "To be fixed"
     } else {
@@ -74,7 +74,7 @@ const METADATA = #{
   }
   //to_check
   fn get_genesis_info() {
-    let res = run_jrpc(global::API_HOST, "genesis");
+    let res = run_jrpc(#{ host: global::API_HOST, method: "genesis"});
     if res.status_code != 200 {
         throw res.status_code;
     }
@@ -82,7 +82,7 @@ const METADATA = #{
   }
   
   fn sync_status() {
-    let res = run_jrpc(global::API_HOST, "ready"); 
+    let res = run_jrpc(#{ host: global::API_HOST, method: "ready"});
     if res.status_code != 200 {
       "Not fully synced"
     } else {

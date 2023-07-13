@@ -78,23 +78,23 @@ fn init(keys) {
 }
 
 fn height() {
-    parse_json(run_jrpc(global::API_HOST, "info_height").body).result.height
+    parse_json(run_jrpc(#{ host: global::API_HOST, method: "info_height"}).body).result.height
 }
 
 fn block_age() {
-    parse_json(run_jrpc(global::API_HOST, "info_block_age").body).result.block_age
+    parse_json(run_jrpc(#{ host: global::API_HOST, method: "info_block_age"}).body).result.block_age
 }
 
 fn name() {
-    parse_json(run_jrpc(global::API_HOST, "info_name").body).result.name.to_string()
+    parse_json(run_jrpc(#{ host: global::API_HOST, method: "info_name"}).body).result.name.to_string()
 }
 
 fn address() {
-    parse_json(run_jrpc(global::API_HOST, "peer_addr").body).result.peer_addr.to_string()
+    parse_json(run_jrpc(#{ host: global::API_HOST, method: "peer_addr"}).body).result.peer_addr.to_string()
 }
 
 fn consensus() {
-    parse_json(run_jrpc(global::API_HOST, "info_in_consensus").body).result.in_consensus
+    parse_json(run_jrpc(#{ host: global::API_HOST, method: "info_in_consensus"}).body).result.in_consensus
 }
 
 fn application_status() {

@@ -1,10 +1,10 @@
 mod utils;
-use babel_api::engine::{HttpResponse, JobType, ShResponse};
-use babel_api::plugin::{ApplicationStatus, StakingStatus, SyncStatus};
-use babel_api::{engine::JobStatus, plugin::Plugin, rhai_plugin};
-use mockall::*;
-use std::collections::HashMap;
-use std::fs;
+use babel_api::{
+    engine::{HttpResponse, JobStatus, JobType, ShResponse},
+    plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
+    rhai_plugin,
+};
+use std::{collections::HashMap, fs};
 
 #[test]
 fn test_testing() -> anyhow::Result<()> {
@@ -50,12 +50,8 @@ fn test_testing() -> anyhow::Result<()> {
         .returning(|_| Ok(JobStatus::Running));
     babel
         .expect_run_jrpc()
-        .with(
-            predicate::eq("http://localhost:4467/"),
-            predicate::always(),
-            predicate::always(),
-        )
-        .returning(|_, _, _| {
+        .withf(|req, _| req.host == "http://localhost:4467/")
+        .returning(|_, _| {
             Ok(HttpResponse {
                 status_code: 200,
                 body: r#"

@@ -80,7 +80,7 @@ fn init(keys) {
 }
 
 fn application_status() {
-    let resp = run_jrpc(global::API_HOST, "/");
+    let resp = run_jrpc(#{ host: global::API_HOST, method: "/"});
     
     if resp.status_code == 200 {
         "broadcasting"
@@ -90,11 +90,11 @@ fn application_status() {
 }
 
 fn address() {
-    parse_json(run_jrpc(global::API_HOST, "eth_coinbase")).result.to_string()
+    parse_json(run_jrpc(#{ host: global::API_HOST, method: "eth_coinbase"})).result.to_string()
 }
 
 fn height() {
-    let resp = run_jrpc(global::API_HOST, "eth_blockNumber");
+    let resp = run_jrpc(#{ host: global::API_HOST, method: "eth_blockNumber"});
     if resp.status_code != 200 {
       throw resp;
     }
@@ -103,7 +103,7 @@ fn height() {
 }
 
 fn sync_status() {
-    let resp = run_jrpc(global::API_HOST, "eth_syncing");
+    let resp = run_jrpc(#{ host: global::API_HOST, method: "eth_syncing"});
     let data = parse_json(resp.body);
     let hb = parse_int(sub_string(data.result.highestBlock,2),16);
     let cb = parse_int(sub_string(data.result.currentBlock,2),16);

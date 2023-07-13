@@ -1,5 +1,5 @@
 use crate::{
-    engine::{HttpResponse, JobConfig, JobStatus, ShResponse},
+    engine::{HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig, KeysConfig},
     utils::{Binary, BinaryStatus},
 };
@@ -29,18 +29,10 @@ pub trait Babel {
     fn job_status(job_name: String) -> JobStatus;
 
     /// Send a Jrpc request to the current blockchain.
-    fn run_jrpc(
-        /// This is the host for the JSON rpc request.
-        host: String,
-        /// The name of the jRPC method that we are going to call into.
-        method: String,
-    ) -> HttpResponse;
+    fn run_jrpc(req: JrpcRequest) -> HttpResponse;
 
     /// Send a Rest request to the current blockchain.
-    fn run_rest(
-        /// This is the url of the rest endpoint.
-        url: String,
-    ) -> HttpResponse;
+    fn run_rest(req: RestRequest) -> HttpResponse;
 
     /// Send a Sh request to the current blockchain.
     fn run_sh(

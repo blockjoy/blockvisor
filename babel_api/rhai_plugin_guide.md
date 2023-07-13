@@ -222,22 +222,42 @@ To make implementation of Babel Plugin interface possible, BV provides following
 - `stop_job(job_name)` - Stop background job with given unique name if running.
 - `job_status(job_name)` - Get background job status by unique name.
   <br>**Possible return values**: _pending_, _running_, _stopped_, _finished{exit_code, message}_
-- `run_jrpc(host, method)` - Execute Jrpc request to the current blockchain and return http response (with default 15s timeout) as following structure:
+- `run_jrpc(request)` - Execute Jrpc request to the current blockchain. Request must have following structure:
+```
+{
+  // This is the host for the JSON rpc request.
+  host: String,
+  // The name of the jRPC method that we are going to call into.
+  method: String,
+  // [optional] Extra HTTP headers to be added to request.
+  headers: Map
+}
+```
+Return http response (with default 15s timeout) as following structure:
 ```
 { 
   status_code: i32,
   body: String,
 }
 ```
-- `run_jrpc(host, method, timeout)` - Same as above, but with custom request timeout (in seconds).
-- `run_rest(url)` - Execute a Rest request to the current blockchain and return its http response (with default 15s timeout) as following structure:
+- `run_jrpc(request, timeout)` - Same as above, but with custom request timeout (in seconds).
+- `run_rest(request)` - Execute a Rest request to the current blockchain. Request must have following structure:
+```
+{
+  // This is the url of the rest endpoint.
+  url: String,
+  // [optional] Extra HTTP headers to be added to request.
+  headers: Map
+}
+```
+Return its http response (with default 15s timeout) as following structure:
 ```
 { 
   status_code: i32,
   body: String,
 }
 ```
-- `run_rest(url, timeout)` - Same as above, but with custom request timeout (in seconds).
+- `run_rest(request, timeout)` - Same as above, but with custom request timeout (in seconds).
 - `run_sh(body)` - Run Sh script on the blockchain VM and return its result (with default 15s timeout). Result is following structure:
 ```
 { 
@@ -398,7 +418,7 @@ fn some_function() {
 const API_HOST = "http://localhost:4467/";
 
 fn block_age() {
-    let resp = run_jrpc(global::API_HOST, "info_block_age");
+    let resp = run_jrpc(#{host: global::API_HOST, method: "info_block_age"});
     if resp.status_code != 200 {
       throw resp;
     }

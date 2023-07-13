@@ -18,7 +18,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Error, Result};
 use babel_api::{
-    engine::{HttpResponse, JobConfig, JobStatus, JobType, ShResponse},
+    engine::{HttpResponse, JobConfig, JobStatus, JobType, JrpcRequest, RestRequest, ShResponse},
     metadata::KeysConfig,
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
@@ -341,13 +341,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 });
             }
             NodeRequest::RunRest {
-                url,
+                req,
                 timeout,
                 response_tx,
             } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_selective_retry!(babel_client.run_rest(with_timeout(
-                        url.clone(),
+                        req.clone(),
                         timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
                     )))
                     .map_err(|err| self.handle_connection_errors(err))
@@ -356,14 +356,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 });
             }
             NodeRequest::RunJrpc {
-                host,
-                method,
+                req,
                 timeout,
                 response_tx,
             } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_selective_retry!(babel_client.run_jrpc(with_timeout(
-                        (host.clone(), method.clone()),
+                        req.clone(),
                         timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
                     )))
                     .map_err(|err| self.handle_connection_errors(err))
@@ -506,13 +505,12 @@ enum NodeRequest {
         response_tx: ResponseTx<Result<JobStatus>>,
     },
     RunJrpc {
-        host: String,
-        method: String,
+        req: JrpcRequest,
         timeout: Option<Duration>,
         response_tx: ResponseTx<Result<HttpResponse>>,
     },
     RunRest {
-        url: String,
+        req: RestRequest,
         timeout: Option<Duration>,
         response_tx: ResponseTx<Result<HttpResponse>>,
     },
@@ -558,26 +556,20 @@ impl babel_api::engine::Engine for Engine {
         response_rx.blocking_recv()?
     }
 
-    fn run_jrpc(
-        &self,
-        host: &str,
-        method: &str,
-        timeout: Option<Duration>,
-    ) -> Result<HttpResponse> {
+    fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RunJrpc {
-            host: host.to_string(),
-            method: method.to_string(),
+            req,
             timeout,
             response_tx,
         })?;
         response_rx.blocking_recv()?
     }
 
-    fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<HttpResponse> {
+    fn run_rest(&self, req: RestRequest, timeout: Option<Duration>) -> Result<HttpResponse> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::RunRest {
-            url: url.to_string(),
+            req,
             timeout,
             response_tx,
         })?;
@@ -660,14 +652,18 @@ fn escape_sh_char(c: char) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use crate::pal::{BabelClient, BabelSupClient, DefaultTimeout};
-    use crate::utils;
-    use crate::utils::tests::test_channel;
+    use crate::{
+        config::Config,
+        pal::{BabelClient, BabelSupClient, DefaultTimeout},
+        utils::{self, tests::test_channel},
+    };
     use assert_fs::TempDir;
     use async_trait::async_trait;
-    use babel_api::engine::{Engine, JobType, RestartPolicy};
-    use babel_api::{babel::BlockchainKey, metadata::BabelConfig};
+    use babel_api::{
+        babel::BlockchainKey,
+        engine::{Engine, JobType, RestartPolicy},
+        metadata::BabelConfig,
+    };
     use mockall::*;
     use tonic::{Request, Response, Streaming};
 
@@ -708,11 +704,11 @@ mod tests {
             async fn job_status(&self, request: Request<String>) -> Result<Response<JobStatus>, Status>;
             async fn run_jrpc(
                 &self,
-                request: Request<(String, String)>,
+                request: Request<JrpcRequest>,
             ) -> Result<Response<HttpResponse>, Status>;
             async fn run_rest(
                 &self,
-                request: Request<String>,
+                request: Request<RestRequest>,
             ) -> Result<Response<HttpResponse>, Status>;
             async fn run_sh(
                 &self,
@@ -806,8 +802,21 @@ mod tests {
             )?;
             self.engine.stop_job(name)?;
             self.engine.job_status(name)?;
-            self.engine.run_jrpc(name, param, None)?;
-            self.engine.run_rest(name, None)?;
+            self.engine.run_jrpc(
+                JrpcRequest {
+                    host: name.to_string(),
+                    method: param.to_string(),
+                    headers: Some(HashMap::from_iter([(param.to_string(), name.to_string())])),
+                },
+                None,
+            )?;
+            self.engine.run_rest(
+                RestRequest {
+                    url: name.to_string(),
+                    headers: Some(HashMap::from_iter([(param.to_string(), name.to_string())])),
+                },
+                None,
+            )?;
             self.engine.render_template(
                 Path::new(name),
                 Path::new(param),
@@ -968,8 +977,14 @@ mod tests {
         babel_mock
             .expect_run_jrpc()
             .withf(|req| {
-                let (name, param) = req.get_ref();
-                name == "custom_name" && param == "param"
+                let req = req.get_ref();
+                req.host == "custom_name"
+                    && req.method == "param"
+                    && req.headers
+                        == Some(HashMap::from_iter([(
+                            "param".to_string(),
+                            "custom_name".to_string(),
+                        )]))
             })
             .return_once(|_| {
                 Ok(Response::new(HttpResponse {
@@ -979,11 +994,19 @@ mod tests {
             });
         babel_mock
             .expect_run_rest()
-            .withf(|req| req.get_ref() == "custom_name")
+            .withf(|req| {
+                let req = req.get_ref();
+                req.url == "custom_name"
+                    && req.headers
+                        == Some(HashMap::from_iter([(
+                            "param".to_string(),
+                            "custom_name".to_string(),
+                        )]))
+            })
             .return_once(|req| {
                 Ok(Response::new(HttpResponse {
                     status_code: 200,
-                    body: req.into_inner(),
+                    body: req.into_inner().url,
                 }))
             });
         babel_mock

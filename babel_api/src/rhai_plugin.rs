@@ -1,17 +1,15 @@
-use crate::metadata::check_metadata;
 use crate::{
     engine::Engine,
-    metadata::BlockchainMetadata,
+    metadata::{check_metadata, BlockchainMetadata},
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
 use anyhow::{anyhow, Context, Error, Result};
-use rhai;
 use rhai::{
+    self,
     serde::{from_dynamic, to_dynamic},
     Dynamic, AST,
 };
-use std::time::Duration;
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
 use tracing::log::Level;
 
 #[derive(Debug)]
@@ -88,31 +86,36 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
-            .register_fn("run_jrpc", move |host: &str, method: &str, timeout: i64| {
+            .register_fn("run_jrpc", move |req: Dynamic, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
                 to_dynamic(into_rhai_result(babel_engine.run_jrpc(
-                    host,
-                    method,
+                    from_dynamic(&req)?,
                     Some(Duration::from_secs(timeout)),
                 ))?)
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
-            .register_fn("run_jrpc", move |host: &str, method: &str| {
-                to_dynamic(into_rhai_result(babel_engine.run_jrpc(host, method, None))?)
-            });
-        let babel_engine = self.babel_engine.clone();
-        self.rhai_engine
-            .register_fn("run_rest", move |url: &str, timeout: i64| {
-                let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
+            .register_fn("run_jrpc", move |req: Dynamic| {
                 to_dynamic(into_rhai_result(
-                    babel_engine.run_rest(url, Some(Duration::from_secs(timeout))),
+                    babel_engine.run_jrpc(from_dynamic(&req)?, None),
                 )?)
             });
         let babel_engine = self.babel_engine.clone();
-        self.rhai_engine.register_fn("run_rest", move |url: &str| {
-            to_dynamic(into_rhai_result(babel_engine.run_rest(url, None))?)
-        });
+        self.rhai_engine
+            .register_fn("run_rest", move |req: Dynamic, timeout: i64| {
+                let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
+                to_dynamic(into_rhai_result(babel_engine.run_rest(
+                    from_dynamic(&req)?,
+                    Some(Duration::from_secs(timeout)),
+                ))?)
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("run_rest", move |req: Dynamic| {
+                to_dynamic(into_rhai_result(
+                    babel_engine.run_rest(from_dynamic(&req)?, None),
+                )?)
+            });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_sh", move |body: &str, timeout: i64| {
@@ -273,7 +276,8 @@ fn into_rhai_result<T>(result: Result<T>) -> std::result::Result<T, Box<rhai::Ev
 mod tests {
     use super::*;
     use crate::engine::{
-        HttpResponse, JobConfig, JobStatus, JobType, RestartConfig, RestartPolicy, ShResponse,
+        HttpResponse, JobConfig, JobStatus, JobType, JrpcRequest, RestRequest, RestartConfig,
+        RestartPolicy, ShResponse,
     };
     use crate::metadata::{firewall, BabelConfig, NetConfiguration, NetType, Requirements};
     use anyhow::bail;
@@ -287,8 +291,8 @@ mod tests {
             fn start_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
             fn stop_job(&self, job_name: &str) -> Result<()>;
             fn job_status(&self, job_name: &str) -> Result<JobStatus>;
-            fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>) -> Result<HttpResponse>;
-            fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<HttpResponse>;
+            fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
+            fn run_rest(&self, req: RestRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
             fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<ShResponse>;
             fn sanitize_sh_param(&self, param: &str) -> Result<String>;
             fn render_template(
@@ -436,12 +440,12 @@ mod tests {
         });
         stop_job("test_job_name");
         out += "|" + job_status("test_job_name");
-        out += "|" + run_jrpc("host", "method").body;
-        out += "|" + run_jrpc("host", "method", 1).body;
-        let http_out = run_rest("url");
+        out += "|" + run_jrpc(#{host: "host", method: "method"}).body;
+        out += "|" + run_jrpc(#{host: "host", method: "method"}, 1).body;
+        let http_out = run_rest(#{url: "url"});
         out += "|" + http_out.body;
         out += "|" + http_out.status_code;
-        out += "|" + run_rest("url", 2).body;
+        out += "|" + run_rest(#{url: "url"}, 2).body;
         out += "|" + run_sh("body").stdout;
         let sh_out = run_sh("body", 3);
         out += "|" + sh_out.stderr;
@@ -516,11 +520,14 @@ mod tests {
         babel
             .expect_run_jrpc()
             .with(
-                predicate::eq("host"),
-                predicate::eq("method"),
+                predicate::eq(JrpcRequest {
+                    host: "host".to_string(),
+                    method: "method".to_string(),
+                    headers: None,
+                }),
                 predicate::eq(None),
             )
-            .return_once(|_, _, _| {
+            .return_once(|_, _| {
                 Ok(HttpResponse {
                     status_code: 200,
                     body: "jrpc_response".to_string(),
@@ -529,11 +536,14 @@ mod tests {
         babel
             .expect_run_jrpc()
             .with(
-                predicate::eq("host"),
-                predicate::eq("method"),
+                predicate::eq(JrpcRequest {
+                    host: "host".to_string(),
+                    method: "method".to_string(),
+                    headers: None,
+                }),
                 predicate::eq(Some(Duration::from_secs(1))),
             )
-            .return_once(|_, _, _| {
+            .return_once(|_, _| {
                 Ok(HttpResponse {
                     status_code: 200,
                     body: "jrpc_with_timeout_response".to_string(),
@@ -541,7 +551,13 @@ mod tests {
             });
         babel
             .expect_run_rest()
-            .with(predicate::eq("url"), predicate::eq(None))
+            .with(
+                predicate::eq(RestRequest {
+                    url: "url".to_string(),
+                    headers: None,
+                }),
+                predicate::eq(None),
+            )
             .return_once(|_, _| {
                 Ok(HttpResponse {
                     status_code: 200,
@@ -551,7 +567,10 @@ mod tests {
         babel
             .expect_run_rest()
             .with(
-                predicate::eq("url"),
+                predicate::eq(RestRequest {
+                    url: "url".to_string(),
+                    headers: None,
+                }),
                 predicate::eq(Some(Duration::from_secs(2))),
             )
             .return_once(|_, _| {

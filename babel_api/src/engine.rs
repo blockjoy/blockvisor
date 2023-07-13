@@ -1,9 +1,11 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tracing::log::Level;
-pub use url::Url;
 
 /// Plugin engin must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -15,11 +17,10 @@ pub trait Engine {
     fn job_status(&self, job_name: &str) -> Result<JobStatus>;
 
     /// Execute Jrpc request to the current blockchain and return its http response. See `HttpResponse`.
-    fn run_jrpc(&self, host: &str, method: &str, timeout: Option<Duration>)
-        -> Result<HttpResponse>;
+    fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
 
     /// Execute a Rest request to the current blockchain and return its http response. See `HttpResponse`.
-    fn run_rest(&self, url: &str, timeout: Option<Duration>) -> Result<HttpResponse>;
+    fn run_rest(&self, req: RestRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
 
     /// Run Sh script on the blockchain VM and return its response. See `ShResponse` for details.
     fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<ShResponse>;
@@ -192,6 +193,26 @@ pub enum JobType {
         /// Source directory with files to be uploaded.
         source: PathBuf,
     },
+}
+
+/// Jrpc request
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct JrpcRequest {
+    /// This is the host for the JSON rpc request.
+    pub host: String,
+    /// The name of the jRPC method that we are going to call into.
+    pub method: String,
+    /// Extra HTTP headers to be added to the request.
+    pub headers: Option<HashMap<String, String>>,
+}
+
+/// REST request
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RestRequest {
+    /// This is the url of the rest endpoint.
+    pub url: String,
+    /// Extra HTTP headers to be added to request.
+    pub headers: Option<HashMap<String, String>>,
 }
 
 /// Long running job configuration
