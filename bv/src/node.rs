@@ -13,7 +13,7 @@ use crate::{
     utils::with_timeout,
     BV_VAR_PATH,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use babel_api::{
     babelsup::SupervisorConfig,
     metadata::{firewall, BlockchainMetadata},
@@ -549,15 +549,11 @@ impl<P: Pal + Debug> Node<P> {
         let data_dir = &paths.data_dir;
         DirBuilder::new().recursive(true).create(data_dir).await?;
         let path = data_dir.join(DATA_FILE);
-        let network = data
-            .properties
-            .get("NETWORK")
-            .ok_or_else(|| anyhow!("`NETWORK` property not found"))?;
         let data_cache_path = paths
             .data_cache_dir
             .join(&data.image.protocol)
             .join(&data.image.node_type)
-            .join(network)
+            .join(&data.network)
             .join(DATA_FILE);
         let disk_size_gb = data.requirements.disk_size_gb;
 
