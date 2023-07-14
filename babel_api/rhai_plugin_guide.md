@@ -409,6 +409,20 @@ fn some_function() {
 }
 ```
 
+## Add Custom HTTP Headers to JRPC and REST Requests
+
+`request` parameter in `run_jrpc` and `run_rest` functions has optional `headers` field,
+that can be used to add custom HTTP headers to the request.
+
+**Example:**
+```rust
+let data = #{host: "localhost:8154", 
+             method: "getBlockByNumber", 
+             headers: #{"content-type": "application/json"}
+            };
+run_jrpc(data);
+```
+
 ## Handling JRPC Output
 
 `run_jrpc` function return raw http response. Use `parse_json` on response body, to easily access json fields.
