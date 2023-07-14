@@ -147,7 +147,7 @@ fn custom_download(param) {
     start_job("download", #{
         job_type: #{
             download: #{
-                destination: "/var/lib/babel/",
+                destination: "/blockjoy/miner/data",
                 manifest: parse_json(param),
             }
         },
@@ -160,7 +160,7 @@ fn upload(param) {
     start_job("upload", #{
         job_type: #{
             upload: #{
-                source: "/var/lib/babel/data/",
+                source: "/blockjoy/miner/data",
                 manifest: parse_json(param),
             }
         },
