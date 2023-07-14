@@ -80,6 +80,7 @@ where
             .properties
             .into_iter()
             .map(|p| (p.name, p.value))
+            .chain([("network".to_string(), request.network.clone())])
             .collect();
 
         self.nodes
