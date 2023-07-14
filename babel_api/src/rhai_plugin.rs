@@ -440,12 +440,12 @@ mod tests {
         });
         stop_job("test_job_name");
         out += "|" + job_status("test_job_name");
-        out += "|" + run_jrpc(#{host: "host", method: "method"}).body;
+        out += "|" + run_jrpc(#{host: "host", method: "method", headers: #{"custom_header": "header value"}}).body;
         out += "|" + run_jrpc(#{host: "host", method: "method"}, 1).body;
         let http_out = run_rest(#{url: "url"});
         out += "|" + http_out.body;
         out += "|" + http_out.status_code;
-        out += "|" + run_rest(#{url: "url"}, 2).body;
+        out += "|" + run_rest(#{url: "url", headers: #{"another-header": "another value"}}, 2).body;
         out += "|" + run_sh("body").stdout;
         let sh_out = run_sh("body", 3);
         out += "|" + sh_out.stderr;
@@ -523,7 +523,10 @@ mod tests {
                 predicate::eq(JrpcRequest {
                     host: "host".to_string(),
                     method: "method".to_string(),
-                    headers: None,
+                    headers: Some(HashMap::from_iter([(
+                        "custom_header".to_string(),
+                        "header value".to_string(),
+                    )])),
                 }),
                 predicate::eq(None),
             )
@@ -569,7 +572,10 @@ mod tests {
             .with(
                 predicate::eq(RestRequest {
                     url: "url".to_string(),
-                    headers: None,
+                    headers: Some(HashMap::from_iter([(
+                        "another-header".to_string(),
+                        "another value".to_string(),
+                    )])),
                 }),
                 predicate::eq(Some(Duration::from_secs(2))),
             )
