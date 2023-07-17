@@ -300,8 +300,14 @@ impl ChunkUploader {
 
     async fn upload_chunk(mut self, mut run: RunFlag) -> Result<Chunk> {
         let (tx, rx) = tokio::sync::oneshot::channel();
+        let content_length = self
+            .chunk
+            .destinations
+            .iter()
+            .fold(0, |acc, item| acc + item.size);
         let reader = DestinationsReader::new(
             self.chunk.destinations.clone().into_iter(),
+            content_length,
             self.max_buffer_size,
             tx,
         )?;
@@ -309,13 +315,16 @@ impl ChunkUploader {
         let body = reqwest::Body::wrap_stream(stream);
 
         select!(
-            resp = self.client.put(&self.chunk.url).body(body).send() => {
+            resp = self.client.put(&self.chunk.url).header("Content-Length", format!("{content_length}")).body(body).send() => {
                 let resp = resp?;
                 ensure!(
                     resp.status().is_success(),
                     anyhow!("server responded with {}", resp.status())
                 );
-                (self.chunk.size, self.chunk.checksum) = rx.await?;
+                let (final_size, checksum) = rx.await?;
+                self.chunk.size = final_size;
+                self.chunk.checksum = checksum;
+                self.chunk.url.clear();
             }
             _ = run.wait() => {
                 bail!("upload interrupted");
@@ -333,6 +342,7 @@ struct FileDescriptor {
 
 struct DestinationsReader {
     iter: IntoIter<FileLocation>,
+    content_length: u64,
     digest: blake3::Hasher,
     chunk_size: u64,
     current: FileDescriptor,
@@ -343,6 +353,7 @@ struct DestinationsReader {
 impl DestinationsReader {
     fn new(
         mut iter: IntoIter<FileLocation>,
+        content_length: u64,
         max_buffer_size: usize,
         summary_tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
     ) -> Result<Self> {
@@ -357,6 +368,7 @@ impl DestinationsReader {
         }?;
         Ok(Self {
             iter,
+            content_length,
             digest: blake3::Hasher::new(),
             chunk_size: 0,
             current: FileDescriptor {
@@ -396,19 +408,26 @@ impl DestinationsReader {
 
             self.digest.update(&self.buffer);
             self.chunk_size += u64::try_from(self.buffer.len())?;
+            if self.chunk_size == self.content_length {
+                self.finalize();
+            }
             Some(mem::replace(
                 &mut self.buffer,
                 Vec::with_capacity(buffer_capacity),
             ))
         } else {
-            if let Some(tx) = self.summary_tx.take() {
-                let _ = tx.send((
-                    self.chunk_size,
-                    Checksum::Blake3(self.digest.finalize().into()),
-                ));
-            }
+            self.finalize();
             None
         })
+    }
+
+    fn finalize(&mut self) {
+        if let Some(tx) = self.summary_tx.take() {
+            let _ = tx.send((
+                self.chunk_size,
+                Checksum::Blake3(self.digest.finalize().into()),
+            ));
+        }
     }
 }
 
@@ -515,7 +534,7 @@ mod tests {
                 chunks: vec![
                     Chunk {
                         key: "KeyA".to_string(),
-                        url: self.url("/url.a")?,
+                        url: Default::default(),
                         checksum: Checksum::Blake3([
                             119, 175, 9, 4, 145, 218, 117, 139, 245, 72, 66, 12, 252, 244, 95, 29,
                             198, 151, 102, 4, 20, 229, 205, 55, 90, 194, 137, 167, 103, 54, 187,
@@ -530,7 +549,7 @@ mod tests {
                     },
                     Chunk {
                         key: "KeyB".to_string(),
-                        url: self.url("/url.b")?,
+                        url: Default::default(),
                         checksum: Checksum::Blake3([
                             119, 175, 9, 4, 145, 218, 117, 139, 245, 72, 66, 12, 252, 244, 95, 29,
                             198, 151, 102, 4, 20, 229, 205, 55, 90, 194, 137, 167, 103, 54, 187,
@@ -545,7 +564,7 @@ mod tests {
                     },
                     Chunk {
                         key: "KeyC".to_string(),
-                        url: self.url("/url.c")?,
+                        url: Default::default(),
                         checksum: Checksum::Blake3([
                             140, 55, 10, 200, 137, 153, 26, 146, 228, 4, 166, 66, 49, 76, 128, 117,
                             82, 90, 240, 126, 94, 112, 246, 153, 33, 150, 131, 176, 100, 171, 105,
@@ -661,6 +680,7 @@ mod tests {
             119, 175, 9, 4, 145, 218, 117, 139, 245, 72, 66, 12, 252, 244, 95, 29, 198, 151, 102,
             4, 20, 229, 205, 55, 90, 194, 137, 167, 103, 54, 187, 43,
         ]);
+        chunk_a.url.clear();
         let chunk_b = progress
             .chunks
             .iter_mut()
@@ -671,6 +691,7 @@ mod tests {
             119, 175, 9, 4, 145, 218, 117, 139, 245, 72, 66, 12, 252, 244, 95, 29, 198, 151, 102,
             4, 20, 229, 205, 55, 90, 194, 137, 167, 103, 54, 187, 43,
         ]);
+        chunk_b.url.clear();
         write_progress_data(&job.uploader.config.progress_file_path, &Some(&progress))?;
 
         assert_eq!(

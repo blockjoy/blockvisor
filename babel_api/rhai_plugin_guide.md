@@ -313,9 +313,8 @@ Each background job has its unique name and configuration structure described by
                 },
             },
             
-            // Job restart policy.
-            restart: #{
-            
+        // Job restart policy.
+        restart: #{
             // "on_failure" key means that job is restarted only if `exit_code != 0`.
             on_failure: #{
                 // if job stay alive given amount of time (in miliseconds) backoff is reset
@@ -340,7 +339,6 @@ Each background job has its unique name and configuration structure described by
 
         // Job restart policy.
         restart: #{
-
             // "always" key means that job is always restarted - equivalent to entrypoint.
             always: #{
                 // if job stay alive given amount of time (in miliseconds) backoff is reset
