@@ -33,7 +33,7 @@ use std::{
 };
 use sysinfo::{DiskExt, System, SystemExt};
 use tokio::{select, sync::mpsc, task::JoinHandle, time::Instant};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 pub struct DownloadJob<T> {
     downloader: Downloader,
@@ -472,8 +472,9 @@ impl Writer {
                 break;
             };
             if let Err(err) = self.handle_chunk_data(chunk_data).await {
+                warn!("Writer error:  {err:#}");
                 run.stop();
-                bail!("Writer error: {err}")
+                bail!("Writer error: {err:#}")
             }
         }
         Ok(())
@@ -505,6 +506,11 @@ impl Writer {
                 file.flush()?;
             }
             Entry::Vacant(entry) => {
+                if let Some(parent) = entry.key().parent() {
+                    if !parent.exists() {
+                        fs::create_dir_all(parent)?;
+                    }
+                }
                 // file not opened yet
                 let file = File::options()
                     .create(true)
