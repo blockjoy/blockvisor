@@ -133,6 +133,15 @@ impl Uploader {
                 None => break,
             }
         }
+        // make destinations paths relative to source_dir
+        for chunk in &mut manifest.chunks {
+            for desination in &mut chunk.destinations {
+                desination.path = desination
+                    .path
+                    .strip_prefix(&self.source_dir)?
+                    .to_path_buf();
+            }
+        }
         // finally upload manifest file as json
         let manifest_body = serde_json::to_string(&manifest)?;
         let resp = reqwest::Client::new()
@@ -542,7 +551,7 @@ mod tests {
                         ]),
                         size: 91,
                         destinations: vec![FileLocation {
-                            path: self.tmp_dir.join("x"),
+                            path: PathBuf::from("x"),
                             pos: 0,
                             size: 91,
                         }],
@@ -557,7 +566,7 @@ mod tests {
                         ]),
                         size: 91,
                         destinations: vec![FileLocation {
-                            path: self.tmp_dir.join("x"),
+                            path: PathBuf::from("x"),
                             pos: 91,
                             size: 91,
                         }],
@@ -573,22 +582,22 @@ mod tests {
                         size: 93,
                         destinations: vec![
                             FileLocation {
-                                path: self.tmp_dir.join("x"),
+                                path: PathBuf::from("x"),
                                 pos: 182,
                                 size: 74,
                             },
                             FileLocation {
-                                path: self.tmp_dir.join("d1/d2/c"),
+                                path: PathBuf::from("d1/d2/c"),
                                 pos: 0,
                                 size: 3,
                             },
                             FileLocation {
-                                path: self.tmp_dir.join("d1/b"),
+                                path: PathBuf::from("d1/b"),
                                 pos: 0,
                                 size: 9,
                             },
                             FileLocation {
-                                path: self.tmp_dir.join("a"),
+                                path: PathBuf::from("a"),
                                 pos: 0,
                                 size: 7,
                             },
