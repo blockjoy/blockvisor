@@ -21,7 +21,7 @@ const LOG_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // use `setsid()` to make sure job runner won't be killed when babel is stopped with SIGINT
-    nix::unistd::setsid()?;
+    let _ = nix::unistd::setsid();
     let mut args = env::args();
     let job_name = args
         .nth(1)
