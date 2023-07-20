@@ -506,7 +506,8 @@ impl Writer {
                 file.flush()?;
             }
             Entry::Vacant(entry) => {
-                if let Some(parent) = entry.key().parent() {
+                let absolute_path = self.destination_dir.join(entry.key());
+                if let Some(parent) = absolute_path.parent() {
                     if !parent.exists() {
                         fs::create_dir_all(parent)?;
                     }
@@ -515,7 +516,7 @@ impl Writer {
                 let file = File::options()
                     .create(true)
                     .write(true)
-                    .open(self.destination_dir.join(entry.key()))?;
+                    .open(absolute_path)?;
                 let (_, file) = entry.insert((Instant::now(), file));
                 file.write_all_at(&data, pos)?;
                 file.flush()?;
@@ -1061,13 +1062,17 @@ mod tests {
                 .body(vec![0u8; 100]);
         });
 
-        let mut job = test_env.download_job(manifest);
-        job.downloader.destination_dir = PathBuf::from("/tmp/non/existing/destination");
+        let job = test_env.download_job(manifest);
+        let mut perms = fs::metadata(&job.downloader.destination_dir)?.permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&job.downloader.destination_dir, perms)?;
 
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: Writer error: No such file or directory (os error 2)".to_string()
+                message:
+                    "download_job 'name' failed with: Writer error: Permission denied (os error 13)"
+                        .to_string()
             },
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );
