@@ -212,10 +212,7 @@ impl Monitor {
             if let Ok(async_pids) = self.update_jobs(sys.processes()).await {
                 if async_pids.is_empty() {
                     // no jobs :( - just wait for job to be added
-                    select!(
-                        _ = self.job_added_rx.changed() => {}
-                        _ = run.wait() => {}
-                    );
+                    run.select(self.job_added_rx.changed()).await;
                 } else {
                     let mut futures: FuturesUnordered<_> =
                         async_pids.iter().map(|a| a.watch()).collect();

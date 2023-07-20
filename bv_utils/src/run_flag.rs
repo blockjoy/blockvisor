@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 /// Based on tokio::sync::broadcast to notify all clones about shutdown request.
 pub struct RunFlag {
     run: bool,
-    tx: broadcast::Sender<()>,
+    tx: Vec<broadcast::Sender<()>>,
     rx: broadcast::Receiver<()>,
 }
 
@@ -26,7 +26,9 @@ impl RunFlag {
     /// Set flag to `false` and send shutdown request to all clones.
     pub fn stop(&mut self) {
         self.run = false;
-        let _ = self.tx.send(());
+        for tx in &self.tx {
+            let _ = tx.send(());
+        }
     }
 
     /// Checks for pending shutdown requests and return flag value.
@@ -49,11 +51,11 @@ impl RunFlag {
         }
     }
 
-    pub async fn select<T>(&mut self, future: impl Future<Output = T>) {
+    pub async fn select<T>(&mut self, future: impl Future<Output = T>) -> Option<T> {
         tokio::select!(
-            _ = future => {},
-            _ = self.wait() => {},
-        );
+            output = future => { Some(output)},
+            _ = self.wait() => { None},
+        )
     }
 
     pub fn clone(&mut self) -> Self {
@@ -64,11 +66,25 @@ impl RunFlag {
             rx,
         }
     }
+
+    pub fn child_flag(&mut self) -> Self {
+        let (tx, rx) = broadcast::channel(1);
+        self.tx.push(tx.clone());
+        Self {
+            run: self.load(),
+            tx: vec![tx],
+            rx,
+        }
+    }
 }
 
 impl Default for RunFlag {
     fn default() -> Self {
         let (tx, rx) = broadcast::channel(1);
-        Self { run: true, tx, rx }
+        Self {
+            run: true,
+            tx: vec![tx],
+            rx,
+        }
     }
 }

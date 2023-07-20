@@ -63,18 +63,15 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
                     info!("Spawned job '{name}'");
                     self.log_buffer
                         .attach(name, child.stdout.take(), child.stderr.take());
-                    tokio::select!(
-                        exit_status = child.wait() => {
-                            let message = format!("Job '{name}' finished with {exit_status:?}");
-                            backoff
-                                .stopped(exit_status.ok().and_then(|exit| exit.code()), message)
-                                .await?;
-                        },
-                        _ = run.wait() => {
-                            info!("Job runner requested to stop, killing job '{name}'");
-                            let _ = child.kill().await;
-                        },
-                    );
+                    if let Some(exit_status) = run.select(child.wait()).await {
+                        let message = format!("Job '{name}' finished with {exit_status:?}");
+                        backoff
+                            .stopped(exit_status.ok().and_then(|exit| exit.code()), message)
+                            .await?;
+                    } else {
+                        info!("Job runner requested to stop, killing job '{name}'");
+                        let _ = child.kill().await;
+                    }
                 }
                 Err(err) => {
                     backoff

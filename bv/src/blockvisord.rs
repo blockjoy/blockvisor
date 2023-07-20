@@ -213,19 +213,16 @@ where
                     notify();
                     while run.load() {
                         debug!("MQTT watch wait...");
-                        tokio::select! {
-                            cmds = client.wait_for_pending_commands() => {
-                                match cmds {
-                                    Ok(Some(_)) => notify(),
-                                    Ok(None) => {}
-                                    Err(e) => {
-                                        warn!("MQTT error: {e:?}");
-                                        mqtt::MQTT_ERROR_COUNTER.increment(1);
-                                        break;
-                                    }
+                        if let Some(cmds) = run.select(client.wait_for_pending_commands()).await {
+                            match cmds {
+                                Ok(Some(_)) => notify(),
+                                Ok(None) => {}
+                                Err(e) => {
+                                    warn!("MQTT error: {e:?}");
+                                    mqtt::MQTT_ERROR_COUNTER.increment(1);
+                                    break;
                                 }
                             }
-                            _ = run.wait() => {}
                         }
                     }
                 }

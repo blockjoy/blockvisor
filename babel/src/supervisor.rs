@@ -53,12 +53,11 @@ async fn wait_for_setup<T: AsyncTimer>(
     babel_path: PathBuf,
     sup_config_rx: SupervisorConfigRx,
 ) -> Option<Supervisor<T>> {
-    tokio::select!(
-        setup = sup_config_rx => {
-            Some(Supervisor::new(timer, babel_path, setup.ok()?))
-        },
-        _ = run.wait() => None, // return anything
-    )
+    if let Some(setup) = run.select(sup_config_rx).await {
+        Some(Supervisor::new(timer, babel_path, setup.ok()?))
+    } else {
+        None
+    }
 }
 
 struct Supervisor<T> {

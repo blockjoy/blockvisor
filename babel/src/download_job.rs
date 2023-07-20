@@ -32,8 +32,8 @@ use std::{
     vec::IntoIter,
 };
 use sysinfo::{DiskExt, System, SystemExt};
-use tokio::{select, sync::mpsc, task::JoinHandle, time::Instant};
-use tracing::{debug, error, info, warn};
+use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
+use tracing::{debug, error, info};
 
 pub struct DownloadJob<T> {
     downloader: Downloader,
@@ -127,29 +127,37 @@ impl Downloader {
     async fn download(&mut self, mut run: RunFlag) -> Result<()> {
         self.check_disk_space()?;
         let (tx, rx) = mpsc::channel(self.config.max_runners);
-        let (downloaded_chunks, writer) = self.init_writer(run.clone(), rx);
+        let mut parallel_downloaders_run = run.child_flag();
+        let (downloaded_chunks, writer) = self.init_writer(parallel_downloaders_run.clone(), rx);
 
         let mut downloaders = ParallelChunkDownloaders::new(
-            run.clone(),
+            parallel_downloaders_run.clone(),
             tx,
             downloaded_chunks,
             &self.manifest.chunks,
             self.config.clone(),
         );
-        while run.load() {
-            downloaders.launch_more();
+        let mut downloaders_result = Ok(());
+        loop {
+            if parallel_downloaders_run.load() {
+                downloaders.launch_more();
+            }
             match downloaders.wait_for_next().await {
                 Some(Err(err)) => {
-                    run.stop();
-                    bail!(err);
+                    downloaders_result = Err(err);
+                    parallel_downloaders_run.stop();
                 }
                 Some(Ok(_)) => {}
                 None => break,
             }
         }
+        downloaders_result?;
         drop(downloaders); // drop last sender so writer know that download is done
 
         writer.await??;
+        if !run.load() {
+            bail!("download interrupted");
+        }
         cleanup_progress_data(&self.config.progress_file_path);
         Ok(())
     }
@@ -292,21 +300,22 @@ impl ChunkDownloader {
         let chunk_size = usize::try_from(self.chunk.size)?;
         let mut pos = 0;
         let mut destination = DestinationsIter::new(self.chunk.destinations.clone().into_iter())?;
-        while run.load() && pos < chunk_size {
-            select!(
-                res = self.download_part_with_retry(pos, chunk_size) => {
-                    let buffer = res?;
-                    pos += buffer.len();
-                    digest.update(&buffer);
+        while pos < chunk_size {
+            if let Some(res) = run
+                .select(self.download_part_with_retry(pos, chunk_size))
+                .await
+            {
+                let buffer = res?;
+                pos += buffer.len();
+                digest.update(&buffer);
 
-                    // TODO add decompression support here
+                // TODO add decompression support here
 
-                    self.send_to_writer(buffer, &mut destination).await?;
-                }
-                _ = run.wait() => {
-                    bail!("download interrupted");
-                }
-            );
+                self.send_to_writer(buffer, &mut destination).await?;
+            } else {
+                // interrupt download, but without error - error is raised somewhere else
+                return Ok(());
+            }
         }
         let calculated_checksum = digest.into_bytes();
         ensure!(
@@ -472,7 +481,6 @@ impl Writer {
                 break;
             };
             if let Err(err) = self.handle_chunk_data(chunk_data).await {
-                warn!("Writer error:  {err:#}");
                 run.stop();
                 bail!("Writer error: {err:#}")
             }

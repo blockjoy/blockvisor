@@ -31,7 +31,6 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::select;
 use tonic::Status;
 use tracing::{debug, error, info, instrument, log::Level, trace, warn};
 use uuid::Uuid;
@@ -319,14 +318,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     /// Listen for `NodeRequest`'s, handle them and send results back to plugin.
     async fn node_request_handler(&mut self, mut run: RunFlag) {
         while run.load() {
-            select!(
-                req = self.node_rx.recv() => {
-                    if let Some(req) = req {
-                        self.handle_node_req(req).await;
-                    }
-                }
-                _ = run.wait() => {}
-            )
+            if let Some(req) = run.select(self.node_rx.recv()).await.flatten() {
+                self.handle_node_req(req).await;
+            }
         }
     }
 

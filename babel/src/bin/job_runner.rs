@@ -6,10 +6,7 @@ use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobTy
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::{anyhow, bail};
 use std::{env, time::Duration};
-use tokio::{
-    net::UnixStream,
-    {join, select},
-};
+use tokio::{join, net::UnixStream};
 use tonic::transport::{Endpoint, Uri};
 use tracing::{debug, info};
 
@@ -108,20 +105,15 @@ async fn run_log_handler(
     );
 
     while log_run.load() {
-        select!(
-            log = log_rx.recv() => {
-                if let Ok(log) = log {
-                    while let Err(err) = client.send_log(log.clone()).await {
-                        debug!("send_log failed with: {err}");
-                        // try to send log every 1s - log server may be temporarily unavailable
-                        log_run.select(tokio::time::sleep(LOG_RETRY_INTERVAL)).await;
-                        if !log_run.load() {
-                            break;
-                        }
-                    }
+        if let Some(Ok(log)) = log_run.select(log_rx.recv()).await {
+            while let Err(err) = client.send_log(log.clone()).await {
+                debug!("send_log failed with: {err}");
+                // try to send log every 1s - log server may be temporarily unavailable
+                log_run.select(tokio::time::sleep(LOG_RETRY_INTERVAL)).await;
+                if !log_run.load() {
+                    break;
                 }
             }
-            _ = log_run.wait() => {}
-        );
+        }
     }
 }

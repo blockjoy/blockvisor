@@ -166,8 +166,8 @@ fn download(param) {
         restart: #{
             on_failure: #{
                 backoff_timeout_ms: 600000,
-                backoff_base_ms: 5000,
-                max_retries: 3,
+                backoff_base_ms: 500,
+                max_retries: 1,
             },
         },
     });

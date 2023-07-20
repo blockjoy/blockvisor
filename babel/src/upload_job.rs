@@ -22,7 +22,6 @@ use std::{
     usize,
     vec::IntoIter,
 };
-use tokio::select;
 use tracing::{debug, error, info};
 
 pub struct UploadJob<T> {
@@ -114,14 +113,21 @@ impl Uploader {
             } else {
                 self.prepare_blueprint()?
             };
-        let mut uploaders =
-            ParallelChunkUploaders::new(run.clone(), manifest.chunks.clone(), self.config.clone());
-        while run.load() {
-            uploaders.launch_more();
+        let mut parallel_uploaders_run = run.child_flag();
+        let mut uploaders = ParallelChunkUploaders::new(
+            parallel_uploaders_run.clone(),
+            manifest.chunks.clone(),
+            self.config.clone(),
+        );
+        let mut uploaders_result = Ok(());
+        loop {
+            if parallel_uploaders_run.load() {
+                uploaders.launch_more();
+            }
             match uploaders.wait_for_next().await {
                 Some(Err(err)) => {
-                    run.stop();
-                    bail!(err);
+                    uploaders_result = Err(err);
+                    parallel_uploaders_run.stop();
                 }
                 Some(Ok(chunk)) => {
                     let Some(blueprint) = manifest.chunks.iter_mut().find(|item|item.key == chunk.key) else {
@@ -132,6 +138,10 @@ impl Uploader {
                 }
                 None => break,
             }
+        }
+        uploaders_result?;
+        if !run.load() {
+            bail!("upload interrupted");
         }
         // make destinations paths relative to source_dir
         for chunk in &mut manifest.chunks {
@@ -323,22 +333,26 @@ impl ChunkUploader {
         let stream = futures_util::stream::iter(reader);
         let body = reqwest::Body::wrap_stream(stream);
 
-        select!(
-            resp = self.client.put(&self.chunk.url).header("Content-Length", format!("{content_length}")).body(body).send() => {
-                let resp = resp?;
-                ensure!(
-                    resp.status().is_success(),
-                    anyhow!("server responded with {}", resp.status())
-                );
-                let (final_size, checksum) = rx.await?;
-                self.chunk.size = final_size;
-                self.chunk.checksum = checksum;
-                self.chunk.url.clear();
-            }
-            _ = run.wait() => {
-                bail!("upload interrupted");
-            }
-        );
+        if let Some(resp) = run
+            .select(
+                self.client
+                    .put(&self.chunk.url)
+                    .header("Content-Length", format!("{content_length}"))
+                    .body(body)
+                    .send(),
+            )
+            .await
+        {
+            let resp = resp?;
+            ensure!(
+                resp.status().is_success(),
+                anyhow!("server responded with {}", resp.status())
+            );
+            let (final_size, checksum) = rx.await?;
+            self.chunk.size = final_size;
+            self.chunk.checksum = checksum;
+            self.chunk.url.clear();
+        }
         Ok(self.chunk)
     }
 }
