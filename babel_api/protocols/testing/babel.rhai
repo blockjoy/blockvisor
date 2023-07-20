@@ -144,7 +144,7 @@ fn info(param) {
 }
 
 fn custom_download(param) {
-    start_job("download", #{
+    start_job("custom_download", #{
         job_type: #{
             download: #{
                 destination: "/blockjoy/miner/data",
@@ -156,6 +156,32 @@ fn custom_download(param) {
     ""
 }
 
+fn download(param) {
+    start_job("download", #{
+        job_type: #{
+            download: #{
+                destination: "/blockjoy/miner/data",
+            }
+        },
+        restart: #{
+            on_failure: #{
+                backoff_timeout_ms: 600000,
+                backoff_base_ms: 5000,
+                max_retries: 3,
+            },
+        },
+    });
+    "Download started!"
+}
+
+fn download_status(param) {
+    job_status("download").to_string()
+}
+
+fn data_file_sha1(param) {
+    run_sh(`sha1sum /blockjoy/miner/data/${param}`).stdout
+}
+
 fn upload(param) {
     start_job("upload", #{
         job_type: #{
@@ -164,7 +190,13 @@ fn upload(param) {
                 manifest: parse_json(param),
             }
         },
-        restart: "never",
+        restart: #{
+            on_failure: #{
+                backoff_timeout_ms: 600000,
+                backoff_base_ms: 5000,
+                max_retries: 3,
+            },
+        },
     });
     ""
 }

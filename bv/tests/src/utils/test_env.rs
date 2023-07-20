@@ -1,4 +1,5 @@
 use anyhow::Result;
+use assert_cmd::assert::AssertResult;
 use assert_cmd::Command;
 use async_trait::async_trait;
 use blockvisord::{
@@ -111,7 +112,7 @@ impl TestEnv {
         bv_run(commands, stdout_pattern, Some(&self.bv_root));
     }
 
-    pub fn try_bv_run(&self, commands: &[&str], stdout_pattern: &str) -> bool {
+    pub fn try_bv_run(&self, commands: &[&str], stdout_pattern: &str) -> AssertResult {
         try_bv_run(commands, stdout_pattern, Some(&self.bv_root))
     }
 
@@ -193,7 +194,7 @@ pub fn bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
         .stdout(predicate::str::contains(stdout_pattern));
 }
 
-pub fn try_bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) -> bool {
+pub fn try_bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) -> AssertResult {
     let mut cmd = Command::cargo_bin("bv").unwrap();
     cmd.args(commands).env("NO_COLOR", "1");
     if let Some(bv_root) = bv_root {
@@ -201,7 +202,6 @@ pub fn try_bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path
     }
     cmd.assert()
         .try_stdout(predicate::str::contains(stdout_pattern))
-        .is_ok()
 }
 
 pub async fn wait_for_node_status(
@@ -212,11 +212,11 @@ pub async fn wait_for_node_status(
 ) {
     println!("wait for {status} node");
     let start = std::time::Instant::now();
-    while !try_bv_run(&["node", "status", vm_id], status, bv_root) {
+    while let Err(err) = try_bv_run(&["node", "status", vm_id], status, bv_root) {
         if start.elapsed() < timeout {
             sleep(Duration::from_secs(1)).await;
         } else {
-            panic!("timeout expired")
+            panic!("timeout expired: {err:#}")
         }
     }
 }

@@ -53,7 +53,7 @@ services:
       R2_BUNDLE_BUCKET: bundle-dev
       R2_BUCKET: cookbook-dev
       DIR_CHAINS_PREFIX: chains
-      PRESIGNED_URL_EXPIRATION: 1m
+      PRESIGNED_URL_EXPIRATION: 1h
       # key service
       KEY_SERVICE_URL: http://api:8080
       # mqtt
