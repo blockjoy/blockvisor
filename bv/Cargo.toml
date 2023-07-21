@@ -27,6 +27,10 @@ path = "src/bin/installer.rs"
 name = "bvup"
 path = "src/bin/bvup.rs"
 
+[[bin]]
+name = "blockvisord-dev"
+path = "src/bin/blockvisord-dev.rs"
+
 [dependencies]
 bv_utils = {version = "*", path = "../bv_utils"}
 anyhow = "1.0.68"

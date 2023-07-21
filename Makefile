@@ -7,6 +7,7 @@ build-release:
 	strip target/x86_64-unknown-linux-musl/release/bv
 	strip target/x86_64-unknown-linux-musl/release/bvup
 	strip target/x86_64-unknown-linux-musl/release/blockvisord
+	strip target/x86_64-unknown-linux-musl/release/blockvisord-dev
 	cargo build -p upload_manifest_generator --target x86_64-unknown-linux-musl --release
 	strip target/x86_64-unknown-linux-musl/release/upload_manifest_generator
 	cargo build -p babel --target x86_64-unknown-linux-musl --release
@@ -22,10 +23,8 @@ get-firecraker:
 	cp /tmp/fc/release-${FC_VERSION}-x86_64/firecracker-${FC_VERSION}-x86_64 /tmp/fc/firecracker
 	cp /tmp/fc/release-${FC_VERSION}-x86_64/jailer-${FC_VERSION}-x86_64 /tmp/fc/jailer
 
-bundle: get-firecraker build-release
-	rm -rf /tmp/bundle.tar.gz
+bundle-base: get-firecraker build-release
 	rm -rf /tmp/bundle
-	rm -rf /tmp/bvup
 	mkdir -p /tmp/bundle/blockvisor/bin /tmp/bundle/blockvisor/services
 	cp target/x86_64-unknown-linux-musl/release/bv /tmp/bundle/blockvisor/bin
 	cp target/x86_64-unknown-linux-musl/release/blockvisord /tmp/bundle/blockvisor/bin
@@ -38,20 +37,22 @@ bundle: get-firecraker build-release
 	mkdir -p /tmp/bundle/firecracker/bin
 	cp /tmp/fc/firecracker /tmp/bundle/firecracker/bin
 	cp /tmp/fc/jailer /tmp/bundle/firecracker/bin
-	tar -C /tmp -czvf /tmp/bundle.tar.gz bundle
 	cp target/x86_64-unknown-linux-musl/release/bvup /tmp/bvup
 
-babelsup: build-release
-	rm -rf /tmp/babelsup.tar.gz
-	rm -rf /tmp/babelsup
-	mkdir -p /tmp/babelsup/usr/bin/ /tmp/babelsup/etc/systemd/system/ /tmp/babelsup/etc/systemd/system/multi-user.target.wants/
-	cp target/x86_64-unknown-linux-musl/release/babelsup /tmp/babelsup/usr/bin/
-	cp babel/data/babelsup.service /tmp/babelsup/etc/systemd/system/
-	ln -sr /tmp/babelsup/etc/systemd/system/babelsup.service /tmp/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service
-	tar -C /tmp -czvf /tmp/babelsup.tar.gz babelsup
+bundle: bundle-base
+	rm -rf /tmp/bundle.tar.gz
+	tar -C /tmp -czvf /tmp/bundle.tar.gz bundle
+
+bundle-dev: bundle-base
+	cp target/x86_64-unknown-linux-musl/release/blockvisord-dev /tmp/bundle/blockvisor/bin/blockvisord
+	mkdir -p /tmp/bundle/babelsup/usr/bin/ /tmp/bundle/babelsup/etc/systemd/system/ /tmp/bundle/babelsup/etc/systemd/system/multi-user.target.wants/
+	cp target/x86_64-unknown-linux-musl/release/babelsup /tmp/bundle/babelsup/usr/bin/
+	cp babel/data/babelsup.service /tmp/bundle/babelsup/etc/systemd/system/
+	ln -sr /tmp/bundle/babelsup/etc/systemd/system/babelsup.service /tmp/bundle/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service
+	rm -rf /tmp/bundle-dev.tar.gz
+	tar -C /tmp -czvf /tmp/bundle-dev.tar.gz bundle
 
 upload_manifest_generator: build-release
-	rm -rf /tmp/upload_manifest_generator
 	cp target/x86_64-unknown-linux-musl/release/upload_manifest_generator /tmp/upload_manifest_generator
 
 install: bundle

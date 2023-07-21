@@ -548,14 +548,13 @@ See [test_testing.rs](tests/test_testing.rs) for example.
 
 If you want to test how rhai script integrates with BV and running node, it can be done in following way:
 
-1. Stop BV if already running: `systemctl stop blockvisor`
-2. Run BV in standalone mode, by defining `BV_STANDALONE` env variable, e.g.: `BV_STANDALONE=1 blockvisord`
-3. Create node, e.g.: `bv node create --ip 192.168.0.75 --gateway 192.168.0.1 testing/validator/0.0.1 --props='{"network": "mainnet", "TESTING_PARAM": "test_value"}'`
-4. Start node: `bv node start <node_id/node_name>`
-5. Call `bv node capabilities <node_id/node_name>`, to see available functions.
-6. Edit & Save script located in `/var/lib/blockvisor/node/<node_id>.rhai`.
-7. Run function(s) from script, that you want to test, via BV CLI: `bv node run <node_id/node_name> <function_name> [--param='string argument passed to the function']`
-8. Repeat 6-7 until done, then remember to copy script, to safe location, since it will be removed with the node on `bv node delete <node_id/node_name>` call.
+1. Install `bundle-dev` which contains modified `blockvisord` that runs in "standalone" mode.
+2. Create node, e.g.: `bv node create --ip 192.168.0.75 --gateway 192.168.0.1 testing/validator/0.0.1 --props='{"network": "mainnet", "TESTING_PARAM": "test_value"}'`
+3. Start node: `bv node start <node_id/node_name>`
+4. Call `bv node capabilities <node_id/node_name>`, to see available functions.
+5. Edit & Save script located in `/var/lib/blockvisor/node/<node_id>.rhai`.
+6. Run function(s) from script, that you want to test, via BV CLI: `bv node run <node_id/node_name> <function_name> [--param='string argument passed to the function']`
+7. Repeat 6-7 until done, then remember to copy script, to safe location, since it will be removed with the node on `bv node delete <node_id/node_name>` call.
 
 ## Check functions
 

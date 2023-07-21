@@ -41,7 +41,7 @@ jobs:
           override: true
       - name: Build bundle file
         run: >
-          make bundle
+          make bundle bundle-dev
       - name: Build babelsup
         run: >
           make babelsup
@@ -54,10 +54,6 @@ jobs:
             aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
             /tmp/bundle.tar.gz \
             s3://bundle-dev/${{ env.GIT_VERSION }}/bvd-bundle.tgz
-          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
-            aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
-            /tmp/babelsup.tar.gz \
-            s3://yafim/${{ env.GIT_VERSION }}/babelsup.tgz
       - name: Release
         uses: softprops/action-gh-release@v1
         env:
@@ -66,8 +62,8 @@ jobs:
           draft: false
           prerelease: false
           files: |
+            /tmp/bundle-dev.tar.gz
             /tmp/bundle.tar.gz
-            /tmp/babelsup.tar.gz
             /tmp/upload_manifest_generator
       - name: Publish bvup
         run: |
