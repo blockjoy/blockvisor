@@ -139,7 +139,6 @@ async fn test_bv_service_e2e() {
     execute_sql(db_url, blockchain_query);
 
     println!("bvup");
-    let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
     let url = "http://localhost:8080";
     let mqtt = "mqtt://localhost:1883";
 
@@ -147,12 +146,8 @@ async fn test_bv_service_e2e() {
         .unwrap()
         .args([&provision_token, "--skip-download"])
         .args(["--region", "europe-bosnia-number-1"]) // this region will be auto-created in API
-        .args(["--ifa", ifa])
         .args(["--api", url])
         .args(["--mqtt", mqtt])
-        .args(["--ip-gateway", "216.18.214.193"])
-        .args(["--ip-range-from", "216.18.214.195"])
-        .args(["--ip-range-to", "216.18.214.206"])
         .args(["--yes"])
         .assert()
         .success()
