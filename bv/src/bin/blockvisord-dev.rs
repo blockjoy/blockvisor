@@ -5,6 +5,7 @@ use blockvisord::{
     nodes::Nodes,
     pal::Pal,
     server::{bv_pb, BlockvisorServer},
+    set_bv_status,
 };
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use std::sync::Arc;
@@ -20,6 +21,7 @@ async fn main() -> Result<()> {
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION")
     );
+    set_bv_status(bv_pb::ServiceStatus::Ok).await;
 
     let mut run = RunFlag::run_until_ctrlc();
     let pal = LinuxPlatform::new()?;
