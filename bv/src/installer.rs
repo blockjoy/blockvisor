@@ -164,6 +164,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     }
 
     async fn handle_broken_installation(&self, err: Error) -> Result<()> {
+        warn!("installation failed with: {err:#}");
         self.blacklist_this_version()?;
 
         match self.backup_status {
@@ -390,11 +391,11 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     fn rollback_bv_data(&self) -> Result<()> {
         // rollback state/config
 
-        // rollback blockvisor config
-        fs::copy(
-            self.paths.backup.join(BLOCKVISOR_CONFIG),
-            self.paths.bv_root.join(CONFIG_PATH),
-        )?;
+        // rollback blockvisor config - if any
+        let backup_config_path = self.paths.backup.join(BLOCKVISOR_CONFIG);
+        if backup_config_path.exists() {
+            fs::copy(backup_config_path, self.paths.bv_root.join(CONFIG_PATH))?;
+        }
         Ok(())
     }
 

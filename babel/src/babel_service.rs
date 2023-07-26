@@ -107,12 +107,13 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             self.pal
                 .set_swap_file(config.swap_size_mb)
                 .await
-                .map_err(|err| Status::internal(format!("failed to add swap file with: {err}")))?;
+                .map_err(|err| {
+                    Status::internal(format!("failed to add swap file with: {err:#}"))
+                })?;
 
-            self.pal
-                .set_hostname(&hostname)
-                .await
-                .map_err(|err| Status::internal(format!("failed to setup hostname with: {err}")))?;
+            self.pal.set_hostname(&hostname).await.map_err(|err| {
+                Status::internal(format!("failed to setup hostname with: {err:#}"))
+            })?;
 
             self.pal
                 .mount_data_drive(&config.data_directory_mount_point)
