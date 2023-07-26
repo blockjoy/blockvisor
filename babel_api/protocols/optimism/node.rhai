@@ -120,17 +120,26 @@ const METADATA = #{
 
 // Other Vars
 const ETH_RPC_URL = "http://localhost:8545"
-const BEDROCK_JWT_PATH = "/shared/jwt.txt"
+const BEDROCK_JWT_PATH = "/blockjoy/optimism/jwt.txt"
 const INITIALIZED = "/shared/initialized"
+const BEDROCK_TAR_PATH = "/blockjoy/optimism/mainnet-bedrock.tar.zst"
+const BEDROCK_TAR_DATA_PATH = "/blockjoy/optimism/data"
+const BEDROCK_ARHIVE_URL = "https://datadirs.optimism.io/mainnet-bedrock.tar.zst"
 //  Init Node
 
 fn init(keys) {
   debug("Executing startup scripts...");
 
-  let bedrock_init = #{
+  let bedrock_init_job_config = #{
     job_type: #{
-      run_sh: `if [ !  -e "${INITIALIZED}"  ]; then echo "Create Jwt, download and untar, touch initialized"; fi`
-    }
+      run_sh: `if [ ! -e "${INITIALIZED}" ]; then
+      openssl rand -hex 32 >  ${BEDROCK_JWT_PATH};
+      wget -O ${BEDROCK_TAR_PATH} ${BEDROCK_ARHIVE_URL};
+      tar xf ${BEDROCK_TAR_PATH} --directory ${BEDROCK_TAR_DATA_PATH}
+      touch ${INITIALIZED};
+      fi`
+    },
+    restart: "never",
   }
 
   let opgeth_job_config  = #{
@@ -155,43 +164,50 @@ fn init(keys) {
       --authrpc.vhosts="*" \
       --authrpc.addr=0.0.0.0 \
       --authrpc.port=8551 \
-      --authrpc.jwtsecret=/shared/jwt.txt \
-      --rollup.sequencerhttp="${METADATA.nets.[node_params().NETWORK].sequencer_url}" \
+      --authrpc.jwtsecret=${BEDROCK_JWT_PATH} \
+      --rollup.sequencerhttp="${METADATA.nets.${node_params().NETWORK}.sequencer_url}" \
       --rollup.disabletxpoolgossip=true \
       --verbosity=3 \
       --snapshot=false`
-    }
+    },
+    restart: "never",
   }
 
   let opnode_job_config = #{
     job_type: #{
       run_sh: `./usr/local/bin/op-node --l2=http://localhost:8551  \
-      --l2.jwt-secret=/shared/jwt.txt  \
+      --l2.jwt-secret=${BEDROCK_JWT_PATH}  \
       --network=mainnet        \
       --rpc.addr=0.0.0.0 \
-      --l1=${let l = sanitize_sh_param(node_params().ETHL1);; l} \
+      --l1=${let l = sanitize_sh_param(node_params().ETHL1); l} \
       --rpc.port=9545 \
       --l1.rpckind=erigon  \
       --l1.trustrpc`
+    },
+    restart: "never",
   }
-  let res = run_sh("echo 'some initialization step'");
-  if res.exit_code != 0  {
-    throw res;
-  }
-  let param = sanitize_sh_param(node_params().TESTING_PARAM);
-  
-  
 
-  start_job("Start OP-Geth and OP-Node", #{
-      job_type: #{
-        run_sh: "echo \"Blockchain entry_point parametrized with " + param + "\"",
-      },
-      restart: #{
-          always: #{
-              backoff_timeout_ms: 60000,
-              backoff_base_ms: 10000,
-          },
-      },
-  });
+  start_job("Bedrock Init", bedrock_init_job_config);      
 }
 
+fn application_status() {
+  let res = run_jrpc(#{ host: global::API_HOST, method: "health"});
+  if res.status_code != 200 {
+      "To be fixed"
+  } else {
+      "Broadcasting"
+  }
+}
+
+fn name(){
+  let res = run_sh("cat /blockjoy/optimism/data/geth/nodekey");
+  print res.stdout;
+}
+
+fn height(){
+  let res = run_sh("cast bn");
+  print res.stdout;
+}
+
+//  Block difference 
+//  echo $(expr $(cast bn --rpc-url https://mainnet.optimism.io) - $(cast bn) )
