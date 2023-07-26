@@ -271,7 +271,7 @@ pub enum ImageCommand {
         /// Source image identifier
         source_image_id: String,
         /// New node image identifier
-        new_image_id: String,
+        destination_image_id: String,
     },
 }
 

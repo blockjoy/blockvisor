@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use babel_api::engine::JobStatus;
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, ImageCommand, NodeCommand, WorkspaceCommand},
@@ -9,14 +9,14 @@ use blockvisord::{
     node_data::{NodeDisplayInfo, NodeImage, NodeStatus},
     nodes::NodeConfig,
     pretty_table::{PrettyTable, PrettyTableRow},
-    services::cookbook::{CookbookService, IMAGES_DIR},
+    services::cookbook::{CookbookService, IMAGES_DIR, ROOT_FS_FILE},
     workspace, BV_VAR_PATH,
 };
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use clap::Parser;
 use cli_table::print_stdout;
 use petname::Petnames;
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, ffi::OsStr, fs, path::Path};
 use tokio::time::{sleep, Duration};
 use tonic::{transport, transport::Channel, Code};
 use uuid::Uuid;
@@ -174,10 +174,10 @@ async fn process_image_command(command: ImageCommand) -> Result<()> {
     match command {
         ImageCommand::Clone {
             source_image_id,
-            new_image_id,
+            destination_image_id,
         } => {
             parse_image(&source_image_id)?; // just validate source image id format
-            let new_image = parse_image(&new_image_id)?;
+            let destination_image = parse_image(&destination_image_id)?;
             let src_image_path = bv_root()
                 .join(BV_VAR_PATH)
                 .join(IMAGES_DIR)
@@ -185,18 +185,51 @@ async fn process_image_command(command: ImageCommand) -> Result<()> {
             let new_image_path = bv_root()
                 .join(BV_VAR_PATH)
                 .join(IMAGES_DIR)
-                .join(new_image_id);
+                .join(destination_image_id);
             fs::create_dir_all(&new_image_path)?;
             fs_extra::dir::copy(
                 src_image_path,
-                new_image_path,
-                &fs_extra::dir::CopyOptions::default()
-                    .overwrite(true)
-                    .content_only(true),
+                &new_image_path,
+                &fs_extra::dir::CopyOptions::default().content_only(true),
             )?;
-            let _ = workspace::set_active_image(&std::env::current_dir()?, new_image);
+            update_babelsup(&new_image_path).await?;
+            let _ = workspace::set_active_image(&std::env::current_dir()?, destination_image);
         }
     }
+    Ok(())
+}
+
+async fn update_babelsup(image_path: &Path) -> Result<()> {
+    let babelsup_path = fs::canonicalize(
+        std::env::current_exe().with_context(|| "failed to get current binary path")?,
+    )
+    .with_context(|| "non canonical current binary path")?
+    .parent()
+    .with_context(|| "invalid current binary dir - has no parent")?
+    .join("../../babelsup.tar.gz");
+    let os_img_path = image_path.join(ROOT_FS_FILE);
+    let mount_point = std::env::current_dir()?.join("rootfs");
+    fs::create_dir_all(&mount_point)?;
+
+    run_cmd("mount", [os_img_path.as_os_str(), mount_point.as_os_str()])
+        .await
+        .with_context(|| "failed to mount os.img")?;
+    let tar_result = run_cmd(
+        "tar",
+        [
+            OsStr::new("--no-same-owner"),
+            OsStr::new("--no-same-permissions"),
+            OsStr::new("-C"),
+            mount_point.as_os_str(),
+            OsStr::new("-xf"),
+            babelsup_path.as_os_str(),
+        ],
+    )
+    .await;
+    run_cmd("umount", [mount_point.as_os_str()])
+        .await
+        .with_context(|| "failed to umount os.img")?;
+    tar_result?;
     Ok(())
 }
 
