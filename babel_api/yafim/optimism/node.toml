@@ -24,7 +24,6 @@ cmds = [
 
   # Install Foundry
   "curl -L https://foundry.paradigm.xyz | bash",
-  "mkdir -p /shared/",
 
   # Terminal config
   '''

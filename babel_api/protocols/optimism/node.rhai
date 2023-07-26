@@ -120,15 +120,15 @@ const METADATA = #{
 
 // Other Vars
 const ETH_RPC_URL = "http://localhost:8545"
+const OPNODE_RPC_URL = "http://localhost:9545"
 const BEDROCK_JWT_PATH = "/blockjoy/optimism/jwt.txt"
-const INITIALIZED = "/shared/initialized"
+const INITIALIZED = "/blockjoy/optimism/initialized"
 const BEDROCK_TAR_PATH = "/blockjoy/optimism/mainnet-bedrock.tar.zst"
 const BEDROCK_TAR_DATA_PATH = "/blockjoy/optimism/data"
 const BEDROCK_ARHIVE_URL = "https://datadirs.optimism.io/mainnet-bedrock.tar.zst"
 //  Init Node
 
 fn init(keys) {
-  debug("Executing startup scripts...");
 
   let bedrock_init_job_config = #{
     job_type: #{
@@ -187,15 +187,17 @@ fn init(keys) {
     restart: "never",
   }
 
-  start_job("Bedrock Init", bedrock_init_job_config);      
+  start_job("Bedrock Init", bedrock_init_job_config);
+  start_job("OP-Geth Init", opgeth_job_config);
+  start_job("OP-Node Init", opnode_job_config);
 }
 
 fn application_status() {
-  let res = run_jrpc(#{ host: global::API_HOST, method: "health"});
+  let res = run_rest(#{ url: "${OPNODE_RPC_URL}/health"});
   if res.status_code != 200 {
-      "To be fixed"
+      "delinquent"
   } else {
-      "Broadcasting"
+      "broadcasting"
   }
 }
 
@@ -205,9 +207,17 @@ fn name(){
 }
 
 fn height(){
-  let res = run_sh("cast bn");
+  let res = run_sh("cast bn --rpc-url ${ETH_RPC_URL}");
   print res.stdout;
 }
 
-//  Block difference 
-//  echo $(expr $(cast bn --rpc-url https://mainnet.optimism.io) - $(cast bn) )
+fn block_age(){
+  let res = run_sh("echo $(expr $(date +%s) - $(cast block latest --rpc-url ${ETH_RPC_URL} -j | jq .timestamp -r |  cast to-dec))  ");
+  print res.stdout;
+}
+
+fn block_diff(){
+  let res = run_sh("echo $(expr $(cast bn --rpc-url https://mainnet.optimism.io) - $(cast bn --rpc-url ${ETH_RPC_URL}) )");
+  print res.stdout;
+}
+ 
