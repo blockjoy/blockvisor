@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use babel_api::engine::JobStatus;
 use blockvisord::{
-    cli::{App, ChainCommand, Command, HostCommand, NodeCommand},
+    cli::{App, ChainCommand, Command, HostCommand, NodeCommand, WorkspaceCommand},
     config::{Config, SharedConfig, CONFIG_PATH},
     hosts::{self, HostInfo, HostMetrics},
     internal_server,
@@ -10,6 +10,7 @@ use blockvisord::{
     nodes::NodeConfig,
     pretty_table::{PrettyTable, PrettyTableRow},
     services::cookbook::CookbookService,
+    workspace,
 };
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use clap::Parser;
@@ -76,6 +77,7 @@ async fn main() -> Result<()> {
             Ok(client) => client.process_node_command(command).await?,
             Err(e) => bail!("service is not running: {e:?}"),
         },
+        Command::Workspace { command } => process_workspace_command(command).await?,
     }
 
     Ok(())
@@ -155,6 +157,15 @@ async fn process_chain_command(command: ChainCommand) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn process_workspace_command(command: WorkspaceCommand) -> Result<()> {
+    match command {
+        WorkspaceCommand::Create { path } => {
+            workspace::create(&std::env::current_dir()?.join(path))?
+        }
+    }
     Ok(())
 }
 
@@ -278,21 +289,26 @@ impl NodeClient {
                 };
                 self.client.create_node((id, config)).await?;
                 println!("Created new node from `{image}` image with ID `{id}` and name `{name}`");
+                let _ = workspace::set_active_node(&std::env::current_dir()?, id, &name);
             }
             NodeCommand::Upgrade { id_or_names, image } => {
                 let image = parse_image(&image)?;
-                for id_or_name in id_or_names {
+                for id_or_name in node_ids_with_fallback(id_or_names, true)? {
                     let id = self.resolve_id_or_name(&id_or_name).await?;
                     self.client.upgrade_node((id, image.clone())).await?;
                     println!("Upgraded node `{id}` to `{image}` image");
                 }
             }
             NodeCommand::Start { id_or_names } => {
-                let ids = self.get_node_ids(id_or_names).await?;
+                let ids = self
+                    .get_node_ids(node_ids_with_fallback(id_or_names, false)?)
+                    .await?;
                 self.start_nodes(&ids).await?;
             }
             NodeCommand::Stop { id_or_names } => {
-                let ids = self.get_node_ids(id_or_names).await?;
+                let ids = self
+                    .get_node_ids(node_ids_with_fallback(id_or_names, false)?)
+                    .await?;
                 self.stop_nodes(&ids).await?;
             }
             NodeCommand::Delete {
@@ -300,22 +316,25 @@ impl NodeClient {
                 all,
                 yes,
             } => {
+                let mut id_or_names = node_ids_with_fallback(id_or_names, false)?;
                 // We only respect the `--all` flag when `id_or_names` is empty, in order to
                 // prevent a typo from accidentally deleting all nodes.
-                let id_or_names = if id_or_names.is_empty() && all {
-                    let confirm = ask_confirm("Are you sure you want to delete all nodes?", yes)?;
-                    if !confirm {
-                        return Ok(());
+                if id_or_names.is_empty() {
+                    if all {
+                        if ask_confirm("Are you sure you want to delete all nodes?", yes)? {
+                            id_or_names = self
+                                .fetch_nodes()
+                                .await?
+                                .into_iter()
+                                .map(|n| n.id.to_string())
+                                .collect();
+                        } else {
+                            return Ok(());
+                        }
+                    } else {
+                        bail!("<ID_OR_NAMES> neither provided nor found in the workspace");
                     }
-
-                    self.fetch_nodes()
-                        .await?
-                        .into_iter()
-                        .map(|n| n.id.to_string())
-                        .collect()
-                } else {
-                    id_or_names
-                };
+                }
                 for id_or_name in id_or_names {
                     let id = self.resolve_id_or_name(&id_or_name).await?;
                     self.client.delete_node(id).await?;
@@ -323,12 +342,16 @@ impl NodeClient {
                 }
             }
             NodeCommand::Restart { id_or_names } => {
-                let ids = self.get_node_ids(id_or_names).await?;
+                let ids = self
+                    .get_node_ids(node_ids_with_fallback(id_or_names, true)?)
+                    .await?;
                 self.stop_nodes(&ids).await?;
                 self.start_nodes(&ids).await?;
             }
             NodeCommand::Jobs { id_or_name } => {
-                let id = self.resolve_id_or_name(&id_or_name).await?;
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
+                    .await?;
                 let jobs = self.client.get_node_jobs(id).await?.into_inner();
                 if !jobs.is_empty() {
                     println!("{:<30} STATUS", "NAME");
@@ -356,7 +379,9 @@ impl NodeClient {
                 }
             }
             NodeCommand::Logs { id_or_name } => {
-                let id = self.resolve_id_or_name(&id_or_name).await?;
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
+                    .await?;
                 let logs = self.client.get_node_logs(id).await?;
                 for log in logs.into_inner() {
                     print!("{log}");
@@ -366,14 +391,16 @@ impl NodeClient {
                 id_or_name,
                 max_lines,
             } => {
-                let id = self.resolve_id_or_name(&id_or_name).await?;
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
+                    .await?;
                 let logs = self.client.get_babel_logs((id, max_lines)).await?;
                 for log in logs.into_inner() {
                     print!("{log}");
                 }
             }
             NodeCommand::Status { id_or_names } => {
-                for id_or_name in id_or_names {
+                for id_or_name in node_ids_with_fallback(id_or_names, true)? {
                     let id = self.resolve_id_or_name(&id_or_name).await?;
                     let status = self.client.get_node_status(id).await?;
                     let status = status.into_inner();
@@ -381,14 +408,18 @@ impl NodeClient {
                 }
             }
             NodeCommand::Keys { id_or_name } => {
-                let id = self.resolve_id_or_name(&id_or_name).await?;
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
+                    .await?;
                 let keys = self.client.get_node_keys(id).await?;
                 for name in keys.into_inner() {
                     println!("{name}");
                 }
             }
             NodeCommand::Capabilities { id_or_name } => {
-                let id = self.resolve_id_or_name(&id_or_name).await?;
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
+                    .await?;
                 let caps = self.list_capabilities(id).await?;
                 for cap in caps {
                     println!("{cap}");
@@ -400,7 +431,9 @@ impl NodeClient {
                 param,
                 param_file,
             } => {
-                let id = self.resolve_id_or_name(&id_or_name).await?;
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
+                    .await?;
                 let param = match param {
                     Some(param) => param,
                     None => {
@@ -429,7 +462,9 @@ impl NodeClient {
                 }
             }
             NodeCommand::Metrics { id_or_name } => {
-                let id = self.resolve_id_or_name(&id_or_name).await?;
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
+                    .await?;
                 let metrics = self.client.get_node_metrics(id).await?.into_inner();
                 println!("Block height:   {:>10}", fmt_opt(metrics.height));
                 println!("Block age:      {:>10}", fmt_opt(metrics.block_age));
@@ -442,7 +477,9 @@ impl NodeClient {
                 println!("Sync Status:    {:>10}", fmt_opt(metrics.sync_status));
             }
             NodeCommand::Check { id_or_name } => {
-                let id = self.resolve_id_or_name(&id_or_name).await?;
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
+                    .await?;
                 // prepare list of checks
                 // first go methods which SHALL and SHOULD be implemented
                 let mut methods = vec![
@@ -514,4 +551,36 @@ fn parse_image(image: &str) -> Result<NodeImage> {
         node_type: image_vec[1].to_string(),
         node_version: image_vec[2].to_string(),
     })
+}
+
+fn node_id_with_fallback(node_id: Option<String>) -> Result<String> {
+    Ok(match node_id {
+        None => {
+            if let Ok(workspace::Workspace {
+                active_node: Some(workspace::ActiveNode { id, .. }),
+                ..
+            }) = workspace::read(&std::env::current_dir()?)
+            {
+                id.to_string()
+            } else {
+                bail!("<ID_OR_NAME> neither provided nor found in the workspace");
+            }
+        }
+        Some(id) => id,
+    })
+}
+
+fn node_ids_with_fallback(mut node_ids: Vec<String>, required: bool) -> Result<Vec<String>> {
+    if node_ids.is_empty() {
+        if let Ok(workspace::Workspace {
+            active_node: Some(workspace::ActiveNode { id, .. }),
+            ..
+        }) = workspace::read(&std::env::current_dir()?)
+        {
+            node_ids.push(id.to_string());
+        } else if required {
+            bail!("<ID_OR_NAMES> neither provided nor found in the workspace");
+        }
+    }
+    Ok(node_ids)
 }

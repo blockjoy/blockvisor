@@ -242,14 +242,14 @@ async fn test_bv_service_e2e() {
 
     println!("start download job");
     test_env::bv_run(
-        &["node", "run", &node_id, "download"],
+        &["node", "run", "download", &node_id],
         "Download started!",
         None,
     );
     println!("wait for download finished");
     let start = std::time::Instant::now();
     while let Err(err) = test_env::try_bv_run(
-        &["node", "run", &node_id, "download_status"],
+        &["node", "run", "download_status", &node_id],
         r#"#{"finished": #{"exit_code": 0, "message": ""}}"#,
         None,
     ) {
@@ -261,17 +261,17 @@ async fn test_bv_service_e2e() {
     }
     println!("verify downloaded data");
     test_env::bv_run(
-        &["node", "run", "--param=file_a", &node_id, "data_file_sha1"],
+        &["node", "run", "--param=file_a", "data_file_sha1", &node_id],
         "87661bf203551efa7fa6a938a372bbba1eb36a1b",
         None,
     );
     test_env::bv_run(
-        &["node", "run", "--param=file_b", &node_id, "data_file_sha1"],
+        &["node", "run", "--param=file_b", "data_file_sha1", &node_id],
         "516e8ffce053defa048255e19b2abf3ec7f44f3d",
         None,
     );
     test_env::bv_run(
-        &["node", "run", "--param=file_c", &node_id, "data_file_sha1"],
+        &["node", "run", "--param=file_c", "data_file_sha1", &node_id],
         "f8f81579034e0dd70e42d4a72f760923c2b22dd5",
         None,
     );
@@ -280,8 +280,8 @@ async fn test_bv_service_e2e() {
             "node",
             "run",
             "--param='sub/file_d'",
-            &node_id,
             "data_file_sha1",
+            &node_id,
         ],
         "c15618007493a7a2eaff43cd38b3fbb98ddddd24",
         None,
@@ -291,8 +291,8 @@ async fn test_bv_service_e2e() {
             "node",
             "run",
             "--param='sub/file_e'",
-            &node_id,
             "data_file_sha1",
+            &node_id,
         ],
         "024262e7a10be0426cda667a29266b46d04a11fc",
         None,

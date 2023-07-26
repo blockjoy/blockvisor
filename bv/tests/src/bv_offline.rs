@@ -169,7 +169,7 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
 
     println!("upgrade running node");
     test_env.bv_run(
-        &["node", "upgrade", vm_id, "testing/validator/0.0.2"],
+        &["node", "upgrade", "testing/validator/0.0.2", vm_id],
         "Upgraded node",
     );
 
@@ -177,7 +177,7 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
     println!("generate node keys");
-    test_env.bv_run(&["node", "run", vm_id, "generate_keys"], "");
+    test_env.bv_run(&["node", "run", "generate_keys", vm_id], "");
 
     println!("check node keys");
     test_env.bv_run(&["node", "keys", vm_id], "first");
@@ -236,7 +236,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
 
     println!("stop babelsup - break node");
     // it may fail because it stop babalsup so ignore result
-    let _ = test_env.try_bv_run(&["node", "run", vm_id, "stop_babelsup"], "");
+    let _ = test_env.try_bv_run(&["node", "run", "stop_babelsup", vm_id], "");
 
     println!("list running node before recovery");
     test_env.bv_run(&["node", "status", vm_id], "Failed");
@@ -265,9 +265,9 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
     println!("disable and stop babelsup - permanently break node");
-    test_env.bv_run(&["node", "run", vm_id, "disable_babelsup"], "");
+    test_env.bv_run(&["node", "run", "disable_babelsup", vm_id], "");
     // it may fail because it stop babalsup so ignore result
-    let _ = test_env.try_bv_run(&["node", "run", vm_id, "stop_babelsup"], "");
+    let _ = test_env.try_bv_run(&["node", "run", "stop_babelsup", vm_id], "");
 
     println!("list running node before recovery");
     test_env.bv_run(&["node", "status", vm_id], "Failed");

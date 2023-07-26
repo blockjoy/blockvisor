@@ -51,6 +51,13 @@ pub enum Command {
         #[clap(subcommand)]
         command: ChainCommand,
     },
+
+    /// Manage workspace
+    #[clap(alias = "w")]
+    Workspace {
+        #[clap(subcommand)]
+        command: WorkspaceCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -91,12 +98,12 @@ pub enum NodeCommand {
     /// Upgrade node
     #[clap(alias = "u")]
     Upgrade {
-        /// Node id or name
-        #[clap(required(true))]
-        id_or_names: Vec<String>,
-
         /// Node Image identifier
         image: String,
+
+        /// Node id or name
+        #[clap(required(false))]
+        id_or_names: Vec<String>,
     },
 
     /// Start node
@@ -116,7 +123,7 @@ pub enum NodeCommand {
     /// Restart node
     Restart {
         /// One or more node id or names.
-        #[clap(required(true))]
+        #[clap(required(false))]
         id_or_names: Vec<String>,
     },
 
@@ -124,6 +131,7 @@ pub enum NodeCommand {
     #[clap(alias = "d", alias = "rm")]
     Delete {
         /// One or more node id or names.
+        #[clap(required(false))]
         id_or_names: Vec<String>,
 
         /// Delete all nodes on this host.
@@ -138,15 +146,15 @@ pub enum NodeCommand {
     /// Display node jobs logs
     #[clap(alias = "l")]
     Logs {
-        /// Node id or name
-        id_or_name: String,
+        /// Node id or name. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
     },
 
     /// Display node Babel logs
     #[clap(alias = "bl")]
     BabelLogs {
-        /// Node id or name
-        id_or_name: String,
+        /// Node id or name. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
         /// Max number of log lines returned
         #[clap(long, short, default_value = "10")]
         max_lines: u32,
@@ -155,56 +163,55 @@ pub enum NodeCommand {
     /// Get installed key names
     #[clap(alias = "k")]
     Keys {
-        /// Node id or name
-        id_or_name: String,
+        /// Node id or name. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
     },
 
     /// Get node status
     Status {
         /// One or more node id or names.
-        #[clap(required(true))]
+        #[clap(required(false))]
         id_or_names: Vec<String>,
     },
 
     /// Return supported methods that could be executed on running node via `bv node run`
     #[clap(alias = "caps")]
     Capabilities {
-        /// Node id or name
-        id_or_name: String,
+        /// Node id or name. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
     },
 
-    /// Runs a command against the blockchain node inside the guest operating system that babel is
-    /// talking to.
+    /// Runs a babel method defined by babel plugin.
     Run {
-        /// The id or name of the node that the command should be run against.
-        id_or_name: String,
         /// The method that should be called. This should be one of the methods listed when
         /// `bv node capabilities <id_or_name>` is ran.
         method: String,
-        /// The payload that should be passed to the endpoint. This should be a string.
+        /// The id or name of the node that the command should be run against. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
+        /// String parameter passed to the method.
         #[clap(long)]
         param: Option<String>,
-        /// The payload that should be passed to the endpoint. This should be a path to file with param.
+        /// Path to file with string parameter content, passed to the method.
         #[clap(long)]
         param_file: Option<PathBuf>,
     },
 
     /// Collect metrics defining the current state of the node.
     Metrics {
-        /// The id or name of the node whose metrics should be collected.
-        id_or_name: String,
+        /// The id or name of the node whose metrics should be collected. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
     },
 
     /// Execute node runtime checks.
     Check {
-        /// The id or name of the node to check.
-        id_or_name: String,
+        /// The id or name of the node to check. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
     },
 
     /// Show node jobs list.
     Jobs {
-        /// The id or name of the node to check.
-        id_or_name: String,
+        /// The id or name of the node to check. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
     },
 }
 
@@ -237,6 +244,16 @@ pub enum ChainCommand {
         /// Display the first N items
         #[clap(long, short, default_value = "10")]
         number: usize,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum WorkspaceCommand {
+    /// Create new BV workspace
+    #[clap(alias = "c")]
+    Create {
+        /// workspace relative path
+        path: String,
     },
 }
 

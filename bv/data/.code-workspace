@@ -1,0 +1,111 @@
+{
+	"folders": [{
+		"path": "."
+	}],
+	"extensions": {"recommendations": [
+        "discretegames.f5anything",
+		"rhaiscript.vscode-rhai"
+    ]},
+	"launch": {
+		"inputs": [
+			{
+			  "id": "PARAM_ID",
+			  "type": "promptString",
+			  "description": "run param"
+			},
+			{
+			  "id": "AWS_ACCESS_KEY_ID",
+			  "type": "promptString",
+			  "description": "AWS access key",
+			  "password": true
+			},
+			{
+			  "id": "AWS_SECRET_ACCESS_KEY_ID",
+			  "type": "promptString",
+			  "description": "AWS secret access key",
+			  "password": true
+			},
+			{
+			  "id": "AWS_ENDPOINT_ID",
+			  "type": "promptString",
+			  "description": "AWS endpoint url",
+			  "default": "https://19afdffb308beea3e9c1ef3a95085d3b.r2.cloudflarestorage.com"
+			},
+			{
+			  "id": "AWS_REGION_ID",
+			  "type": "promptString",
+			  "description": "AWS region",
+			  "default": "us-east-1"
+			}
+		],
+		"version": "0.2.0",
+		"configurations": [
+			{
+				"command": "bv node check",
+				"name": "check",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node run ${selectedText}",
+				"name": "run selected",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node run --param=\"${input:PARAM_ID}\" ${selectedText}",
+				"name": "run selected with param",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node start",
+				"name": "start",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node stop",
+				"name": "stop",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node jobs",
+				"name": "jobs",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node logs",
+				"name": "logs",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node babel-logs",
+				"name": "babel-logs",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "tmux attach -t $(cat .bv-workspace |jq .active_node.name| xargs)",
+				"name": "tmux",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv image snapshot",
+				"name": "snapshot",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "export AWS_ACCESS_KEY=${input:AWS_ACCESS_KEY_ID} && export AWS_SECRET_ACCESS_KEY=${input:AWS_SECRET_ACCESS_KEY_ID} && export AWS_ENDPOINT=${input:AWS_ENDPOINT_ID} && export AWS_REGION=${input:AWS_REGION_ID} && bv image publish",
+				"name": "publish",
+				"request": "launch",
+				"type": "f5anything"
+			}
+		]
+	}
+}
