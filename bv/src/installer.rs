@@ -98,6 +98,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
 
         self.preinstall()?; // TODO: try to send install failed status to the backend in error case
         if let Err(err) = self.install().await {
+            warn!("{err}");
             self.handle_broken_installation(err).await
         } else {
             // try cleanup after install, but cleanup result should not affect exit code
