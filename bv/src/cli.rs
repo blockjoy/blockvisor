@@ -58,6 +58,13 @@ pub enum Command {
         #[clap(subcommand)]
         command: WorkspaceCommand,
     },
+
+    /// Manage blockchain node images
+    #[clap(alias = "i")]
+    Image {
+        #[clap(subcommand)]
+        command: ImageCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -254,6 +261,17 @@ pub enum WorkspaceCommand {
     Create {
         /// workspace relative path
         path: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ImageCommand {
+    /// Create new node image from existing one
+    Clone {
+        /// Source image identifier
+        source_image_id: String,
+        /// New node image identifier
+        new_image_id: String,
     },
 }
 

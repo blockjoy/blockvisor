@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use babel_api::engine::JobStatus;
 use blockvisord::{
-    cli::{App, ChainCommand, Command, HostCommand, NodeCommand, WorkspaceCommand},
+    cli::{App, ChainCommand, Command, HostCommand, ImageCommand, NodeCommand, WorkspaceCommand},
     config::{Config, SharedConfig, CONFIG_PATH},
     hosts::{self, HostInfo, HostMetrics},
     internal_server,
@@ -9,8 +9,8 @@ use blockvisord::{
     node_data::{NodeDisplayInfo, NodeImage, NodeStatus},
     nodes::NodeConfig,
     pretty_table::{PrettyTable, PrettyTableRow},
-    services::cookbook::CookbookService,
-    workspace,
+    services::cookbook::{CookbookService, IMAGES_DIR},
+    workspace, BV_VAR_PATH,
 };
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use clap::Parser;
@@ -78,6 +78,7 @@ async fn main() -> Result<()> {
             Err(e) => bail!("service is not running: {e:?}"),
         },
         Command::Workspace { command } => process_workspace_command(command).await?,
+        Command::Image { command } => process_image_command(command).await?,
     }
 
     Ok(())
@@ -163,7 +164,37 @@ async fn process_chain_command(command: ChainCommand) -> Result<()> {
 async fn process_workspace_command(command: WorkspaceCommand) -> Result<()> {
     match command {
         WorkspaceCommand::Create { path } => {
-            workspace::create(&std::env::current_dir()?.join(path))?
+            workspace::create(&std::env::current_dir()?.join(path))?;
+        }
+    }
+    Ok(())
+}
+
+async fn process_image_command(command: ImageCommand) -> Result<()> {
+    match command {
+        ImageCommand::Clone {
+            source_image_id,
+            new_image_id,
+        } => {
+            parse_image(&source_image_id)?; // just validate source image id format
+            let new_image = parse_image(&new_image_id)?;
+            let src_image_path = bv_root()
+                .join(BV_VAR_PATH)
+                .join(IMAGES_DIR)
+                .join(source_image_id);
+            let new_image_path = bv_root()
+                .join(BV_VAR_PATH)
+                .join(IMAGES_DIR)
+                .join(new_image_id);
+            fs::create_dir_all(&new_image_path)?;
+            fs_extra::dir::copy(
+                src_image_path,
+                new_image_path,
+                &fs_extra::dir::CopyOptions::default()
+                    .overwrite(true)
+                    .content_only(true),
+            )?;
+            let _ = workspace::set_active_image(&std::env::current_dir()?, new_image);
         }
     }
     Ok(())
