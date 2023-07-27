@@ -149,16 +149,15 @@ impl<T: Timer, S: BvService> Installer<T, S> {
                 self.paths.this_version.to_string_lossy()
             );
             fs::create_dir_all(&self.paths.install_path).expect("failed to create install path");
-            let move_opt = fs_extra::dir::CopyOptions {
-                overwrite: true,
-                skip_exist: false,
-                buffer_size: 64000,
-                copy_inside: true,
-                content_only: false,
-                depth: 0,
-            };
-            fs_extra::dir::move_dir(bin_dir, &self.paths.this_version, &move_opt)
-                .with_context(|| "failed to move files to install path")?;
+            fs_extra::dir::move_dir(
+                bin_dir,
+                &self.paths.this_version,
+                &fs_extra::dir::CopyOptions::default()
+                    .copy_inside(true)
+                    .content_only(true)
+                    .overwrite(true),
+            )
+            .with_context(|| "failed to move files to install path")?;
         }
         Ok(())
     }
