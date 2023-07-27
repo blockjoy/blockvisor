@@ -166,7 +166,7 @@ fn height(){
             };
   response = run_jrpc(getBlockByNumber);
   response_map = parse_json(resp.body);
-  parse_int(sub_string(h.result,2),16)
+  parse_int(sub_string(response_map.result,2),16)
 }
 
 fn block_age(){
