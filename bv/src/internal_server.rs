@@ -1,3 +1,4 @@
+use crate::node::Node;
 use crate::node_data::{NodeDisplayInfo, NodeImage, NodeStatus};
 use crate::node_metrics;
 use crate::nodes::{self, Nodes};
@@ -6,6 +7,7 @@ use crate::{get_bv_status, set_bv_status, ServiceStatus};
 use chrono::Utc;
 use std::fmt::Debug;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::instrument;
 use uuid::Uuid;
@@ -15,6 +17,7 @@ trait Service {
     fn health() -> ServiceStatus;
     fn start_update() -> ServiceStatus;
     fn get_node_status(id: Uuid) -> NodeStatus;
+    fn get_node(id: Uuid) -> NodeDisplayInfo;
     fn get_nodes() -> Vec<NodeDisplayInfo>;
     fn create_node(id: Uuid, config: nodes::NodeConfig);
     fn upgrade_node(id: Uuid, image: NodeImage);
@@ -79,6 +82,22 @@ where
     }
 
     #[instrument(skip(self), ret(Debug))]
+    async fn get_node(&self, request: Request<Uuid>) -> Result<Response<NodeDisplayInfo>, Status> {
+        status_check().await?;
+        let id = request.into_inner();
+        let nodes_lock = self.nodes.nodes.read().await;
+        if let Some(node_lock) = nodes_lock.get(&id) {
+            Ok(Response::new(
+                self.get_node_display_info(id, node_lock)
+                    .await
+                    .map_err(|e| Status::unknown(format!("{e:#}")))?,
+            ))
+        } else {
+            Err(Status::not_found(format!("Node {id} not found")))
+        }
+    }
+
+    #[instrument(skip(self), ret(Debug))]
     async fn get_nodes(
         &self,
         _request: Request<()>,
@@ -87,39 +106,11 @@ where
         let nodes_lock = self.nodes.nodes.read().await;
         let mut nodes = vec![];
         for (id, node_lock) in nodes_lock.iter() {
-            let n = if let Ok(node) = node_lock.try_read() {
-                let status = node.status();
-                NodeDisplayInfo {
-                    id: node.data.id,
-                    name: node.data.name.clone(),
-                    image: node.data.image.clone(),
-                    status,
-                    ip: node.data.network_interface.ip().to_string(),
-                    gateway: node.data.network_interface.gateway().to_string(),
-                    uptime: node
-                        .data
-                        .started_at
-                        .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                }
-            } else {
-                let cache = self
-                    .nodes
-                    .node_data_cache(*id)
+            nodes.push(
+                self.get_node_display_info(*id, node_lock)
                     .await
-                    .map_err(|e| Status::unknown(format!("{e:#}")))?;
-                NodeDisplayInfo {
-                    id: *id,
-                    name: cache.name,
-                    image: cache.image,
-                    status: NodeStatus::Busy,
-                    ip: cache.ip,
-                    gateway: cache.gateway,
-                    uptime: cache
-                        .started_at
-                        .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                }
-            };
-            nodes.push(n);
+                    .map_err(|e| Status::unknown(format!("{e:#}")))?,
+            );
         }
         Ok(Response::new(nodes))
     }
@@ -306,5 +297,52 @@ where
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
         Ok(Response::new(metrics))
+    }
+}
+
+impl<P> State<P>
+where
+    P: 'static + Debug + Pal + Send + Sync,
+    P::NetInterface: 'static + Send + Sync,
+    P::NodeConnection: 'static + Send + Sync,
+    P::VirtualMachine: 'static + Send + Sync,
+{
+    async fn get_node_display_info(
+        &self,
+        id: Uuid,
+        node_lock: &RwLock<Node<P>>,
+    ) -> anyhow::Result<NodeDisplayInfo> {
+        Ok(if let Ok(node) = node_lock.try_read() {
+            let status = node.status();
+            NodeDisplayInfo {
+                id: node.data.id,
+                name: node.data.name.clone(),
+                image: node.data.image.clone(),
+                status,
+                ip: node.data.network_interface.ip().to_string(),
+                gateway: node.data.network_interface.gateway().to_string(),
+                uptime: node
+                    .data
+                    .started_at
+                    .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
+            }
+        } else {
+            let cache = self
+                .nodes
+                .node_data_cache(id)
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+            NodeDisplayInfo {
+                id,
+                name: cache.name,
+                image: cache.image,
+                status: NodeStatus::Busy,
+                ip: cache.ip,
+                gateway: cache.gateway,
+                uptime: cache
+                    .started_at
+                    .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
+            }
+        })
     }
 }

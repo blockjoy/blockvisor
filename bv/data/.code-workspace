@@ -95,8 +95,8 @@
 				"type": "f5anything"
 			},
 			{
-				"command": "bv image snapshot",
-				"name": "snapshot",
+				"command": "bv image capture",
+				"name": "capture",
 				"request": "launch",
 				"type": "f5anything"
 			},

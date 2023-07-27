@@ -273,6 +273,13 @@ pub enum ImageCommand {
         /// New node image identifier
         destination_image_id: String,
     },
+
+    /// Capture image files from given node.
+    /// Node must be stopped first.
+    Capture {
+        /// /// The id or name of the source node. BV tries to get it from workspace if not provided.
+        node_id_or_name: Option<String>,
+    },
 }
 
 #[derive(ValueEnum, PartialEq, Eq, Clone)]

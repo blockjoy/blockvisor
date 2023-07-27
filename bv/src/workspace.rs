@@ -1,5 +1,6 @@
 use crate::{
-    linux_platform::bv_root, node::REGISTRY_CONFIG_DIR, node_data::NodeImage, BV_VAR_PATH,
+    linux_platform::bv_root, node::REGISTRY_CONFIG_DIR, node_data::NodeImage,
+    services::cookbook::BABEL_PLUGIN_NAME, BV_VAR_PATH,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -8,7 +9,6 @@ use uuid::Uuid;
 
 const VSCODE_WORKSPACE_FILENAME: &str = ".code-workspace";
 const BV_WORKSPACE_FILENAME: &str = ".bv-workspace";
-const BABEL_PLUGIN_FILENAME: &str = "babel.rhai";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Workspace {
@@ -46,7 +46,7 @@ pub fn set_active_node(path: &Path, id: Uuid, name: &str) -> Result<()> {
         name: name.to_owned(),
     });
     fs::write(ws_path, serde_json::to_string(&workspace)?)?;
-    let plugin_link_path = path.join(BABEL_PLUGIN_FILENAME);
+    let plugin_link_path = path.join(BABEL_PLUGIN_NAME);
     let _ = fs::remove_file(&plugin_link_path);
     unix::fs::symlink(
         bv_root()
@@ -113,7 +113,7 @@ pub mod tests {
             }),
             workspace.active_node
         );
-        assert!(tmp_dir.join(BABEL_PLUGIN_FILENAME).is_symlink());
+        assert!(tmp_dir.join(BABEL_PLUGIN_NAME).is_symlink());
         Ok(())
     }
 }

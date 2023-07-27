@@ -1,22 +1,29 @@
 use anyhow::{bail, Context, Result};
 use babel_api::engine::JobStatus;
+use blockvisord::services::cookbook::KERNEL_FILE;
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, ImageCommand, NodeCommand, WorkspaceCommand},
     config::{Config, SharedConfig, CONFIG_PATH},
     hosts::{self, HostInfo, HostMetrics},
     internal_server,
     linux_platform::bv_root,
+    node::REGISTRY_CONFIG_DIR,
     node_data::{NodeDisplayInfo, NodeImage, NodeStatus},
     nodes::NodeConfig,
     pretty_table::{PrettyTable, PrettyTableRow},
-    services::cookbook::{CookbookService, IMAGES_DIR, ROOT_FS_FILE},
+    services::cookbook::{CookbookService, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOT_FS_FILE},
     workspace, BV_VAR_PATH,
 };
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use clap::Parser;
 use cli_table::print_stdout;
 use petname::Petnames;
-use std::{collections::HashMap, ffi::OsStr, fs, path::Path};
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    fs,
+    path::{Path, PathBuf},
+};
 use tokio::time::{sleep, Duration};
 use tonic::{transport, transport::Channel, Code};
 use uuid::Uuid;
@@ -78,7 +85,10 @@ async fn main() -> Result<()> {
             Err(e) => bail!("service is not running: {e:?}"),
         },
         Command::Workspace { command } => process_workspace_command(command).await?,
-        Command::Image { command } => process_image_command(command).await?,
+        Command::Image { command } => match NodeClient::new(bv_url).await {
+            Ok(client) => client.process_image_command(command).await?,
+            Err(e) => bail!("service is not running: {e:?}"),
+        },
     }
 
     Ok(())
@@ -165,35 +175,6 @@ async fn process_workspace_command(command: WorkspaceCommand) -> Result<()> {
     match command {
         WorkspaceCommand::Create { path } => {
             workspace::create(&std::env::current_dir()?.join(path))?;
-        }
-    }
-    Ok(())
-}
-
-async fn process_image_command(command: ImageCommand) -> Result<()> {
-    match command {
-        ImageCommand::Clone {
-            source_image_id,
-            destination_image_id,
-        } => {
-            parse_image(&source_image_id)?; // just validate source image id format
-            let destination_image = parse_image(&destination_image_id)?;
-            let src_image_path = bv_root()
-                .join(BV_VAR_PATH)
-                .join(IMAGES_DIR)
-                .join(source_image_id);
-            let new_image_path = bv_root()
-                .join(BV_VAR_PATH)
-                .join(IMAGES_DIR)
-                .join(destination_image_id);
-            fs::create_dir_all(&new_image_path)?;
-            fs_extra::dir::copy(
-                src_image_path,
-                &new_image_path,
-                &fs_extra::dir::CopyOptions::default().content_only(true),
-            )?;
-            update_babelsup(&new_image_path).await?;
-            let _ = workspace::set_active_image(&std::env::current_dir()?, destination_image);
         }
     }
     Ok(())
@@ -598,6 +579,63 @@ impl NodeClient {
         }
         Ok(())
     }
+
+    async fn process_image_command(mut self, command: ImageCommand) -> Result<()> {
+        match command {
+            ImageCommand::Clone {
+                source_image_id,
+                destination_image_id,
+            } => {
+                parse_image(&source_image_id)?; // just validate source image id format
+                let destination_image = parse_image(&destination_image_id)?;
+                let images_dir = build_bv_var_path().join(IMAGES_DIR);
+                let destination_image_path = images_dir.join(destination_image_id);
+                fs::create_dir_all(&destination_image_path)?;
+                fs_extra::dir::copy(
+                    images_dir.join(source_image_id),
+                    &destination_image_path,
+                    &fs_extra::dir::CopyOptions::default().content_only(true),
+                )?;
+                update_babelsup(&destination_image_path).await?;
+                let _ = workspace::set_active_image(&std::env::current_dir()?, destination_image);
+            }
+            ImageCommand::Capture { node_id_or_name } => {
+                let id = self
+                    .resolve_id_or_name(&node_id_with_fallback(node_id_or_name)?)
+                    .await?;
+                let node = self.client.get_node(id).await?.into_inner();
+                if NodeStatus::Stopped != node.status {
+                    bail!("Node must be stopped before capture!")
+                }
+                let build_bv_var_path = build_bv_var_path();
+                let image_dir = build_bv_var_path
+                    .join(IMAGES_DIR)
+                    .join(format!("{}", node.image));
+                // capture rhai script
+                fs::copy(
+                    build_bv_var_path
+                        .join(REGISTRY_CONFIG_DIR)
+                        .join(format!("{id}.rhai")),
+                    image_dir.join(BABEL_PLUGIN_NAME),
+                )?;
+                // capture kernel and os.img
+                let node_images_dir = build_bv_var_path.join(format!("firecracker/{id}/root"));
+                fs::copy(
+                    node_images_dir.join(KERNEL_FILE),
+                    image_dir.join(KERNEL_FILE),
+                )?;
+                fs::copy(
+                    node_images_dir.join(ROOT_FS_FILE),
+                    image_dir.join(ROOT_FS_FILE),
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn build_bv_var_path() -> PathBuf {
+    bv_root().join(BV_VAR_PATH)
 }
 
 fn fmt_opt<T: std::fmt::Debug>(opt: Option<T>) -> String {

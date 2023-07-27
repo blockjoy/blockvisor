@@ -537,6 +537,10 @@ mod tests {
                 &self,
                 request: tonic::Request<Uuid>,
             ) -> Result<tonic::Response<NodeStatus>, tonic::Status>;
+            async fn get_node(
+                &self,
+                _request: tonic::Request<Uuid>,
+            ) -> Result<tonic::Response<NodeDisplayInfo>, tonic::Status>;
             async fn get_nodes(
                 &self,
                 _request: tonic::Request<()>,
