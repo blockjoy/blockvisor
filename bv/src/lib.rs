@@ -2,6 +2,7 @@ extern crate core;
 
 pub mod babel_engine;
 pub mod blockvisord;
+pub mod bv;
 pub mod cli;
 pub mod config;
 pub mod firecracker_machine;
