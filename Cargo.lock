@@ -823,6 +823,7 @@ dependencies = [
  "assert_cmd",
  "assert_fs",
  "async-trait",
+ "aws-sdk-s3",
  "babel_api",
  "base64 0.21.0",
  "bv_utils",

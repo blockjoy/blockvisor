@@ -277,8 +277,31 @@ pub enum ImageCommand {
     /// Capture image files from given node.
     /// Node must be stopped first.
     Capture {
-        /// /// The id or name of the source node. BV tries to get it from workspace if not provided.
+        /// The id or name of the source node. BV tries to get it from workspace if not provided.
         node_id_or_name: Option<String>,
+    },
+
+    /// Upload image to S3 compatible storage.
+    /// Following environment variables are expected to be set:
+    /// AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+    Upload {
+        /// Node image identifier
+        image_id: Option<String>,
+        /// S3 endpoint
+        #[clap(
+            long,
+            default_value = "https://19afdffb308beea3e9c1ef3a95085d3b.r2.cloudflarestorage.com"
+        )]
+        s3_endpoint: String,
+        /// S3 region
+        #[clap(long, default_value = "us-east-1")]
+        s3_region: String,
+        /// S3 bucket
+        #[clap(long, default_value = "cookbook-dev")]
+        s3_bucket: String,
+        /// S3 prefix
+        #[clap(long, default_value = "chains")]
+        s3_prefix: String,
     },
 }
 

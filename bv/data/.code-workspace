@@ -101,8 +101,8 @@
 				"type": "f5anything"
 			},
 			{
-				"command": "export AWS_ACCESS_KEY=${input:AWS_ACCESS_KEY_ID} && export AWS_SECRET_ACCESS_KEY=${input:AWS_SECRET_ACCESS_KEY_ID} && export AWS_ENDPOINT=${input:AWS_ENDPOINT_ID} && export AWS_REGION=${input:AWS_REGION_ID} && bv image publish",
-				"name": "publish",
+				"command": "export AWS_ACCESS_KEY=${input:AWS_ACCESS_KEY_ID} && export AWS_SECRET_ACCESS_KEY=${input:AWS_SECRET_ACCESS_KEY_ID} && bv image upload",
+				"name": "upload",
 				"request": "launch",
 				"type": "f5anything"
 			}

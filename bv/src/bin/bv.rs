@@ -1,6 +1,5 @@
 use anyhow::{bail, Context, Result};
 use babel_api::engine::JobStatus;
-use blockvisord::services::cookbook::KERNEL_FILE;
 use blockvisord::{
     cli::{App, ChainCommand, Command, HostCommand, ImageCommand, NodeCommand, WorkspaceCommand},
     config::{Config, SharedConfig, CONFIG_PATH},
@@ -11,7 +10,10 @@ use blockvisord::{
     node_data::{NodeDisplayInfo, NodeImage, NodeStatus},
     nodes::NodeConfig,
     pretty_table::{PrettyTable, PrettyTableRow},
-    services::cookbook::{CookbookService, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOT_FS_FILE},
+    services::cookbook::{
+        CookbookService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR,
+        KERNEL_ARCHIVE_NAME, KERNEL_FILE, ROOT_FS_FILE,
+    },
     workspace, BV_VAR_PATH,
 };
 use bv_utils::cmd::{ask_confirm, run_cmd};
@@ -180,7 +182,7 @@ async fn process_workspace_command(command: WorkspaceCommand) -> Result<()> {
     Ok(())
 }
 
-async fn update_babelsup(image_path: &Path) -> Result<()> {
+async fn update_babelsup(image_path: &Path, image: &NodeImage) -> Result<()> {
     let babelsup_path = fs::canonicalize(
         std::env::current_exe().with_context(|| "failed to get current binary path")?,
     )
@@ -189,7 +191,10 @@ async fn update_babelsup(image_path: &Path) -> Result<()> {
     .with_context(|| "invalid current binary dir - has no parent")?
     .join("../../babelsup.tar.gz");
     let os_img_path = image_path.join(ROOT_FS_FILE);
-    let mount_point = std::env::current_dir()?.join("rootfs");
+    let mount_point = std::env::temp_dir().join(format!(
+        "{}_{}_{}_rootfs",
+        image.protocol, image.node_type, image.node_version
+    ));
     fs::create_dir_all(&mount_point)?;
 
     run_cmd("mount", [os_img_path.as_os_str(), mount_point.as_os_str()])
@@ -211,6 +216,7 @@ async fn update_babelsup(image_path: &Path) -> Result<()> {
         .await
         .with_context(|| "failed to umount os.img")?;
     tar_result?;
+    fs::remove_dir_all(mount_point)?;
     Ok(())
 }
 
@@ -596,7 +602,7 @@ impl NodeClient {
                     &destination_image_path,
                     &fs_extra::dir::CopyOptions::default().content_only(true),
                 )?;
-                update_babelsup(&destination_image_path).await?;
+                update_babelsup(&destination_image_path, &destination_image).await?;
                 let _ = workspace::set_active_image(&std::env::current_dir()?, destination_image);
             }
             ImageCommand::Capture { node_id_or_name } => {
@@ -629,7 +635,95 @@ impl NodeClient {
                     image_dir.join(ROOT_FS_FILE),
                 )?;
             }
+            ImageCommand::Upload {
+                image_id,
+                s3_endpoint,
+                s3_region,
+                s3_bucket,
+                s3_prefix,
+            } => {
+                let image_id = image_id_with_fallback(image_id)?;
+                parse_image(&image_id)?; // just validate source image id format
+                let s3_client =
+                    S3Client::new(s3_endpoint, s3_region, s3_bucket, s3_prefix, image_id)?;
+                s3_client.upload_file(BABEL_PLUGIN_NAME).await?;
+                s3_client
+                    .archive_and_upload_file(KERNEL_FILE, KERNEL_ARCHIVE_NAME)
+                    .await?;
+                s3_client
+                    .archive_and_upload_file(ROOT_FS_FILE, BABEL_ARCHIVE_IMAGE_NAME)
+                    .await?;
+            }
         }
+        Ok(())
+    }
+}
+
+struct S3Client {
+    client: aws_sdk_s3::Client,
+    s3_bucket: String,
+    s3_prefix: String,
+    image_dir: PathBuf,
+}
+
+impl S3Client {
+    fn new(
+        s3_endpoint: String,
+        s3_region: String,
+        s3_bucket: String,
+        s3_prefix: String,
+        image_id: String,
+    ) -> Result<Self> {
+        Ok(Self {
+            client: aws_sdk_s3::Client::from_conf(
+                aws_sdk_s3::Config::builder()
+                    .endpoint_url(s3_endpoint)
+                    .region(aws_sdk_s3::config::Region::new(s3_region))
+                    .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                        std::env::var("AWS_ACCESS_KEY_ID")?,
+                        std::env::var("AWS_SECRET_ACCESS_KEY")?,
+                        None,
+                        None,
+                        "Custom Provided Credentials",
+                    ))
+                    .build(),
+            ),
+            s3_bucket,
+            s3_prefix: format!("{s3_prefix}/{image_id}"),
+            image_dir: build_bv_var_path().join(IMAGES_DIR).join(image_id),
+        })
+    }
+
+    async fn upload_file(&self, file_name: &str) -> Result<()> {
+        println!(
+            "Uploading {file_name} to {}/{}/{} ...",
+            self.s3_bucket, self.s3_prefix, file_name
+        );
+        let file_path = self.image_dir.join(file_name);
+        self.client
+            .put_object()
+            .bucket(&self.s3_bucket)
+            .key(&format!("{}/{}", self.s3_prefix, file_name))
+            .set_content_length(Some(i64::try_from(file_path.metadata()?.len())?))
+            .body(aws_sdk_s3::primitives::ByteStream::from_path(file_path).await?)
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    async fn archive_and_upload_file(
+        &self,
+        file_name: &str,
+        archive_file_name: &str,
+    ) -> Result<()> {
+        println!("Archiving {file_name} ...");
+        let mut file_path = self.image_dir.join(file_name).into_os_string();
+        let archive_file_path = &self.image_dir.join(archive_file_name);
+        run_cmd("gzip", [OsStr::new("-kf"), &file_path]).await?;
+        file_path.push(".gz");
+        fs::rename(file_path, archive_file_path)?;
+        self.upload_file(archive_file_name).await?;
+        fs::remove_file(archive_file_path)?;
         Ok(())
     }
 }
@@ -685,4 +779,21 @@ fn node_ids_with_fallback(mut node_ids: Vec<String>, required: bool) -> Result<V
         }
     }
     Ok(node_ids)
+}
+
+fn image_id_with_fallback(image: Option<String>) -> Result<String> {
+    Ok(match image {
+        None => {
+            if let Ok(workspace::Workspace {
+                active_image: Some(image),
+                ..
+            }) = workspace::read(&std::env::current_dir()?)
+            {
+                format!("{image}")
+            } else {
+                bail!("<IMAGE_ID> neither provided nor found in the workspace");
+            }
+        }
+        Some(image_id) => image_id,
+    })
 }

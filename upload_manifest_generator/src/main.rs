@@ -5,18 +5,22 @@ use std::time::Duration;
 #[derive(Parser, Debug, Clone)]
 #[clap(version, about, long_about = None)]
 pub struct CmdArgs {
-    /// S3 url
-    pub s3_url: String,
-
-    /// S3 bucket
-    pub s3_bucket: String,
-
     /// S3 prefix
     pub s3_prefix: String,
-
     /// Number of slots in generated manifest.
     pub slots: usize,
-
+    /// S3 endpoint
+    #[clap(
+        long,
+        default_value = "https://19afdffb308beea3e9c1ef3a95085d3b.r2.cloudflarestorage.com"
+    )]
+    pub s3_endpoint: String,
+    /// S3 region
+    #[clap(long, default_value = "us-east-1")]
+    pub s3_region: String,
+    /// S3 bucket
+    #[clap(long, default_value = "cookbook-dev")]
+    pub s3_bucket: String,
     /// Presigned urls expire time (in seconds).
     #[clap(default_value = "86400")]
     pub expires_in_secs: u64,
@@ -27,10 +31,8 @@ pub struct CmdArgs {
 async fn main() -> Result<()> {
     let cmd_args = CmdArgs::parse();
     let s3_config = aws_sdk_s3::Config::builder()
-        .endpoint_url(&cmd_args.s3_url)
-        .region(aws_sdk_s3::config::Region::new(std::env::var(
-            "AWS_REGION",
-        )?))
+        .endpoint_url(&cmd_args.s3_endpoint)
+        .region(aws_sdk_s3::config::Region::new(cmd_args.s3_region.clone()))
         .credentials_provider(aws_sdk_s3::config::Credentials::new(
             std::env::var("AWS_ACCESS_KEY_ID")?,
             std::env::var("AWS_SECRET_ACCESS_KEY")?,
