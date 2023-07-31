@@ -14,6 +14,36 @@
 			  "description": "run param"
 			},
 			{
+			  "id": "CREATE_NODE_IP_ID",
+			  "type": "promptString",
+			  "description": "node IP address"
+			},
+			{
+			  "id": "CREATE_GATEWAY_IP_ID",
+			  "type": "promptString",
+			  "description": "gateway IP address"
+			},
+			{
+			  "id": "CREATE_PROPS_ID",
+			  "type": "promptString",
+			  "description": "the properties that are passed to the node"
+			},
+			{
+			  "id": "CREATE_NETWORK_NAME_ID",
+			  "type": "promptString",
+			  "description": "network name"
+			},
+			{
+			  "id": "CLONE_SOURCE_IMAGE_ID",
+			  "type": "promptString",
+			  "description": "source image id"
+			},
+			{
+			  "id": "CLONE_DESTINATION_IMAGE_ID",
+			  "type": "promptString",
+			  "description": "destination image id"
+			},
+			{
 			  "id": "AWS_ACCESS_KEY_ID",
 			  "type": "promptString",
 			  "description": "AWS access key",
@@ -41,71 +71,119 @@
 		"version": "0.2.0",
 		"configurations": [
 			{
-				"command": "bv node check",
-				"name": "check",
+				"command": "bv image clone ${input:CLONE_SOURCE_IMAGE_ID} ${input:CLONE_DESTINATION_IMAGE_ID}",
+				"name": "image clone",
 				"request": "launch",
 				"type": "f5anything"
 			},
 			{
-				"command": "bv node run ${selectedText}",
-				"name": "run selected",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "bv node run --param=\"${input:PARAM_ID}\" ${selectedText}",
-				"name": "run selected with param",
+				"command": "bv node create --ip ${input:CREATE_NODE_IP_ID} --gateway ${input:CREATE_GATEWAY_IP_ID} --network ${input:CREATE_NETWORK_NAME_ID} --props ${input:CREATE_PROPS_ID}",
+				"name": "node create",
 				"request": "launch",
 				"type": "f5anything"
 			},
 			{
 				"command": "bv node start",
-				"name": "start",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "bv node stop",
-				"name": "stop",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "bv node jobs",
-				"name": "jobs",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "bv node logs",
-				"name": "logs",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "bv node babel-logs",
-				"name": "babel-logs",
+				"name": "node start",
 				"request": "launch",
 				"type": "f5anything"
 			},
 			{
 				"command": "tmux attach -t $(cat .bv-workspace |jq .active_node.name| xargs)",
-				"name": "tmux",
+				"name": "node attach tmux",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node check",
+				"name": "node check",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node run ${selectedText}",
+				"name": "node run selected",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node run --param=\"${input:PARAM_ID}\" ${selectedText}",
+				"name": "node run selected with param",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node stop",
+				"name": "node stop",
 				"request": "launch",
 				"type": "f5anything"
 			},
 			{
 				"command": "bv image capture",
-				"name": "capture",
+				"name": "image capture",
 				"request": "launch",
 				"type": "f5anything"
 			},
 			{
 				"command": "export AWS_ACCESS_KEY=${input:AWS_ACCESS_KEY_ID} && export AWS_SECRET_ACCESS_KEY=${input:AWS_SECRET_ACCESS_KEY_ID} && bv image upload",
-				"name": "upload",
+				"name": "image upload",
 				"request": "launch",
 				"type": "f5anything"
 			}
+			{
+				"command": "bv node restart",
+				"name": "node restart",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node delete",
+				"name": "node delete",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node jobs",
+				"name": "node jobs",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node logs",
+				"name": "node logs",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node babel-logs",
+				"name": "node babel-logs",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node status",
+				"name": "node status",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node capabilities",
+				"name": "node capabilities",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node metrics",
+				"name": "node metrics",
+				"request": "launch",
+				"type": "f5anything"
+			},
+			{
+				"command": "bv node ls",
+				"name": "node list",
+				"request": "launch",
+				"type": "f5anything"
+			},
 		]
 	}
 }

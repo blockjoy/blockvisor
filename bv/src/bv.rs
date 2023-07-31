@@ -109,7 +109,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
         } => {
             let id = Uuid::new_v4();
             let name = Petnames::default().generate_one(3, "_");
-            let image = parse_image(&image)?;
+            let image = parse_image(&image_id_with_fallback(image)?)?;
             let props: HashMap<String, String> = props
                 .as_deref()
                 .map(serde_json::from_str)

@@ -80,9 +80,6 @@ pub enum NodeCommand {
     /// Create node
     #[clap(alias = "c")]
     Create {
-        /// Node Image identifier
-        image: String,
-
         /// Node IP Address
         #[clap(long)]
         ip: String,
@@ -100,6 +97,9 @@ pub enum NodeCommand {
         /// Blockchain network name
         #[clap(long)]
         network: String,
+
+        /// Node Image identifier
+        image: Option<String>,
     },
 
     /// Upgrade node
