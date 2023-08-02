@@ -63,7 +63,9 @@ async fn main() -> Result<()> {
         Command::Host { command } => bv::process_host_command(config, command).await?,
         Command::Chain { command } => bv::process_chain_command(command).await?,
         Command::Node { command } => bv::process_node_command(bv_url.clone(), command).await?,
-        Command::Workspace { command } => bv::process_workspace_command(command).await?,
+        Command::Workspace { command } => {
+            bv::process_workspace_command(bv_url.clone(), command).await?
+        }
         Command::Image { command } => bv::process_image_command(bv_url, command).await?,
     }
 

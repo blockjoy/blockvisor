@@ -468,10 +468,20 @@ pub async fn process_chain_command(command: ChainCommand) -> Result<()> {
     Ok(())
 }
 
-pub async fn process_workspace_command(command: WorkspaceCommand) -> Result<()> {
+pub async fn process_workspace_command(bv_url: String, command: WorkspaceCommand) -> Result<()> {
+    let current_dir = std::env::current_dir()?;
     match command {
         WorkspaceCommand::Create { path } => {
-            workspace::create(&std::env::current_dir()?.join(path))?;
+            workspace::create(&current_dir.join(path))?;
+        }
+        WorkspaceCommand::SetActiveNode { id_or_name } => {
+            let mut client = NodeClient::new(bv_url).await?;
+            let id = client.resolve_id_or_name(&id_or_name).await?;
+            let node = client.get_node(id).await?.into_inner();
+            workspace::set_active_node(&current_dir, id, &node.name)?;
+        }
+        WorkspaceCommand::SetActiveImage { image_id } => {
+            workspace::set_active_image(&current_dir, parse_image(&image_id)?)?;
         }
     }
     Ok(())

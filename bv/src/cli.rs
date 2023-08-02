@@ -270,6 +270,20 @@ pub enum WorkspaceCommand {
         /// workspace relative path
         path: String,
     },
+
+    /// Set active node for current workspace (override previously set).
+    #[clap(alias = "n")]
+    SetActiveNode {
+        /// The id or name of the node
+        id_or_name: String,
+    },
+
+    /// Set active image for current workspace (override previously set).
+    #[clap(alias = "i")]
+    SetActiveImage {
+        /// The id of node image
+        image_id: String,
+    },
 }
 
 #[derive(Subcommand)]
