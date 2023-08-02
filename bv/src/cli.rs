@@ -125,6 +125,10 @@ pub enum NodeCommand {
         /// One or more node id or names.
         #[clap(required(false))]
         id_or_names: Vec<String>,
+
+        /// Try to stop node, even if its in failed state.
+        #[clap(long)]
+        force: bool,
     },
 
     /// Restart node
@@ -132,6 +136,10 @@ pub enum NodeCommand {
         /// One or more node id or names.
         #[clap(required(false))]
         id_or_names: Vec<String>,
+
+        /// Try to restart node, even if its in failed state.
+        #[clap(long)]
+        force: bool,
     },
 
     /// Delete node and clean up resources

@@ -22,7 +22,7 @@ trait Service {
     fn create_node(id: Uuid, config: nodes::NodeConfig);
     fn upgrade_node(id: Uuid, image: NodeImage);
     fn start_node(id: Uuid);
-    fn stop_node(id: Uuid);
+    fn stop_node(id: Uuid, force: bool);
     fn delete_node(id: Uuid);
     fn get_node_jobs(id: Uuid) -> Vec<(String, babel_api::engine::JobStatus)>;
     fn get_node_logs(id: Uuid) -> Vec<String>;
@@ -166,11 +166,11 @@ where
     }
 
     #[instrument(skip(self), ret(Debug))]
-    async fn stop_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
+    async fn stop_node(&self, request: Request<(Uuid, bool)>) -> Result<Response<()>, Status> {
         status_check().await?;
-        let id = request.into_inner();
+        let (id, force) = request.into_inner();
         self.nodes
-            .stop(id)
+            .stop(id, force)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
         Ok(Response::new(()))

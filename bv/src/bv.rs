@@ -146,11 +146,11 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 .await?;
             client.start_nodes(&ids).await?;
         }
-        NodeCommand::Stop { id_or_names } => {
+        NodeCommand::Stop { id_or_names, force } => {
             let ids = client
                 .get_node_ids(node_ids_with_fallback(id_or_names, false)?)
                 .await?;
-            client.stop_nodes(&ids).await?;
+            client.stop_nodes(&ids, force).await?;
         }
         NodeCommand::Delete {
             id_or_names,
@@ -183,11 +183,11 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 println!("Deleted node `{id_or_name}`");
             }
         }
-        NodeCommand::Restart { id_or_names } => {
+        NodeCommand::Restart { id_or_names, force } => {
             let ids = client
                 .get_node_ids(node_ids_with_fallback(id_or_names, true)?)
                 .await?;
-            client.stop_nodes(&ids).await?;
+            client.stop_nodes(&ids, force).await?;
             client.start_nodes(&ids).await?;
         }
         NodeCommand::Jobs { id_or_name } => {
@@ -540,9 +540,9 @@ impl NodeClient {
         Ok(())
     }
 
-    async fn stop_nodes(&mut self, ids: &[Uuid]) -> Result<()> {
+    async fn stop_nodes(&mut self, ids: &[Uuid], force: bool) -> Result<()> {
         for id in ids {
-            self.client.stop_node(*id).await?;
+            self.client.stop_node((*id, force)).await?;
             println!("Stopped node `{id}`");
         }
         Ok(())

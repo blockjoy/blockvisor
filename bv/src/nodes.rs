@@ -198,7 +198,7 @@ impl<P: Pal + Debug> Nodes<P> {
                 .await;
 
             let need_to_restart = node.status() == NodeStatus::Running;
-            self.node_stop(&mut node).await?;
+            self.node_stop(&mut node, false).await?;
 
             let data = &node.data;
             if image.protocol != data.image.protocol {
@@ -423,7 +423,7 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn stop(&self, id: Uuid) -> Result<()> {
+    pub async fn stop(&self, id: Uuid, force: bool) -> Result<()> {
         let nodes_lock = self.nodes.read().await;
         let mut node = nodes_lock
             .get(&id)
@@ -431,11 +431,11 @@ impl<P: Pal + Debug> Nodes<P> {
             .write()
             .await;
 
-        self.node_stop(&mut node).await
+        self.node_stop(&mut node, force).await
     }
 
-    async fn node_stop(&self, node: &mut Node<P>) -> Result<()> {
-        if NodeStatus::Stopped != node.expected_status() {
+    async fn node_stop(&self, node: &mut Node<P>, force: bool) -> Result<()> {
+        if NodeStatus::Stopped != node.expected_status() || force {
             node.stop().await?;
             debug!("Node stopped");
             node.set_expected_status(NodeStatus::Stopped).await?;

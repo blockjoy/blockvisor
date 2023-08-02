@@ -560,7 +560,7 @@ mod tests {
             ) -> Result<tonic::Response<()>, tonic::Status>;
             async fn delete_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn start_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
-            async fn stop_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
+            async fn stop_node(&self, request: tonic::Request<(Uuid, bool)>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn get_node_jobs(
                 &self,
                 request: tonic::Request<Uuid>,
