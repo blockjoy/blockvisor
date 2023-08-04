@@ -19,6 +19,7 @@ use babel_api::engine::JobStatus;
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use cli_table::print_stdout;
 use petname::Petnames;
+use std::future::Future;
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -398,7 +399,14 @@ pub async fn process_image_command(bv_url: String, command: ImageCommand) -> Res
                 .await?;
             let node = client.get_node(id).await?.into_inner();
             if NodeStatus::Stopped != node.status {
-                bail!("Node must be stopped before capture!")
+                if ask_confirm(
+                    "Node must be stopped before capture! Do you want to stop it now?",
+                    false,
+                )? {
+                    client.stop_node((id, true)).await?;
+                } else {
+                    bail!("Can't capture running node!")
+                }
             }
             let build_bv_var_path = build_bv_var_path();
             let image_dir = build_bv_var_path
@@ -421,6 +429,7 @@ pub async fn process_image_command(bv_url: String, command: ImageCommand) -> Res
                 node_images_dir.join(ROOT_FS_FILE),
                 image_dir.join(ROOT_FS_FILE),
             )?;
+            cleanup_rootfs(&image_dir, &node.image).await?;
         }
         ImageCommand::Upload {
             image_id,
@@ -699,13 +708,45 @@ fn image_id_with_fallback(image: Option<String>) -> Result<String> {
 }
 
 async fn update_babelsup(image_path: &Path, image: &NodeImage) -> Result<()> {
-    let babelsup_path = fs::canonicalize(
-        std::env::current_exe().with_context(|| "failed to get current binary path")?,
-    )
-    .with_context(|| "non canonical current binary path")?
-    .parent()
-    .with_context(|| "invalid current binary dir - has no parent")?
-    .join("../../babelsup.tar.gz");
+    on_rootfs(image_path, image, |mount_point| async move {
+        let babelsup_path = fs::canonicalize(
+            std::env::current_exe().with_context(|| "failed to get current binary path")?,
+        )
+        .with_context(|| "non canonical current binary path")?
+        .parent()
+        .with_context(|| "invalid current binary dir - has no parent")?
+        .join("../../babelsup.tar.gz");
+        run_cmd(
+            "tar",
+            [
+                OsStr::new("--no-same-owner"),
+                OsStr::new("--no-same-permissions"),
+                OsStr::new("-C"),
+                mount_point.as_os_str(),
+                OsStr::new("-xf"),
+                babelsup_path.as_os_str(),
+            ],
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+/// Cleanup rootfs from babel state remnants (remove /var/lib/babel).
+async fn cleanup_rootfs(image_path: &Path, image: &NodeImage) -> Result<()> {
+    on_rootfs(image_path, image, |mount_point| async move {
+        fs::remove_dir_all(mount_point.join("var/lib/babel"))?;
+        Ok(())
+    })
+    .await
+}
+
+async fn on_rootfs<C: FnOnce(PathBuf) -> F, F: Future<Output = Result<()>>>(
+    image_path: &Path,
+    image: &NodeImage,
+    call: C,
+) -> Result<()> {
     let os_img_path = image_path.join(ROOT_FS_FILE);
     let mount_point = std::env::temp_dir().join(format!(
         "{}_{}_{}_rootfs",
@@ -716,22 +757,10 @@ async fn update_babelsup(image_path: &Path, image: &NodeImage) -> Result<()> {
     run_cmd("mount", [os_img_path.as_os_str(), mount_point.as_os_str()])
         .await
         .with_context(|| "failed to mount os.img")?;
-    let tar_result = run_cmd(
-        "tar",
-        [
-            OsStr::new("--no-same-owner"),
-            OsStr::new("--no-same-permissions"),
-            OsStr::new("-C"),
-            mount_point.as_os_str(),
-            OsStr::new("-xf"),
-            babelsup_path.as_os_str(),
-        ],
-    )
-    .await;
+    let call_result = call(mount_point.clone()).await;
     run_cmd("umount", [mount_point.as_os_str()])
         .await
         .with_context(|| "failed to umount os.img")?;
-    tar_result?;
-    fs::remove_dir_all(mount_point)?;
+    call_result?;
     Ok(())
 }
