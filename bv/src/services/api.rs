@@ -211,11 +211,11 @@ impl CommandsService {
                         // process the command
                         match process_node_command(nodes.clone(), node_command).await {
                             Err(error) => {
-                                error!("Error processing command: {error}");
+                                error!("Error processing command: {error:?}");
                                 self.send_command_update(
                                     command_id,
                                     Some(STATUS_ERROR),
-                                    Some(error.to_string()),
+                                    Some(format!("{error:?}")),
                                 )
                                 .await?;
                             }
