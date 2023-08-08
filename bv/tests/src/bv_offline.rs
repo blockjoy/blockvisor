@@ -609,8 +609,16 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             Some("Node with ip address `216.18.214.195` exists"),
             Some(1),
         ),
-        (&command_id, Some("invalid ip `invalid_ip`"), Some(1)),
-        (&command_id, Some("invalid gateway `invalid_ip`"), Some(1)),
+        (
+            &command_id,
+            Some("invalid ip `invalid_ip`\n\nCaused by:\n    invalid IP address syntax"),
+            Some(1),
+        ),
+        (
+            &command_id,
+            Some("invalid gateway `invalid_ip`\n\nCaused by:\n    invalid IP address syntax"),
+            Some(1),
+        ),
         (&command_id, None, Some(0)),
         (&command_id, None, Some(0)),
         (&command_id, None, Some(0)),
