@@ -9,13 +9,12 @@ use crate::{
     nodes::NodeConfig,
     pretty_table::{PrettyTable, PrettyTableRow},
     services::cookbook::{
-        CookbookService, KernelService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR,
-        KERNEL_ARCHIVE_NAME, KERNEL_FILE, ROOT_FS_FILE,
+        CookbookService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOT_FS_FILE,
     },
     workspace, BV_VAR_PATH,
 };
 use anyhow::{bail, Context, Result};
-use babel_api::{engine::JobStatus, rhai_plugin};
+use babel_api::engine::JobStatus;
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use cli_table::print_stdout;
 use petname::Petnames;
@@ -374,9 +373,6 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
 }
 
 pub async fn process_image_command(bv_url: String, command: ImageCommand) -> Result<()> {
-    let bv_root = bv_root();
-    let config = SharedConfig::new(Config::load(&bv_root).await?, bv_root);
-
     match command {
         ImageCommand::Create {
             image_id,
@@ -387,9 +383,7 @@ pub async fn process_image_command(bv_url: String, command: ImageCommand) -> Res
             let images_dir = build_bv_var_path().join(IMAGES_DIR);
             let destination_image_path = images_dir.join(image_id);
             fs::create_dir_all(&destination_image_path)?;
-            let script = render_rhai_file(&destination_image_path, &destination_image).await?;
-            let kernel_version = rhai_plugin::read_metadata(&script)?.kernel;
-            download_kernel_file(&config, &destination_image, &kernel_version).await?;
+            render_rhai_file(&destination_image_path, &destination_image).await?;
             bootstrap_os_image(
                 &destination_image_path,
                 &destination_image,
@@ -443,14 +437,11 @@ pub async fn process_image_command(bv_url: String, command: ImageCommand) -> Res
                     .join(format!("{id}.rhai")),
                 image_dir.join(BABEL_PLUGIN_NAME),
             )?;
-            // capture kernel and os.img
-            let node_images_dir = build_bv_var_path.join(format!("firecracker/{id}/root"));
+            // capture os.img
             fs::copy(
-                node_images_dir.join(KERNEL_FILE),
-                image_dir.join(KERNEL_FILE),
-            )?;
-            fs::copy(
-                node_images_dir.join(ROOT_FS_FILE),
+                build_bv_var_path
+                    .join(format!("firecracker/{id}/root"))
+                    .join(ROOT_FS_FILE),
                 image_dir.join(ROOT_FS_FILE),
             )?;
             cleanup_rootfs(&image_dir, &node.image).await?;
@@ -466,9 +457,6 @@ pub async fn process_image_command(bv_url: String, command: ImageCommand) -> Res
             parse_image(&image_id)?; // just validate source image id format
             let s3_client = S3Client::new(s3_endpoint, s3_region, s3_bucket, s3_prefix, image_id)?;
             s3_client.upload_file(BABEL_PLUGIN_NAME).await?;
-            s3_client
-                .archive_and_upload_file(KERNEL_FILE, KERNEL_ARCHIVE_NAME)
-                .await?;
             s3_client
                 .archive_and_upload_file(ROOT_FS_FILE, BABEL_ARCHIVE_IMAGE_NAME)
                 .await?;
@@ -803,7 +791,7 @@ async fn run_in_chroot(mount_point: &Path, cmd: &str) -> Result<()> {
     Ok(())
 }
 
-async fn render_rhai_file(image_path: &Path, image: &NodeImage) -> Result<String> {
+async fn render_rhai_file(image_path: &Path, image: &NodeImage) -> Result<()> {
     let mut context = tera::Context::new();
     context.insert("protocol", &image.protocol);
     context.insert("node_type", &image.node_type);
@@ -814,23 +802,6 @@ async fn render_rhai_file(image_path: &Path, image: &NodeImage) -> Result<String
     println!("Render rhai file at `{}`", rhai_file_path.display());
     let out_file = fs::File::create(rhai_file_path)?;
     tera.render_to("template", &context, out_file)?;
-    // return as string
-    Ok(tera.render("template", &context)?)
-}
-
-async fn download_kernel_file(
-    config: &SharedConfig,
-    image: &NodeImage,
-    kernel_version: &str,
-) -> Result<()> {
-    println!("Fetching kernel version `{kernel_version}`");
-    let mut kernel_service = KernelService::connect(config)
-        .await
-        .with_context(|| "cannot connect to kernel service")?;
-    kernel_service
-        .download_kernel(image, kernel_version)
-        .await
-        .with_context(|| "cannot download kernel")?;
     Ok(())
 }
 

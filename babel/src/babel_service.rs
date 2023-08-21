@@ -21,7 +21,7 @@ use std::{
 use thiserror::Error;
 use tokio::{
     fs,
-    fs::{DirBuilder, File},
+    fs::File,
     io::AsyncWriteExt,
     sync::{broadcast, oneshot, Mutex, RwLock},
 };
@@ -216,7 +216,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
                 (location.join(name), Some(location))
             };
             if let Some(parent) = parent_dir {
-                DirBuilder::new().recursive(true).create(parent).await?;
+                fs::create_dir_all(parent).await?;
             }
 
             // Write key content into file

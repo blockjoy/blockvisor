@@ -1,7 +1,11 @@
-use crate::node_data::NodeData;
-use crate::services::cookbook::{CookbookService, DATA_FILE, KERNEL_FILE, ROOT_FS_FILE};
-use crate::utils::get_process_pid;
-use crate::{pal, BV_VAR_PATH};
+use crate::services::kernel::KernelService;
+use crate::{
+    node_data::NodeData,
+    pal,
+    services::cookbook::{CookbookService, DATA_FILE, ROOT_FS_FILE},
+    utils::get_process_pid,
+    BV_VAR_PATH,
+};
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use firec::{config::JailerMode, Machine, MachineState};
@@ -97,8 +101,7 @@ async fn create_config(
         firec::config::network::Interface::new(data.network_interface.name().clone(), "eth0");
     let root_fs_path =
         CookbookService::get_image_download_folder_path(bv_root, &data.image).join(ROOT_FS_FILE);
-    let kernel_path =
-        CookbookService::get_image_download_folder_path(bv_root, &data.image).join(KERNEL_FILE);
+    let kernel_path = KernelService::get_kernel_path(bv_root, &data.kernel);
     let data_fs_path = build_vm_data_path(bv_root, data.id).join(DATA_FILE);
 
     let config = firec::config::Config::builder(Some(data.id), kernel_path)

@@ -5,6 +5,7 @@ use std::future::Future;
 
 pub mod api;
 pub mod cookbook;
+pub mod kernel;
 pub mod keyfiles;
 pub mod mqtt;
 

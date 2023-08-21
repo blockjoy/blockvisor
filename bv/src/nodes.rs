@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use babel_api::{
     engine::JobStatus,
-    metadata::{firewall, Requirements},
+    metadata::{firewall, BlockchainMetadata},
     rhai_plugin,
 };
 use chrono::{DateTime, Utc};
@@ -22,17 +22,17 @@ use tokio::{
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::pal::{NetInterface, Pal};
-use crate::services::cookbook::BABEL_PLUGIN_NAME;
 use crate::{
     config::SharedConfig,
     hosts::HostInfo,
     node::{build_registry_dir, Node},
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     node_metrics,
+    pal::{NetInterface, Pal},
     services::{
         api::pb,
-        cookbook::{CookbookService, KernelService},
+        cookbook::{CookbookService, BABEL_PLUGIN_NAME},
+        kernel::KernelService,
         keyfiles::KeyService,
     },
     BV_VAR_PATH,
@@ -141,14 +141,14 @@ impl<P: Pal + Debug> Nodes<P> {
             allocated_disk_size_gb += node.data.requirements.disk_size_gb;
         }
 
-        let requirements = self
+        let meta = self
             .fetch_image_data(&config.image)
             .await
             .with_context(|| "fetch image data failed")?;
 
         let host_info = HostInfo::collect()?;
         let total_gb = host_info.disk_space_bytes as usize / 1_000_000_000;
-        if (allocated_disk_size_gb + requirements.disk_size_gb) > total_gb {
+        if (allocated_disk_size_gb + meta.requirements.disk_size_gb) > total_gb {
             bail!("Not enough disk space to allocate for new node");
         }
 
@@ -166,10 +166,11 @@ impl<P: Pal + Debug> Nodes<P> {
             id,
             name: config.name.clone(),
             image: config.image,
+            kernel: meta.kernel,
             expected_status: NodeStatus::Stopped,
             started_at: None,
             network_interface,
-            requirements,
+            requirements: meta.requirements,
             properties,
             network: config.network,
             firewall_rules: config.rules,
@@ -192,7 +193,7 @@ impl<P: Pal + Debug> Nodes<P> {
     #[instrument(skip(self))]
     pub async fn upgrade(&self, id: Uuid, image: NodeImage) -> Result<()> {
         if image != self.image(id).await? {
-            let new_requirements = self.fetch_image_data(&image).await?;
+            let new_meta = self.fetch_image_data(&image).await?;
 
             let nodes_lock = self.nodes.read().await;
             let mut node = nodes_lock
@@ -211,11 +212,12 @@ impl<P: Pal + Debug> Nodes<P> {
             if image.node_type != data.image.node_type {
                 bail!("Cannot upgrade node type to `{}`", image.node_type);
             }
-            if data.requirements.vcpu_count != new_requirements.vcpu_count
-                || data.requirements.mem_size_mb != new_requirements.mem_size_mb
-                || data.requirements.disk_size_gb != new_requirements.disk_size_gb
+            if data.requirements.vcpu_count != new_meta.requirements.vcpu_count
+                || data.requirements.mem_size_mb != new_meta.requirements.mem_size_mb
+                || data.requirements.disk_size_gb != new_meta.requirements.disk_size_gb
+                || data.kernel != new_meta.kernel
             {
-                bail!("Cannot upgrade node requirements");
+                bail!("Cannot upgrade node requirements or kernel");
             }
 
             node.upgrade(&image).await?;
@@ -234,11 +236,12 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    async fn fetch_image_data(&self, image: &NodeImage) -> Result<Requirements> {
-        let folder = CookbookService::get_image_download_folder_path(self.pal.bv_root(), image);
+    async fn fetch_image_data(&self, image: &NodeImage) -> Result<BlockchainMetadata> {
+        let bv_root = self.pal.bv_root();
+        let folder = CookbookService::get_image_download_folder_path(bv_root, image);
         let rhai_path = folder.join(BABEL_PLUGIN_NAME);
 
-        let script = if !CookbookService::is_image_cache_valid(self.pal.bv_root(), image)
+        let script = if !CookbookService::is_image_cache_valid(bv_root, image)
             .await
             .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
         {
@@ -253,24 +256,26 @@ impl<P: Pal + Debug> Nodes<P> {
                 .download_image(image)
                 .await
                 .with_context(|| "cannot download image")?;
-
-            let script = fs::read_to_string(rhai_path).await?;
-            let kernel_version = rhai_plugin::read_metadata(&script)?.kernel;
+            fs::read_to_string(rhai_path).await?
+        } else {
+            fs::read_to_string(rhai_path).await?
+        };
+        let meta = rhai_plugin::read_metadata(&script)?;
+        if !KernelService::is_kernel_cache_valid(bv_root, &meta.kernel)
+            .await
+            .with_context(|| format!("Failed to check kernel cache: `{}`", meta.kernel))?
+        {
             let mut kernel_service = KernelService::connect(&self.api_config)
                 .await
                 .with_context(|| "cannot connect to kernel service")?;
             kernel_service
-                .download_kernel(image, &kernel_version)
+                .download_kernel(&meta.kernel)
                 .await
                 .with_context(|| "cannot download kernel")?;
-
-            script
-        } else {
-            fs::read_to_string(rhai_path).await?
-        };
+        }
 
         info!("Reading blockchain requirements...");
-        Ok(rhai_plugin::read_metadata(&script)?.requirements)
+        Ok(meta)
     }
 
     #[instrument(skip(self))]

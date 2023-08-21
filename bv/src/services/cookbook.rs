@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use bv_utils::with_retry;
 use std::path::{Path, PathBuf};
 use tokio::{
-    fs::{self, DirBuilder, File},
+    fs::{self, File},
     io::AsyncWriteExt,
 };
 use tonic::transport::Endpoint;
@@ -15,79 +15,13 @@ use tracing::{debug, info, instrument};
 pub const IMAGES_DIR: &str = "images";
 pub const BABEL_ARCHIVE_IMAGE_NAME: &str = "blockjoy.gz";
 pub const BABEL_IMAGE_NAME: &str = "blockjoy";
-pub const KERNEL_ARCHIVE_NAME: &str = "kernel.gz";
 pub const BABEL_PLUGIN_NAME: &str = "babel.rhai";
 pub const ROOT_FS_FILE: &str = "os.img";
-pub const KERNEL_FILE: &str = "kernel";
 pub const DATA_FILE: &str = "data.img";
 
 pub struct CookbookService {
     client: pb::cookbook_service_client::CookbookServiceClient<AuthenticatedService>,
     bv_root: PathBuf,
-}
-
-pub struct KernelService {
-    client: pb::kernel_service_client::KernelServiceClient<AuthenticatedService>,
-    bv_root: PathBuf,
-}
-
-impl KernelService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        services::connect(config, |config| async {
-            let url = config.read().await.blockjoy_api_url;
-            let endpoint = Endpoint::from_shared(url.clone())?;
-            let channel = Endpoint::connect(&endpoint)
-                .await
-                .with_context(|| format!("Failed to connect to kernel service at {url}"))?;
-            let client = pb::kernel_service_client::KernelServiceClient::with_interceptor(
-                channel,
-                config.token().await?,
-            );
-            Ok(Self {
-                client,
-                bv_root: config.bv_root.clone(),
-            })
-        })
-        .await
-    }
-
-    #[instrument(skip(self))]
-    pub async fn list_versions(&mut self, protocol: &str, node_type: &str) -> Result<Vec<String>> {
-        info!("Listing versions...");
-        let req = pb::KernelServiceListKernelVersionsRequest {};
-        let resp = with_retry!(self.client.list_kernel_versions(req.clone()))?.into_inner();
-        let mut versions: Vec<String> = resp.identifiers.into_iter().map(|id| id.version).collect();
-        // sort desc
-        versions.sort_by(|a, b| utils::semver_cmp(b, a));
-
-        Ok(versions)
-    }
-
-    #[instrument(skip(self))]
-    pub async fn download_kernel(&mut self, image: &NodeImage, version: &str) -> Result<()> {
-        info!("Downloading kernel...");
-        let archive: pb::ArchiveLocation = with_retry!(self.client.retrieve(tonic::Request::new(
-            pb::KernelServiceRetrieveRequest {
-                id: Some(pb::KernelIdentifier {
-                    version: version.to_string()
-                }),
-            }
-        )))?
-        .into_inner()
-        .location
-        .ok_or_else(|| anyhow!("missing location"))?;
-
-        let folder = CookbookService::get_image_download_folder_path(&self.bv_root, image);
-        DirBuilder::new().recursive(true).create(&folder).await?;
-        let gz = folder.join(KERNEL_ARCHIVE_NAME);
-        utils::download_archive_with_retry(&archive.url, gz)
-            .await?
-            .ungzip()
-            .await?;
-        debug!("Done downloading kernel");
-
-        Ok(())
-    }
 }
 
 impl CookbookService {
@@ -145,7 +79,7 @@ impl CookbookService {
         .rhai_content;
 
         let folder = Self::get_image_download_folder_path(&self.bv_root, image);
-        DirBuilder::new().recursive(true).create(&folder).await?;
+        fs::create_dir_all(&folder).await?;
         let path = folder.join(BABEL_PLUGIN_NAME);
         let mut f = File::create(path).await?;
         f.write_all(&rhai_content).await?;
@@ -167,7 +101,7 @@ impl CookbookService {
         .ok_or_else(|| anyhow!("missing location"))?;
 
         let folder = Self::get_image_download_folder_path(&self.bv_root, image);
-        DirBuilder::new().recursive(true).create(&folder).await?;
+        fs::create_dir_all(&folder).await?;
         let path = folder.join(ROOT_FS_FILE);
         let gz = folder.join(BABEL_ARCHIVE_IMAGE_NAME);
         utils::download_archive_with_retry(&archive.url, gz)
@@ -176,30 +110,6 @@ impl CookbookService {
             .await?;
         tokio::fs::rename(folder.join(BABEL_IMAGE_NAME), path).await?;
         debug!("Done downloading image");
-
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    pub async fn download_kernel(&mut self, image: &NodeImage) -> Result<()> {
-        info!("Downloading kernel...");
-        let archive: pb::ArchiveLocation = with_retry!(self.client.retrieve_kernel(
-            tonic::Request::new(pb::CookbookServiceRetrieveKernelRequest {
-                id: Some(image.clone().into()),
-            })
-        ))?
-        .into_inner()
-        .location
-        .ok_or_else(|| anyhow!("missing location"))?;
-
-        let folder = Self::get_image_download_folder_path(&self.bv_root, image);
-        DirBuilder::new().recursive(true).create(&folder).await?;
-        let gz = folder.join(KERNEL_ARCHIVE_NAME);
-        utils::download_archive_with_retry(&archive.url, gz)
-            .await?
-            .ungzip()
-            .await?;
-        debug!("Done downloading kernel");
 
         Ok(())
     }
@@ -217,14 +127,11 @@ impl CookbookService {
         let folder = Self::get_image_download_folder_path(bv_root, image);
 
         let root = folder.join(ROOT_FS_FILE);
-        let kernel = folder.join(KERNEL_FILE);
         let plugin = folder.join(BABEL_PLUGIN_NAME);
-        if !root.exists() || !kernel.exists() || !plugin.exists() {
+        if !root.exists() || !plugin.exists() {
             return Ok(false);
         }
 
-        Ok(fs::metadata(root).await?.len() > 0
-            && fs::metadata(kernel).await?.len() > 0
-            && fs::metadata(plugin).await?.len() > 0)
+        Ok(fs::metadata(root).await?.len() > 0 && fs::metadata(plugin).await?.len() > 0)
     }
 }

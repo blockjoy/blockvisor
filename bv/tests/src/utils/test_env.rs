@@ -9,7 +9,7 @@ use blockvisord::{
     node::REGISTRY_CONFIG_DIR,
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
-    services::cookbook::IMAGES_DIR,
+    services::{cookbook::IMAGES_DIR, kernel::KERNELS_DIR},
     BV_VAR_PATH,
 };
 use bv_utils::{cmd::run_cmd, run_flag::RunFlag};
@@ -59,6 +59,11 @@ impl TestEnv {
         std::os::unix::fs::symlink(
             Path::new("/").join(BV_VAR_PATH).join(IMAGES_DIR),
             vars_path.join(IMAGES_DIR),
+        )?;
+        // link to pre downloaded kernels in /var/lib/blockvisord/kernels
+        std::os::unix::fs::symlink(
+            Path::new("/").join(BV_VAR_PATH).join(KERNELS_DIR),
+            vars_path.join(KERNELS_DIR),
         )?;
         fs::create_dir_all(bv_root.join("usr"))?;
         // link to /usr/bin where firecracker and jailer is expected

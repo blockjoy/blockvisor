@@ -1,14 +1,15 @@
-use crate::babel_engine::NodeInfo;
 use crate::{
     babel_engine,
+    babel_engine::NodeInfo,
     config::SharedConfig,
     node_data::{NodeData, NodeImage, NodeStatus},
     pal,
     pal::NodeConnection,
     pal::VirtualMachine,
     pal::{NetInterface, Pal},
-    services::cookbook::{
-        CookbookService, BABEL_PLUGIN_NAME, DATA_FILE, KERNEL_FILE, ROOT_FS_FILE,
+    services::{
+        cookbook::{CookbookService, BABEL_PLUGIN_NAME, DATA_FILE, ROOT_FS_FILE},
+        kernel::KERNEL_FILE,
     },
     utils::with_timeout,
     BV_VAR_PATH,
@@ -30,7 +31,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    fs::{self, DirBuilder, File},
+    fs::{self, File},
     io::{AsyncReadExt, BufReader},
     time::Instant,
 };
@@ -533,7 +534,7 @@ impl<P: Pal + Debug> Node<P> {
                 .join(ROOT_FS_FILE);
 
         let data_dir = &self.paths.data_dir;
-        DirBuilder::new().recursive(true).create(data_dir).await?;
+        fs::create_dir_all(data_dir).await?;
 
         run_cmd("cp", [root_fs_path.as_os_str(), data_dir.as_os_str()]).await?;
 
@@ -543,7 +544,7 @@ impl<P: Pal + Debug> Node<P> {
     /// Create new data drive in chroot location, or copy it from cache
     async fn prepare_data_image(paths: &Paths, data: &NodeData<P::NetInterface>) -> Result<()> {
         let data_dir = &paths.data_dir;
-        DirBuilder::new().recursive(true).create(data_dir).await?;
+        fs::create_dir_all(data_dir).await?;
         let path = data_dir.join(DATA_FILE);
         let data_cache_path = paths
             .data_cache_dir

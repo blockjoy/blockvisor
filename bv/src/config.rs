@@ -2,10 +2,7 @@ use crate::services::api::{pb, AuthClient, AuthToken};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tokio::{
-    fs::{self, DirBuilder},
-    sync::RwLockWriteGuard,
-};
+use tokio::{fs, sync::RwLockWriteGuard};
 use tracing::info;
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.json";
@@ -102,7 +99,7 @@ impl Config {
         let path = bv_root.join(CONFIG_PATH);
         let parent = path.parent().unwrap();
         info!("Ensuring config dir is present: {}", parent.display());
-        DirBuilder::new().recursive(true).create(parent).await?;
+        fs::create_dir_all(parent).await?;
         info!("Writing host config: {}", path.display());
         let config = serde_json::to_string(&self)?;
         fs::write(path, &*config).await?;

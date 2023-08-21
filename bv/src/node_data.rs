@@ -59,6 +59,7 @@ pub struct NodeData<N> {
     #[serde(default)]
     pub initialized: bool,
     pub image: NodeImage,
+    pub kernel: String,
     pub network_interface: N,
     pub requirements: Requirements,
     pub firewall_rules: Vec<firewall::Rule>,
