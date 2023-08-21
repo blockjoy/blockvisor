@@ -125,10 +125,10 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
                 _ => Status::internal(eyre!("{err}").to_string()),
             })?;
 
+        self.save_babel_conf(&config).await?;
+
         let mut status = self.status.lock().await;
         if let BabelStatus::Uninitialized(_) = status.deref() {
-            self.save_babel_conf(&config).await?;
-
             // setup logs_server
             let (logs_broadcast_tx, logs_rx) = broadcast::channel(config.log_buffer_capacity_ln);
             if let BabelStatus::Uninitialized(logs_tx) =
