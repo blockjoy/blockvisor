@@ -397,8 +397,6 @@ pub async fn process_image_command(bv_url: String, command: ImageCommand) -> Res
                 rootfs_size,
             )
             .await?;
-            // TODO: consider refactoring to avoid extra mount/umount
-            update_babelsup(&destination_image_path, &destination_image).await?;
             let _ = workspace::set_active_image(&std::env::current_dir()?, destination_image);
         }
         ImageCommand::Clone {
@@ -752,21 +750,11 @@ async fn bootstrap_os_image(
     println!("Creating the file system on this disk image");
     run_cmd("mkfs.ext4", [os_img_path.as_os_str()]).await?;
 
-    let mount_point = std::env::temp_dir().join(format!(
-        "{}_{}_{}_rootfs",
-        image.protocol, image.node_type, image.node_version
-    ));
-    fs::create_dir_all(&mount_point)?;
-
-    println!("Mounting disk image into `{}`", mount_point.display());
-    run_cmd("mount", [os_img_path.as_os_str(), mount_point.as_os_str()]).await?;
-
-    let result = install_os_and_packages(debian_version, &mount_point).await;
-
-    println!("Unmounting disk image from `{}`", mount_point.display());
-    run_cmd("umount", [mount_point.as_os_str()]).await?;
-
-    result
+    on_rootfs(image_path, image, |mount_point| async move {
+        install_os_and_packages(debian_version, &mount_point).await?;
+        extract_babelsup(&mount_point).await
+    })
+    .await
 }
 
 async fn install_os_and_packages(debian_version: &str, mount_point: &Path) -> Result<()> {
@@ -824,7 +812,7 @@ async fn render_rhai_file(image_path: &Path, image: &NodeImage) -> Result<String
     tera.add_raw_template("template", template)?;
     let rhai_file_path = image_path.join(BABEL_PLUGIN_NAME);
     println!("Render rhai file at `{}`", rhai_file_path.display());
-    let out_file = std::fs::File::create(rhai_file_path)?;
+    let out_file = fs::File::create(rhai_file_path)?;
     tera.render_to("template", &context, out_file)?;
     // return as string
     Ok(tera.render("template", &context)?)
@@ -848,28 +836,32 @@ async fn download_kernel_file(
 
 async fn update_babelsup(image_path: &Path, image: &NodeImage) -> Result<()> {
     on_rootfs(image_path, image, |mount_point| async move {
-        let babelsup_path = fs::canonicalize(
-            std::env::current_exe().with_context(|| "failed to get current binary path")?,
-        )
-        .with_context(|| "non canonical current binary path")?
-        .parent()
-        .with_context(|| "invalid current binary dir - has no parent")?
-        .join("../../babelsup.tar.gz");
-        run_cmd(
-            "tar",
-            [
-                OsStr::new("--no-same-owner"),
-                OsStr::new("--no-same-permissions"),
-                OsStr::new("-C"),
-                mount_point.as_os_str(),
-                OsStr::new("-xf"),
-                babelsup_path.as_os_str(),
-            ],
-        )
-        .await?;
-        Ok(())
+        extract_babelsup(&mount_point).await
     })
     .await
+}
+
+async fn extract_babelsup(target_dir: &Path) -> Result<()> {
+    let babelsup_path = fs::canonicalize(
+        std::env::current_exe().with_context(|| "failed to get current binary path")?,
+    )
+    .with_context(|| "non canonical current binary path")?
+    .parent()
+    .with_context(|| "invalid current binary dir - has no parent")?
+    .join("../../babelsup.tar.gz");
+    run_cmd(
+        "tar",
+        [
+            OsStr::new("--no-same-owner"),
+            OsStr::new("--no-same-permissions"),
+            OsStr::new("-C"),
+            target_dir.as_os_str(),
+            OsStr::new("-xf"),
+            babelsup_path.as_os_str(),
+        ],
+    )
+    .await?;
+    Ok(())
 }
 
 /// Cleanup rootfs from babel state remnants (remove /var/lib/babel).
@@ -900,6 +892,5 @@ async fn on_rootfs<C: FnOnce(PathBuf) -> F, F: Future<Output = Result<()>>>(
     run_cmd("umount", [mount_point.as_os_str()])
         .await
         .with_context(|| "failed to umount os.img")?;
-    call_result?;
-    Ok(())
+    call_result
 }
