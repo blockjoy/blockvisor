@@ -70,7 +70,7 @@ fn init(keys) {
     start_job("celo", #{
         job_type: #{
             run_sh: `
-            sleep 30 && /usr/bin/celo --verbosity 3 --syncmode full --http --http.port 9154 --port 40405 --metrics.port 7770 --http.addr 0.0.0.0 --http.api eth,net,web3,debug,admin,personal --light.serve 9090 --light.maxpeers 20 --maxpeers 5000 --datadir ${global::HOME} --http.vhosts localhost --gcmode archive --txlookuplimit=0 --cache.preimages
+            /usr/bin/celo --verbosity 3 --syncmode full --http --http.port 9154 --port 40405 --metrics.port 7770 --http.addr 0.0.0.0 --http.api eth,net,web3,debug,admin,personal --light.serve 9090 --light.maxpeers 20 --maxpeers 5000 --datadir ${global::HOME} --http.vhosts localhost --gcmode archive --txlookuplimit=0 --cache.preimages
             `,
         },
        restart: #{
@@ -79,6 +79,7 @@ fn init(keys) {
                 backoff_base_ms: 10000,
             },
         },
+        needs: ["download_prerequisites"],
     });
 }
 
