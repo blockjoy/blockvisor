@@ -838,7 +838,10 @@ async fn extract_babelsup(target_dir: &Path) -> Result<()> {
 /// Cleanup rootfs from babel state remnants (remove /var/lib/babel).
 async fn cleanup_rootfs(image_path: &Path, image: &NodeImage) -> Result<()> {
     on_rootfs(image_path, image, |mount_point| async move {
-        fs::remove_dir_all(mount_point.join("var/lib/babel"))?;
+        let babel_dir = mount_point.join("var/lib/babel");
+        if babel_dir.exists() {
+            fs::remove_dir_all(babel_dir).with_context(|| "failed to cleanup rootfs")?;
+        }
         Ok(())
     })
     .await
