@@ -1,14 +1,15 @@
 use crate::{
-    engine::Engine,
+    engine::{Engine, JrpcRequest},
     metadata::{check_metadata, BlockchainMetadata},
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{anyhow, bail, Context, Error, Result};
 use rhai::{
     self,
     serde::{from_dynamic, to_dynamic},
-    Dynamic, AST,
+    Dynamic, Map, AST,
 };
+use serde::Deserialize;
 use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
 use tracing::log::Level;
 
@@ -88,17 +89,16 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         self.rhai_engine
             .register_fn("run_jrpc", move |req: Dynamic, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
-                to_dynamic(into_rhai_result(babel_engine.run_jrpc(
-                    from_dynamic(&req)?,
-                    Some(Duration::from_secs(timeout)),
-                ))?)
+                let req = into_rhai_result(from_dynamic::<BareJrpcRequest>(&req)?.try_into())?;
+                to_dynamic(into_rhai_result(
+                    babel_engine.run_jrpc(req, Some(Duration::from_secs(timeout))),
+                )?)
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_jrpc", move |req: Dynamic| {
-                to_dynamic(into_rhai_result(
-                    babel_engine.run_jrpc(from_dynamic(&req)?, None),
-                )?)
+                let req = into_rhai_result(from_dynamic::<BareJrpcRequest>(&req)?.try_into())?;
+                to_dynamic(into_rhai_result(babel_engine.run_jrpc(req, None))?)
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
@@ -136,17 +136,17 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn(
             "render_template",
-            move |template: &str, output: &str, params: &str| {
+            move |template: &str, output: &str, params: Map| {
                 into_rhai_result(babel_engine.render_template(
                     Path::new(&template.to_string()),
                     Path::new(&output.to_string()),
-                    params,
+                    &rhai::format_map_as_json(&params),
                 ))
             },
         );
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("node_params", move || {
-            rhai::Map::from_iter(
+            Map::from_iter(
                 babel_engine
                     .node_params()
                     .into_iter()
@@ -216,8 +216,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     }
 
     fn init(&self, secret_keys: &HashMap<String, String>) -> Result<()> {
-        let secret_keys =
-            rhai::Map::from_iter(secret_keys.iter().map(|(k, v)| (k.into(), v.into())));
+        let secret_keys = Map::from_iter(secret_keys.iter().map(|(k, v)| (k.into(), v.into())));
         self.call_fn("init", (secret_keys,))
     }
 
@@ -270,6 +269,41 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
 
 fn into_rhai_result<T>(result: Result<T>) -> std::result::Result<T, Box<rhai::EvalAltResult>> {
     Ok(result.map_err(|err| <String as Into<rhai::EvalAltResult>>::into(err.to_string()))?)
+}
+
+/// Helper structure that represents `JrpcRequest` from Rhai script perspective.
+/// It allows any `Dynamic` object to be set as params. Then `rhai_plugin` takes care of json
+/// serialization of `Map` or `Array`, since `babel_engine` expect params to be already
+/// serialized to json string.   
+#[derive(Deserialize)]
+pub struct BareJrpcRequest {
+    pub host: String,
+    pub method: String,
+    pub params: Option<Dynamic>,
+    pub headers: Option<HashMap<String, String>>,
+}
+
+impl TryInto<JrpcRequest> for BareJrpcRequest {
+    type Error = Error;
+
+    fn try_into(self) -> std::result::Result<JrpcRequest, Self::Error> {
+        let params = match self.params {
+            Some(value) => {
+                if value.is_map() || value.is_array() {
+                    Some(serde_json::to_string(&value)?)
+                } else {
+                    bail!("unsupported jrpc params type")
+                }
+            }
+            None => None,
+        };
+        Ok(JrpcRequest {
+            host: self.host,
+            method: self.method,
+            params,
+            headers: self.headers,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -443,7 +477,8 @@ mod tests {
         stop_job("test_job_name");
         out += "|" + job_status("test_job_name");
         out += "|" + run_jrpc(#{host: "host", method: "method", headers: #{"custom_header": "header value"}}).body;
-        out += "|" + run_jrpc(#{host: "host", method: "method", params: #{"chain": "x"}.to_json()}, 1).body;
+        out += "|" + run_jrpc(#{host: "host", method: "method", params: #{"chain": "x"}}, 1).body;
+        out += "|" + run_jrpc(#{host: "host", method: "method", params: ["positional", "args", "array"]}, 1).body;
         let http_out = run_rest(#{url: "url"});
         out += "|" + http_out.body;
         out += "|" + http_out.status_code;
@@ -453,7 +488,7 @@ mod tests {
         out += "|" + sh_out.stderr;
         out += "|" + sh_out.exit_code;
         out += "|" + sanitize_sh_param("sh param");
-        render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"}.to_json());
+        render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"});
         out += "|" + node_params().to_json(); 
         save_data("some plugin data"); 
         out += "|" + load_data(); 
@@ -545,7 +580,7 @@ mod tests {
                 predicate::eq(JrpcRequest {
                     host: "host".to_string(),
                     method: "method".to_string(),
-                    params: Some("{\"chain\":\"x\"}".to_string()),
+                    params: Some(r#"{"chain":"x"}"#.to_string()),
                     headers: None,
                 }),
                 predicate::eq(Some(Duration::from_secs(1))),
@@ -553,7 +588,24 @@ mod tests {
             .return_once(|_, _| {
                 Ok(HttpResponse {
                     status_code: 200,
-                    body: "jrpc_with_timeout_response".to_string(),
+                    body: "jrpc_with_map_and_timeout_response".to_string(),
+                })
+            });
+        babel
+            .expect_run_jrpc()
+            .with(
+                predicate::eq(JrpcRequest {
+                    host: "host".to_string(),
+                    method: "method".to_string(),
+                    params: Some(r#"["positional","args","array"]"#.to_string()),
+                    headers: None,
+                }),
+                predicate::eq(Some(Duration::from_secs(1))),
+            )
+            .return_once(|_, _| {
+                Ok(HttpResponse {
+                    status_code: 200,
+                    body: "jrpc_with_array_and_timeout_response".to_string(),
                 })
             });
         babel
@@ -637,7 +689,7 @@ mod tests {
 
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
-            r#"json_as_param|#{"finished": #{"exit_code": 1, "message": "error msg"}}|jrpc_response|jrpc_with_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|{"key_A":"value_A"}|loaded data"#,
+            r#"json_as_param|#{"finished": #{"exit_code": 1, "message": "error msg"}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|{"key_A":"value_A"}|loaded data"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
         );
         Ok(())

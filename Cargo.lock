@@ -708,6 +708,7 @@ dependencies = [
  "rhai",
  "serde",
  "serde_bytes",
+ "serde_json",
  "tonic",
  "tonic-rpc",
  "tracing",

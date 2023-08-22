@@ -243,8 +243,8 @@ To make implementation of Babel Plugin interface possible, BV provides following
   host: String,
   // The name of the jRPC method that we are going to call into.
   method: String,
-  // [optional] Params structure in form of serialized JSON.
-  params: String,
+  // [optional] Params structure in form of Dynamic object that is serializable into JSON.
+  params: Dynamic,
   // [optional] Extra HTTP headers to be added to request.
   headers: Map
 }
@@ -289,7 +289,7 @@ Return its http response (with default 15s timeout) as following structure:
   string or absolutely needed to form an url or json file.
 - `render_template(template, output, params)` - This function renders configuration template with provided `params`.
   See [Tera Docs](https://tera.netlify.app/docs/#templates) for details on templating syntax.
-  `params` is expected to be JSON serialized to string.
+  `params` is expected to be Map object serializable to JSON.
   It assumes that file pointed by `template` argument exists.
   File pointed by `output` path will be overwritten if exists.
 - `node_params()` - Get node params as key-value map.
@@ -446,7 +446,7 @@ that can be used to add params to the request.
 ```rust
 let data = #{host: "localhost:8154",
              method: "getBlockByNumber",
-             params: #{"chain": "x"}.to_json(),
+             params: #{"chain": "x"},
              headers: #{"content-type": "application/json"}
             };
 run_jrpc(data);
@@ -554,7 +554,7 @@ fn init(keys) {
         param2: 2,
         aParam: ["a", "bb", "ccc"],
     };
-    render_template("/etc/blockchain.config.template", "/etc/blockchain.config", params.to_json());
+    render_template("/etc/blockchain.config.template", "/etc/blockchain.config", params);
 }
 ```
 
