@@ -200,7 +200,12 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     pub async fn call_method(&mut self, name: &str, param: &str) -> Result<String> {
         Ok(match name {
             "init" => {
-                self.init(serde_json::from_str(param)?).await?;
+                let keys = if param.is_empty() {
+                    Default::default()
+                } else {
+                    serde_json::from_str(param)?
+                };
+                self.init(keys).await?;
                 Default::default()
             }
             "height" => self.height().await?.to_string(),
