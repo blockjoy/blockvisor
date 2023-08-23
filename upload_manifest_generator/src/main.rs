@@ -5,9 +5,10 @@ use std::time::Duration;
 #[derive(Parser, Debug, Clone)]
 #[clap(version, about, long_about = None)]
 pub struct CmdArgs {
-    /// S3 prefix
+    /// S3 prefix, shall be in following form: 'chains/<protocol>/<node_type>/<node_version>/<network>',
+    /// e.g: chains/helium/validator/1.2.3/main
     pub s3_prefix: String,
-    /// Number of slots in generated manifest.
+    /// Number of slots in generated manifest
     pub slots: usize,
     /// S3 endpoint
     #[clap(
