@@ -21,12 +21,12 @@ const BACKOFF_BASE_MS: u64 = 500;
 
 #[async_trait]
 pub trait JobRunnerImpl {
-    async fn try_run_job(self, mut run: RunFlag, name: &str) -> Result<(), JobStatus>;
+    async fn try_run_job(self, run: RunFlag, name: &str) -> Result<(), JobStatus>;
 }
 
 #[async_trait]
 pub trait JobRunner {
-    async fn run(self, mut run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus;
+    async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus;
 }
 
 #[async_trait]

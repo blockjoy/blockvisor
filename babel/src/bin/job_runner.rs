@@ -81,11 +81,16 @@ async fn main() -> eyre::Result<()> {
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;
         }
-        JobType::Upload { manifest, source } => {
+        JobType::Upload {
+            manifest,
+            source,
+            exclude,
+        } => {
             UploadJob::new(
                 bv_utils::timer::SysTimer,
                 manifest.ok_or(anyhow!("missing UploadManifest"))?,
                 source,
+                exclude.unwrap_or_default(),
                 job_config.restart,
                 TransferConfig::new(
                     jobs::JOBS_DIR

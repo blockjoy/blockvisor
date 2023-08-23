@@ -13,6 +13,7 @@ use babel_api::engine::{
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
+use nu_glob::{Pattern, PatternError};
 use std::{
     cmp::min,
     fs::File,
@@ -33,6 +34,7 @@ pub struct UploadJob<T> {
 struct Uploader {
     manifest: UploadManifest,
     source_dir: PathBuf,
+    exclude: Vec<Pattern>,
     config: TransferConfig,
 }
 
@@ -41,6 +43,7 @@ impl<T: AsyncTimer + Send> UploadJob<T> {
         timer: T,
         manifest: UploadManifest,
         source_dir: PathBuf,
+        exclude: Vec<String>,
         restart_policy: RestartPolicy,
         config: TransferConfig,
     ) -> Result<Self> {
@@ -48,6 +51,10 @@ impl<T: AsyncTimer + Send> UploadJob<T> {
             uploader: Uploader {
                 manifest,
                 source_dir,
+                exclude: exclude
+                    .iter()
+                    .map(|pattern_str| nu_glob::Pattern::new(pattern_str))
+                    .collect::<Result<Vec<Pattern>, PatternError>>()?,
                 config,
             },
             restart_policy,
@@ -179,7 +186,7 @@ impl Uploader {
         if self.manifest.slots.is_empty() {
             bail!("invalid upload manifest - no slots granted");
         }
-        let (total_size, mut sources) = sources_list(&self.source_dir)?;
+        let (total_size, mut sources) = sources_list(&self.source_dir, &self.exclude)?;
         sources.sort_by(|a, b| a.path.cmp(&b.path));
         let number_of_slots = u64::try_from(self.manifest.slots.len())?;
         let chunk_size = total_size / number_of_slots;
@@ -214,24 +221,30 @@ impl Uploader {
 }
 
 /// Prepare list of all source files, recursively walking down the source directory.
-fn sources_list(source_path: &Path) -> Result<(u64, Vec<FileLocation>)> {
+fn sources_list(source_path: &Path, exclude: &[Pattern]) -> Result<(u64, Vec<FileLocation>)> {
     let mut sources: Vec<_> = Default::default();
     let mut total_size = 0;
-    for entry in source_path.read_dir()? {
+    'sources: for entry in walkdir::WalkDir::new(source_path) {
         let entry = entry?;
         let path = entry.path();
-        total_size += if path.is_dir() {
-            let (size, mut sub_sources) = sources_list(&path)?;
-            sources.append(&mut sub_sources);
-            size
-        } else if path.is_file() {
+
+        if let Some(relative_path) = pathdiff::diff_paths(path, source_path) {
+            for pattern in exclude {
+                if pattern.matches(&relative_path.to_string_lossy()) {
+                    continue 'sources;
+                }
+            }
+        }
+
+        if path.is_file() {
             let size = entry.metadata()?.len();
-            sources.push(FileLocation { path, pos: 0, size });
-            size
-        } else {
-            // skip symlinks
-            0
-        };
+            sources.push(FileLocation {
+                path: path.to_path_buf(),
+                pos: 0,
+                size,
+            });
+            total_size += size
+        }
     }
     Ok((total_size, sources))
 }
@@ -510,6 +523,11 @@ mod tests {
         fs::write(path.join("d1").join("b"), "9   bytes")?;
         fs::write(path.join("d1").join("d2").join("c"), "333")?;
         fs::write(path.join("x"), [120u8; 256])?;
+        fs::create_dir_all(path.join("sub_with_ignored"))?;
+        fs::write(
+            path.join("sub_with_ignored").join("ignored_file"),
+            [1u8; 16],
+        )?;
         Ok(())
     }
 
@@ -519,6 +537,7 @@ mod tests {
                 uploader: Uploader {
                     manifest,
                     source_dir: self.tmp_dir.clone(),
+                    exclude: vec![Pattern::new("**/ignored_*").unwrap()],
                     config: TransferConfig {
                         max_opened_files: 1,
                         max_runners: 4,
@@ -765,7 +784,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "upload_job 'name' failed with: No such file or directory (os error 2)"
+                message: "upload_job 'name' failed with: IO error for operation on some/invalid/source: No such file or directory (os error 2): No such file or directory (os error 2)"
                     .to_string()
             },
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
@@ -877,7 +896,8 @@ mod tests {
     async fn test_sources_list() -> Result<()> {
         let tmp_dir = TempDir::new()?.to_path_buf();
         dummy_sources(&tmp_dir)?;
-        let (total_size, mut sources) = sources_list(&tmp_dir)?;
+        let (total_size, mut sources) =
+            sources_list(&tmp_dir, &[Pattern::new("*_ignored/ignored_*")?])?;
         assert_eq!(275, total_size);
         sources.sort_by(|a, b| a.path.file_stem().unwrap().cmp(b.path.file_stem().unwrap()));
         assert_eq!(
