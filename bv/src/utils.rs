@@ -54,7 +54,9 @@ impl Archive {
     }
 
     pub async fn untar(self) -> Result<Self> {
-        let Some(parent_dir) = self.0.parent() else { bail!("invalid tar file path {}", self.0.to_string_lossy()) };
+        let Some(parent_dir) = self.0.parent() else {
+            bail!("invalid tar file path {}", self.0.to_string_lossy())
+        };
         run_cmd(
             "tar",
             [

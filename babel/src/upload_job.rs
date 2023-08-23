@@ -130,7 +130,11 @@ impl Uploader {
                     parallel_uploaders_run.stop();
                 }
                 Some(Ok(chunk)) => {
-                    let Some(blueprint) = manifest.chunks.iter_mut().find(|item|item.key == chunk.key) else {
+                    let Some(blueprint) = manifest
+                        .chunks
+                        .iter_mut()
+                        .find(|item| item.key == chunk.key)
+                    else {
                         bail!("internal error - finished upload of chunk that doesn't exists in manifest");
                     };
                     *blueprint = chunk;
@@ -243,7 +247,9 @@ fn build_destinations(chunk_size: u64, sources: &mut Vec<FileLocation>) -> Vec<F
             // skip empty files
             sources.pop();
         }
-        let Some(file) = sources.last_mut() else { break; };
+        let Some(file) = sources.last_mut() else {
+            break;
+        };
 
         let dest_size = min(file.size, chunk_size - bytes_in_slot);
         destinations.push(FileLocation {
@@ -409,7 +415,9 @@ impl DestinationsReader {
         let buffer_capacity = self.buffer.capacity();
         while self.buffer.len() < buffer_capacity {
             if self.current.bytes_remaining == 0 {
-                let Some(next) = self.iter.next() else { break; };
+                let Some(next) = self.iter.next() else {
+                    break;
+                };
                 self.current = FileDescriptor {
                     file: File::open(&next.path)?,
                     offset: next.pos,

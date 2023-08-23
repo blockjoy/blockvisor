@@ -133,8 +133,10 @@ async fn test_bv_service_e2e() {
 
     println!("add blockchain");
     let blockchain_query = r#"INSERT INTO blockchains (id, name) values ('ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'Testing');
-        INSERT INTO blockchain_properties VALUES ('5972a35a-333c-421f-ab64-a77f4ae17533', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '0.0.3', 'validator', 'keystore-file', NULL, 'file_upload', FALSE, FALSE);
-        INSERT INTO blockchain_properties VALUES ('a989ad08-b455-4a57-9fe0-696405947e48', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '0.0.3', 'validator', 'TESTING_PARAM', NULL, 'text', FALSE, FALSE);
+        INSERT INTO blockchain_node_types (id, blockchain_id, node_type) VALUES ('206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'validator');
+        INSERT INTO blockchain_versions (id, blockchain_id, blockchain_node_type_id, version) VALUES ('78d4c409-401d-491f-8c87-df7f35971bb7','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '0.0.3');
+        INSERT INTO blockchain_properties VALUES ('5972a35a-333c-421f-ab64-a77f4ae17533', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'keystore-file', NULL, 'file_upload', FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
+        INSERT INTO blockchain_properties VALUES ('a989ad08-b455-4a57-9fe0-696405947e48', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'TESTING_PARAM', NULL, 'text',        FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
         "#;
     execute_sql(db_url, blockchain_query);
 
@@ -213,7 +215,9 @@ async fn test_bv_service_e2e() {
             required: true,
             value: "I guess just some test value".to_string(),
         }],
-        network: blockchain.networks[0].clone().name,
+        network: blockchain.node_types[0].versions[0].networks[0]
+            .name
+            .clone(),
         placement: Some(pb::NodePlacement {
             placement: Some(pb::node_placement::Placement::Scheduler(
                 pb::NodeScheduler {
