@@ -47,10 +47,11 @@ impl CookbookService {
     #[instrument(skip(self))]
     pub async fn list_versions(&mut self, protocol: &str, node_type: &str) -> Result<Vec<String>> {
         info!("Listing versions...");
-        let req = pb::CookbookServiceListBabelVersionsRequest {
+        let mut req = pb::CookbookServiceListBabelVersionsRequest {
             protocol: protocol.to_string(),
-            node_type: node_type.to_string(),
+            node_type: 0,
         };
+        req.set_node_type(node_type.parse()?);
 
         let resp = with_retry!(self.client.list_babel_versions(req.clone()))?.into_inner();
 
@@ -70,7 +71,7 @@ impl CookbookService {
         info!("Downloading plugin...");
         let rhai_content = with_retry!(self.client.retrieve_plugin(tonic::Request::new(
             pb::CookbookServiceRetrievePluginRequest {
-                id: Some(image.clone().into()),
+                id: Some(image.clone().try_into()?),
             }
         )))?
         .into_inner()
@@ -93,7 +94,7 @@ impl CookbookService {
         info!("Downloading image...");
         let archive: pb::ArchiveLocation = with_retry!(self.client.retrieve_image(
             tonic::Request::new(pb::CookbookServiceRetrieveImageRequest {
-                id: Some(image.clone().into()),
+                id: Some(image.clone().try_into()?),
             })
         ))?
         .into_inner()

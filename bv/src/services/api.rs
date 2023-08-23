@@ -503,7 +503,7 @@ impl ManifestService {
         let manifest = self
             .client
             .retrieve_download_manifest(pb::ManifestServiceRetrieveDownloadManifestRequest {
-                id: Some(image.clone().into()),
+                id: Some(image.clone().try_into()?),
                 network: network.to_owned(),
             })
             .await?
@@ -530,6 +530,15 @@ impl std::fmt::Display for pb::NodeType {
         let s = self.as_str_name();
         let s = s.strip_prefix("NODE_TYPE_").unwrap_or(s).to_lowercase();
         write!(f, "{s}")
+    }
+}
+
+impl std::str::FromStr for pb::NodeType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let str = format!("NODE_TYPE_{}", s.to_uppercase());
+        Self::from_str_name(&str).ok_or_else(|| anyhow!("Invalid NodeType {s}"))
     }
 }
 
@@ -594,13 +603,17 @@ impl TryFrom<Rule> for firewall::Rule {
     }
 }
 
-impl From<NodeImage> for pb::ConfigIdentifier {
-    fn from(image: NodeImage) -> Self {
-        Self {
+impl TryFrom<NodeImage> for pb::ConfigIdentifier {
+    type Error = anyhow::Error;
+
+    fn try_from(image: NodeImage) -> Result<Self, Self::Error> {
+        let mut res = Self {
             protocol: image.protocol,
-            node_type: image.node_type,
+            node_type: 0,
             node_version: image.node_version,
-        }
+        };
+        res.set_node_type(image.node_type.parse()?);
+        Ok(res)
     }
 }
 
