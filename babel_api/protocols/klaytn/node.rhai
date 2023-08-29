@@ -149,20 +149,19 @@ fn height(){
 
 fn block_age(){
     // curl -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"klay_getBlockByNumber","params":["latest", true],"id":1}' http://localhost:8551 | jq '.result.timestamp'
-    let res = run_jrpc({
+    let res = run_jrpc(#{
         host: KLAYTN_RPC_URL,
         method: klay_getBlockByNumber,
-        // [optional] Params structure in form of Dynamic object that is serializable into JSON.
-        params: #{params: ["latest", "true"], id: 1, jsonrpc:"2.0"}
-        headers: #{"Content-Type" : "application/json"}
-      })
+        params: #{params: ["latest", "true"], id: 1, jsonrpc:"2.0"},
+        headers: #{"Content-Type" : "application/json"},
+      });
     if res.status_code != 200 {
         throw res.status_code;
     }
-    let payload = parse_json(res.result)
+    let payload = parse_json(res.result);
     let timestamp = parse_int(sub_string(payload.result.timestamp,2),16);
-    let now=run_sh(`date +%s`)
-    parse_int(now.stdout)-timestamp
+    let now=run_sh(`date +%s`);
+    parse_int(now.stdout)-timestamp;
 }
 
 
@@ -172,19 +171,18 @@ fn consensus(){
 
 fn sync_status(){
    // curl -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"klay_syncing","params":[],"id":1}' http://localhost:8551 | jq '.result'
-   let res = run_jrpc({
+   let res = run_jrpc(#{
         host: KLAYTN_RPC_URL,
         method: klay_syncing,
-        // [optional] Params structure in form of Dynamic object that is serializable into JSON.
-        params: #{id: 1, jsonrpc:"2.0"}
+        params: #{id: 1, jsonrpc:"2.0"},
         headers: #{
-            "Content-Type" : "application/json"
+            "Content-Type" : "application/json",
         }
-    })
+    });
     if res.status_code != 200 {
         throw res.status_code;
     }
-    payload = parse_json(res.result)
+    let payload = parse_json(res.result);
     if payload.result {
         "Syncing"
     } else {

@@ -38,8 +38,8 @@ git_repo = ""
 git_tag = ""
 build_cmds =  [
   # Netdata Streaming Configuration
-  "mkdir -p {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
-  "cp {{.YafimHome}}/blockvisor/babel_api/netdata/stream.conf {{.YafimHome}}/target/erigon/node/mnt/opt/netdata/etc/netdata/",
+  "mkdir -p {{.YafimHome}}/target/klaytn/node/mnt/opt/netdata/etc/netdata/",
+  "cp {{.YafimHome}}/blockvisor/babel_api/netdata/stream.conf {{.YafimHome}}/target/klaytn/node/mnt/opt/netdata/etc/netdata/",
 
   # Install and auto start Babelsup service
   "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimHome}}/target/klaytn/node/mnt/usr/bin/",
