@@ -339,13 +339,18 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn start(&self, id: Uuid) -> Result<()> {
+    pub async fn start(&self, id: Uuid, reload_plugin: bool) -> Result<()> {
         let nodes_lock = self.nodes.read().await;
         let mut node = nodes_lock
             .get(&id)
             .ok_or_else(|| id_not_found(id))?
             .write()
             .await;
+        if reload_plugin {
+            node.reload_plugin()
+                .await
+                .map_err(|err| BabelError::Internal { err })?;
+        }
         self.node_start(&mut node).await
     }
 

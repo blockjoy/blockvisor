@@ -159,7 +159,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         self.nodes
-            .start(id)
+            .start(id, true)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
         Ok(Response::new(()))
