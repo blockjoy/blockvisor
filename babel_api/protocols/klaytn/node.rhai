@@ -4,10 +4,11 @@ const METADATA = #{
     protocol: "klaytn",
     node_type: "endpoint node",
     description: "Klaytn Endpoint Node",
+    kernel: "5.10.174-build.1+fc.ufw",
     requirements: #{
         vcpu_count: 8,
         mem_size_mb: 65536,
-        disk_size_gb: 3000,
+        disk_size_gb: 4000,
     },
 
     nets: #{
@@ -35,7 +36,6 @@ const METADATA = #{
 
         rules: [
             #{
-                // Unique rule name.
                 name: "Allowed incoming tcp traffic on port",
                 action: "allow",
                 direction: "in",
@@ -50,24 +50,62 @@ const METADATA = #{
 
 // Other Vars
 const KLAYTN_RPC_URL = "http://localhost:8551";
-const KLAYTN_DATA_PATH = "/blockjoy/klaytn/data";
-const KEN_DOWNLOAD_PATH = "/blockjoy/klaytn/downloads/ken.tar.gz";
-const KLAYTN_ARCHIVE_PATH = "/blockjoy/klaytn/downloads/klatyn-chaindata.tar.gz";
+const KEN_DOWNLOAD_PATH = global::METADATA.babel_config.data_directory_mount_point + "/downloads/ken.tar.gz";
+const KLAYTN_ARCHIVE_PATH = global::METADATA.babel_config.data_directory_mount_point +"/downloads/klatyn-chaindata.tar.gz";
 const KEN_INSTALL_PATH = "/var/lib/klaytn";
 fn init(keys) {
-    try {
-        info = parse_json(load_data());
-    } catch {
-        info = bootstrap();
-    }
-    if !(info.bootstrapped) {
-        bootstrap();
-    }
-        
 
-    let klay_path = `${KEN_INSTALL_PATH}/ken-linux-amd64/bin`;
+    let klaytn_init_commands = [
+        `mkdir -p ${global::KEN_DOWNLOAD_PATH}`,
+        `wget ${global::METADATA.nets[node_params().NETWORK].package_url} -O ${global::KEN_DOWNLOAD_PATH}`,
+        `mkdir -p ${global::KEN_INSTALL_PATH}`,
+        `tar xvf ${global::KEN_DOWNLOAD_PATH} -C ${global::KEN_INSTALL_PATH}`,
+        `sed -e "s|DATA_DIR=.*|DATA_DIR=${global::METADATA.data_directory_mount_point}|" ${global::KEN_INSTALL_PATH}/ken-linux-amd64/conf/kend.conf`,
+        `sed -e 's|RPC_API=.*|RPC_API=admin,debug,klay,eth,miner,net,personal,rpc,txpool,web3|' ${global::KEN_INSTALL_PATH}/ken-linux-amd64/conf/kend.conf`,
+    ];
+
+    for (cmd, i) in klaytn_init_commands {
+        let response = run_sh(cmd);
+        print(`Response from shell command ${cmd}':`);
+        print(response);
+    
+        if response.exit_code != 0 {
+            print(`Command at index ${i} failed: '${cmd}'`);
+        }
+    }
+    
+    start_job("download", #{
+        job_type: #{
+            run_sh: `wget ${global::METADATA.nets[node_params().NETWORK].archive_url} -O ${global::KLAYTN_ARCHIVE_PATH} && tar xvf ${global::KLAYTN_ARCHIVE_PATH} -C ${global::METADATA.data_directory_mount_point}`,
+        },
+        restart: #{
+            on_failure: #{
+                backoff_timeout_ms: 60000,
+                backoff_base_ms: 10000,
+                max_retries: 3,
+            },
+        },
+        needs: [],
+    });
+
+    start_job("start", #{
+        job_type: #{
+            run_sh: "kend start && sleep infinity",
+        },
+        restart: #{
+            on_failure: #{
+                backoff_timeout_ms: 60000,
+                backoff_base_ms: 10000,
+                max_retries: 3,
+            },
+        },
+        needs: ["download"],
+    });
+    
+        
+    let klay_path = `${global::KEN_INSTALL_PATH}/ken-linux-amd64/bin`;
     let current_path = run_sh("echo $PATH");
-    if current_path.contains(klay_path) {
+    if current_path.stdout.contains(klay_path) {
         print("PATH already contains '${klay_path}'");
     } else {
         let response = run_sh(`export PATH=$PATH:${klay_path}`);
@@ -80,52 +118,29 @@ fn init(keys) {
     }
 
     let response = run_sh(`kend start`);
-    print(response);
+    if response.exit_code != 0 {
+        print("Error starting kend");
+    } else {
+        print("kend started successfully");
+    }
 
-
+    // to do : Clean up tar snapshot files.
+    run_sh(`rm -f ${global::KLAYTN_ARCHIVE_PATH}`)
 };
 
-fn bootstrap(){
-    let run_once_sh_commmands = [
-        `mkdir -p ${KEN_DOWNLOAD_PATH}`,
-        `wget ${global::METADATA.nets[node_params().NETWORK].package_url} -O ${KEN_DOWNLOAD_PATH}`,
-        `mkdir -p ${KEN_INSTALL_PATH}`,
-        `tar xvf ${KEN_DOWNLOAD_PATH} -C ${KEN_INSTALL_PATH}`,
-        `sed -e "s|DATA_DIR=.*|DATA_DIR=${KLAYTN_DATA_PATH}|" ${KEN_INSTALL_PATH}/ken-linux-amd64/conf/config.conf`
-    ];
-
-    let run_once_sh_job = #{
-        job_type: #{
-            run_sh: `wget ${global::METADATA.nets[node_params().NETWORK].archive_url} -O ${KLAYTN_ARCHIVE_PATH} && tar xvf ${KLAYTN_ARCHIVE_PATH} -C ${KLAYTN_DATA_PATH}`,
-        },
-        restart: #{
-            on_failure: #{
-                backoff_timeout_ms: 60000,
-                backoff_base_ms: 10000,
-                max_retries: 3,
-            },
-        },
-    };
-    for (cmd, i) in run_once_sh_commmands {
-        let response = run_sh(cmd);
-        print(`Response from shell command ${cmd}':`);
-        print(response);
-    
-        if response.exit_code != 0 {
-            print(`Command at index ${i} failed: '${cmd}'`);
-        }
-    }
-    start_job("Download Archive",run_once_sh_job);
-    info = #{
-        boostrapped: true
-    };
-    save_data(info.to_json());
-    return parse_json(load_data());
-}
-
 fn address(){
-    let res = run_sh("ken --exec governance.nodeAddress attach ${KLAYTN_DATA_PATH}/klay.ipc");
+    let res = run_sh("ken --exec governance.nodeAddress attach ${global::METADATA.data_directory_mount_point}/klay.ipc");
     res.stdout;
+    let response = run_jrpc(#{
+        host: KLAYTN_RPC_URL,
+        method: governance_nodeAddress ,
+        params: #{params: ["latest", "true"], id: 1, jsonrpc:"2.0"},
+        headers: #{"Content-Type" : "application/json"},
+      });
+    if res.status_code != 200 {
+        throw res.status_code;
+    }
+    let payload = parse_json(res.result);
 }
 
 fn application_status() {
@@ -138,12 +153,12 @@ fn application_status() {
 }
 
 fn name(){
-    let res = run_sh(`ken --exec admin.nodeInfo.name attach ${KLAYTN_DATA_PATH}/klay.ipc`);
+    let res = run_sh(`ken --exec admin.nodeInfo.name attach ${global::METADATA.data_directory_mount_point}/klay.ipc`);
     res.stdout;
 }
 
 fn height(){
-    let res = run_sh(`ken --exec klay.blockNumber attach ${KLAYTN_DATA_PATH}/klay.ipc`);
+    let res = run_sh(`ken --exec klay.blockNumber attach ${global::METADATA.data_directory_mount_point}/klay.ipc`);
     res.stdout;
 }
 

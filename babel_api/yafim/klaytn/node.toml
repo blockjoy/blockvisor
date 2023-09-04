@@ -4,7 +4,7 @@ version = "1.10.2-build.1"
 
 [image]
 debian_version = "focal"
-rootfs_size = "10G"
+rootfs_size = "20G"
 fs_type = "ext4"
 apt_image = ["ufw","jq"]
 apt_source = []
