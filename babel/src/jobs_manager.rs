@@ -21,7 +21,7 @@ use tokio::{
     select,
     sync::{watch, Mutex},
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum JobsManagerState {
@@ -117,7 +117,7 @@ fn load_jobs(jobs_dir: &Path, job_runner_bin_path: &Path) -> Result<Jobs> {
 #[async_trait]
 pub trait JobsManagerClient {
     async fn startup(&self) -> Result<()>;
-    async fn active_jobs_shutdown_timeout(&self) -> Duration;
+    async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
     async fn shutdown(&self) -> Result<()>;
     async fn list(&self) -> Result<Vec<(String, JobStatus)>>;
     async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
@@ -134,13 +134,14 @@ pub struct Client {
 #[async_trait]
 impl JobsManagerClient for Client {
     async fn startup(&self) -> Result<()> {
+        info!("Startup jobs manager - set state to 'Ready'");
         self.jobs_manager_state_tx.send(JobsManagerState::Ready)?;
         Ok(())
     }
 
-    async fn active_jobs_shutdown_timeout(&self) -> Duration {
+    async fn get_active_jobs_shutdown_timeout(&self) -> Duration {
         let (jobs, _) = &*self.jobs_registry.lock().await;
-        jobs.iter().fold(Duration::default(), |acc, (_, job)| {
+        let total_timeout = jobs.iter().fold(Duration::default(), |acc, (_, job)| {
             if let JobState::Active(_) = job.state {
                 acc + Duration::from_secs(
                     job.config
@@ -150,10 +151,16 @@ impl JobsManagerClient for Client {
             } else {
                 acc
             }
-        })
+        });
+        debug!(
+            "Get active jobs total timeout: {}s",
+            total_timeout.as_secs()
+        );
+        total_timeout
     }
 
     async fn shutdown(&self) -> Result<()> {
+        info!("Shutdown jobs manager - set state to 'Shutdown'");
         // ignore send error since jobs_manager may be already stopped
         let _ = self.jobs_manager_state_tx.send(JobsManagerState::Shutdown);
         let (jobs, _) = &mut *self.jobs_registry.lock().await;
@@ -257,6 +264,10 @@ fn terminate_job(name: &str, pid: &Pid, config: &JobConfig) -> Result<()> {
             .shutdown_timeout_secs
             .unwrap_or(DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS),
     );
+    info!(
+        "Terminate job '{name}' with timeout {}s",
+        shutdown_timeout.as_secs()
+    );
     if !gracefully_terminate_process(pid, shutdown_timeout) {
         bail!("Failed to terminate job_runner for '{name}' job (pid {pid}), timeout expired!");
     }
@@ -273,6 +284,10 @@ pub struct Manager {
 
 impl Manager {
     pub async fn run(mut self, mut run: RunFlag) {
+        debug!(
+            "Started Jobs Manager in state {:?}",
+            self.jobs_manager_state_rx.borrow()
+        );
         let mut sys = System::new();
         // do not start any job until jobs manager is ready
         while run.load() && *self.jobs_manager_state_rx.borrow() == JobsManagerState::NotReady {
@@ -353,14 +368,12 @@ impl Manager {
                     if let Some(needs) = needs {
                         match deps_finished(name, &deps, needs) {
                             Ok(true) => {
-                                job.state = {
-                                    info!("all '{name}' job dependencies finished");
-                                    self.start_job(name, jobs_data).await
-                                }
+                                info!("all '{name}' job dependencies finished");
+                                job.state = self.start_job(name, jobs_data).await;
                             }
                             Ok(false) => {}
                             Err(err) => {
-                                info!("{err}");
+                                warn!("{err}");
                                 *status = JobStatus::Finished {
                                     exit_code: None,
                                     message: err.to_string(),
@@ -401,7 +414,7 @@ impl Manager {
             info!("job '{name}' finished with {status:?}");
             JobState::Inactive(status)
         } else {
-            info!("job '{name}' process ended, but job was not finished - try restart");
+            warn!("job '{name}' process ended, but job was not finished - try restart");
             self.start_job(name, jobs_data).await
         }
     }
@@ -414,9 +427,11 @@ impl Manager {
                 JobState::Active(pid)
             }
             Err(err) => {
+                let message = format!("failed to start job '{name}': {err}");
+                warn!(message);
                 let status = JobStatus::Finished {
                     exit_code: None,
-                    message: format!("failed to start job '{name}': {err}"),
+                    message,
                 };
                 match jobs_data.save_status(&status, name) {
                     Ok(()) => JobState::Inactive(status),

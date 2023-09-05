@@ -108,7 +108,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         _request: Request<()>,
     ) -> Result<Response<Duration>, Status> {
         Ok(Response::new(
-            self.jobs_manager.active_jobs_shutdown_timeout().await + BABEL_SHUTDOWN_TIMEOUT,
+            self.jobs_manager.get_active_jobs_shutdown_timeout().await + BABEL_SHUTDOWN_TIMEOUT,
         ))
     }
 
@@ -528,7 +528,7 @@ mod tests {
         #[async_trait]
         impl JobsManagerClient for JobsManager {
             async fn startup(&self) -> Result<()>;
-            async fn active_jobs_shutdown_timeout(&self) -> Duration;
+            async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
             async fn shutdown(&self) -> Result<()>;
             async fn list(&self) -> Result<Vec<(String, JobStatus)>>;
             async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
