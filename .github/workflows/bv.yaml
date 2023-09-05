@@ -102,7 +102,7 @@ jobs:
           override: true
       - name: Test
         run: >
-          cargo test -p babel
+          cargo test -p babel -p bv_utils
 
   protocols_tests:
     name: Protocols Tests

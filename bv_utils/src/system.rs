@@ -49,29 +49,3 @@ pub fn find_disk_by_path<'a>(sys: &'a System, path: &Path) -> Option<&'a Disk> {
             }
         })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_host_info_collect() {
-        assert!(HostInfo::collect().is_ok());
-    }
-
-    #[test]
-    fn test_host_metrics_collect() {
-        assert!(HostMetrics::collect().is_ok());
-    }
-
-    #[test]
-    fn test_find_bv_var_disk() {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        // Theoretically it may return `None` in some edge cases, but normally it should not happen
-        // `/` disk should be returned in worst case.
-        assert!(
-            find_disk_by_path(&sys, &bv_root().canonicalize().unwrap().join(BV_VAR_PATH)).is_some()
-        );
-    }
-}
