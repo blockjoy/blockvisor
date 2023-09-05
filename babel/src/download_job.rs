@@ -125,10 +125,16 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
 
 impl Downloader {
     async fn download(&mut self, mut run: RunFlag) -> Result<()> {
-        self.check_disk_space()?;
+        let downloaded_chunks: HashSet<String> =
+            read_progress_data(&self.config.progress_file_path);
+        self.check_disk_space(&downloaded_chunks)?;
         let (tx, rx) = mpsc::channel(self.config.max_runners);
         let mut parallel_downloaders_run = run.child_flag();
-        let (downloaded_chunks, writer) = self.init_writer(parallel_downloaders_run.clone(), rx);
+        let writer = self.init_writer(
+            parallel_downloaders_run.clone(),
+            downloaded_chunks.clone(),
+            rx,
+        );
 
         let mut downloaders = ParallelChunkDownloaders::new(
             parallel_downloaders_run.clone(),
@@ -162,13 +168,20 @@ impl Downloader {
         Ok(())
     }
 
-    fn check_disk_space(&self) -> Result<()> {
+    fn check_disk_space(&self, downloaded_chunks: &HashSet<String>) -> Result<()> {
         let mut sys = System::new_all();
         sys.refresh_all();
         let available_space = bv_utils::system::find_disk_by_path(&sys, &self.destination_dir)
             .map(|disk| disk.available_space())
             .ok_or_else(|| anyhow!("Cannot get available disk space"))?;
-        if self.manifest.total_size > available_space {
+        let downloaded_bytes = self.manifest.chunks.iter().fold(0, |acc, item| {
+            if downloaded_chunks.contains(&item.key) {
+                acc + item.size
+            } else {
+                acc
+            }
+        });
+        if self.manifest.total_size - downloaded_bytes > available_space {
             bail!(
                 "Can't download {} bytes of data while only {} available",
                 self.manifest.total_size,
@@ -181,18 +194,17 @@ impl Downloader {
     fn init_writer(
         &self,
         mut run: RunFlag,
+        downloaded_chunks: HashSet<String>,
         rx: mpsc::Receiver<ChunkData>,
-    ) -> (HashSet<String>, JoinHandle<Result<()>>) {
+    ) -> JoinHandle<Result<()>> {
         let writer = Writer::new(
             rx,
             self.destination_dir.clone(),
             self.config.max_opened_files,
             self.config.progress_file_path.clone(),
+            downloaded_chunks,
         );
-        (
-            writer.downloaded_chunks.clone(),
-            tokio::spawn(writer.run(run.clone())),
-        )
+        tokio::spawn(writer.run(run.clone()))
     }
 }
 
@@ -462,8 +474,8 @@ impl Writer {
         destination_dir: PathBuf,
         max_opened_files: usize,
         progress_file_path: PathBuf,
+        downloaded_chunks: HashSet<String>,
     ) -> Self {
-        let downloaded_chunks = read_progress_data(&progress_file_path);
         Self {
             opened_files: HashMap::new(),
             destination_dir,
