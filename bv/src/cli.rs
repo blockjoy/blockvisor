@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -223,10 +223,37 @@ pub enum NodeCommand {
         id_or_name: Option<String>,
     },
 
-    /// Show node jobs list.
-    Jobs {
+    /// Manage jobs on given node
+    #[clap(alias = "j")]
+    Job {
+        #[clap(subcommand)]
+        command: JobCommand,
+
         /// The id or name of the node to check. BV tries to get it from workspace if not provided.
         id_or_name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum JobCommand {
+    /// Show node jobs list.
+    #[clap(alias = "ls")]
+    List,
+
+    /// Stop job.
+    #[clap(group(ArgGroup::new("job_input").required(true).args(&["name", "all"])))]
+    Stop {
+        /// Job name to be stoped.
+        name: Option<String>,
+        /// Stop all jobs.
+        #[clap(long, short)]
+        all: bool,
+    },
+
+    /// Get job status.
+    Status {
+        /// Job name.
+        name: String,
     },
 }
 

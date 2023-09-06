@@ -250,6 +250,20 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(jobs)
     }
 
+    /// Returns status of single job.
+    pub async fn job_status(&mut self, name: &str) -> Result<JobStatus> {
+        let babel_client = self.node_connection.babel_client().await?;
+        let status = with_retry!(babel_client.job_status(name.to_owned()))?.into_inner();
+        Ok(status)
+    }
+
+    /// Request to stop given job.
+    pub async fn stop_job(&mut self, name: &str) -> Result<()> {
+        let babel_client = self.node_connection.babel_client().await?;
+        with_retry!(babel_client.stop_job(name.to_owned()))?;
+        Ok(())
+    }
+
     /// Returns the list of logs from blockchain jobs.
     pub async fn get_logs(&mut self) -> Result<Vec<String>> {
         let client = self.node_connection.babel_client().await?;

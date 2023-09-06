@@ -1,3 +1,4 @@
+use crate::cli::JobCommand;
 use crate::{
     cli::{ChainCommand, HostCommand, ImageCommand, NodeCommand, WorkspaceCommand},
     config::{Config, SharedConfig},
@@ -190,33 +191,37 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             client.stop_nodes(&ids, force).await?;
             client.start_nodes(&ids).await?;
         }
-        NodeCommand::Jobs { id_or_name } => {
+        NodeCommand::Job {
+            command,
+            id_or_name,
+        } => {
             let id = client
                 .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
                 .await?;
-            let jobs = client.get_node_jobs(id).await?.into_inner();
-            if !jobs.is_empty() {
-                println!("{:<30} STATUS", "NAME");
-                for (name, status) in jobs {
-                    let (exit_code, message) = match &status {
-                        JobStatus::Pending => (None, None),
-                        JobStatus::Running => (None, None),
-                        JobStatus::Finished { exit_code, message } => {
-                            (exit_code.map(|c| c as u64), Some(message.clone()))
+            match command {
+                JobCommand::List => {
+                    let jobs = client.get_node_jobs(id).await?.into_inner();
+                    if !jobs.is_empty() {
+                        println!("{:<30} STATUS", "NAME");
+                        for (name, status) in jobs {
+                            println!("{name:<30} {status:?}");
                         }
-                        JobStatus::Stopped => (None, None),
-                    };
-                    let status_with_code = format!(
-                        "{:?}{}",
-                        status,
-                        exit_code.map(|c| format!("({c})")).unwrap_or_default()
-                    );
-                    println!(
-                        "{:<30} {:<20} {}",
-                        name,
-                        status_with_code,
-                        message.unwrap_or_default()
-                    );
+                    }
+                }
+                JobCommand::Stop { name, .. } => {
+                    if let Some(name) = name {
+                        client.stop_node_job((id, name)).await?;
+                    } else {
+                        for (name, status) in client.get_node_jobs(id).await?.into_inner() {
+                            if JobStatus::Running == status {
+                                client.stop_node_job((id, name)).await?;
+                            }
+                        }
+                    }
+                }
+                JobCommand::Status { name } => {
+                    let status = client.get_node_job_status((id, name)).await?.into_inner();
+                    println!("{status:?}");
                 }
             }
         }

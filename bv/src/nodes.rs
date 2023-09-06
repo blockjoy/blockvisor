@@ -403,6 +403,28 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
+    pub async fn job_status(&self, id: Uuid, job_name: &str) -> Result<JobStatus> {
+        let nodes = self.nodes.read().await;
+        let mut node = nodes
+            .get(&id)
+            .ok_or_else(|| id_not_found(id))?
+            .write()
+            .await;
+        node.babel_engine.job_status(job_name).await
+    }
+
+    #[instrument(skip(self))]
+    pub async fn stop_job(&self, id: Uuid, job_name: &str) -> Result<()> {
+        let nodes = self.nodes.read().await;
+        let mut node = nodes
+            .get(&id)
+            .ok_or_else(|| id_not_found(id))?
+            .write()
+            .await;
+        node.babel_engine.stop_job(job_name).await
+    }
+
+    #[instrument(skip(self))]
     pub async fn logs(&self, id: Uuid) -> Result<Vec<String>> {
         let nodes = self.nodes.read().await;
         let mut node = nodes

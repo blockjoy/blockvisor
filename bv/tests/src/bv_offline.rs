@@ -87,7 +87,7 @@ async fn test_bv_cmd_jobs() -> Result<()> {
     test_env.bv_run(&["node", "start", vm_id], "Started node");
 
     println!("check jobs");
-    test_env.bv_run(&["node", "jobs", vm_id], "echo");
+    test_env.bv_run(&["node", "job", vm_id, "ls"], "echo");
     Ok(())
 }
 

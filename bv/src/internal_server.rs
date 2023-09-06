@@ -25,6 +25,8 @@ trait Service {
     fn stop_node(id: Uuid, force: bool);
     fn delete_node(id: Uuid);
     fn get_node_jobs(id: Uuid) -> Vec<(String, babel_api::engine::JobStatus)>;
+    fn get_node_job_status(id: Uuid, job_name: String) -> babel_api::engine::JobStatus;
+    fn stop_node_job(id: Uuid, job_name: String);
     fn get_node_logs(id: Uuid) -> Vec<String>;
     fn get_babel_logs(id: Uuid, max_lines: u32) -> Vec<String>;
     fn get_node_keys(id: Uuid) -> Vec<String>;
@@ -189,6 +191,35 @@ where
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
         Ok(Response::new(jobs))
+    }
+
+    #[instrument(skip(self))]
+    async fn get_node_job_status(
+        &self,
+        request: Request<(Uuid, String)>,
+    ) -> Result<Response<babel_api::engine::JobStatus>, Status> {
+        status_check().await?;
+        let (id, job_name) = request.into_inner();
+        let status = self
+            .nodes
+            .job_status(id, &job_name)
+            .await
+            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        Ok(Response::new(status))
+    }
+
+    #[instrument(skip(self))]
+    async fn stop_node_job(
+        &self,
+        request: Request<(Uuid, String)>,
+    ) -> Result<Response<()>, Status> {
+        status_check().await?;
+        let (id, job_name) = request.into_inner();
+        self.nodes
+            .stop_job(id, &job_name)
+            .await
+            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        Ok(Response::new(()))
     }
 
     #[instrument(skip(self))]
