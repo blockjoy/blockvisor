@@ -68,6 +68,9 @@ exception when assertion fail.
 All changes applied on the node are NOT automatically propagated to its source image. Therefore, once node changes are done,
 `bv image capture` must be called, so all changes are applied to source image.
 
+__NOTE__: Sometimes running node generates files (e.g. cache) in rootfs that should not go into the captured image.
+All that files can be excluded using `/etc/bvignore` file (on rootfs), which format is the same as `.gitignore`.
+
 Updated image can be now used again to create fresh node for final testing (e.g. `init()` function).
 
 Once everything is verified, use `bv image upload` to easily put image files on R2 (see `bv image upload --help` for more details).
