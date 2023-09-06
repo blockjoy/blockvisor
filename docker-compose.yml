@@ -53,6 +53,7 @@ services:
       R2_BUNDLE_BUCKET: bundle-dev
       R2_KERNEL_BUCKET: kernel-dev
       R2_BUCKET: cookbook-dev
+      DIR_CHAINS_DATA_PREFIX: chains_data
       DIR_CHAINS_PREFIX: chains
       PRESIGNED_URL_EXPIRATION: 1h
       # key service

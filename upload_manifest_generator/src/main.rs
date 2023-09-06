@@ -1,12 +1,17 @@
 use clap::Parser;
-use eyre::Result;
+use eyre::{bail, Result};
 use std::time::Duration;
+
+const PREFIX_FORMAT: &str =
+    "chains_data/<protocol>/<node_type>/<min_node_version>/<network>/<data_version>";
 
 #[derive(Parser, Debug, Clone)]
 #[clap(version, about, long_about = None)]
 pub struct CmdArgs {
-    /// S3 prefix, shall be in following form: 'chains/<protocol>/<node_type>/<node_version>/<network>',
-    /// e.g: chains/helium/validator/1.2.3/main
+    /// S3 prefix, shall be in following form: 'chains_data/<protocol>/<node_type>/<min_node_version>/<network>/<data_version>',
+    /// e.g: chains_data/helium/validator/0.0.1/main/17
+    /// <min_node_version> - data won't be offered for nodes below that version
+    /// <data_version> - single number version, it may be simply incremented number or anything that is ordered (e.g. timestamp)
     pub s3_prefix: String,
     /// Number of slots in generated manifest
     pub slots: usize,
@@ -25,12 +30,22 @@ pub struct CmdArgs {
     /// Presigned urls expire time (in seconds).
     #[clap(default_value = "86400")]
     pub expires_in_secs: u64,
+    /// Ignore warnings
+    #[clap(long)]
+    pub force: bool,
 }
 
 /// Tool to generate upload manifest.
 #[tokio::main]
 async fn main() -> Result<()> {
     let cmd_args = CmdArgs::parse();
+    if let Err(err) = validate_prefix(&cmd_args.s3_prefix) {
+        if cmd_args.force {
+            println!("WARNING: {err}");
+        } else {
+            bail!("{err}");
+        }
+    }
     let s3_config = aws_sdk_s3::Config::builder()
         .endpoint_url(&cmd_args.s3_endpoint)
         .region(aws_sdk_s3::config::Region::new(cmd_args.s3_region.clone()))
@@ -65,6 +80,34 @@ async fn main() -> Result<()> {
         n += 1;
     }
     println!("{}", serde_json::to_string_pretty(&manifest)?);
+    Ok(())
+}
+
+fn validate_prefix(prefix: &str) -> Result<()> {
+    let mut parts = prefix.split('/');
+    let mut expect_next = || {
+        let Some(root) = parts.next() else {
+            bail!("s3_prefix invalid format - shall be '{PREFIX_FORMAT}'")
+        };
+        Ok(root)
+    };
+    if expect_next()? != "chains_data" {
+        bail!("s3_prefix should start from 'chains_data'")
+    }
+    expect_next()?; //<protocol>
+    expect_next()?; //<node_type>
+    let min_node_version = expect_next()?;
+    if let Err(err) = semver::Version::parse(min_node_version) {
+        bail!("invalid <min_node_version> - must be semver compatible: {err}")
+    }
+    expect_next()?; //<network>
+    let data_version = expect_next()?;
+    if let Err(err) = data_version.parse::<u64>() {
+        bail!("invalid <data_version> - must be a number: {err}")
+    }
+    if parts.next().is_some() {
+        bail!("s3_prefix invalid format - shall be '{PREFIX_FORMAT}'")
+    }
     Ok(())
 }
 

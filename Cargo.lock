@@ -4233,6 +4233,7 @@ dependencies = [
  "babel_api",
  "clap",
  "eyre",
+ "semver",
  "serde",
  "serde_json",
  "tokio",
