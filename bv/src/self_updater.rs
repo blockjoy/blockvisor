@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use bv_utils::timer::AsyncTimer;
+use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use std::{
     cmp::Ordering,
     env,
@@ -94,13 +94,14 @@ pub async fn new<T: AsyncTimer>(
 }
 
 impl<T: AsyncTimer, C: BundleConnector> SelfUpdater<T, C> {
-    pub async fn run(mut self) {
+    pub async fn run(mut self, mut run: RunFlag) {
         if let Some(check_interval) = self.check_interval {
-            loop {
+            while run.load() {
                 if let Err(e) = self.check_for_update().await {
                     warn!("Error executing self update: {e:#}");
                 }
-                self.sleeper.sleep(utils::with_jitter(check_interval)).await;
+                run.select(self.sleeper.sleep(utils::with_jitter(check_interval)))
+                    .await;
             }
         }
     }

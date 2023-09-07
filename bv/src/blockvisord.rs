@@ -91,7 +91,7 @@ where
                 warn!("Cannot run self update: {e:#}");
             }
         }
-        let self_updater_future = self_updater.run();
+        let self_updater_future = self_updater.run(run.clone());
 
         // setup metrics endpoint
         let builder = PrometheusBuilder::new();
