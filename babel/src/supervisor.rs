@@ -206,10 +206,9 @@ mod tests {
         let mut test_run = test_env.run.clone();
         let mut timer_mock = MockAsyncTimer::new();
         timer_mock.expect_now().times(1).returning(move || now);
-        timer_mock.expect_now().returning(move || {
-            let n = now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1));
-            n
-        });
+        timer_mock
+            .expect_now()
+            .returning(move || now.add(Duration::from_millis(cfg.backoff_timeout_ms + 1)));
         timer_mock.expect_sleep().once().returning(move |_| {
             test_run.stop();
         });

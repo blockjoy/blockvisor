@@ -106,8 +106,8 @@ mod tests {
         let job_name = "job_name".to_string();
         let tmp_root = TempDir::new()?.to_path_buf();
         let jobs_dir = tmp_root.join("jobs");
-        fs::create_dir_all(&jobs_dir.join(CONFIG_SUBDIR))?;
-        fs::create_dir_all(&jobs_dir.join(STATUS_SUBDIR))?;
+        fs::create_dir_all(jobs_dir.join(CONFIG_SUBDIR))?;
+        fs::create_dir_all(jobs_dir.join(STATUS_SUBDIR))?;
         let test_run = RunFlag::default();
         let log_buffer = LogBuffer::new(16);
         let mut log_rx = log_buffer.subscribe();

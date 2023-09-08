@@ -137,7 +137,7 @@ mod tests {
             .unwrap();
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {
-            lines.push(line.split_once("|").unwrap().1.to_string());
+            lines.push(line.split_once('|').unwrap().1.to_string());
         }
         assert_eq!(
             vec![
@@ -172,7 +172,7 @@ mod tests {
         let mut lines = Vec::default();
         loop {
             match rx.try_recv() {
-                Ok(line) => lines.push(line.split_once("|").unwrap().1.to_string()),
+                Ok(line) => lines.push(line.split_once('|').unwrap().1.to_string()),
                 Err(error::TryRecvError::Lagged(_)) => {}
                 Err(_) => break,
             }

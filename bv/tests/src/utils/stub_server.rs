@@ -7,6 +7,7 @@ type Result<T> = std::result::Result<Response<T>, Status>;
 
 pub struct StubHostsServer {}
 
+#[allow(clippy::diverging_sub_expression)]
 #[tonic::async_trait]
 impl pb::host_service_server::HostService for StubHostsServer {
     async fn update(
@@ -31,14 +32,14 @@ impl pb::host_service_server::HostService for StubHostsServer {
         &self,
         _: Request<pb::HostServiceGetRequest>,
     ) -> Result<pb::HostServiceGetResponse> {
-        unimplemented!("Sod off I'm just a test server")
+        unimplemented!("Sod off I'm just a test server");
     }
 
     async fn list(
         &self,
         _: Request<pb::HostServiceListRequest>,
     ) -> Result<pb::HostServiceListResponse> {
-        unimplemented!("Sod off I'm just a test server")
+        unimplemented!("Sod off I'm just a test server");
     }
 
     async fn create(

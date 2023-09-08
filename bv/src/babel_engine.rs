@@ -700,6 +700,7 @@ mod tests {
     mock! {
         pub BabelService {}
 
+        #[allow(clippy::type_complexity)]
         #[tonic::async_trait]
         impl babel_api::babel::babel_server::Babel for BabelService {
             async fn setup_babel(
@@ -873,6 +874,7 @@ mod tests {
         client: BabelClient,
     }
 
+    #[allow(clippy::diverging_sub_expression)]
     #[async_trait]
     impl NodeConnection for TestConnection {
         async fn open(&mut self, _max_delay: Duration) -> Result<()> {
@@ -972,6 +974,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::cmp_owned)]
     #[tokio::test]
     async fn test_async_bridge_to_babel() -> Result<()> {
         let mut test_env = TestEnv::new()?;
@@ -985,8 +988,8 @@ mod tests {
                 let json = json.as_object().unwrap();
                 template == Path::new("template")
                     && out == Path::new("config")
-                    && json["some_key"].to_string() == "\"some value\""
-                    && json["secret_key"].to_string() == "\"\\u0001\\u0002\\u0003\""
+                    && json["some_key"].to_string() == r#""some value""#
+                    && json["secret_key"].to_string() == r#""\u0001\u0002\u0003""#
             })
             .return_once(|_| Ok(Response::new(())));
         // from custom_method
@@ -1154,7 +1157,7 @@ mod tests {
             vec!["some_method".to_string()],
             test_env.engine.capabilities().await?
         );
-        assert_eq!(true, test_env.engine.has_capability("some method").await?);
+        assert!(test_env.engine.has_capability("some method").await?);
         assert_eq!(
             "no metadata",
             test_env

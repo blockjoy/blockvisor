@@ -352,7 +352,7 @@ async fn test_bv_service_e2e() {
 
 fn execute_sql(connection_str: &str, query: &str) {
     Command::new("docker")
-        .args(&[
+        .args([
             "compose",
             "exec",
             "-T",

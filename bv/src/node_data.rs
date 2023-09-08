@@ -25,7 +25,7 @@ pub enum NodeStatus {
 }
 
 impl fmt::Display for NodeStatus {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self:?}")
     }
 }
@@ -38,7 +38,7 @@ pub struct NodeImage {
 }
 
 impl fmt::Display for NodeImage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}/{}/{}",

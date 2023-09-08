@@ -40,7 +40,7 @@ pub fn rhai_smoke(path: &Path) -> anyhow::Result<BlockchainMetadata> {
         .expect_sanitize_sh_param()
         .returning(|input| Ok(input.to_string()));
     babel.expect_render_template().returning(|_, _, _| Ok(()));
-    babel.expect_node_params().returning(|| Default::default());
+    babel.expect_node_params().returning(Default::default);
     babel.expect_save_data().returning(|_| Ok(()));
     babel
         .expect_load_data()
@@ -62,7 +62,7 @@ pub fn rhai_smoke(path: &Path) -> anyhow::Result<BlockchainMetadata> {
     plugin.sync_status().ok();
     plugin.staking_status().ok();
     plugin.generate_keys().ok();
-    Ok(plugin.metadata()?)
+    plugin.metadata()
 }
 
 #[test]

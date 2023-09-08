@@ -1018,7 +1018,7 @@ mod tests {
             serde_json::to_string(&parts)?,
         )?;
         // partially downloaded second file
-        fs::write(&test_env.tmp_dir.join("second.file"), vec![1u8; 55])?;
+        fs::write(test_env.tmp_dir.join("second.file"), vec![1u8; 55])?;
 
         let mut job = test_env.download_job(manifest);
         job.downloader.config.max_runners = 1;

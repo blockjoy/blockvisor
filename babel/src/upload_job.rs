@@ -504,7 +504,7 @@ mod tests {
     }
 
     fn dummy_sources(path: &Path) -> Result<()> {
-        fs::create_dir_all(&path)?;
+        fs::create_dir_all(path)?;
         fs::write(path.join("a"), "7 bytes")?;
         fs::create_dir_all(path.join("d1").join("d2"))?;
         fs::write(path.join("d1").join("b"), "9   bytes")?;
