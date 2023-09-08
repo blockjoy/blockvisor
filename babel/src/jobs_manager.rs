@@ -591,6 +591,7 @@ mod tests {
             job_type: JobType::RunSh("".to_string()),
             restart: RestartPolicy::Never,
             shutdown_timeout_secs: None,
+            shutdown_signal: None,
             needs: None,
         }
     }
@@ -648,6 +649,7 @@ mod tests {
                     job_type: JobType::RunSh("different".to_string()),
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,
+                    shutdown_signal: None,
                     needs: Some(vec![]),
                 },
             )
@@ -860,6 +862,7 @@ mod tests {
                     job_type: JobType::RunSh("".to_string()),
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,
+                    shutdown_signal: None,
                     needs: Some(vec!["invalid_dependency".to_string()]),
                 },
             )
@@ -876,6 +879,7 @@ mod tests {
                     job_type: JobType::RunSh("".to_string()),
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,
+                    shutdown_signal: None,
                     needs: Some(vec!["test_job".to_string()]),
                 },
             )
@@ -950,6 +954,7 @@ mod tests {
                     job_type: JobType::RunSh("".to_string()),
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,
+                    shutdown_signal: None,
                     needs: Some(vec!["failed_job".to_string()]),
                 },
             )
@@ -1026,6 +1031,7 @@ mod tests {
                         max_retries: None,
                     }),
                     shutdown_timeout_secs: None,
+                    shutdown_signal: None,
                     needs: None,
                 },
             )

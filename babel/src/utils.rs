@@ -1,3 +1,4 @@
+use babel_api::engine::PosixSignal;
 use bv_utils::{run_flag::RunFlag, system::is_process_running, timer::AsyncTimer};
 use eyre::{bail, Context, ContextCompat};
 use futures::StreamExt;
@@ -39,7 +40,12 @@ pub fn bv_shell(body: &str) -> (String, Vec<String>) {
 /// Kill all processes that match `cmd` and passed `args`.
 ///
 /// TODO: (maybe) try to use &[&str] instead of Vec<String>
-pub fn kill_all_processes(cmd: &str, args: Vec<String>, timeout: Option<Duration>) {
+pub fn kill_all_processes(
+    cmd: &str,
+    args: Vec<String>,
+    timeout: Option<Duration>,
+    signal: PosixSignal,
+) {
     let mut sys = System::new();
     sys.refresh_processes();
     let ps = sys.processes();
@@ -47,7 +53,7 @@ pub fn kill_all_processes(cmd: &str, args: Vec<String>, timeout: Option<Duration
     let procs = find_processes(cmd, args, ps);
     let now = Instant::now();
     for (_, proc) in procs {
-        kill_process_tree(proc, ps, now, timeout);
+        kill_process_tree(proc, ps, now, timeout, into_sysinfo_signal(signal));
     }
 }
 
@@ -57,10 +63,11 @@ pub fn kill_process_tree(
     ps: &HashMap<Pid, Process>,
     now: Instant,
     timeout: Option<Duration>,
+    signal: Signal,
 ) {
     // Better to kill parent first, since it may implement some child restart mechanism.
     // Try to interrupt the process, and kill it after timeout in case it has not finished.
-    proc.kill_with(Signal::Term);
+    proc.kill_with(signal);
     while is_process_running(proc.pid().as_u32()) {
         if let Some(timeout) = timeout {
             if now.elapsed() > timeout {
@@ -73,7 +80,7 @@ pub fn kill_process_tree(
     }
     let children = ps.iter().filter(|(_, p)| p.parent() == Some(proc.pid()));
     for (_, child) in children {
-        kill_process_tree(child, ps, now, timeout);
+        kill_process_tree(child, ps, now, timeout, signal);
     }
 }
 
@@ -276,6 +283,47 @@ pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::utils::Binary, S
     Ok(checksum)
 }
 
+fn into_sysinfo_signal(posix: PosixSignal) -> Signal {
+    match posix {
+        PosixSignal::SIGABRT => Signal::Abort,
+        PosixSignal::SIGALRM => Signal::Alarm,
+        PosixSignal::SIGBUS => Signal::Bus,
+        PosixSignal::SIGCHLD => Signal::Child,
+        PosixSignal::SIGCLD => Signal::Child,
+        PosixSignal::SIGCONT => Signal::Continue,
+        PosixSignal::SIGEMT => Signal::Trap,
+        PosixSignal::SIGFPE => Signal::FloatingPointException,
+        PosixSignal::SIGHUP => Signal::Hangup,
+        PosixSignal::SIGILL => Signal::Illegal,
+        PosixSignal::SIGINFO => Signal::Power,
+        PosixSignal::SIGINT => Signal::Interrupt,
+        PosixSignal::SIGIO => Signal::IO,
+        PosixSignal::SIGIOT => Signal::IOT,
+        PosixSignal::SIGKILL => Signal::Kill,
+        PosixSignal::SIGPIPE => Signal::Pipe,
+        PosixSignal::SIGPOLL => Signal::Poll,
+        PosixSignal::SIGPROF => Signal::Profiling,
+        PosixSignal::SIGPWR => Signal::Power,
+        PosixSignal::SIGQUIT => Signal::Quit,
+        PosixSignal::SIGSEGV => Signal::Segv,
+        PosixSignal::SIGSTOP => Signal::Stop,
+        PosixSignal::SIGTSTP => Signal::TSTP,
+        PosixSignal::SIGSYS => Signal::Sys,
+        PosixSignal::SIGTERM => Signal::Term,
+        PosixSignal::SIGTRAP => Signal::Trap,
+        PosixSignal::SIGTTIN => Signal::TTIN,
+        PosixSignal::SIGTTOU => Signal::TTOU,
+        PosixSignal::SIGUNUSED => Signal::Sys,
+        PosixSignal::SIGURG => Signal::Urgent,
+        PosixSignal::SIGUSR1 => Signal::User1,
+        PosixSignal::SIGUSR2 => Signal::User2,
+        PosixSignal::SIGVTALRM => Signal::VirtualAlarm,
+        PosixSignal::SIGXCPU => Signal::XCPU,
+        PosixSignal::SIGXFSZ => Signal::XFSZ,
+        PosixSignal::SIGWINCH => Signal::Winch,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +369,7 @@ mod tests {
             &cmd_path.to_string_lossy(),
             vec!["a".to_string(), "b".to_string(), "c".to_string()],
             Some(Duration::from_secs(3)),
+            PosixSignal::SIGTERM,
         );
         tokio::time::timeout(Duration::from_secs(60), async {
             while is_process_running(pid) {

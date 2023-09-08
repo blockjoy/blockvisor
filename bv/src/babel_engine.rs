@@ -839,6 +839,7 @@ mod tests {
                     job_type: JobType::RunSh(param.to_string()),
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,
+                    shutdown_signal: None,
                     needs: None,
                 },
             )?;

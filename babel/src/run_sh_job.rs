@@ -9,7 +9,7 @@ use crate::{
     utils,
 };
 use async_trait::async_trait;
-use babel_api::engine::{JobStatus, RestartPolicy};
+use babel_api::engine::{JobStatus, PosixSignal, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::Result;
 use std::time::Duration;
@@ -21,6 +21,7 @@ pub struct RunShJob<T> {
     sh_body: String,
     restart_policy: RestartPolicy,
     shutdown_timeout: Duration,
+    shutdown_signal: PosixSignal,
     timer: T,
     log_buffer: LogBuffer,
 }
@@ -31,12 +32,14 @@ impl<T: AsyncTimer + Send> RunShJob<T> {
         sh_body: String,
         restart_policy: RestartPolicy,
         shutdown_timeout: Duration,
+        shutdown_signal: PosixSignal,
         log_buffer: LogBuffer,
     ) -> Result<Self> {
         Ok(Self {
             sh_body,
             restart_policy,
             shutdown_timeout,
+            shutdown_signal,
             timer,
             log_buffer,
         })
@@ -46,7 +49,12 @@ impl<T: AsyncTimer + Send> RunShJob<T> {
         // Check if there are no remnant child process after previous run.
         // If so, just kill it.
         let (cmd, args) = utils::bv_shell(&self.sh_body);
-        utils::kill_all_processes(&cmd, args, Some(self.shutdown_timeout));
+        utils::kill_all_processes(
+            &cmd,
+            args,
+            Some(self.shutdown_timeout),
+            self.shutdown_signal,
+        );
         <Self as JobRunner>::run(self, run, name, jobs_dir).await;
     }
 }
@@ -76,7 +84,12 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
                             .await?;
                     } else {
                         info!("Job runner requested to stop, killing job '{name}'");
-                        utils::kill_all_processes(&cmd_name, args.clone(), None);
+                        utils::kill_all_processes(
+                            &cmd_name,
+                            args.clone(),
+                            None,
+                            self.shutdown_signal,
+                        );
                     }
                 }
                 Err(err) => {
@@ -135,6 +148,7 @@ mod tests {
                 max_retries: Some(3),
             }),
             Duration::from_secs(3),
+            PosixSignal::SIGTERM,
             log_buffer,
         )?
         .run(test_run, &job_name, &jobs_dir)

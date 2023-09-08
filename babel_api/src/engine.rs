@@ -8,6 +8,7 @@ use std::{
 use tracing::log::Level;
 
 pub const DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS: u64 = 60;
+pub const DEFAULT_JOB_SHUTDOWN_SIGNAL: PosixSignal = PosixSignal::SIGTERM;
 
 /// Plugin engine must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -231,6 +232,10 @@ pub struct JobConfig {
     /// After given time job won't be killed, but babel will rise the error.
     /// If not set default to 60s.
     pub shutdown_timeout_secs: Option<u64>,
+    /// POSIX signal that will be sent to child processes on job shutdown.
+    /// See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
+    /// If not set default to `SIGTERM`.
+    pub shutdown_signal: Option<PosixSignal>,
     /// List of job names that this job needs to be finished before start.
     pub needs: Option<Vec<String>>,
 }
@@ -328,4 +333,81 @@ impl UploadManifest {
         }
         Ok(())
     }
+}
+
+/// See [man7](https://man7.org/linux/man-pages/man7/signal.7.html)
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum PosixSignal {
+    /// Abort signal from abort(3)
+    SIGABRT,
+    /// Timer signal from alarm(2)
+    SIGALRM,
+    /// Bus error (bad memory access)
+    SIGBUS,
+    /// Child stopped or terminated
+    SIGCHLD,
+    /// A synonym for SIGCHLD
+    SIGCLD,
+    /// Continue if stopped
+    SIGCONT,
+    /// Emulator trap
+    SIGEMT,
+    /// Floating-point exception
+    SIGFPE,
+    /// Hangup detected on controlling terminal or death of controlling process
+    SIGHUP,
+    /// Illegal Instruction
+    SIGILL,
+    /// A synonym for SIGPWR
+    SIGINFO,
+    /// Interrupt from keyboard
+    SIGINT,
+    /// I/O now possible (4.2BSD)
+    SIGIO,
+    /// IOT trap. A synonym for SIGABRT
+    SIGIOT,
+    /// Kill signal
+    SIGKILL,
+    /// Broken pipe: write to pipe with no readers; see pipe(7)
+    SIGPIPE,
+    /// Pollable event (Sys V); synonym for SIGIO
+    SIGPOLL,
+    /// Profiling timer expired
+    SIGPROF,
+    /// Power failure (System V)
+    SIGPWR,
+    /// Quit from keyboard
+    SIGQUIT,
+    /// Invalid memory reference
+    SIGSEGV,
+    /// Stop process
+    SIGSTOP,
+    /// Stop typed at terminal
+    SIGTSTP,
+    /// Bad system call (SVr4); see also seccomp(2)
+    SIGSYS,
+    /// Termination signal
+    SIGTERM,
+    /// Trace/breakpoint trap
+    SIGTRAP,
+    /// Terminal input for background process
+    SIGTTIN,
+    /// Terminal output for background process
+    SIGTTOU,
+    /// Synonymous with SIGSYS
+    SIGUNUSED,
+    /// Urgent condition on socket (4.2BSD)
+    SIGURG,
+    /// User-defined signal 1
+    SIGUSR1,
+    /// User-defined signal 2
+    SIGUSR2,
+    /// Virtual alarm clock (4.2BSD)
+    SIGVTALRM,
+    /// CPU time limit exceeded (4.2BSD); see setrlimit(2)
+    SIGXCPU,
+    /// File size limit exceeded (4.2BSD); see setrlimit(2)
+    SIGXFSZ,
+    /// Window resize signal (4.3BSD, Sun)
+    SIGWINCH,
 }

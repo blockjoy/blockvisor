@@ -2,7 +2,7 @@ use babel::{
     download_job::DownloadJob, job_runner::TransferConfig, jobs, log_buffer::LogBuffer,
     run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH,
 };
-use babel_api::engine::DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS;
+use babel_api::engine::{DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS};
 use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobType};
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::{anyhow, bail};
@@ -54,6 +54,9 @@ async fn main() -> eyre::Result<()> {
                             .shutdown_timeout_secs
                             .unwrap_or(DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS)
                     ),
+                    job_config
+                        .shutdown_signal
+                        .unwrap_or(DEFAULT_JOB_SHUTDOWN_SIGNAL),
                     log_buffer,
                 )?
                 .run(run, &job_name, &jobs::JOBS_DIR),

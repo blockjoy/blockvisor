@@ -524,6 +524,7 @@ mod tests {
                         max_retries: Some(3),
                     }),
                     shutdown_timeout_secs: None,
+                    shutdown_signal: None,
                     needs: Some(vec!["needed".to_string()]),
                 }),
             )
@@ -539,6 +540,7 @@ mod tests {
                     },
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,
+                    shutdown_signal: None,
                     needs: None,
                 }),
             )
