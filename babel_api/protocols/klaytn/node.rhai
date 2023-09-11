@@ -8,20 +8,23 @@ const METADATA = #{
     requirements: #{
         vcpu_count: 8,
         mem_size_mb: 65536,
-        disk_size_gb: 4000,
+        disk_size_gb: 5000, // 1.5TB / 3.3TB uncompressed
     },
 
     nets: #{
         baobab: #{
+            url: "https://public-en-baobab.klaytn.net/",
             package_url: "https://packages.klaytn.net/klaytn/v1.11.0/ken-baobab-v1.11.0-0-linux-amd64.tar.gz",
-            net_type: "test", 
+            net_type: "test",
             archive_url: "https://s3.ap-northeast-2.amazonaws.com/klaytn-chaindata/baobab/klaytn-baobab-chaindata-20230829010811.tar.gz",
           },
         cypress: #{
+            url: "https://public-en-cypress.klaytn.net/",
             package_url: "https://packages.klaytn.net/klaytn/v1.11.0/ken-v1.11.0-0-linux-amd64.tar.gz",
             net_type: "main",
             archive_url: "https://s3.ap-northeast-2.amazonaws.com/klaytn-chaindata/cypress/klaytn-cypress-chaindata-20230828010811.tar.gz",
-        },
+        }
+    },
 
     babel_config: #{
         data_directory_mount_point: "/blockjoy/klaytn/data",
@@ -44,166 +47,244 @@ const METADATA = #{
             },
         ],
      },
-    keys: #{},
-  }
+    keys: #{}
 };
 
-// Other Vars
 const KLAYTN_RPC_URL = "http://localhost:8551";
-const KEN_DOWNLOAD_PATH = global::METADATA.babel_config.data_directory_mount_point + "/downloads/ken.tar.gz";
-const KLAYTN_ARCHIVE_PATH = global::METADATA.babel_config.data_directory_mount_point +"/downloads/klatyn-chaindata.tar.gz";
+const KLAYTN_DOWNLOADS_DIR = global::METADATA.babel_config.data_directory_mount_point + "/downloads/";
+const KEN_DOWNLOAD_PATH = global::KLAYTN_DOWNLOADS_DIR + "ken.tar.gz";
+const KLAYTN_ARCHIVE_PATH = global::KLAYTN_DOWNLOADS_DIR +"klatyn-chaindata.tar.gz";
 const KEN_INSTALL_PATH = "/var/lib/klaytn";
+const KEN_PATH = `${global::KEN_INSTALL_PATH}/ken-linux-amd64/bin`;
+
 fn init(keys) {
 
     let klaytn_init_commands = [
-        `mkdir -p ${global::KEN_DOWNLOAD_PATH}`,
+        `mkdir -p ${global::KLAYTN_DOWNLOADS_DIR}`,
         `wget ${global::METADATA.nets[node_params().NETWORK].package_url} -O ${global::KEN_DOWNLOAD_PATH}`,
         `mkdir -p ${global::KEN_INSTALL_PATH}`,
         `tar xvf ${global::KEN_DOWNLOAD_PATH} -C ${global::KEN_INSTALL_PATH}`,
-        `sed -e "s|DATA_DIR=.*|DATA_DIR=${global::METADATA.data_directory_mount_point}|" ${global::KEN_INSTALL_PATH}/ken-linux-amd64/conf/kend.conf`,
-        `sed -e 's|RPC_API=.*|RPC_API=admin,debug,klay,eth,miner,net,personal,rpc,txpool,web3|' ${global::KEN_INSTALL_PATH}/ken-linux-amd64/conf/kend.conf`,
+        `sed -i -e "s|DATA_DIR=.*|DATA_DIR=${global::METADATA.babel_config.data_directory_mount_point} |" ${global::KEN_INSTALL_PATH}/ken-linux-amd64/conf/kend.conf`,
+        `sed -i -e 's|RPC_API=.*|RPC_API="admin,debug,klay,eth,miner,net,personal,rpc,txpool,web3"|' ${global::KEN_INSTALL_PATH}/ken-linux-amd64/conf/kend.conf`,
+        `sed -i -e 's|RPC_ADDR=.*|RPC_ADDR="127.0.0.1"|' ${global::KEN_INSTALL_PATH}/ken-linux-amd64/conf/kend.conf`,
+        `rm -rf /opt/netdata/var/lib/netdata/*`,
+        `rm -rf /opt/netdata/var/cache/netdata/*`,
+        `apt-get install nginx -y`,
+        `systemctl enable nginx`,
+        `sed -i '/location \/ {/,/}/d' /etc/nginx/sites-enabled/default`,
+        `sed -i '/server_name _;/a \\nlocation \/ {\n    proxy_set_header Host $host;\n    proxy_set_header X-Real-IP $remote_addr;\n    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    proxy_set_header X-Forwarded-Proto $scheme;\n    proxy_pass http://localhost:8551;\n    proxy_read_timeout 90;\n}' /etc/nginx/sites-enabled/default`,
+        `systemctl restart nginx`,
+        `ufw allow http`,
     ];
 
     for (cmd, i) in klaytn_init_commands {
         let response = run_sh(cmd);
-        print(`Response from shell command ${cmd}':`);
-        print(response);
+        debug(`Response from shell command ${cmd}':`);
+        debug(response);
     
         if response.exit_code != 0 {
-            print(`Command at index ${i} failed: '${cmd}'`);
+            debug(`Command at index ${i} failed: '${cmd}'`);
         }
     }
     
-    start_job("download", #{
+    // start_job("download", #{
+    //     job_type: #{
+    //         run_sh: `wget ${global::METADATA.nets.cypress.archive_url} -O ${global::KLAYTN_ARCHIVE_PATH} && tar xvf ${global::KLAYTN_ARCHIVE_PATH} -C ${global::METADATA.babel_config.data_directory_mount_point}`,
+    //     },
+    //     restart: #{
+    //         on_failure: #{
+    //             backoff_timeout_ms: 60000,
+    //             backoff_base_ms: 10000,
+    //             max_retries: 3,
+    //         },
+    //     },
+    //     needs: [],
+    // });
+
+    start_job("start", #{
         job_type: #{
-            run_sh: `wget ${global::METADATA.nets[node_params().NETWORK].archive_url} -O ${global::KLAYTN_ARCHIVE_PATH} && tar xvf ${global::KLAYTN_ARCHIVE_PATH} -C ${global::METADATA.data_directory_mount_point}`,
+            run_sh: `${global::KEN_PATH}/kend start-docker`,
         },
         restart: #{
-            on_failure: #{
+            always: #{
                 backoff_timeout_ms: 60000,
                 backoff_base_ms: 10000,
-                max_retries: 3,
+            },
+        },
+        needs: [],
+        // needs: ["download"],
+    });
+
+    start_job("netdata-visuals", #{
+        job_type: #{
+            run_sh: `sleep 10 && /opt/netdata/usr/sbin/netdata -D`,
+        },
+       restart: #{
+            "always": #{
+                backoff_timeout_ms: 60000,
+                backoff_base_ms: 10000,
             },
         },
         needs: [],
     });
-
-    start_job("start", #{
-        job_type: #{
-            run_sh: "kend start && sleep infinity",
-        },
-        restart: #{
-            on_failure: #{
-                backoff_timeout_ms: 60000,
-                backoff_base_ms: 10000,
-                max_retries: 3,
-            },
-        },
-        needs: ["download"],
-    });
     
-        
-    let klay_path = `${global::KEN_INSTALL_PATH}/ken-linux-amd64/bin`;
-    let current_path = run_sh("echo $PATH");
-    if current_path.stdout.contains(klay_path) {
-        print("PATH already contains '${klay_path}'");
-    } else {
-        let response = run_sh(`export PATH=$PATH:${klay_path}`);
-        // Check the response and handle errors if needed
-        if response.exit_code != 0 {
-            print("Error updating PATH");
-        } else {
-            print("PATH updated successfully");
-        }
-    }
-
-    let response = run_sh(`kend start`);
-    if response.exit_code != 0 {
-        print("Error starting kend");
-    } else {
-        print("kend started successfully");
-    }
-
-    // to do : Clean up tar snapshot files.
-    run_sh(`rm -f ${global::KLAYTN_ARCHIVE_PATH}`)
+    //let response = run_sh(`rm -f ${global::KLAYTN_ARCHIVE_PATH}`);
 };
 
 fn address(){
-    let res = run_sh("ken --exec governance.nodeAddress attach ${global::METADATA.data_directory_mount_point}/klay.ipc");
-    res.stdout;
-    let response = run_jrpc(#{
-        host: KLAYTN_RPC_URL,
-        method: governance_nodeAddress ,
-        params: #{params: ["latest", "true"], id: 1, jsonrpc:"2.0"},
+    // curl -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"admin_nodeInfo","id":1}' http://localhost:8551 | jq .id
+    let res = run_jrpc(#{
+        host: `${global::KLAYTN_RPC_URL}`,
+        method: "admin_nodeInfo",
+        params: #{ id: 1, jsonrpc:"2.0"},
         headers: #{"Content-Type" : "application/json"},
       });
     if res.status_code != 200 {
         throw res.status_code;
     }
-    let payload = parse_json(res.result);
+    parse_json(res.body).result.id
 }
 
 fn application_status() {
-    let res = run_sh("kend status");
-    if response.contains("down") {
-        "delinquent"
+    let res = run_jrpc(#{
+        host: `${global::KLAYTN_RPC_URL}`,
+        method: "klay_blockNumber",
+        params: #{ id: 1, jsonrpc:"2.0"},
+        headers: #{"Content-Type" : "application/json"},
+      });
+    if res.status_code != 200 {
+       "delinquent";
     } else {
-        "broadcasting"
+        "broadcasting";
     }
 }
 
 fn name(){
-    let res = run_sh(`ken --exec admin.nodeInfo.name attach ${global::METADATA.data_directory_mount_point}/klay.ipc`);
-    res.stdout;
-}
-
-fn height(){
-    let res = run_sh(`ken --exec klay.blockNumber attach ${global::METADATA.data_directory_mount_point}/klay.ipc`);
-    res.stdout;
-}
-
-fn block_age(){
-    // curl -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"klay_getBlockByNumber","params":["latest", true],"id":1}' http://localhost:8551 | jq '.result.timestamp'
     let res = run_jrpc(#{
-        host: KLAYTN_RPC_URL,
-        method: klay_getBlockByNumber,
-        params: #{params: ["latest", "true"], id: 1, jsonrpc:"2.0"},
+        host: `${global::KLAYTN_RPC_URL}`,
+        method: "admin_nodeInfo",
         headers: #{"Content-Type" : "application/json"},
       });
     if res.status_code != 200 {
         throw res.status_code;
     }
-    let payload = parse_json(res.result);
-    let timestamp = parse_int(sub_string(payload.result.timestamp,2),16);
-    let now=run_sh(`date +%s`);
-    parse_int(now.stdout)-timestamp;
+    parse_json(res.body).result.name
+}
+
+fn height(){
+    let res = run_jrpc(#{
+        host: `${global::KLAYTN_RPC_URL}`,
+        method: "klay_blockNumber",
+        headers: #{"Content-Type" : "application/json"},
+      });
+    if res.status_code != 200 {
+        throw res.status_code;
+    }
+    let hex = parse_json(res.body);
+    parse_int(sub_string(hex.result,2),16)
+}
+
+fn block_age(){
+    // curl -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"klay_getBlockByNumber","params":["latest", true],"id":1}' http://localhost:8551 
+    // {
+    //     "jsonrpc": "2.0",
+    //     "id": 1,
+    //     "result": {
+    //       "blockScore": "0x1",
+    //       "extraData": "xxxxxxx",
+    //       "gasUsed": "0x0",
+    //       "governanceData": "0x",
+    //       "hash": "0xc8e222726fc0bd85c1a0823259fbe8d0c0cf347d061c40aae57c0a24fc2651cd",
+    //       "logsBloom": "0x0",
+    //       "number": "0x38d7de",
+    //       "parentHash": "0x0c534b1b7ef97b54c47e85faa407dea5c8d03e15e2181892a42f87d1a0f983d9",
+    //       "receiptsRoot": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+    //       "reward": "0xc5b67d88c3a26fcee67fc542009d8526f6b4c8a3",
+    //       "size": "0x716",
+    //       "stateRoot": "0xb37d99b34d60daf641555e5ed3e30c2b764d9cb6a02419ac97a771d03ed28688",
+    //       "timestamp": "0x5d4ae20b",
+    //       "timestampFoS": "0x19",
+    //       "totalBlockScore": "0x38d7df",
+    //       "transactions": [],
+    //       "transactionsRoot": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+    //       "voteData": "0x"
+    //     }
+    //   }
+
+    let res = run_jrpc(#{
+        host: `${global::KLAYTN_RPC_URL}`,
+        method: "klay_getBlockByNumber",
+        // params: [true],
+        headers: #{"Content-Type" : "application/json"},
+      });
+    if res.status_code != 200 {
+        throw res.status_code;
+    }
+    return 0;
+    // let now=run_sh(`date +%s`);
+    //let hex = parse_json(res.body);
+    //hex.result.timestamp;
+    // let result = parse_json(hex.result);
+    // let timestamp = parse_int(sub_string(hex.result.timestamp,2),16);
+    //parse_int(sub_string(hex.result,2),16)
+    // print(hex);
+    // parse_int(now.stdout)
+    
+    // parse_int(now.stdout)-timestamp;
 }
 
 
 fn consensus(){
-    "false"
+    false
 }
 
 fn sync_status(){
-   // curl -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"klay_syncing","params":[],"id":1}' http://localhost:8551 | jq '.result'
-   let res = run_jrpc(#{
-        host: KLAYTN_RPC_URL,
-        method: klay_syncing,
-        params: #{id: 1, jsonrpc:"2.0"},
-        headers: #{
-            "Content-Type" : "application/json",
-        }
+    // curl -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"klay_syncing","params":[],"id":1}' http://localhost:8551 | jq '.result'
+    //    let res = run_jrpc(#{
+    //         host: `${global::KLAYTN_RPC_URL}`,
+    //         method: "klay_blockNumber",
+    //         params: #{ id: 1, jsonrpc:"2.0"},
+    //         headers: #{"Content-Type" : "application/json"},
+    //     });
+    //     if res.status_code != 200 {
+    //         throw res.status_code;
+    //     }
+    //     let hex = parse_json(res.body);
+    //     let t0 = parse_int(sub_string(hex.result,2),16);
+    //     sleep(5);
+    //     let res1 = run_jrpc(#{
+    //         host: `${global::KLAYTN_RPC_URL}`,
+    //         method: "klay_blockNumber",
+    //         params: #{ id: 1, jsonrpc:"2.0"},
+    //         headers: #{"Content-Type" : "application/json"},
+    //     });
+    //     if res1.status_code != 200 {
+    //         throw res1.status_code;
+    //     }
+    //     let hex1 = parse_json(res.body);
+    //     let t1 = parse_int(sub_string(hex1.result,2),16);
+
+    //     if t1-t0 > 0 {
+    //         "synced"
+    //     } else {
+    //         "syncing"
+    //     }
+
+    // curl -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"klay_syncing","params":[],"id":1}' http://localhost:8551
+    let res = run_jrpc(#{
+        host: `${global::KLAYTN_RPC_URL}`,
+        method: "klay_syncing",
+        params: #{ id: 1, jsonrpc:"2.0"},
+        headers: #{"Content-Type" : "application/json"},
     });
     if res.status_code != 200 {
         throw res.status_code;
     }
-    let payload = parse_json(res.result);
-    if payload.result {
-        "Syncing"
+    if parse_json(res.body).result != false {
+        "syncing"
     } else {
-        "Not Syncing"
+        "synced"
     }
-
 }
 
 fn staking_status(){
@@ -211,5 +292,5 @@ fn staking_status(){
 }
 
 fn generate_keys(){
-    "keys"
+    ()
 }
