@@ -3,12 +3,12 @@ use blockvisord::{
     bv,
     cli::{App, Command},
     config::{Config, SharedConfig, CONFIG_PATH},
+    internal_server,
     linux_platform::bv_root,
 };
 use bv_utils::cmd::run_cmd;
 use clap::Parser;
 use tokio::time::{sleep, Duration};
-use tonic::transport;
 
 // TODO: use proper wait mechanism
 const BLOCKVISOR_START_TIMEOUT: Duration = Duration::from_secs(5);
@@ -28,19 +28,16 @@ async fn main() -> Result<()> {
 
     match args.command {
         Command::Start(_) => {
-            if is_running(bv_url.clone()).await? {
-                println!("Service already running");
+            if let Ok(info) = service_info(bv_url.clone()).await {
+                println!("Service already running: {info}");
                 return Ok(());
             }
 
             run_cmd("systemctl", ["start", "blockvisor.service"]).await?;
             sleep(BLOCKVISOR_START_TIMEOUT).await;
 
-            match is_running(bv_url.clone()).await {
-                Ok(true) => println!("blockvisor service started successfully"),
-                Ok(false) => {
-                    bail!("blockvisor service did not start: cannot connect to `{bv_url}`");
-                }
+            match service_info(bv_url.clone()).await {
+                Ok(info) => println!("blockvisor service started successfully: {info}"),
                 Err(e) => bail!("blockvisor service did not start: {e:?}"),
             }
         }
@@ -48,14 +45,15 @@ async fn main() -> Result<()> {
             run_cmd("systemctl", ["stop", "blockvisor.service"]).await?;
             sleep(BLOCKVISOR_STOP_TIMEOUT).await;
 
-            match is_running(bv_url).await {
-                Ok(true) => bail!("blockvisor service did not stop"),
-                _ => println!("blockvisor service stopped successfully"),
+            if let Ok(info) = service_info(bv_url).await {
+                bail!("blockvisor service did not stop: {info}");
+            } else {
+                println!("blockvisor service stopped successfully");
             }
         }
         Command::Status(_) => {
-            if is_running(bv_url).await? {
-                println!("Service running");
+            if let Ok(info) = service_info(bv_url).await {
+                println!("Service running: {info}");
             } else {
                 println!("Service stopped");
             }
@@ -72,9 +70,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn is_running(url: String) -> Result<bool> {
-    Ok(transport::Endpoint::from_shared(url)?
-        .connect()
-        .await
-        .is_ok())
+async fn service_info(url: String) -> Result<String> {
+    let mut client = internal_server::service_client::ServiceClient::connect(url).await?;
+    Ok(client.info(()).await?.into_inner())
 }

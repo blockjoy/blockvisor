@@ -530,6 +530,10 @@ mod tests {
 
         #[tonic::async_trait]
         impl internal_server::service_server::Service for TestBV {
+            async fn info(
+                &self,
+                request: tonic::Request<()>,
+            ) -> Result<tonic::Response<String>, tonic::Status>;
             async fn health(
                 &self,
                 request: tonic::Request<()>,

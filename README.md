@@ -63,6 +63,7 @@ used during debugging issues, not printed by default
 - `/usr/bin/babel_job_runner`
 - `/etc/babelsup.conf`
 - `/etc/babel.conf`
+- `/etc/bvignore`
 - `/etc/systemd/system/babelsup.service`
 - `/var/lib/babel/jobs/<job_name>.cfg`
 - `/var/lib/babel/jobs/<job_name>.status`

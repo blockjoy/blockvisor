@@ -1,9 +1,11 @@
+use crate::config::Config;
+use crate::linux_platform::LinuxPlatform;
 use crate::node::Node;
 use crate::node_data::{NodeDisplayInfo, NodeImage, NodeStatus};
-use crate::node_metrics;
 use crate::nodes::{self, Nodes};
 use crate::pal::{NetInterface, Pal};
 use crate::{get_bv_status, set_bv_status, ServiceStatus};
+use crate::{node_metrics, BV_VAR_PATH};
 use chrono::Utc;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -14,6 +16,7 @@ use uuid::Uuid;
 
 #[tonic_rpc::tonic_rpc(bincode)]
 trait Service {
+    fn info() -> String;
     fn health() -> ServiceStatus;
     fn start_update() -> ServiceStatus;
     fn get_node_status(id: Uuid) -> NodeStatus;
@@ -58,6 +61,23 @@ where
     P::NodeConnection: Send + Sync + 'static,
     P::VirtualMachine: Send + Sync + 'static,
 {
+    #[instrument(skip(self), ret(Debug))]
+    async fn info(&self, _request: Request<()>) -> Result<Response<String>, Status> {
+        let pal = LinuxPlatform::new().map_err(|e| Status::internal(format!("{e:#}")))?;
+        Ok(Response::new(format!(
+            "{} {} - {:?}\n BV_PATH: {}\n BABEL_PATH: {}\n JOB_RUNNER_PATH: {}\n CONFIG: {:?}",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION"),
+            get_bv_status().await,
+            pal.bv_root().join(BV_VAR_PATH).to_string_lossy(),
+            pal.babel_path().to_string_lossy(),
+            pal.job_runner_path().to_string_lossy(),
+            Config::load(pal.bv_root())
+                .await
+                .map_err(|e| Status::internal(format!("{e:#}")))?,
+        )))
+    }
+
     #[instrument(skip(self), ret(Debug))]
     async fn health(&self, _request: Request<()>) -> Result<Response<ServiceStatus>, Status> {
         Ok(Response::new(get_bv_status().await))
