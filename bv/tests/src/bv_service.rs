@@ -1,4 +1,4 @@
-use crate::src::utils::{stub_server::StubHostsServer, test_env};
+use crate::src::utils::{execute_sql, rbac, stub_server::StubHostsServer, test_env};
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::{
@@ -88,9 +88,10 @@ async fn test_bv_service_e2e() {
     let org_id = "53b28794-fb68-4cd1-8165-b98a51a19c46";
     let db_url = "postgres://blockvisor:password@database:5432/blockvisor_db";
 
+    rbac::setup_rbac(db_url).await;
     println!("create user");
     let user_query = r#"INSERT INTO users
-        VALUES ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', 'tester@blockjoy.com', '57snVgOUjwtfOrMxLHez8KOQaTNaNnLXMkUpzaxoRDs', 'cM4OaOTJUottdF4i8unbuA', '2023-01-17 22:13:52.422342+00', 'Luuk', 'Wester', '2023-01-17 22:14:06.297602+00', NULL, NULL, FALSE);
+        VALUES ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', 'tester@blockjoy.com', '57snVgOUjwtfOrMxLHez8KOQaTNaNnLXMkUpzaxoRDs', 'cM4OaOTJUottdF4i8unbuA', '2023-01-17 22:13:52.422342+00', 'Luuk', 'Wester', '2023-01-17 22:14:06.297602+00', NULL, NULL);
         "#;
     execute_sql(db_url, user_query);
 
@@ -108,7 +109,13 @@ async fn test_bv_service_e2e() {
 
     println!("get user org and token");
     let org_query = r#"INSERT INTO orgs VALUES ('53b28794-fb68-4cd1-8165-b98a51a19c46', 'Personal', TRUE, now(), now(), NULL);
-        INSERT INTO orgs_users VALUES ('53b28794-fb68-4cd1-8165-b98a51a19c46', '1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', 'owner', now(), now(), 'rgfr4YJZ8dIA');
+        INSERT INTO orgs_users VALUES ('53b28794-fb68-4cd1-8165-b98a51a19c46', '1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', now(), now(), 'rgfr4YJZ8dIA');
+        INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'org-admin');
+        INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'org-member');
+        INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'api-key-host');
+        INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'api-key-node');
+        INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'grpc-login');
+        INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'grpc-new-host');
         "#;
     execute_sql(db_url, org_query);
 
@@ -348,21 +355,4 @@ async fn test_bv_service_e2e() {
             panic!("timeout expired")
         }
     }
-}
-
-fn execute_sql(connection_str: &str, query: &str) {
-    Command::new("docker")
-        .args([
-            "compose",
-            "exec",
-            "-T",
-            "database",
-            "psql",
-            connection_str,
-            "-c",
-            query,
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("INSERT"));
 }
