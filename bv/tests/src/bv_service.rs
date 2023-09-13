@@ -151,6 +151,8 @@ async fn test_bv_service_e2e() {
     let url = "http://localhost:8080";
     let mqtt = "mqtt://localhost:1883";
 
+    println!("stop blockvisor");
+    test_env::bv_run(&["stop"], "blockvisor service stopped successfully", None);
     Command::cargo_bin("bvup")
         .unwrap()
         .args([&provision_token, "--skip-download"])
@@ -171,8 +173,7 @@ async fn test_bv_service_e2e() {
     let host_id = config.id;
     println!("got host id: {host_id}");
 
-    println!("restart blockvisor");
-    test_env::bv_run(&["stop"], "blockvisor service stopped successfully", None);
+    println!("start blockvisor");
     test_env::bv_run(&["start"], "blockvisor service started successfully", None);
 
     println!("test host info update");
