@@ -176,22 +176,18 @@ where
         config: &SharedConfig,
     ) {
         while run.load() {
-            tokio::select! {
-                _ = cmd_watch_rx.changed() => {
-                    debug!("MQTT watch triggerred");
-                    match api::CommandsService::connect(config).await {
-                        Ok(mut client) => {
-                            if let Err(e) = client.get_and_process_pending_commands(&config.read().await.id, nodes.clone()).await {
-                                error!("Error processing pending commands: {:#}", e);
-                            }
-                        }
-                        Err(e) => warn!("Error connecting to api: {:?}", e),
+            run.select(cmd_watch_rx.changed()).await;
+            debug!("MQTT watch triggerred");
+            match api::CommandsService::connect(config).await {
+                Ok(mut client) => {
+                    if let Err(e) = client
+                        .get_and_process_pending_commands(&config.read().await.id, nodes.clone())
+                        .await
+                    {
+                        error!("Error processing pending commands: {:#}", e);
                     }
                 }
-                _ = sleep(RECONNECT_INTERVAL) => {
-                    debug!("Waiting for commands notification...");
-                }
-                _ = run.wait() => {}
+                Err(e) => warn!("Error connecting to api: {:?}", e),
             }
         }
     }
