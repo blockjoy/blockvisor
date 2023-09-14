@@ -1,0 +1,41 @@
+application_name = "polygon"
+node_type = "node"
+version = "0.3.0-build.1"
+
+[image]
+debian_version = "focal"
+rootfs_size = "10G"
+fs_type = "ext4"
+apt_image = []
+apt_source = []
+cmds = [
+  "systemctl disable systemd-resolved.service",
+  "rm /etc/dhcp/dhclient-enter-hooks.d/resolved",
+  "rm /etc/resolv.conf",
+  "echo 'nameserver 8.8.8.8' > /etc/resolv.conf",
+  "echo 'nameserver 1.1.1.1' >> /etc/resolv.conf",
+  "mkdir -p ~/.bor/data ~/.heimdalld/data",
+  #"cd ~/node/heimdall && sudo bash setup.sh",
+  #"cd ~/node/bor && sudo bash setup.sh",
+
+]
+
+[build_machine]
+apt_build_machine = ["build-essential", "git", "binutils-dev", "libcurl4-openssl-dev", "zlib1g-dev", "libdw-dev", "libiberty-dev", "cmake", "gcc", "g++", "python", "libssl-dev", "pkg-config", "clang", "llvm"]
+git_repo = ""
+git_tag = ""
+build_cmds =  [ "rm -rf {{.YafimPolygonImageHome}}/launch {{.YafimPolygonImageHome}}/bor* {{.YafimPolygonImageHome}}/heimdall* || exit 0",
+                "cp {{.YafimHome}}/babelsup/usr/bin/babelsup {{.YafimPolygonImageHome}}/usr/bin/",
+                "cp {{.YafimHome}}/babelsup/etc/systemd/system/babelsup.service {{.YafimPolygonImageHome}}/etc/systemd/system/",
+                "cp {{.YafimHome}}/babelsup/etc/systemd/system/multi-user.target.wants/babelsup.service {{.YafimPolygonImageHome}}/etc/systemd/system/multi-user.target.wants/",
+		"echo 'root:f&IS_rwh' | chpasswd -R {{.YafimPolygonImageHome}}/",
+		"echo polygon > {{.YafimPolygonImageHome}}/etc/hostname",
+		"cd {{.YafimPolygonImageHome}} && git clone https://github.com/maticnetwork/heimdall && git clone https://github.com/maticnetwork/bor && git clone https://github.com/maticnetwork/launch",
+                "cd {{.YafimPolygonImageHome}}/heimdall && git checkout v0.3.0 && make install && cd -",
+                "cd {{.YafimPolygonImageHome}}/bor && git checkout v0.3.0 && make bor && cd -",
+                "cp ~/go/bin/* {{.YafimPolygonImageHome}}/usr/bin/",
+		"cd {{.YafimPolygonImageHome}}/bor/cmd/bootnode/ && go build -o {{.YafimPolygonImageHome}}/usr/bin/bootnode {{.YafimPolygonImageHome}}/bor/cmd/bootnode/main.go",
+		"mkdir -p {{.YafimPolygonImageHome}}/root/node",
+		"cd {{.YafimPolygonImageHome}} && bash launch/mainnet-v1/service.sh && cp *.service {{.YafimPolygonImageHome}}/etc/systemd/system/",
+	        "cp -rf {{.YafimPolygonImageHome}}/launch/mainnet-v1/sentry/sentry/* {{.YafimPolygonImageHome}}/root/node",
+]
