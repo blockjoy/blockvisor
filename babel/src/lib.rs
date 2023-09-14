@@ -2,6 +2,7 @@ pub mod async_pid_watch;
 pub mod babel_service;
 pub mod babelsup_service;
 pub mod checksum;
+pub mod compression;
 pub mod download_job;
 pub mod job_runner;
 pub mod jobs;

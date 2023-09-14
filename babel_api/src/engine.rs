@@ -132,10 +132,10 @@ pub struct Chunk {
 }
 
 /// Type of compression used on chunk data.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Compression {
-    // no compression is supported yet
+    ZSTD,
 }
 
 /// Download manifest, describing a cloud to disk mapping.
@@ -198,6 +198,8 @@ pub enum JobType {
         /// List of exclude patterns. Files in `source` directory that match any of pattern,
         /// won't be taken into account.
         exclude: Option<Vec<String>>,
+        /// Compression to be used on chunks.
+        compression: Option<Compression>,
     },
 }
 

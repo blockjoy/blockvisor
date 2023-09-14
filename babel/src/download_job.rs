@@ -1,3 +1,4 @@
+use crate::compression::{Coder, NoCoder, ZstdDecoder};
 /// This module implements job runner for downloading data. It downloads data according to given
 /// manifest and destination dir. In case of recoverable errors download is retried according to given
 /// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
@@ -11,7 +12,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use babel_api::engine::{
-    Checksum, Chunk, DownloadManifest, FileLocation, JobProgress, JobStatus, RestartPolicy,
+    Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, JobStatus,
+    RestartPolicy,
 };
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
 use eyre::{anyhow, bail, ensure, Context, Result};
@@ -287,26 +289,39 @@ impl ChunkDownloader {
     }
 
     async fn run(self, run: RunFlag) -> Result<()> {
+        match self.config.compression {
+            None => self.run_with_decoder(run, NoCoder::default()).await,
+            Some(Compression::ZSTD) => self.run_with_decoder(run, ZstdDecoder::new()?).await,
+        }
+    }
+
+    async fn run_with_decoder<D: Coder>(self, run: RunFlag, decoder: D) -> Result<()> {
         match &self.chunk.checksum {
             Checksum::Sha1(checksum) => {
-                self.download_chunk(run, sha1_smol::Sha1::new(), checksum)
+                self.download_chunk(run, decoder, sha1_smol::Sha1::new(), checksum)
                     .await
             }
             Checksum::Sha256(checksum) => {
-                self.download_chunk(run, <sha2::Sha256 as sha2::Digest>::new(), checksum)
-                    .await
+                self.download_chunk(
+                    run,
+                    decoder,
+                    <sha2::Sha256 as sha2::Digest>::new(),
+                    checksum,
+                )
+                .await
             }
             Checksum::Blake3(checksum) => {
-                self.download_chunk(run, blake3::Hasher::new(), checksum)
+                self.download_chunk(run, decoder, blake3::Hasher::new(), checksum)
                     .await
             }
         }
         .with_context(|| format!("chunk '{}' download failed", self.chunk.key))
     }
 
-    async fn download_chunk<C: checksum::Checksum>(
+    async fn download_chunk<C: checksum::Checksum, D: Coder>(
         &self,
         mut run: RunFlag,
+        mut decoder: D,
         mut digest: C,
         expected_checksum: &C::Bytes,
     ) -> Result<()> {
@@ -321,10 +336,9 @@ impl ChunkDownloader {
                 let buffer = res?;
                 pos += buffer.len();
                 digest.update(&buffer);
-
-                // TODO add decompression support here
-
-                self.send_to_writer(buffer, &mut destination).await?;
+                decoder.feed(buffer)?;
+                self.send_to_writer(decoder.consume()?, &mut destination)
+                    .await?;
             } else {
                 // interrupt download, but without error - error is raised somewhere else
                 return Ok(());
@@ -335,6 +349,8 @@ impl ChunkDownloader {
             &calculated_checksum == expected_checksum,
             "chunk checksum mismatch - expected {expected_checksum:?}, actual {calculated_checksum:?}"
         );
+        self.send_to_writer(decoder.finalize()?, &mut destination)
+            .await?;
         self.tx
             .send(ChunkData::EndOfChunk {
                 key: self.chunk.key.clone(),
@@ -384,6 +400,9 @@ impl ChunkDownloader {
         mut buffer: Vec<u8>,
         destination: &mut DestinationsIter,
     ) -> Result<()> {
+        if buffer.is_empty() {
+            return Ok(());
+        }
         if destination.size == 0 {
             // last destination file is full, go to next one
             destination.go_next()?;
@@ -617,6 +636,7 @@ mod tests {
                         backoff_base_ms: 1,
                         parts_file_path: self.download_parts_path.clone(),
                         progress_file_path: self.download_progress_path.clone(),
+                        compression: None,
                     },
                 },
                 restart_policy: RestartPolicy::Never,

@@ -303,7 +303,7 @@ impl<'a> ParallelChunkUploaders<'a> {
                 // skip chunks successfully uploaded in previous run
                 continue;
             }
-            let uploader = ChunkUploader::new(chunk, self.config.max_buffer_size);
+            let uploader = ChunkUploader::new(chunk, self.config.clone());
             self.futures.push(Box::pin(uploader.run(self.run.clone())));
         }
     }
@@ -316,15 +316,15 @@ impl<'a> ParallelChunkUploaders<'a> {
 struct ChunkUploader {
     chunk: Chunk,
     client: reqwest::Client,
-    max_buffer_size: usize,
+    config: TransferConfig,
 }
 
 impl ChunkUploader {
-    fn new(chunk: Chunk, max_buffer_size: usize) -> Self {
+    fn new(chunk: Chunk, config: TransferConfig) -> Self {
         Self {
             chunk,
             client: reqwest::Client::new(),
-            max_buffer_size,
+            config,
         }
     }
 
@@ -345,7 +345,7 @@ impl ChunkUploader {
         let reader = DestinationsReader::new(
             self.chunk.destinations.clone().into_iter(),
             content_length,
-            self.max_buffer_size,
+            self.config,
             tx,
         )?;
         let stream = futures_util::stream::iter(reader);
@@ -388,6 +388,7 @@ struct DestinationsReader {
     chunk_size: u64,
     current: FileDescriptor,
     buffer: Vec<u8>,
+    config: TransferConfig,
     summary_tx: Option<tokio::sync::oneshot::Sender<(u64, Checksum)>>,
 }
 
@@ -395,7 +396,7 @@ impl DestinationsReader {
     fn new(
         mut iter: IntoIter<FileLocation>,
         content_length: u64,
-        max_buffer_size: usize,
+        config: TransferConfig,
         summary_tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
     ) -> Result<Self> {
         let first = match iter.next() {
@@ -417,7 +418,8 @@ impl DestinationsReader {
                 offset: first.pos,
                 bytes_remaining: usize::try_from(first.size)?,
             },
-            buffer: Vec::with_capacity(max_buffer_size),
+            buffer: Vec::with_capacity(config.max_buffer_size),
+            config,
             summary_tx: Some(summary_tx),
         })
     }
@@ -448,6 +450,7 @@ impl DestinationsReader {
         }
         Ok(if !self.buffer.is_empty() {
             // TODO add compression support here
+            let _ = self.config.compression.is_none(); // just for linter
 
             self.digest.update(&self.buffer);
             self.chunk_size += u64::try_from(self.buffer.len())?;
@@ -546,6 +549,7 @@ mod tests {
                         backoff_base_ms: 1,
                         parts_file_path: self.upload_parts_path.clone(),
                         progress_file_path: self.upload_progress_path.clone(),
+                        compression: None,
                     },
                 },
                 restart_policy: RestartPolicy::Never,
