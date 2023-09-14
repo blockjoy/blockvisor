@@ -1,14 +1,19 @@
+use crate::compression::LockedZstdEncoder;
 /// This module implements job runner for uploading data. It uploads data according to given
 /// manifest and source dir. In case of recoverable errors upload is retried according to given
 /// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
 /// Backoff timeout and retry count are reset if upload continue without errors for at least `backoff_timeout_ms`.
-use crate::job_runner::{
-    cleanup_job_data, load_job_data, save_job_data, JobBackoff, JobRunner, JobRunnerImpl,
-    TransferConfig,
+use crate::{
+    compression::{Coder, NoCoder},
+    job_runner::{
+        cleanup_job_data, load_job_data, save_job_data, JobBackoff, JobRunner, JobRunnerImpl,
+        TransferConfig,
+    },
 };
 use async_trait::async_trait;
 use babel_api::engine::{
-    Checksum, Chunk, DownloadManifest, FileLocation, JobStatus, RestartPolicy, UploadManifest,
+    Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobStatus, RestartPolicy,
+    UploadManifest,
 };
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{anyhow, bail, ensure, Context, Result};
@@ -17,7 +22,6 @@ use nu_glob::{Pattern, PatternError};
 use std::{
     cmp::min,
     fs::File,
-    mem,
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
     usize,
@@ -214,7 +218,7 @@ impl Uploader {
         }
         Ok(DownloadManifest {
             total_size,
-            compression: None,
+            compression: self.config.compression,
             chunks,
         })
     }
@@ -337,19 +341,12 @@ impl ChunkUploader {
 
     async fn upload_chunk(mut self, mut run: RunFlag) -> Result<Chunk> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let content_length = self
-            .chunk
-            .destinations
-            .iter()
-            .fold(0, |acc, item| acc + item.size);
-        let reader = DestinationsReader::new(
-            self.chunk.destinations.clone().into_iter(),
-            content_length,
-            self.config,
-            tx,
-        )?;
-        let stream = futures_util::stream::iter(reader);
-        let body = reqwest::Body::wrap_stream(stream);
+        let (body, content_length) = match self.config.compression {
+            None => self.build_body_stream(tx, NoCoder::default())?,
+            Some(Compression::ZSTD(level)) => {
+                self.build_body_stream(tx, LockedZstdEncoder::new(level)?)?
+            }
+        };
 
         if let Some(resp) = run
             .select(
@@ -373,6 +370,28 @@ impl ChunkUploader {
         }
         Ok(self.chunk)
     }
+
+    fn build_body_stream<E: Coder + Send + Sync + 'static>(
+        &self,
+        tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
+        encoder: E,
+    ) -> Result<(reqwest::Body, u64)> {
+        let content_length = self
+            .chunk
+            .destinations
+            .iter()
+            .fold(0, |acc, item| acc + item.size);
+        Ok((
+            reqwest::Body::wrap_stream(futures_util::stream::iter(DestinationsReader::new(
+                self.chunk.destinations.clone().into_iter(),
+                content_length,
+                self.config.clone(),
+                encoder,
+                tx,
+            )?)),
+            content_length,
+        ))
+    }
 }
 
 struct FileDescriptor {
@@ -381,22 +400,28 @@ struct FileDescriptor {
     bytes_remaining: usize,
 }
 
-struct DestinationsReader {
-    iter: IntoIter<FileLocation>,
-    content_length: u64,
+struct InterimBuffer<E> {
     digest: blake3::Hasher,
+    encoder: E,
     chunk_size: u64,
-    current: FileDescriptor,
-    buffer: Vec<u8>,
-    config: TransferConfig,
-    summary_tx: Option<tokio::sync::oneshot::Sender<(u64, Checksum)>>,
+    summary_tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
 }
 
-impl DestinationsReader {
+struct DestinationsReader<E> {
+    iter: IntoIter<FileLocation>,
+    current: FileDescriptor,
+    bytes_read: u64,
+    content_length: u64,
+    config: TransferConfig,
+    interim_buffer: Option<InterimBuffer<E>>,
+}
+
+impl<E: Coder + Send> DestinationsReader<E> {
     fn new(
         mut iter: IntoIter<FileLocation>,
         content_length: u64,
         config: TransferConfig,
+        encoder: E,
         summary_tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
     ) -> Result<Self> {
         let first = match iter.next() {
@@ -410,24 +435,74 @@ impl DestinationsReader {
         }?;
         Ok(Self {
             iter,
-            content_length,
-            digest: blake3::Hasher::new(),
-            chunk_size: 0,
             current: FileDescriptor {
                 file: File::open(&first.path)?,
                 offset: first.pos,
                 bytes_remaining: usize::try_from(first.size)?,
             },
-            buffer: Vec::with_capacity(config.max_buffer_size),
+            bytes_read: 0,
+            content_length,
             config,
-            summary_tx: Some(summary_tx),
+            interim_buffer: Some(InterimBuffer {
+                digest: blake3::Hasher::new(),
+                encoder,
+                chunk_size: 0,
+                summary_tx,
+            }),
         })
     }
 
     fn try_next(&mut self) -> Result<Option<Vec<u8>>> {
-        self.buffer.clear();
-        let buffer_capacity = self.buffer.capacity();
-        while self.buffer.len() < buffer_capacity {
+        Ok(if self.interim_buffer.is_some() {
+            // first try to read some data from disk
+            let buffer = self.read_data()?;
+            self.bytes_read += u64::try_from(buffer.len())?;
+            let data = if self.bytes_read == self.content_length || buffer.is_empty() {
+                // it is end of chunk, so we can take interim_buffer (won't be used anymore)
+                // and finalize it's members
+                let mut interim = self.interim_buffer.take().unwrap();
+                if !buffer.is_empty() {
+                    // feed encoder with last data if any
+                    interim.encoder.feed(buffer)?;
+                }
+                // finalize compression, since no more data will come
+                let compressed = interim.encoder.finalize()?;
+                if !compressed.is_empty() {
+                    interim.chunk_size += u64::try_from(compressed.len())?;
+                    interim.digest.update(&compressed);
+                }
+                // finalize checksum and send summary to uploader
+                let _ = interim.summary_tx.send((
+                    interim.chunk_size,
+                    Checksum::Blake3(interim.digest.finalize().into()),
+                ));
+                // return last part of data
+                compressed
+            } else {
+                // somewhere in the middle, so take only reference to interim_buffer
+                let interim = self.interim_buffer.as_mut().unwrap();
+                interim.encoder.feed(buffer)?;
+                // try to consume compressed data from encoder
+                let compressed = interim.encoder.consume()?;
+                if !compressed.is_empty() {
+                    interim.chunk_size += u64::try_from(compressed.len())?;
+                    interim.digest.update(&compressed);
+                }
+                compressed
+            };
+            if data.is_empty() {
+                None
+            } else {
+                Some(data)
+            }
+        } else {
+            None
+        })
+    }
+
+    fn read_data(&mut self) -> Result<Vec<u8>> {
+        let mut buffer = Vec::with_capacity(self.config.max_buffer_size);
+        while buffer.len() < self.config.max_buffer_size {
             if self.current.bytes_remaining == 0 {
                 let Some(next) = self.iter.next() else {
                     break;
@@ -438,46 +513,24 @@ impl DestinationsReader {
                     bytes_remaining: usize::try_from(next.size)?,
                 };
             }
-            let bytes_to_read = min(self.current.bytes_remaining, buffer_capacity);
-            let start = self.buffer.len();
-            self.buffer.resize(start + bytes_to_read, 0);
+            let bytes_to_read = min(
+                self.current.bytes_remaining,
+                buffer.capacity() - buffer.len(),
+            );
+            let start = buffer.len();
+            buffer.resize(start + bytes_to_read, 0);
             self.current.file.read_exact_at(
-                &mut self.buffer[start..(start + bytes_to_read)],
+                &mut buffer[start..(start + bytes_to_read)],
                 self.current.offset,
             )?;
             self.current.bytes_remaining -= bytes_to_read;
             self.current.offset += u64::try_from(bytes_to_read)?;
         }
-        Ok(if !self.buffer.is_empty() {
-            // TODO add compression support here
-            let _ = self.config.compression.is_none(); // just for linter
-
-            self.digest.update(&self.buffer);
-            self.chunk_size += u64::try_from(self.buffer.len())?;
-            if self.chunk_size == self.content_length {
-                self.finalize();
-            }
-            Some(mem::replace(
-                &mut self.buffer,
-                Vec::with_capacity(buffer_capacity),
-            ))
-        } else {
-            self.finalize();
-            None
-        })
-    }
-
-    fn finalize(&mut self) {
-        if let Some(tx) = self.summary_tx.take() {
-            let _ = tx.send((
-                self.chunk_size,
-                Checksum::Blake3(self.digest.finalize().into()),
-            ));
-        }
+        Ok(buffer)
     }
 }
 
-impl Iterator for DestinationsReader {
+impl<D: Coder + Send> Iterator for DestinationsReader<D> {
     type Item = Result<Vec<u8>>;
 
     fn next(&mut self) -> Option<Self::Item> {

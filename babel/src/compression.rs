@@ -1,10 +1,22 @@
 use eyre::Result;
 use std::io::Write;
 use std::mem;
+use std::ops::DerefMut;
+use std::sync::Mutex;
 
+/// Common interface for encoders/decoders that may be used by upload/download jobs.
+/// Coder is feed with data and processed output can be consumed.
+/// Not consumed data are stored in internal buffer, so remember to consume regularly, to avoid
+/// buffer overflow. Once coder wes fed with all data, call finalize to get trailing data.
 pub trait Coder {
+    /// Feed coder with new data. Processed data are stored in internal buffer until `consume`
+    /// or `finalize` is called.
     fn feed(&mut self, data: Vec<u8>) -> Result<()>;
+    /// Consume next frame of processed data from buffer. May return empty vector if not fed with
+    /// enough data to produce next frame.
     fn consume(&mut self) -> Result<Vec<u8>>;
+    /// Flush remaining data from buffer. It should be always called after coder is fed, to make sure
+    /// noting remain in internal buffer.
     fn finalize(self) -> Result<Vec<u8>>;
 }
 
@@ -61,9 +73,9 @@ pub struct ZstdEncoder<'a> {
 }
 
 impl ZstdEncoder<'_> {
-    pub fn new() -> Result<Self> {
+    pub fn new(level: i32) -> Result<Self> {
         Ok(Self {
-            zstd: zstd::stream::write::Encoder::new(Vec::new(), 3)?,
+            zstd: zstd::stream::write::Encoder::new(Vec::new(), level)?,
         })
     }
 }
@@ -83,6 +95,40 @@ impl Coder for ZstdEncoder<'_> {
     }
 }
 
+pub struct LockedZstdEncoder<'a>(Mutex<Option<ZstdEncoder<'a>>>);
+
+impl LockedZstdEncoder<'_> {
+    pub fn new(level: i32) -> Result<Self> {
+        Ok(Self(Mutex::new(Some(ZstdEncoder::new(level)?))))
+    }
+}
+
+impl Coder for LockedZstdEncoder<'_> {
+    fn feed(&mut self, data: Vec<u8>) -> Result<()> {
+        if let Some(encoder) = self.0.lock().unwrap().deref_mut() {
+            encoder.feed(data)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn consume(&mut self) -> Result<Vec<u8>> {
+        if let Some(encoder) = self.0.lock().unwrap().deref_mut() {
+            encoder.consume()
+        } else {
+            Ok(Default::default())
+        }
+    }
+
+    fn finalize(self) -> Result<Vec<u8>> {
+        if let Some(encoder) = self.0.lock().unwrap().take() {
+            encoder.finalize()
+        } else {
+            Ok(Default::default())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_zstd_coder_small() -> Result<()> {
-        let mut encoder = ZstdEncoder::new()?;
+        let mut encoder = ZstdEncoder::new(3)?;
         let mut decoder = ZstdDecoder::new()?;
         encoder.feed(vec![7; 1017])?;
         assert!(encoder.consume()?.is_empty());
@@ -114,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_zstd_coder_big() -> Result<()> {
-        let mut encoder = ZstdEncoder::new()?;
+        let mut encoder = ZstdEncoder::new(3)?;
         let mut decoder = ZstdDecoder::new()?;
 
         let mut input = vec![0u8];

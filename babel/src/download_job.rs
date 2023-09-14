@@ -1,10 +1,10 @@
-use crate::compression::{Coder, NoCoder, ZstdDecoder};
 /// This module implements job runner for downloading data. It downloads data according to given
 /// manifest and destination dir. In case of recoverable errors download is retried according to given
 /// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
 /// Backoff timeout and retry count are reset if download continue without errors for at least `backoff_timeout_ms`.
 use crate::{
     checksum,
+    compression::{Coder, NoCoder, ZstdDecoder},
     job_runner::{
         cleanup_job_data, load_job_data, save_job_data, JobBackoff, JobRunner, JobRunnerImpl,
         TransferConfig,
@@ -291,7 +291,7 @@ impl ChunkDownloader {
     async fn run(self, run: RunFlag) -> Result<()> {
         match self.config.compression {
             None => self.run_with_decoder(run, NoCoder::default()).await,
-            Some(Compression::ZSTD) => self.run_with_decoder(run, ZstdDecoder::new()?).await,
+            Some(Compression::ZSTD(_)) => self.run_with_decoder(run, ZstdDecoder::new()?).await,
         }
     }
 

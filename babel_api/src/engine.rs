@@ -135,7 +135,7 @@ pub struct Chunk {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Compression {
-    ZSTD,
+    ZSTD(i32),
 }
 
 /// Download manifest, describing a cloud to disk mapping.
