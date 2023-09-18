@@ -230,6 +230,7 @@ async fn main() -> Result<()> {
             blockvisor_port: cmd_args
                 .blockvisor_port
                 .unwrap_or_else(config::default_blockvisor_port),
+            iface: cmd_args.ifa,
         };
         api_config.save(&bv_root).await?;
         Some(api_config)

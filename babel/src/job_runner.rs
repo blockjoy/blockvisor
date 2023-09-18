@@ -3,7 +3,7 @@ use crate::{
     utils::{Backoff, LimitStatus},
 };
 use async_trait::async_trait;
-use babel_api::engine::{JobStatus, RestartConfig, RestartPolicy};
+use babel_api::engine::{Compression, JobStatus, RestartConfig, RestartPolicy};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -54,10 +54,15 @@ pub struct TransferConfig {
     pub backoff_base_ms: u64,
     pub parts_file_path: PathBuf,
     pub progress_file_path: PathBuf,
+    pub compression: Option<Compression>,
 }
 
 impl TransferConfig {
-    pub fn new(parts_file_path: PathBuf, progress_file_path: PathBuf) -> eyre::Result<Self> {
+    pub fn new(
+        parts_file_path: PathBuf,
+        progress_file_path: PathBuf,
+        compression: Option<Compression>,
+    ) -> eyre::Result<Self> {
         let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
         Ok(Self {
             max_opened_files,
@@ -67,6 +72,7 @@ impl TransferConfig {
             backoff_base_ms: BACKOFF_BASE_MS,
             parts_file_path,
             progress_file_path,
+            compression,
         })
     }
 }

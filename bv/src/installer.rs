@@ -1,7 +1,7 @@
 use crate::{
     config::{Config, CONFIG_PATH},
     internal_server,
-    linux_platform::BRIDGE_IFACE,
+    linux_platform::DEFAULT_BRIDGE_IFACE,
     ServiceStatus,
 };
 use anyhow::{anyhow, bail, ensure, Context, Error, Result};
@@ -497,9 +497,9 @@ fn check_kernel_requirements() -> Result<()> {
 }
 
 async fn check_network_setup() -> Result<()> {
-    bv_utils::cmd::run_cmd("ip", ["link", "show", BRIDGE_IFACE])
+    bv_utils::cmd::run_cmd("ip", ["link", "show", DEFAULT_BRIDGE_IFACE])
         .await
-        .with_context(|| format!("bridge interface '{BRIDGE_IFACE}' not configured"))?;
+        .with_context(|| format!("bridge interface '{DEFAULT_BRIDGE_IFACE}' not configured"))?;
     Ok(())
 }
 

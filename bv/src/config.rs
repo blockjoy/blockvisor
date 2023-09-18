@@ -1,3 +1,4 @@
+use crate::linux_platform::DEFAULT_BRIDGE_IFACE;
 use crate::services::api::{pb, AuthClient, AuthToken};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,10 @@ pub const CONFIG_PATH: &str = "etc/blockvisor.json";
 
 pub fn default_blockvisor_port() -> u16 {
     9001
+}
+
+pub fn default_iface() -> String {
+    DEFAULT_BRIDGE_IFACE.to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +86,9 @@ pub struct Config {
     /// Port to be used by blockvisor internal service
     #[serde(default = "default_blockvisor_port")]
     pub blockvisor_port: u16,
+    /// Network interface name
+    #[serde(default = "default_iface")]
+    pub iface: String,
 }
 
 impl Config {

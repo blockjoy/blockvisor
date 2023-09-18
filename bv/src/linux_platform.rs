@@ -19,7 +19,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub const BRIDGE_IFACE: &str = "bvbr0";
+pub const DEFAULT_BRIDGE_IFACE: &str = "bvbr0";
 const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
 
 #[derive(Debug)]
@@ -170,7 +170,8 @@ async fn remaster(name: &str) -> Result<()> {
     let _ = run_cmd("ip", ["tuntap", "add", name, "mode", "tap"]).await;
 
     // Set bridge as the interface's master.
-    run_cmd("ip", ["link", "set", name, "master", BRIDGE_IFACE])
+    // TODO: we will need to read this from config
+    run_cmd("ip", ["link", "set", name, "master", DEFAULT_BRIDGE_IFACE])
         // Start the interface.
         .and_then(|_| run_cmd("ip", ["link", "set", name, "up"]))
         .await?;

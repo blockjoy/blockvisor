@@ -559,6 +559,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         blockjoy_mqtt_url: Some("mqtt://localhost:1889".to_string()),
         update_check_interval_secs: None,
         blockvisor_port: 0,
+        iface: "bvbr0".to_string(),
     };
     let config = SharedConfig::new(config.clone(), "/conf.jason".into());
     let config_clone = config.clone();
@@ -662,6 +663,7 @@ async fn test_discovery_on_connection_error() -> Result<()> {
         blockjoy_mqtt_url: None,
         update_check_interval_secs: None,
         blockvisor_port: 0,
+        iface: "bvbr0".to_string(),
     };
     let config = SharedConfig::new(config, "/some/dir/conf.json".into());
     let connect_future = services::connect(&config, |config| async {

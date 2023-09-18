@@ -952,6 +952,7 @@ mod tests {
                         blockjoy_mqtt_url: None,
                         update_check_interval_secs: None,
                         blockvisor_port: 0,
+                        iface: "bvbr0".to_string(),
                     },
                     tmp_root.clone(),
                 ),
