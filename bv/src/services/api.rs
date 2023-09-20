@@ -617,18 +617,22 @@ impl TryFrom<NodeImage> for pb::ConfigIdentifier {
     }
 }
 
-impl TryFrom<pb::Compression> for Compression {
-    type Error = anyhow::Error;
-    fn try_from(_value: pb::Compression) -> Result<Self, Self::Error> {
-        bail!("Invalid compression type");
+impl From<pb::compression::Compression> for Compression {
+    fn from(value: pb::compression::Compression) -> Self {
+        match value {
+            pb::compression::Compression::Zstd(level) => Compression::ZSTD(level),
+        }
     }
 }
 
 impl TryFrom<pb::DownloadManifest> for DownloadManifest {
     type Error = anyhow::Error;
     fn try_from(manifest: pb::DownloadManifest) -> Result<Self, Self::Error> {
-        let compression = if manifest.compression.is_some() {
-            Some(manifest.compression().try_into()?)
+        let compression = if let Some(pb::Compression {
+            compression: Some(compression),
+        }) = manifest.compression
+        {
+            Some(compression.into())
         } else {
             None
         };
