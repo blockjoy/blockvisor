@@ -133,7 +133,6 @@ pub struct Chunk {
 
 /// Type of compression used on chunk data.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub enum Compression {
     ZSTD(i32),
 }

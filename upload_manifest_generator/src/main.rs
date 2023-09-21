@@ -1,5 +1,6 @@
 use clap::Parser;
 use eyre::{bail, Result};
+use std::path::PathBuf;
 use std::time::Duration;
 
 const PREFIX_FORMAT: &str =
@@ -15,6 +16,8 @@ pub struct CmdArgs {
     pub s3_prefix: String,
     /// Number of slots in generated manifest
     pub slots: usize,
+    /// Path to the output file
+    pub output: String,
     /// S3 endpoint
     #[clap(
         long,
@@ -46,6 +49,7 @@ async fn main() -> Result<()> {
             bail!("{err}");
         }
     }
+    let out_path = PathBuf::from(cmd_args.output.to_owned());
     let s3_config = aws_sdk_s3::Config::builder()
         .endpoint_url(&cmd_args.s3_endpoint)
         .region(aws_sdk_s3::config::Region::new(cmd_args.s3_region.clone()))
@@ -79,7 +83,7 @@ async fn main() -> Result<()> {
         });
         n += 1;
     }
-    println!("{}", serde_json::to_string_pretty(&manifest)?);
+    std::fs::write(out_path, serde_json::to_string_pretty(&manifest)?)?;
     Ok(())
 }
 

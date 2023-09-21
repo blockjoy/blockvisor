@@ -224,9 +224,7 @@ async fn test_bv_service_e2e() {
             required: true,
             value: "I guess just some test value".to_string(),
         }],
-        network: blockchain.node_types[0].versions[0].networks[0]
-            .name
-            .clone(),
+        network: "test".to_string(),
         placement: Some(pb::NodePlacement {
             placement: Some(pb::node_placement::Placement::Scheduler(
                 pb::NodeScheduler {
@@ -253,69 +251,7 @@ async fn test_bv_service_e2e() {
     println!("check node keys");
     test_env::bv_run(&["node", "keys", &node_id], "first", None);
 
-    println!("start download job");
-    test_env::bv_run(
-        &["node", "run", "download", &node_id],
-        "Download started!",
-        None,
-    );
-    println!("wait for download finished");
-    let start = std::time::Instant::now();
-    while let Err(err) = test_env::try_bv_run(
-        &["node", "run", "download_status", &node_id],
-        r#"#{"finished": #{"exit_code": 0, "message": ""}}"#,
-        None,
-    ) {
-        if start.elapsed() < Duration::from_secs(15) {
-            sleep(Duration::from_secs(1)).await;
-        } else {
-            panic!("timeout expired: {err:#}")
-        }
-    }
-    println!("verify downloaded data");
-    test_env::bv_run(
-        &["node", "run", "--param=file_a", "data_file_sha1", &node_id],
-        "87661bf203551efa7fa6a938a372bbba1eb36a1b",
-        None,
-    );
-    test_env::bv_run(
-        &["node", "run", "--param=file_b", "data_file_sha1", &node_id],
-        "516e8ffce053defa048255e19b2abf3ec7f44f3d",
-        None,
-    );
-    test_env::bv_run(
-        &["node", "run", "--param=file_c", "data_file_sha1", &node_id],
-        "f8f81579034e0dd70e42d4a72f760923c2b22dd5",
-        None,
-    );
-    test_env::bv_run(
-        &[
-            "node",
-            "run",
-            "--param='sub/file_d'",
-            "data_file_sha1",
-            &node_id,
-        ],
-        "c15618007493a7a2eaff43cd38b3fbb98ddddd24",
-        None,
-    );
-    test_env::bv_run(
-        &[
-            "node",
-            "run",
-            "--param='sub/file_e'",
-            "data_file_sha1",
-            &node_id,
-        ],
-        "024262e7a10be0426cda667a29266b46d04a11fc",
-        None,
-    );
-    println!("check download progress");
-    test_env::bv_run(
-        &["node", "job", &node_id, "progress", "download"],
-        "total: 9, current: 9",
-        None,
-    );
+    check_upload_and_download(&node_id);
 
     let node_stop = pb::NodeServiceStopRequest {
         id: node_id.clone(),
@@ -356,4 +292,142 @@ async fn test_bv_service_e2e() {
             panic!("timeout expired")
         }
     }
+}
+
+fn check_upload_and_download(node_id: &str) {
+    println!("generate upload manifest");
+    Command::cargo_bin("upload_manifest_generator")
+        .unwrap()
+        .args([
+            "--s3-bucket=cookbook-dev", // TODO remove when after switch to 'archive' bucket
+            "chains_data/testing/validator/0.0.1/test/1",
+            "9",
+            "/tmp/upload_manifest.json",
+        ])
+        .assert()
+        .success();
+
+    println!("create dummy blockchain data");
+    sh_inside(node_id,"mkdir -p /blockjoy/miner/data/sub /blockjoy/miner/data/some_subdir && touch /blockjoy/miner/data/.gitignore /blockjoy/miner/data/some_subdir/something_to_ignore.txt /blockjoy/miner/data/empty_file");
+    sh_inside(node_id,"head -c 43210 < /dev/urandom > /blockjoy/miner/data/file_a && head -c 654321 < /dev/urandom > /blockjoy/miner/data/file_b && head -c 432 < /dev/urandom > /blockjoy/miner/data/file_c && head -c 257 < /dev/urandom > /blockjoy/miner/data/sub/file_d && head -c 128 < /dev/urandom > /blockjoy/miner/data/sub/file_e && head -c 43210 < /dev/urandom > /blockjoy/miner/data/some_subdir/any.bak");
+    let sha_a = sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_a");
+    let sha_b = sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_b");
+    let sha_c = sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_c");
+    let sha_d = sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_d");
+    let sha_e = sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_e");
+
+    println!("start upload job");
+    test_env::bv_run(
+        &[
+            "node",
+            "run",
+            "--param-file=/tmp/upload_manifest.json",
+            "upload",
+            node_id,
+        ],
+        "Upload started!",
+        None,
+    );
+
+    println!("wait for upload finished");
+    let start = std::time::Instant::now();
+    while let Err(err) = test_env::try_bv_run(
+        &["node", "job", node_id, "status", "upload"],
+        r#"Finished { exit_code: Some(0), message: "" }"#,
+        None,
+    ) {
+        if start.elapsed() < Duration::from_secs(120) {
+            std::thread::sleep(Duration::from_secs(1));
+        } else {
+            panic!("timeout expired: {err:#}")
+        }
+    }
+
+    println!("cleanup blockchain data");
+    sh_inside(
+        node_id,
+        "rm -rf /blockjoy/miner/data/* /blockjoy/miner/data/.gitignore",
+    );
+
+    println!("start download job");
+    test_env::bv_run(
+        &["node", "run", "download", node_id],
+        "Download started!",
+        None,
+    );
+
+    println!("wait for download finished");
+    let start = std::time::Instant::now();
+    while let Err(err) = test_env::try_bv_run(
+        &["node", "job", node_id, "status", "download"],
+        r#"Finished { exit_code: Some(0), message: "" }"#,
+        None,
+    ) {
+        if start.elapsed() < Duration::from_secs(120) {
+            std::thread::sleep(Duration::from_secs(1));
+        } else {
+            panic!("timeout expired: {err:#}")
+        }
+    }
+
+    println!("check download progress");
+    test_env::bv_run(
+        &["node", "job", node_id, "progress", "download"],
+        "total: 9, current: 9",
+        None,
+    );
+
+    println!("verify downloaded data");
+    assert_eq!(
+        sha_a.trim(),
+        sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_a").trim()
+    );
+    assert_eq!(
+        sha_b.trim(),
+        sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_b").trim()
+    );
+    assert_eq!(
+        sha_c.trim(),
+        sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_c").trim()
+    );
+    assert_eq!(
+        sha_d.trim(),
+        sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_d").trim()
+    );
+    assert_eq!(
+        sha_e.trim(),
+        sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_e").trim()
+    );
+    sh_inside(
+        node_id,
+        "if [ -f /blockjoy/miner/data/.gitignore ]; then exit 1; fi",
+    );
+    sh_inside(
+        node_id,
+        "if [ -f /blockjoy/miner/data/some_subdir/something_to_ignore.txt ]; then exit 1; fi",
+    );
+    sh_inside(
+        node_id,
+        "if [ ! -f /blockjoy/miner/data/empty_file ]; then exit 1; fi",
+    );
+}
+
+fn sh_inside(node_id: &str, sh_script: &str) -> String {
+    String::from_utf8(
+        Command::cargo_bin("bv")
+            .unwrap()
+            .args([
+                "node",
+                "run",
+                &format!("--param={sh_script}"),
+                "sh_inside",
+                node_id,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .to_owned(),
+    )
+    .unwrap()
 }

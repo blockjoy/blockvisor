@@ -110,33 +110,7 @@ fn test_testing() -> anyhow::Result<()> {
             ]
         }"#,
     )?;
-    assert_eq!(
-        r#"#{"finished": #{"exit_code": 0, "message": ""}}"#,
-        plugin.call_custom_method("upload_status", "",)?
-    );
-    plugin.call_custom_method(
-        "custom_download",
-        r#"{
-            "total_size": 1024,
-            "chunks": [
-                {
-                    "key": "part_key_1",
-                    "url": "some://valid.url",
-                    "checksum": {
-                        "sha1": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
-                    },
-                    "size": 1024,
-                    "destinations": [
-                        {
-                            "path": "f1.data",
-                            "pos": 0,
-                            "size": 1024
-                        }
-                    ]
-                },
-            ]
-        }"#,
-    )?;
+    plugin.call_custom_method("download", "")?;
 
     assert!(plugin.has_capability("init"));
     plugin.init(&HashMap::from_iter([(

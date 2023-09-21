@@ -79,6 +79,7 @@ fn init(keys) {
                 backoff_base_ms: 10000,
             },
         },
+        shutdown_signal: "SIGINT",
         needs: [],
     });
 }
@@ -150,19 +151,6 @@ fn info(param) {
     info
 }
 
-fn custom_download(param) {
-    start_job("custom_download", #{
-        job_type: #{
-            download: #{
-                destination: "/blockjoy/miner/data",
-                manifest: parse_json(param),
-            }
-        },
-        restart: "never",
-    });
-    ""
-}
-
 fn download(param) {
     start_job("download", #{
         job_type: #{
@@ -173,7 +161,7 @@ fn download(param) {
         restart: #{
             on_failure: #{
                 backoff_timeout_ms: 600000,
-                backoff_base_ms: 500,
+                backoff_base_ms: 100,
                 max_retries: 1,
             },
         },
@@ -182,12 +170,12 @@ fn download(param) {
     "Download started!"
 }
 
-fn download_status(param) {
-    job_status("download").to_string()
-}
-
-fn data_file_sha1(param) {
-    run_sh(`sha1sum /blockjoy/miner/data/${param}`).stdout
+fn sh_inside(param) {
+    let res = run_sh(param);
+    if res.exit_code != 0 {
+        throw res.stderr;
+    }
+    res.stdout
 }
 
 fn upload(param) {
@@ -196,21 +184,22 @@ fn upload(param) {
             upload: #{
                 source: "/blockjoy/miner/data",
                 manifest: parse_json(param),
+                exclude: [
+                    "**/something_to_ignore*",
+                    ".gitignore",
+                    "some_subdir/*.bak",
+                ],
             }
         },
         restart: #{
             on_failure: #{
                 backoff_timeout_ms: 600000,
-                backoff_base_ms: 5000,
-                max_retries: 3,
+                backoff_base_ms: 100,
+                max_retries: 1,
             },
         },
     });
-    ""
-}
-
-fn upload_status(param) {
-    job_status("upload").to_string()
+    "Upload started!"
 }
 
 fn test_height_value(param) {

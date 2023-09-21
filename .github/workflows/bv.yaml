@@ -72,7 +72,9 @@ jobs:
         run: >
           docker compose up -d
       - name: Test
-        run: >
+        run: |
+          cargo build -p upload_manifest_generator
+          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} \
           cargo test -p blockvisord -- --test-threads=9
       - name: Shutdown test env
         if: always()
