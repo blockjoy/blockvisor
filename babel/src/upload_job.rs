@@ -258,15 +258,15 @@ fn sources_list(source_path: &Path, exclude: &[Pattern]) -> Result<(u64, Vec<Fil
 fn build_destinations(chunk_size: u64, sources: &mut Vec<FileLocation>) -> Vec<FileLocation> {
     let mut destinations: Vec<_> = Default::default();
     let mut bytes_in_slot = 0;
-    while bytes_in_slot < chunk_size {
-        while let Some(FileLocation { size: 0, .. }) = sources.last() {
-            // skip empty files
-            sources.pop();
-        }
+    while bytes_in_slot <= chunk_size {
         let Some(file) = sources.last_mut() else {
+            // no more files
             break;
         };
-
+        if bytes_in_slot >= chunk_size && file.size > 0 {
+            // when slot is full, still can add only empty files (if any), or break otherwise
+            break;
+        }
         let dest_size = min(file.size, chunk_size - bytes_in_slot);
         destinations.push(FileLocation {
             path: file.path.clone(),
@@ -276,6 +276,10 @@ fn build_destinations(chunk_size: u64, sources: &mut Vec<FileLocation>) -> Vec<F
         file.size -= dest_size;
         file.pos += dest_size;
         bytes_in_slot += dest_size;
+        if file.size == 0 {
+            // go to next file
+            sources.pop();
+        }
     }
     destinations
 }
@@ -348,26 +352,30 @@ impl ChunkUploader {
             }
         };
 
-        if let Some(resp) = run
-            .select(
-                self.client
-                    .put(&self.chunk.url)
-                    .header("Content-Length", format!("{content_length}"))
-                    .body(body)
-                    .send(),
-            )
-            .await
-        {
-            let resp = resp?;
-            ensure!(
-                resp.status().is_success(),
-                anyhow!("server responded with {}", resp.status())
-            );
-            let (final_size, checksum) = rx.await?;
-            self.chunk.size = final_size;
-            self.chunk.checksum = checksum;
-            self.chunk.url.clear();
-        }
+        let (final_size, checksum) = if content_length > 0 {
+            if let Some(resp) = run
+                .select(
+                    self.client
+                        .put(&self.chunk.url)
+                        .header("Content-Length", format!("{content_length}"))
+                        .body(body)
+                        .send(),
+                )
+                .await
+            {
+                let resp = resp?;
+                ensure!(
+                    resp.status().is_success(),
+                    anyhow!("server responded with {}", resp.status())
+                );
+            }
+            rx.await?
+        } else {
+            (0, Checksum::Blake3(blake3::Hasher::new().finalize().into()))
+        };
+        self.chunk.size = final_size;
+        self.chunk.checksum = checksum;
+        self.chunk.url.clear();
         Ok(self.chunk)
     }
 
@@ -574,6 +582,7 @@ mod tests {
 
     fn dummy_sources(path: &Path) -> Result<()> {
         fs::create_dir_all(path)?;
+        File::create(path.join("empty_file"))?;
         fs::write(path.join("a"), "7 bytes")?;
         fs::create_dir_all(path.join("d1").join("d2"))?;
         fs::write(path.join("d1").join("b"), "9   bytes")?;
@@ -688,6 +697,11 @@ mod tests {
                                 size: 74,
                             },
                             FileLocation {
+                                path: PathBuf::from("empty_file"),
+                                pos: 0,
+                                size: 0,
+                            },
+                            FileLocation {
                                 path: PathBuf::from("d1/d2/c"),
                                 pos: 0,
                                 size: 3,
@@ -741,6 +755,57 @@ mod tests {
             then.status(200);
         });
         let expected_manifest = test_env.expected_download_manifest()?;
+        test_env.server.mock(|when, then| {
+            when.method(PUT).path("/url.m").body(expected_manifest);
+            then.status(200);
+        });
+
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: Default::default(),
+            },
+            test_env
+                .upload_job(test_env.dummy_upload_manifest()?)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_empty_upload_ok() -> Result<()> {
+        let test_env = setup_test_env()?;
+        fs::remove_dir_all(&test_env.tmp_dir)?;
+        fs::create_dir_all(&test_env.tmp_dir)?;
+        File::create(test_env.tmp_dir.join("empty_file_1"))?;
+        File::create(test_env.tmp_dir.join("empty_file_2"))?;
+
+        let expected_manifest = serde_json::to_string(&DownloadManifest {
+            total_size: 0,
+            compression: None,
+            chunks: vec![Chunk {
+                key: "KeyA".to_string(),
+                url: Default::default(),
+                checksum: Checksum::Blake3([
+                    175, 19, 73, 185, 245, 249, 161, 166, 160, 64, 77, 234, 54, 220, 201, 73, 155,
+                    203, 37, 201, 173, 193, 18, 183, 204, 154, 147, 202, 228, 31, 50, 98,
+                ]),
+                size: 0,
+                destinations: vec![
+                    FileLocation {
+                        path: PathBuf::from("empty_file_2"),
+                        pos: 0,
+                        size: 0,
+                    },
+                    FileLocation {
+                        path: PathBuf::from("empty_file_1"),
+                        pos: 0,
+                        size: 0,
+                    },
+                ],
+            }],
+        })?;
         test_env.server.mock(|when, then| {
             when.method(PUT).path("/url.m").body(expected_manifest);
             then.status(200);
@@ -936,6 +1001,11 @@ mod tests {
                                 size: 3,
                             },
                             FileLocation {
+                                path: test_env.tmp_dir.join("empty_file"),
+                                pos: 0,
+                                size: 0,
+                            },
+                            FileLocation {
                                 path: test_env.tmp_dir.join("x"),
                                 pos: 137,
                                 size: 119,
@@ -973,6 +1043,11 @@ mod tests {
                     path: tmp_dir.join("d1").join("d2").join("c"),
                     pos: 0,
                     size: 3,
+                },
+                FileLocation {
+                    path: tmp_dir.join("empty_file"),
+                    pos: 0,
+                    size: 0
                 },
                 FileLocation {
                     path: tmp_dir.join("x"),
@@ -1019,7 +1094,7 @@ mod tests {
                 size: 0,
             },
         ];
-        // skipp empty, split too big
+        // split too big
         let destinations = build_destinations(1024, &mut sources);
         assert_eq!(
             vec![
@@ -1043,6 +1118,16 @@ mod tests {
         );
         assert_eq!(
             vec![
+                FileLocation {
+                    path: PathBuf::from("a"),
+                    pos: 0,
+                    size: 0,
+                },
+                FileLocation {
+                    path: PathBuf::from("b"),
+                    pos: 0,
+                    size: 0,
+                },
                 FileLocation {
                     path: PathBuf::from("c"),
                     pos: 0,
@@ -1070,11 +1155,6 @@ mod tests {
                     pos: 0,
                     size: 77,
                 },
-                FileLocation {
-                    path: PathBuf::from("d"),
-                    pos: 2048,
-                    size: 0,
-                },
             ],
             sources
         );
@@ -1091,11 +1171,18 @@ mod tests {
         let destinations = build_destinations(1024, &mut sources);
         assert!(sources.is_empty());
         assert_eq!(
-            vec![FileLocation {
-                path: PathBuf::from("e"),
-                pos: 0,
-                size: 77,
-            },],
+            vec![
+                FileLocation {
+                    path: PathBuf::from("e"),
+                    pos: 0,
+                    size: 77,
+                },
+                FileLocation {
+                    path: PathBuf::from("f"),
+                    pos: 0,
+                    size: 0,
+                },
+            ],
             destinations
         );
         Ok(())

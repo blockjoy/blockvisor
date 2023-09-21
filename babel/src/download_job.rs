@@ -25,13 +25,10 @@ use std::{
     fs,
     fs::File,
     io::Write,
-    mem,
-    ops::{Deref, DerefMut},
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
     slice::Iter,
     usize,
-    vec::IntoIter,
 };
 use sysinfo::{DiskExt, System, SystemExt};
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
@@ -327,7 +324,7 @@ impl ChunkDownloader {
     ) -> Result<()> {
         let chunk_size = usize::try_from(self.chunk.size)?;
         let mut pos = 0;
-        let mut destination = DestinationsIter::new(self.chunk.destinations.clone().into_iter())?;
+        let mut destination = DestinationsIter::new(self.chunk.destinations.clone())?;
         while pos < chunk_size {
             if let Some(res) = run
                 .select(self.download_part_with_retry(pos, chunk_size))
@@ -400,82 +397,56 @@ impl ChunkDownloader {
         mut buffer: Vec<u8>,
         destination: &mut DestinationsIter,
     ) -> Result<()> {
-        if buffer.is_empty() {
-            return Ok(());
-        }
-        if destination.size == 0 {
-            // last destination file is full, go to next one
-            destination.go_next()?;
-        }
         // split buffer into file parts and send to writer
-        while u64::try_from(buffer.len())? > destination.size {
-            let destination = destination.go_next()?;
-            let reminder = buffer.split_off(destination.size as usize);
+        while let Some(next) = destination.next(u64::try_from(buffer.len())?) {
+            let reminder = buffer.split_off(usize::try_from(next.size)?);
             self.tx
                 .send(ChunkData::FilePart {
-                    path: destination.path,
-                    pos: destination.pos,
+                    path: next.path,
+                    pos: next.pos,
                     data: buffer,
                 })
                 .await?;
             buffer = reminder;
         }
-        // send remaining
-        let bytes_sent = u64::try_from(buffer.len())?;
-        self.tx
-            .send(ChunkData::FilePart {
-                path: destination.path.clone(),
-                pos: destination.pos,
-                data: buffer,
-            })
-            .await?;
-        // and update last destination position and size
-        destination.pos += bytes_sent;
-        destination.size -= bytes_sent;
+        if !buffer.is_empty() {
+            bail!("(decompressed) chunk size doesn't mach expected one");
+        };
         Ok(())
     }
 }
 
-struct DestinationsIter {
-    iter: IntoIter<FileLocation>,
-    current: FileLocation,
-}
+struct DestinationsIter(Vec<FileLocation>);
 
 impl DestinationsIter {
-    fn new(mut iter: IntoIter<FileLocation>) -> Result<Self> {
-        let current = match iter.next() {
-            None => {
-                error!("corrupted manifest - this is internal BV error, manifest shall be already validated");
-                Err(anyhow!(
-                    "corrupted manifest - expected at least one destination file in chunk"
-                ))
+    fn new(mut iter: Vec<FileLocation>) -> Result<Self> {
+        if iter.is_empty() {
+            error!("corrupted manifest - this is internal BV error, manifest shall be already validated");
+            bail!("corrupted manifest - expected at least one destination file in chunk");
+        }
+        iter.reverse();
+        Ok(Self(iter))
+    }
+
+    fn next(&mut self, bytes: u64) -> Option<FileLocation> {
+        if let Some(current) = self.0.last_mut() {
+            if current.size <= bytes {
+                self.0.pop()
+            } else if bytes > 0 {
+                let current_part = FileLocation {
+                    path: current.path.clone(),
+                    pos: current.pos,
+                    size: bytes,
+                };
+                current.pos += bytes;
+                current.size -= bytes;
+                Some(current_part)
+            } else {
+                None
             }
-            Some(current) => Ok(current),
-        }?;
-        Ok(Self { iter, current })
-    }
-
-    fn go_next(&mut self) -> Result<FileLocation> {
-        Ok(mem::replace(
-            &mut self.current,
-            self.iter.next().ok_or(anyhow!(
-                "(decompressed) chunk size doesn't mach expected one"
-            ))?,
-        ))
-    }
-}
-
-impl Deref for DestinationsIter {
-    type Target = FileLocation;
-
-    fn deref(&self) -> &Self::Target {
-        &self.current
-    }
-}
-
-impl DerefMut for DestinationsIter {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.current
+        } else {
+            None
+        }
     }
 }
 
@@ -553,11 +524,13 @@ impl Writer {
         // or T to be Cloneable, which complicates test code, but doesn't bring a lot of benefits.
         match self.opened_files.entry(path) {
             Entry::Occupied(mut entry) => {
-                // already have opened handle to the file, so just update timestamp
-                let (timestamp, file) = entry.get_mut();
-                *timestamp = Instant::now();
-                file.write_all_at(&data, pos)?;
-                file.flush()?;
+                if !data.is_empty() {
+                    // already have opened handle to the file, so just update timestamp
+                    let (timestamp, file) = entry.get_mut();
+                    *timestamp = Instant::now();
+                    file.write_all_at(&data, pos)?;
+                    file.flush()?;
+                }
             }
             Entry::Vacant(entry) => {
                 let absolute_path = self.destination_dir.join(entry.key());
@@ -571,9 +544,11 @@ impl Writer {
                     .create(true)
                     .write(true)
                     .open(absolute_path)?;
-                let (_, file) = entry.insert((Instant::now(), file));
-                file.write_all_at(&data, pos)?;
-                file.flush()?;
+                if !data.is_empty() {
+                    let (_, file) = entry.insert((Instant::now(), file));
+                    file.write_all_at(&data, pos)?;
+                    file.flush()?;
+                }
             }
         }
         if self.opened_files.len() >= self.max_opened_files {
@@ -681,6 +656,11 @@ mod tests {
                             pos: 0,
                             size: 300,
                         },
+                        FileLocation {
+                            path: PathBuf::from("empty.file"),
+                            pos: 0,
+                            size: 0,
+                        },
                     ],
                 },
                 Chunk {
@@ -780,6 +760,54 @@ mod tests {
             [vec![2u8; 300], vec![3u8; 324]].concat(),
             fs::read(test_env.tmp_dir.join("second.file"))?
         );
+        assert_eq!(0, test_env.tmp_dir.join("empty.file").metadata()?.len());
+        assert!(!test_env.download_parts_path.exists());
+        assert!(test_env.download_progress_path.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_empty_download_ok() -> Result<()> {
+        let test_env = setup_test_env()?;
+
+        let manifest = DownloadManifest {
+            total_size: 0,
+            compression: None,
+            chunks: vec![Chunk {
+                key: "first_chunk".to_string(),
+                url: test_env.url("/first_chunk")?,
+                checksum: Checksum::Blake3([
+                    175, 19, 73, 185, 245, 249, 161, 166, 160, 64, 77, 234, 54, 220, 201, 73, 155,
+                    203, 37, 201, 173, 193, 18, 183, 204, 154, 147, 202, 228, 31, 50, 98,
+                ]),
+                size: 0,
+                destinations: vec![
+                    FileLocation {
+                        path: PathBuf::from("empty_1.file"),
+                        pos: 0,
+                        size: 0,
+                    },
+                    FileLocation {
+                        path: PathBuf::from("empty_2.file"),
+                        pos: 0,
+                        size: 0,
+                    },
+                ],
+            }],
+        };
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            test_env
+                .download_job(manifest)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
+        );
+
+        assert_eq!(0, test_env.tmp_dir.join("empty_1.file").metadata()?.len());
+        assert_eq!(0, test_env.tmp_dir.join("empty_2.file").metadata()?.len());
         assert!(!test_env.download_parts_path.exists());
         assert!(test_env.download_progress_path.exists());
         Ok(())
