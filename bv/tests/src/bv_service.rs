@@ -147,12 +147,12 @@ async fn test_bv_service_e2e() {
         "#;
     execute_sql(db_url, blockchain_query);
 
+    println!("stop blockvisor");
+    test_env::bv_run(&["stop"], "blockvisor service stopped successfully", None);
+
     println!("bvup");
     let url = "http://localhost:8080";
     let mqtt = "mqtt://localhost:1883";
-
-    println!("stop blockvisor");
-    test_env::bv_run(&["stop"], "blockvisor service stopped successfully", None);
     Command::cargo_bin("bvup")
         .unwrap()
         .args([&provision_token, "--skip-download"])

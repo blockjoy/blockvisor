@@ -25,7 +25,6 @@ use std::{
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
     usize,
-    vec::IntoIter,
 };
 use tracing::{debug, error, info};
 
@@ -346,9 +345,23 @@ impl ChunkUploader {
     async fn upload_chunk(mut self, mut run: RunFlag) -> Result<Chunk> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let (body, content_length) = match self.config.compression {
-            None => self.build_body_stream(tx, NoCoder::default())?,
+            None => {
+                let content_length = self
+                    .chunk
+                    .destinations
+                    .iter()
+                    .fold(0, |acc, item| acc + item.size);
+                (
+                    self.build_body_stream(tx, NoCoder::default())?,
+                    content_length,
+                )
+            }
             Some(Compression::ZSTD(level)) => {
-                self.build_body_stream(tx, LockedZstdEncoder::new(level)?)?
+                let content_length = 0;
+                (
+                    self.build_body_stream(tx, LockedZstdEncoder::new(level)?)?,
+                    content_length,
+                )
             }
         };
 
@@ -383,22 +396,15 @@ impl ChunkUploader {
         &self,
         tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
         encoder: E,
-    ) -> Result<(reqwest::Body, u64)> {
-        let content_length = self
-            .chunk
-            .destinations
-            .iter()
-            .fold(0, |acc, item| acc + item.size);
-        Ok((
-            reqwest::Body::wrap_stream(futures_util::stream::iter(DestinationsReader::new(
-                self.chunk.destinations.clone().into_iter(),
-                content_length,
+    ) -> Result<reqwest::Body> {
+        Ok(reqwest::Body::wrap_stream(futures_util::stream::iter(
+            DestinationsReader::new(
+                self.chunk.destinations.clone(),
                 self.config.clone(),
                 encoder,
                 tx,
-            )?)),
-            content_length,
-        ))
+            )?,
+        )))
     }
 }
 
@@ -416,23 +422,22 @@ struct InterimBuffer<E> {
 }
 
 struct DestinationsReader<E> {
-    iter: IntoIter<FileLocation>,
+    iter: Vec<FileLocation>,
     current: FileDescriptor,
     bytes_read: u64,
-    content_length: u64,
     config: TransferConfig,
     interim_buffer: Option<InterimBuffer<E>>,
 }
 
 impl<E: Coder + Send> DestinationsReader<E> {
     fn new(
-        mut iter: IntoIter<FileLocation>,
-        content_length: u64,
+        mut iter: Vec<FileLocation>,
         config: TransferConfig,
         encoder: E,
         summary_tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
     ) -> Result<Self> {
-        let first = match iter.next() {
+        iter.reverse();
+        let last = match iter.pop() {
             None => {
                 error!("corrupted manifest - this is internal BV error, manifest shall be already validated");
                 Err(anyhow!(
@@ -441,15 +446,15 @@ impl<E: Coder + Send> DestinationsReader<E> {
             }
             Some(first) => Ok(first),
         }?;
+        let current = FileDescriptor {
+            file: File::open(&last.path)?,
+            offset: last.pos,
+            bytes_remaining: usize::try_from(last.size)?,
+        };
         Ok(Self {
             iter,
-            current: FileDescriptor {
-                file: File::open(&first.path)?,
-                offset: first.pos,
-                bytes_remaining: usize::try_from(first.size)?,
-            },
+            current,
             bytes_read: 0,
-            content_length,
             config,
             interim_buffer: Some(InterimBuffer {
                 digest: blake3::Hasher::new(),
@@ -465,7 +470,7 @@ impl<E: Coder + Send> DestinationsReader<E> {
             // first try to read some data from disk
             let buffer = self.read_data()?;
             self.bytes_read += u64::try_from(buffer.len())?;
-            let data = if self.bytes_read == self.content_length || buffer.is_empty() {
+            let data = if self.iter.is_empty() && self.current.bytes_remaining == 0 {
                 // it is end of chunk, so we can take interim_buffer (won't be used anymore)
                 // and finalize it's members
                 let mut interim = self.interim_buffer.take().unwrap();
@@ -512,7 +517,7 @@ impl<E: Coder + Send> DestinationsReader<E> {
         let mut buffer = Vec::with_capacity(self.config.max_buffer_size);
         while buffer.len() < self.config.max_buffer_size {
             if self.current.bytes_remaining == 0 {
-                let Some(next) = self.iter.next() else {
+                let Some(next) = self.iter.pop() else {
                     break;
                 };
                 self.current = FileDescriptor {
