@@ -26,7 +26,6 @@ use tokio::{
 };
 use tonic::transport::{Channel, Endpoint, Server};
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
@@ -245,8 +244,7 @@ where
 
     /// This task runs periodically to send important info about nodes to API.
     async fn node_updates(mut run: RunFlag, nodes: Arc<Nodes<P>>, config: SharedConfig) {
-        let mut known_addresses: HashMap<Uuid, Option<String>> = HashMap::new();
-        let mut known_statuses: HashMap<Uuid, NodeStatus> = HashMap::new();
+        let mut updates_cache = HashMap::new();
         while run.load() {
             run.select(sleep(with_jitter(INFO_UPDATE_INTERVAL))).await;
 
@@ -261,20 +259,13 @@ where
                         None
                     };
                     debug!("Collected node `{id}` info: s={status}, a={maybe_address:?}");
-                    updates.push((node.id(), maybe_address, status));
+                    updates.push((node.id(), status, maybe_address));
                 } else {
                     debug!("Skipping node info collection, node `{id}` busy");
                 }
             }
 
-            for (node_id, address, status) in updates {
-                if known_addresses.get(&node_id) == Some(&address)
-                    && known_statuses.get(&node_id) == Some(&status)
-                {
-                    debug!("Skipping node update: a={known_addresses:?}, s={known_statuses:?}");
-                    continue;
-                }
-
+            for (node_id, status, address) in updates {
                 let container_status = match status {
                     NodeStatus::Running => pb::ContainerStatus::Running,
                     NodeStatus::Stopped => pb::ContainerStatus::Stopped,
@@ -284,16 +275,20 @@ where
                 let mut update = pb::NodeServiceUpdateStatusRequest {
                     id: node_id.to_string(),
                     container_status: None, // We use the setter to set this field for type-safety
-                    address: address.clone(),
+                    address,
                     version: None,
                 };
                 update.set_container_status(container_status);
 
-                match Self::send_node_status_update(&config, update).await {
+                if updates_cache.get(&node_id) == Some(&update) {
+                    debug!("Skipping node update: {update:?}");
+                    continue;
+                }
+
+                match Self::send_node_status_update(&config, update.clone()).await {
                     Ok(_) => {
                         // cache to not send the same data if it has not changed
-                        known_addresses.entry(node_id).or_insert(address);
-                        known_statuses.entry(node_id).or_insert(status);
+                        updates_cache.insert(node_id, update);
                     }
                     Err(e) => warn!("Cannot send node `{node_id}` info update: {e:?}"),
                 }

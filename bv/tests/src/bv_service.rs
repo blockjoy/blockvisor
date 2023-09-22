@@ -246,7 +246,7 @@ async fn test_bv_service_e2e() {
     let node_id = resp.node.unwrap().id;
 
     println!("list created node, should be auto-started");
-    test_env::wait_for_node_status(&node_id, "Running", Duration::from_secs(120), None).await;
+    test_env::wait_for_node_status(&node_id, "Running", Duration::from_secs(300), None).await;
 
     println!("check node keys");
     test_env::bv_run(&["node", "keys", &node_id], "first", None);

@@ -57,7 +57,7 @@ impl<T: AsyncTimer + Send> UploadJob<T> {
                 source_dir,
                 exclude: exclude
                     .iter()
-                    .map(|pattern_str| nu_glob::Pattern::new(pattern_str))
+                    .map(|pattern_str| Pattern::new(pattern_str))
                     .collect::<Result<Vec<Pattern>, PatternError>>()?,
                 config,
             },
@@ -159,8 +159,8 @@ impl Uploader {
         }
         // make destinations paths relative to source_dir
         for chunk in &mut manifest.chunks {
-            for desination in &mut chunk.destinations {
-                desination.path = desination
+            for destination in &mut chunk.destinations {
+                destination.path = destination
                     .path
                     .strip_prefix(&self.source_dir)?
                     .to_path_buf();
