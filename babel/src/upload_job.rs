@@ -1,10 +1,9 @@
-use crate::compression::LockedZstdEncoder;
 /// This module implements job runner for uploading data. It uploads data according to given
 /// manifest and source dir. In case of recoverable errors upload is retried according to given
 /// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
 /// Backoff timeout and retry count are reset if upload continue without errors for at least `backoff_timeout_ms`.
 use crate::{
-    compression::{Coder, NoCoder},
+    compression::{Coder, NoCoder, ZstdEncoder},
     job_runner::{
         cleanup_job_data, load_job_data, save_job_data, JobBackoff, JobRunner, JobRunnerImpl,
         TransferConfig,
@@ -25,7 +24,6 @@ use std::{
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
     usize,
-    vec::IntoIter,
 };
 use tracing::{debug, error, info};
 
@@ -344,20 +342,42 @@ impl ChunkUploader {
     }
 
     async fn upload_chunk(mut self, mut run: RunFlag) -> Result<Chunk> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let (body, content_length) = match self.config.compression {
-            None => self.build_body_stream(tx, NoCoder::default())?,
-            Some(Compression::ZSTD(level)) => {
-                self.build_body_stream(tx, LockedZstdEncoder::new(level)?)?
-            }
-        };
-
-        let (final_size, checksum) = if content_length > 0 {
+        self.chunk.size = self
+            .chunk
+            .destinations
+            .iter()
+            .fold(0, |acc, item| acc + item.size);
+        self.chunk.checksum = if self.chunk.size > 0 {
+            let (checksum_tx, checksum_rx) = tokio::sync::oneshot::channel();
+            let body = match self.config.compression {
+                None => {
+                    reqwest::Body::wrap_stream(futures_util::stream::iter(DestinationsReader::new(
+                        self.chunk.destinations.clone(),
+                        self.config.clone(),
+                        NoCoder::default(),
+                        checksum_tx,
+                    )?))
+                }
+                Some(Compression::ZSTD(level)) => {
+                    let (parts, compressed_size) = consume_reader(
+                        run.clone(),
+                        DestinationsReader::new(
+                            self.chunk.destinations.clone(),
+                            self.config.clone(),
+                            ZstdEncoder::new(level)?,
+                            checksum_tx,
+                        )?,
+                    )
+                    .await?;
+                    self.chunk.size = compressed_size; // update chunk size after compression
+                    reqwest::Body::wrap_stream(futures_util::stream::iter(parts))
+                }
+            };
             if let Some(resp) = run
                 .select(
                     self.client
                         .put(&self.chunk.url)
-                        .header("Content-Length", format!("{content_length}"))
+                        .header("Content-Length", format!("{}", self.chunk.size))
                         .body(body)
                         .send(),
                 )
@@ -369,37 +389,30 @@ impl ChunkUploader {
                     anyhow!("server responded with {}", resp.status())
                 );
             }
-            rx.await?
+            checksum_rx.await?
         } else {
-            (0, Checksum::Blake3(blake3::Hasher::new().finalize().into()))
+            Checksum::Blake3(blake3::Hasher::new().finalize().into())
         };
-        self.chunk.size = final_size;
-        self.chunk.checksum = checksum;
         self.chunk.url.clear();
         Ok(self.chunk)
     }
+}
 
-    fn build_body_stream<E: Coder + Send + Sync + 'static>(
-        &self,
-        tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
-        encoder: E,
-    ) -> Result<(reqwest::Body, u64)> {
-        let content_length = self
-            .chunk
-            .destinations
-            .iter()
-            .fold(0, |acc, item| acc + item.size);
-        Ok((
-            reqwest::Body::wrap_stream(futures_util::stream::iter(DestinationsReader::new(
-                self.chunk.destinations.clone().into_iter(),
-                content_length,
-                self.config.clone(),
-                encoder,
-                tx,
-            )?)),
-            content_length,
-        ))
+async fn consume_reader<E: Coder>(
+    mut run: RunFlag,
+    reader: DestinationsReader<E>,
+) -> Result<(Vec<Result<Vec<u8>>>, u64)> {
+    let mut parts = Vec::default();
+    let mut total_size = 0;
+    for part in reader {
+        if !run.load() {
+            bail!("reading chunk data interrupted");
+        }
+        let part = part?;
+        total_size += part.len();
+        parts.push(Ok(part));
     }
+    Ok((parts, u64::try_from(total_size)?))
 }
 
 struct FileDescriptor {
@@ -411,28 +424,26 @@ struct FileDescriptor {
 struct InterimBuffer<E> {
     digest: blake3::Hasher,
     encoder: E,
-    chunk_size: u64,
-    summary_tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
+    checksum_tx: tokio::sync::oneshot::Sender<Checksum>,
 }
 
 struct DestinationsReader<E> {
-    iter: IntoIter<FileLocation>,
+    iter: Vec<FileLocation>,
     current: FileDescriptor,
     bytes_read: u64,
-    content_length: u64,
     config: TransferConfig,
     interim_buffer: Option<InterimBuffer<E>>,
 }
 
-impl<E: Coder + Send> DestinationsReader<E> {
+impl<E: Coder> DestinationsReader<E> {
     fn new(
-        mut iter: IntoIter<FileLocation>,
-        content_length: u64,
+        mut iter: Vec<FileLocation>,
         config: TransferConfig,
         encoder: E,
-        summary_tx: tokio::sync::oneshot::Sender<(u64, Checksum)>,
+        checksum_tx: tokio::sync::oneshot::Sender<Checksum>,
     ) -> Result<Self> {
-        let first = match iter.next() {
+        iter.reverse();
+        let last = match iter.pop() {
             None => {
                 error!("corrupted manifest - this is internal BV error, manifest shall be already validated");
                 Err(anyhow!(
@@ -441,21 +452,20 @@ impl<E: Coder + Send> DestinationsReader<E> {
             }
             Some(first) => Ok(first),
         }?;
+        let current = FileDescriptor {
+            file: File::open(&last.path)?,
+            offset: last.pos,
+            bytes_remaining: usize::try_from(last.size)?,
+        };
         Ok(Self {
             iter,
-            current: FileDescriptor {
-                file: File::open(&first.path)?,
-                offset: first.pos,
-                bytes_remaining: usize::try_from(first.size)?,
-            },
+            current,
             bytes_read: 0,
-            content_length,
             config,
             interim_buffer: Some(InterimBuffer {
                 digest: blake3::Hasher::new(),
                 encoder,
-                chunk_size: 0,
-                summary_tx,
+                checksum_tx,
             }),
         })
     }
@@ -465,25 +475,18 @@ impl<E: Coder + Send> DestinationsReader<E> {
             // first try to read some data from disk
             let buffer = self.read_data()?;
             self.bytes_read += u64::try_from(buffer.len())?;
-            let data = if self.bytes_read == self.content_length || buffer.is_empty() {
-                // it is end of chunk, so we can take interim_buffer (won't be used anymore)
-                // and finalize it's members
+            let data = if self.iter.is_empty() && self.current.bytes_remaining == 0 {
+                // it is end of chunk, so we can take interim_buffer (won't be used anymore) and finalize it's members
                 let mut interim = self.interim_buffer.take().unwrap();
-                if !buffer.is_empty() {
-                    // feed encoder with last data if any
-                    interim.encoder.feed(buffer)?;
-                }
+                // feed encoder with last data if any
+                interim.encoder.feed(buffer)?;
                 // finalize compression, since no more data will come
                 let compressed = interim.encoder.finalize()?;
-                if !compressed.is_empty() {
-                    interim.chunk_size += u64::try_from(compressed.len())?;
-                    interim.digest.update(&compressed);
-                }
+                interim.digest.update(&compressed);
                 // finalize checksum and send summary to uploader
-                let _ = interim.summary_tx.send((
-                    interim.chunk_size,
-                    Checksum::Blake3(interim.digest.finalize().into()),
-                ));
+                let _ = interim
+                    .checksum_tx
+                    .send(Checksum::Blake3(interim.digest.finalize().into()));
                 // return last part of data
                 compressed
             } else {
@@ -492,10 +495,7 @@ impl<E: Coder + Send> DestinationsReader<E> {
                 interim.encoder.feed(buffer)?;
                 // try to consume compressed data from encoder
                 let compressed = interim.encoder.consume()?;
-                if !compressed.is_empty() {
-                    interim.chunk_size += u64::try_from(compressed.len())?;
-                    interim.digest.update(&compressed);
-                }
+                interim.digest.update(&compressed);
                 compressed
             };
             if data.is_empty() {
@@ -512,7 +512,7 @@ impl<E: Coder + Send> DestinationsReader<E> {
         let mut buffer = Vec::with_capacity(self.config.max_buffer_size);
         while buffer.len() < self.config.max_buffer_size {
             if self.current.bytes_remaining == 0 {
-                let Some(next) = self.iter.next() else {
+                let Some(next) = self.iter.pop() else {
                     break;
                 };
                 self.current = FileDescriptor {
@@ -538,7 +538,7 @@ impl<E: Coder + Send> DestinationsReader<E> {
     }
 }
 
-impl<D: Coder + Send> Iterator for DestinationsReader<D> {
+impl<E: Coder> Iterator for DestinationsReader<E> {
     type Item = Result<Vec<u8>>;
 
     fn next(&mut self) -> Option<Self::Item> {

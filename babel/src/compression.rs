@@ -1,8 +1,6 @@
 use eyre::Result;
 use std::io::Write;
 use std::mem;
-use std::ops::DerefMut;
-use std::sync::Mutex;
 
 /// Common interface for encoders/decoders that may be used by upload/download jobs.
 /// Coder is feed with data and processed output can be consumed.
@@ -92,40 +90,6 @@ impl Coder for ZstdEncoder<'_> {
 
     fn finalize(self) -> Result<Vec<u8>> {
         Ok(self.zstd.finish()?)
-    }
-}
-
-pub struct LockedZstdEncoder<'a>(Mutex<Option<ZstdEncoder<'a>>>);
-
-impl LockedZstdEncoder<'_> {
-    pub fn new(level: i32) -> Result<Self> {
-        Ok(Self(Mutex::new(Some(ZstdEncoder::new(level)?))))
-    }
-}
-
-impl Coder for LockedZstdEncoder<'_> {
-    fn feed(&mut self, data: Vec<u8>) -> Result<()> {
-        if let Some(encoder) = self.0.lock().unwrap().deref_mut() {
-            encoder.feed(data)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn consume(&mut self) -> Result<Vec<u8>> {
-        if let Some(encoder) = self.0.lock().unwrap().deref_mut() {
-            encoder.consume()
-        } else {
-            Ok(Default::default())
-        }
-    }
-
-    fn finalize(self) -> Result<Vec<u8>> {
-        if let Some(encoder) = self.0.lock().unwrap().take() {
-            encoder.finalize()
-        } else {
-            Ok(Default::default())
-        }
     }
 }
 

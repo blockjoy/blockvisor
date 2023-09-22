@@ -189,6 +189,9 @@ fn upload(param) {
                     ".gitignore",
                     "some_subdir/*.bak",
                 ],
+                compression: #{
+                    ZSTD: 5,
+                },
             }
         },
         restart: #{
