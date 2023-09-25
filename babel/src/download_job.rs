@@ -570,23 +570,24 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compression::ZstdEncoder;
     use assert_fs::TempDir;
     use babel_api::engine::Checksum;
     use bv_utils::timer::SysTimer;
-    use httpmock::prelude::*;
+    use mockito::{Server, ServerGuard};
     use std::fs;
 
     struct TestEnv {
         tmp_dir: PathBuf,
         download_parts_path: PathBuf,
         download_progress_path: PathBuf,
-        server: MockServer,
+        server: ServerGuard,
     }
 
     fn setup_test_env() -> Result<TestEnv> {
         let tmp_dir = TempDir::new()?.to_path_buf();
         fs::create_dir_all(&tmp_dir)?;
-        let server = MockServer::start();
+        let server = Server::new();
         let download_parts_path = tmp_dir.join("download.parts");
         let download_progress_path = tmp_dir.join("download.progress");
         Ok(TestEnv {
@@ -619,14 +620,14 @@ mod tests {
             }
         }
 
-        fn url(&self, path: &str) -> Result<String> {
-            Ok(self.server.url(path))
+        fn url(&self, path: &str) -> String {
+            format!("{}/{}", self.server.url(), path)
         }
     }
 
     #[tokio::test]
     async fn test_full_download_ok() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
             total_size: 924,
@@ -634,7 +635,7 @@ mod tests {
             chunks: vec![
                 Chunk {
                     key: "first_chunk".to_string(),
-                    url: test_env.url("/first_chunk")?,
+                    url: test_env.url("first_chunk"),
                     checksum: Checksum::Blake3([
                         85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8,
                         190, 219, 61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
@@ -665,7 +666,7 @@ mod tests {
                 },
                 Chunk {
                     key: "second_chunk".to_string(),
-                    url: test_env.url("/second_chunk")?,
+                    url: test_env.url("second_chunk"),
                     checksum: Checksum::Sha256([
                         104, 0, 168, 43, 116, 130, 25, 151, 217, 240, 13, 245, 96, 88, 86, 0, 75,
                         93, 168, 15, 58, 171, 248, 94, 149, 167, 72, 202, 179, 227, 164, 214,
@@ -680,63 +681,55 @@ mod tests {
             ],
         };
 
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-149")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body([vec![0u8; 100], vec![1u8; 50]].concat());
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=150-299")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![1u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=300-449")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![2u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=450-599")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![2u8; 150]);
-        });
-
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-149")
-                .path("/second_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![3u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=150-299")
-                .path("/second_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![3u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=300-323")
-                .path("/second_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![3u8; 24]);
-        });
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body([vec![0u8; 100], vec![1u8; 50]].concat())
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=150-299")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![1u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=300-449")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![2u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=450-599")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![2u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=150-299")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=300-323")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 24])
+            .create();
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(0),
@@ -767,6 +760,112 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_download_with_compression() -> Result<()> {
+        let mut test_env = setup_test_env()?;
+
+        let manifest = DownloadManifest {
+            total_size: 924,
+            compression: Some(Compression::ZSTD(5)),
+            chunks: vec![
+                Chunk {
+                    key: "first_chunk".to_string(),
+                    url: test_env.url("first_chunk"),
+                    checksum: Checksum::Blake3([
+                        98, 29, 20, 118, 237, 197, 62, 255, 36, 9, 121, 104, 72, 128, 94, 22, 60,
+                        213, 118, 168, 232, 175, 160, 41, 157, 152, 131, 73, 147, 183, 91, 246,
+                    ]),
+                    size: 24,
+                    destinations: vec![
+                        FileLocation {
+                            path: PathBuf::from("zero.file"),
+                            pos: 0,
+                            size: 100,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("first.file"),
+                            pos: 0,
+                            size: 200,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("second.file"),
+                            pos: 0,
+                            size: 300,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("empty.file"),
+                            pos: 0,
+                            size: 0,
+                        },
+                    ],
+                },
+                Chunk {
+                    key: "second_chunk".to_string(),
+                    url: test_env.url("second_chunk"),
+                    checksum: Checksum::Sha256([
+                        148, 46, 25, 243, 16, 182, 201, 222, 228, 39, 228, 26, 8, 94, 74, 188, 93,
+                        151, 210, 123, 9, 65, 196, 29, 185, 113, 189, 51, 227, 124, 158, 177,
+                    ]),
+                    size: 18,
+                    destinations: vec![FileLocation {
+                        path: PathBuf::from("second.file"),
+                        pos: 300,
+                        size: 324,
+                    }],
+                },
+            ],
+        };
+
+        let mut encoder = ZstdEncoder::new(5)?;
+        encoder.feed(vec![0u8; 100])?;
+        encoder.feed(vec![1u8; 200])?;
+        encoder.feed(vec![2u8; 300])?;
+        let compressed_chunk = encoder.finalize()?;
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=0-23")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(compressed_chunk)
+            .create();
+        let mut encoder = ZstdEncoder::new(5)?;
+        encoder.feed(vec![3u8; 324])?;
+        let compressed_chunk = encoder.finalize()?;
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=0-17")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(compressed_chunk)
+            .create();
+        let mut job = test_env.download_job(manifest);
+        job.downloader.config.compression = Some(Compression::ZSTD(5));
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
+        );
+
+        assert_eq!(
+            vec![0u8; 100],
+            fs::read(test_env.tmp_dir.join("zero.file"))?
+        );
+        assert_eq!(
+            vec![1u8; 200],
+            fs::read(test_env.tmp_dir.join("first.file"))?
+        );
+        assert_eq!(
+            [vec![2u8; 300], vec![3u8; 324]].concat(),
+            fs::read(test_env.tmp_dir.join("second.file"))?
+        );
+        assert_eq!(0, test_env.tmp_dir.join("empty.file").metadata()?.len());
+        assert!(!test_env.download_parts_path.exists());
+        assert!(test_env.download_progress_path.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_empty_download_ok() -> Result<()> {
         let test_env = setup_test_env()?;
 
@@ -775,7 +874,7 @@ mod tests {
             compression: None,
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
-                url: test_env.url("/first_chunk")?,
+                url: test_env.url("first_chunk"),
                 checksum: Checksum::Blake3([
                     175, 19, 73, 185, 245, 249, 161, 166, 160, 64, 77, 234, 54, 220, 201, 73, 155,
                     203, 37, 201, 173, 193, 18, 183, 204, 154, 147, 202, 228, 31, 50, 98,
@@ -815,14 +914,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_manifest() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
 
         let manifest_wo_destination = DownloadManifest {
             total_size: 600,
             compression: None,
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
-                url: test_env.url("/first_chunk")?,
+                url: test_env.url("first_chunk"),
                 checksum: Checksum::Sha1([0u8; 20]),
                 size: 600,
                 destinations: vec![],
@@ -844,7 +943,7 @@ mod tests {
             compression: None,
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
-                url: test_env.url("/chunk")?,
+                url: test_env.url("chunk"),
                 checksum: Checksum::Sha1([0u8; 20]),
                 size: 200,
                 destinations: vec![FileLocation {
@@ -854,14 +953,13 @@ mod tests {
                 }],
             }],
         };
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-149")
-                .path("/chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![0u8; 150]);
-        });
+        test_env
+            .server
+            .mock("GET", "/chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![0u8; 150])
+            .create();
 
         assert_eq!(
             JobStatus::Finished {
@@ -878,14 +976,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_errors() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
             total_size: 100,
             compression: None,
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
-                url: test_env.url("/first_chunk")?,
+                url: test_env.url("first_chunk"),
                 checksum: Checksum::Sha1([0u8; 20]),
                 size: 100,
                 destinations: vec![FileLocation {
@@ -896,14 +994,13 @@ mod tests {
             }],
         };
 
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-99")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![0u8; 150]);
-        });
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=0-99")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![0u8; 150])
+            .create();
 
         assert_eq!(
             JobStatus::Finished {
@@ -922,7 +1019,7 @@ mod tests {
             compression: None,
             chunks: vec![Chunk {
                 key: "second_chunk".to_string(),
-                url: test_env.url("/second_chunk")?,
+                url: test_env.url("second_chunk"),
                 checksum: Checksum::Sha1([0u8; 20]),
                 size: 100,
                 destinations: vec![FileLocation {
@@ -933,14 +1030,13 @@ mod tests {
             }],
         };
 
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-99")
-                .path("/second_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![0u8; 50]);
-        });
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=0-99")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![0u8; 50])
+            .create();
 
         assert_eq!(
             JobStatus::Finished {
@@ -959,7 +1055,7 @@ mod tests {
             compression: None,
             chunks: vec![Chunk {
                 key: "third_chunk".to_string(),
-                url: test_env.url("/third_chunk")?,
+                url: test_env.url("third_chunk"),
                 checksum: Checksum::Sha1([0u8; 20]),
                 size: 100,
                 destinations: vec![FileLocation {
@@ -973,7 +1069,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: chunk 'third_chunk' download failed: server responded with 404 Not Found"
+                message: "download_job 'name' failed with: chunk 'third_chunk' download failed: server responded with 501 Not Implemented"
                     .to_string()
             },
             test_env
@@ -986,7 +1082,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_restore_download_ok() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
             total_size: 450,
@@ -994,7 +1090,7 @@ mod tests {
             chunks: vec![
                 Chunk {
                     key: "first_chunk".to_string(),
-                    url: test_env.url("/first_chunk")?,
+                    url: test_env.url("first_chunk"),
                     checksum: Checksum::Sha1([0u8; 20]),
                     size: 150,
                     destinations: vec![
@@ -1012,7 +1108,7 @@ mod tests {
                 },
                 Chunk {
                     key: "second_chunk".to_string(),
-                    url: test_env.url("/second_chunk")?,
+                    url: test_env.url("second_chunk"),
                     checksum: Checksum::Sha1([
                         152, 150, 127, 36, 91, 230, 29, 94, 132, 21, 41, 252, 81, 126, 200, 137,
                         69, 117, 117, 134,
@@ -1026,7 +1122,7 @@ mod tests {
                 },
                 Chunk {
                     key: "third_chunk".to_string(),
-                    url: test_env.url("/third_chunk")?,
+                    url: test_env.url("third_chunk"),
                     checksum: Checksum::Sha1([
                         250, 1, 243, 45, 249, 202, 133, 7, 222, 104, 232, 37, 207, 74, 223, 126, 2,
                         142, 95, 170,
@@ -1041,22 +1137,20 @@ mod tests {
             ],
         };
 
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-149")
-                .path("/second_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![2u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-149")
-                .path("/third_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![3u8; 150]);
-        });
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![2u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/third_chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 150])
+            .create();
 
         // mark first file as downloaded
         let mut parts = HashSet::new();
@@ -1120,14 +1214,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_writer_error() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
             total_size: 100,
             compression: None,
             chunks: vec![Chunk {
                 key: "first_chunk".to_string(),
-                url: test_env.url("/first_chunk")?,
+                url: test_env.url("first_chunk"),
                 checksum: Checksum::Sha1([
                     237, 74, 119, 209, 181, 106, 17, 137, 56, 120, 143, 197, 48, 55, 117, 155, 108,
                     80, 30, 61,
@@ -1141,14 +1235,13 @@ mod tests {
             }],
         };
 
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-99")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![0u8; 100]);
-        });
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=0-99")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![0u8; 100])
+            .create();
 
         let job = test_env.download_job(manifest);
         let mut perms = fs::metadata(&job.downloader.destination_dir)?.permissions();
@@ -1170,7 +1263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_after_fail() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
             total_size: 924,
@@ -1178,7 +1271,7 @@ mod tests {
             chunks: vec![
                 Chunk {
                     key: "first_chunk".to_string(),
-                    url: test_env.url("/first_chunk")?,
+                    url: test_env.url("first_chunk"),
                     checksum: Checksum::Blake3([
                         85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8,
                         190, 219, 61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
@@ -1204,7 +1297,7 @@ mod tests {
                 },
                 Chunk {
                     key: "second_chunk".to_string(),
-                    url: test_env.url("/second_chunk")?,
+                    url: test_env.url("second_chunk"),
                     checksum: Checksum::Sha1([0u8; 20]),
                     size: 324,
                     destinations: vec![FileLocation {
@@ -1216,63 +1309,55 @@ mod tests {
             ],
         };
 
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-149")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body([vec![0u8; 100], vec![1u8; 50]].concat());
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=150-299")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![1u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=300-449")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![2u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=450-599")
-                .path("/first_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![2u8; 150]);
-        });
-
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=0-149")
-                .path("/second_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![3u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=150-299")
-                .path("/second_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![3u8; 150]);
-        });
-        test_env.server.mock(|when, then| {
-            when.method(GET)
-                .header("range", "bytes=300-323")
-                .path("/second_chunk");
-            then.status(200)
-                .header("content-type", "application/octet-stream")
-                .body(vec![3u8; 24]);
-        });
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body([vec![0u8; 100], vec![1u8; 50]].concat())
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=150-299")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![1u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=300-449")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![2u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=450-599")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![2u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=150-299")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=300-323")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 24])
+            .create();
 
         let mut job = test_env.download_job(manifest);
         job.downloader.config.max_runners = 1;
