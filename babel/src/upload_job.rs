@@ -347,8 +347,9 @@ impl ChunkUploader {
             .destinations
             .iter()
             .fold(0, |acc, item| acc + item.size);
-        self.chunk.checksum = if self.chunk.size > 0 {
-            let (checksum_tx, checksum_rx) = tokio::sync::oneshot::channel();
+        let (checksum_tx, checksum_rx) =
+            tokio::sync::watch::channel(Checksum::Blake3(blake3::Hasher::new().finalize().into()));
+        if self.chunk.size > 0 {
             let body = match self.config.compression {
                 None => {
                     reqwest::Body::wrap_stream(futures_util::stream::iter(DestinationsReader::new(
@@ -389,10 +390,8 @@ impl ChunkUploader {
                     anyhow!("server responded with {}", resp.status())
                 );
             }
-            checksum_rx.await?
-        } else {
-            Checksum::Blake3(blake3::Hasher::new().finalize().into())
-        };
+        }
+        self.chunk.checksum = checksum_rx.borrow().clone();
         self.chunk.url.clear();
         Ok(self.chunk)
     }
@@ -424,7 +423,7 @@ struct FileDescriptor {
 struct InterimBuffer<E> {
     digest: blake3::Hasher,
     encoder: E,
-    checksum_tx: tokio::sync::oneshot::Sender<Checksum>,
+    checksum_tx: tokio::sync::watch::Sender<Checksum>,
 }
 
 struct DestinationsReader<E> {
@@ -440,7 +439,7 @@ impl<E: Coder> DestinationsReader<E> {
         mut iter: Vec<FileLocation>,
         config: TransferConfig,
         encoder: E,
-        checksum_tx: tokio::sync::oneshot::Sender<Checksum>,
+        checksum_tx: tokio::sync::watch::Sender<Checksum>,
     ) -> Result<Self> {
         iter.reverse();
         let last = match iter.pop() {
@@ -472,36 +471,35 @@ impl<E: Coder> DestinationsReader<E> {
 
     fn try_next(&mut self) -> Result<Option<Vec<u8>>> {
         Ok(if self.interim_buffer.is_some() {
-            // first try to read some data from disk
-            let buffer = self.read_data()?;
-            self.bytes_read += u64::try_from(buffer.len())?;
-            let data = if self.iter.is_empty() && self.current.bytes_remaining == 0 {
-                // it is end of chunk, so we can take interim_buffer (won't be used anymore) and finalize it's members
-                let mut interim = self.interim_buffer.take().unwrap();
-                // feed encoder with last data if any
-                interim.encoder.feed(buffer)?;
-                // finalize compression, since no more data will come
-                let compressed = interim.encoder.finalize()?;
-                interim.digest.update(&compressed);
-                // finalize checksum and send summary to uploader
-                let _ = interim
-                    .checksum_tx
-                    .send(Checksum::Blake3(interim.digest.finalize().into()));
-                // return last part of data
-                compressed
-            } else {
-                // somewhere in the middle, so take only reference to interim_buffer
-                let interim = self.interim_buffer.as_mut().unwrap();
-                interim.encoder.feed(buffer)?;
-                // try to consume compressed data from encoder
-                let compressed = interim.encoder.consume()?;
-                interim.digest.update(&compressed);
-                compressed
-            };
-            if data.is_empty() {
-                None
-            } else {
-                Some(data)
+            loop {
+                // first try to read some data from disk
+                let buffer = self.read_data()?;
+                self.bytes_read += u64::try_from(buffer.len())?;
+                if self.iter.is_empty() && self.current.bytes_remaining == 0 {
+                    // it is end of chunk, so we can take interim_buffer (won't be used anymore) and finalize it's members
+                    let mut interim = self.interim_buffer.take().unwrap();
+                    // feed encoder with last data if any
+                    interim.encoder.feed(buffer)?;
+                    // finalize compression, since no more data will come
+                    let compressed = interim.encoder.finalize()?;
+                    interim.digest.update(&compressed);
+                    // finalize checksum and send summary to uploader
+                    let _ = interim
+                        .checksum_tx
+                        .send(Checksum::Blake3(interim.digest.finalize().into()));
+                    // return last part of data
+                    break Some(compressed);
+                } else {
+                    // somewhere in the middle, so take only reference to interim_buffer
+                    let interim = self.interim_buffer.as_mut().unwrap();
+                    interim.encoder.feed(buffer)?;
+                    // try to consume compressed data from encoder
+                    let compressed = interim.encoder.consume()?;
+                    if !compressed.is_empty() {
+                        interim.digest.update(&compressed);
+                        break Some(compressed);
+                    }
+                }
             }
         } else {
             None
@@ -556,20 +554,20 @@ mod tests {
     use assert_fs::TempDir;
     use babel_api::engine::Slot;
     use bv_utils::timer::SysTimer;
-    use httpmock::prelude::*;
+    use mockito::{Matcher, Server, ServerGuard};
     use std::fs;
 
     struct TestEnv {
         tmp_dir: PathBuf,
         upload_parts_path: PathBuf,
         upload_progress_path: PathBuf,
-        server: MockServer,
+        server: ServerGuard,
     }
 
     fn setup_test_env() -> Result<TestEnv> {
         let tmp_dir = TempDir::new()?.to_path_buf();
         dummy_sources(&tmp_dir)?;
-        let server = MockServer::start();
+        let server = Server::new();
         let upload_parts_path = tmp_dir.join("upload.parts");
         let upload_progress_path = tmp_dir.join("upload.progress");
         Ok(TestEnv {
@@ -619,8 +617,8 @@ mod tests {
             }
         }
 
-        fn url(&self, path: &str) -> Result<String> {
-            Ok(self.server.url(path))
+        fn url(&self, path: &str) -> String {
+            format!("{}/{}", self.server.url(), path)
         }
 
         fn dummy_upload_manifest(&self) -> Result<UploadManifest> {
@@ -628,20 +626,20 @@ mod tests {
                 slots: vec![
                     Slot {
                         key: "KeyA".to_string(),
-                        url: self.url("/url.a")?,
+                        url: self.url("url.a"),
                     },
                     Slot {
                         key: "KeyB".to_string(),
-                        url: self.url("/url.b")?,
+                        url: self.url("url.b"),
                     },
                     Slot {
                         key: "KeyC".to_string(),
-                        url: self.url("/url.c")?,
+                        url: self.url("url.c"),
                     },
                 ],
                 manifest_slot: Slot {
                     key: "KeyM".to_string(),
-                    url: self.url("/url.m")?,
+                    url: self.url("url.m"),
                 },
             })
         }
@@ -734,31 +732,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_upload_ok() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
 
         let expected_body = String::from_utf8([120u8; 91].to_vec())?;
-        test_env.server.mock(|when, then| {
-            when.method(PUT).path("/url.a").body(expected_body);
-            then.status(200);
-        });
+        test_env
+            .server
+            .mock("PUT", "/url.a")
+            .match_body(Matcher::Exact(expected_body))
+            .create();
         let expected_body = String::from_utf8([120u8; 91].to_vec())?;
-        test_env.server.mock(|when, then| {
-            when.method(PUT).path("/url.b").body(expected_body);
-            then.status(200);
-        });
+        test_env
+            .server
+            .mock("PUT", "/url.b")
+            .match_body(Matcher::Exact(expected_body))
+            .create();
         let expected_body = format!(
             "{}3339   bytes7 bytes",
             String::from_utf8([120u8; 74].to_vec())?
         );
-        test_env.server.mock(|when, then| {
-            when.method(PUT).path("/url.c").body(expected_body);
-            then.status(200);
-        });
+        test_env
+            .server
+            .mock("PUT", "/url.c")
+            .match_body(Matcher::Exact(expected_body))
+            .create();
         let expected_manifest = test_env.expected_download_manifest()?;
-        test_env.server.mock(|when, then| {
-            when.method(PUT).path("/url.m").body(expected_manifest);
-            then.status(200);
-        });
+        test_env
+            .server
+            .mock("PUT", "/url.m")
+            .match_body(Matcher::Exact(expected_manifest))
+            .create();
 
         assert_eq!(
             JobStatus::Finished {
@@ -774,8 +776,127 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_upload_with_compression() -> Result<()> {
+        let mut test_env = setup_test_env()?;
+
+        let mut encoder = ZstdEncoder::new(5)?;
+        encoder.feed([120u8; 91].to_vec())?;
+        test_env
+            .server
+            .mock("PUT", "/url.a")
+            .match_body(Matcher::from(encoder.finalize()?))
+            .create();
+        let mut encoder = ZstdEncoder::new(5)?;
+        encoder.feed([120u8; 91].to_vec())?;
+        test_env
+            .server
+            .mock("PUT", "/url.b")
+            .match_body(Matcher::from(encoder.finalize()?))
+            .create();
+        let mut encoder = ZstdEncoder::new(5)?;
+        encoder.feed(
+            format!(
+                "{}3339   bytes7 bytes",
+                String::from_utf8([120u8; 74].to_vec())?
+            )
+            .into_bytes(),
+        )?;
+        test_env
+            .server
+            .mock("PUT", "/url.c")
+            .match_body(Matcher::from(encoder.finalize()?))
+            .create();
+        let expected_manifest = serde_json::to_string(&DownloadManifest {
+            total_size: 275,
+            compression: Some(Compression::ZSTD(5)),
+            chunks: vec![
+                Chunk {
+                    key: "KeyA".to_string(),
+                    url: Default::default(),
+                    checksum: Checksum::Blake3([
+                        53, 33, 159, 172, 97, 35, 0, 46, 105, 43, 143, 177, 157, 51, 214, 88, 140,
+                        186, 13, 108, 22, 182, 47, 45, 167, 111, 224, 73, 196, 7, 128, 213,
+                    ]),
+                    size: 17,
+                    destinations: vec![FileLocation {
+                        path: PathBuf::from("x"),
+                        pos: 0,
+                        size: 91,
+                    }],
+                },
+                Chunk {
+                    key: "KeyB".to_string(),
+                    url: Default::default(),
+                    checksum: Checksum::Blake3([
+                        53, 33, 159, 172, 97, 35, 0, 46, 105, 43, 143, 177, 157, 51, 214, 88, 140,
+                        186, 13, 108, 22, 182, 47, 45, 167, 111, 224, 73, 196, 7, 128, 213,
+                    ]),
+                    size: 17,
+                    destinations: vec![FileLocation {
+                        path: PathBuf::from("x"),
+                        pos: 91,
+                        size: 91,
+                    }],
+                },
+                Chunk {
+                    key: "KeyC".to_string(),
+                    url: Default::default(),
+                    checksum: Checksum::Blake3([
+                        34, 152, 245, 110, 117, 204, 105, 42, 58, 8, 75, 147, 111, 165, 203, 58,
+                        40, 146, 100, 173, 198, 47, 52, 132, 182, 129, 65, 57, 84, 73, 187, 158,
+                    ]),
+                    size: 36,
+                    destinations: vec![
+                        FileLocation {
+                            path: PathBuf::from("x"),
+                            pos: 182,
+                            size: 74,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("empty_file"),
+                            pos: 0,
+                            size: 0,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("d1/d2/c"),
+                            pos: 0,
+                            size: 3,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("d1/b"),
+                            pos: 0,
+                            size: 9,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("a"),
+                            pos: 0,
+                            size: 7,
+                        },
+                    ],
+                },
+            ],
+        })?;
+        test_env
+            .server
+            .mock("PUT", "/url.m")
+            .match_body(Matcher::Exact(expected_manifest))
+            .create();
+
+        let mut job = test_env.upload_job(test_env.dummy_upload_manifest()?);
+        job.uploader.config.compression = Some(Compression::ZSTD(5));
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: Default::default(),
+            },
+            job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_empty_upload_ok() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
         fs::remove_dir_all(&test_env.tmp_dir)?;
         fs::create_dir_all(&test_env.tmp_dir)?;
         File::create(test_env.tmp_dir.join("empty_file_1"))?;
@@ -806,10 +927,11 @@ mod tests {
                 ],
             }],
         })?;
-        test_env.server.mock(|when, then| {
-            when.method(PUT).path("/url.m").body(expected_manifest);
-            then.status(200);
-        });
+        test_env
+            .server
+            .mock("PUT", "/url.m")
+            .match_body(Matcher::Exact(expected_manifest))
+            .create();
 
         assert_eq!(
             JobStatus::Finished {
@@ -826,21 +948,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_restore_upload_ok() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let mut test_env = setup_test_env()?;
 
         let expected_body = format!(
             "{}3339   bytes7 bytes",
             String::from_utf8([120u8; 74].to_vec())?
         );
-        test_env.server.mock(|when, then| {
-            when.method(PUT).path("/url.c").body(expected_body);
-            then.status(200);
-        });
+        test_env
+            .server
+            .mock("PUT", "/url.c")
+            .match_body(Matcher::Exact(expected_body))
+            .create();
         let expected_manifest = test_env.expected_download_manifest()?;
-        test_env.server.mock(|when, then| {
-            when.method(PUT).path("/url.m").body(expected_manifest);
-            then.status(200);
-        });
+        test_env
+            .server
+            .mock("PUT", "/url.m")
+            .match_body(Matcher::Exact(expected_manifest))
+            .create();
 
         let job = test_env.upload_job(test_env.dummy_upload_manifest()?);
         // mark first two as uploaded
@@ -887,7 +1011,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "upload_job 'name' failed with: chunk 'KeyC' upload failed: server responded with 404 Not Found"
+                message: "upload_job 'name' failed with: chunk 'KeyC' upload failed: server responded with 501 Not Implemented"
                     .to_string()
             },
             test_env
