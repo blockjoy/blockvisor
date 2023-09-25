@@ -193,8 +193,6 @@ mod tests {
     use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
     use bv_utils::{cmd::run_cmd, timer::MockAsyncTimer};
-    use httpmock::prelude::GET;
-    use httpmock::MockServer;
     use mockall::*;
     use std::ffi::OsStr;
     use std::path::Path;
@@ -388,7 +386,7 @@ mod tests {
         let bundle_id = pb::BundleIdentifier {
             version: "3.2.1".to_string(),
         };
-        let server = MockServer::start();
+        let mut server = mockito::Server::new();
 
         // no server
         test_env
@@ -406,12 +404,10 @@ mod tests {
             };
             Ok(Response::new(reply))
         });
-        let server_address = server.address().to_string();
+        let url = server.url();
         bundles_mock.expect_retrieve().once().returning(move |_| {
             let reply = pb::BundleServiceRetrieveResponse {
-                location: Some(pb::ArchiveLocation {
-                    url: format!("http://{server_address}"),
-                }),
+                location: Some(pb::ArchiveLocation { url: url.clone() }),
             };
             Ok(Response::new(reply))
         });
@@ -423,10 +419,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        let mock = server.mock(|when, then| {
-            when.method(GET);
-            then.status(200).body("invalid");
-        });
+        let mock = server.mock("GET", "/").with_body("invalid").create();
 
         test_env
             .updater
@@ -445,15 +438,13 @@ mod tests {
         let bundle_id = pb::BundleIdentifier {
             version: "3.2.1".to_string(),
         };
-        let server = MockServer::start();
+        let mut server = mockito::Server::new();
 
         let mut bundles_mock = MockTestBundleService::new();
-        let server_address = server.address().to_string();
+        let url = server.url();
         bundles_mock.expect_retrieve().once().returning(move |_| {
             let reply = pb::BundleServiceRetrieveResponse {
-                location: Some(pb::ArchiveLocation {
-                    url: format!("http://{server_address}"),
-                }),
+                location: Some(pb::ArchiveLocation { url: url.clone() }),
             };
             Ok(Response::new(reply))
         });
@@ -464,11 +455,10 @@ mod tests {
             .await?;
         fs::remove_file(&ctrl_file_path).await.ok();
 
-        let mock = server.mock(|when, then| {
-            when.method(GET);
-            then.status(200)
-                .body_from_file(&*test_env.tmp_root.join("bundle.tar.gz").to_string_lossy());
-        });
+        let mock = server
+            .mock("GET", "/")
+            .with_body_from_file(&*test_env.tmp_root.join("bundle.tar.gz").to_string_lossy())
+            .create();
 
         test_env
             .updater
@@ -496,7 +486,7 @@ mod tests {
         let _ = test_env.updater.check_for_update().await;
         assert_eq!(CURRENT_VERSION, test_env.updater.latest_installed_version);
 
-        let server = MockServer::start();
+        let mut server = mockito::Server::new();
 
         let mut bundles_mock = MockTestBundleService::new();
         let expected_bundle_id = bundle_id.clone();
@@ -509,7 +499,7 @@ mod tests {
                 };
                 Ok(Response::new(reply))
             });
-        let server_address = server.address().to_string();
+        let url = server.url();
         bundles_mock
             .expect_retrieve()
             .once()
@@ -520,9 +510,7 @@ mod tests {
             )
             .returning(move |_| {
                 let reply = pb::BundleServiceRetrieveResponse {
-                    location: Some(pb::ArchiveLocation {
-                        url: format!("http://{server_address}"),
-                    }),
+                    location: Some(pb::ArchiveLocation { url: url.clone() }),
                 };
                 Ok(Response::new(reply))
             });
@@ -534,11 +522,10 @@ mod tests {
 
         fs::remove_file(&ctrl_file_path).await.ok();
 
-        let mock = server.mock(|when, then| {
-            when.method(GET);
-            then.status(200)
-                .body_from_file(&*test_env.tmp_root.join("bundle.tar.gz").to_string_lossy());
-        });
+        let mock = server
+            .mock("GET", "/")
+            .with_body_from_file(&*test_env.tmp_root.join("bundle.tar.gz").to_string_lossy())
+            .create();
 
         test_env.updater.check_for_update().await?;
         assert_eq!(bundle_version, test_env.updater.latest_installed_version);

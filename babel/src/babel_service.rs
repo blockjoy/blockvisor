@@ -527,7 +527,6 @@ mod tests {
     use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
     use babel_api::metadata::RamdiskConfiguration;
     use futures::StreamExt;
-    use httpmock::prelude::*;
     use mockall::*;
     use serde_json::json;
     use std::collections::HashMap;
@@ -816,32 +815,34 @@ mod tests {
 
     #[tokio::test]
     async fn test_jrpc_json_ok() -> Result<()> {
-        let server = MockServer::start();
+        let mut server = mockito::Server::new();
 
-        let mock = server.mock(|when, then| {
-            when.method(POST)
-                .path("/")
-                .header("Content-Type", "application/json")
-                .header("custom_header", "some value")
-                .json_body(json!({
-                    "id": 0,
-                    "jsonrpc": "2.0",
-                    "method": "info_get",
-                    "params": {"chain": "x"},
-                }));
-            then.status(201)
-                .header("Content-Type", "application/json")
-                .json_body(json!({
+        let mock = server
+            .mock("POST", "/")
+            .match_header("Content-Type", "application/json")
+            .match_header("custom_header", "some value")
+            .match_body(mockito::Matcher::Json(json!({
+                "id": 0,
+                "jsonrpc": "2.0",
+                "method": "info_get",
+                "params": {"chain": "x"},
+            })))
+            .with_status(201)
+            .with_header("Content-Type", "application/json")
+            .with_body(
+                json!({
                         "id": 0,
                         "jsonrpc": "2.0",
                         "result": {"info": {"height": 123, "address": "abc"}},
-                }));
-        });
+                })
+                .to_string(),
+            )
+            .create();
 
         let service = build_babel_service_with_defaults().await?;
         let output = service
             .run_jrpc(Request::new(JrpcRequest {
-                host: format!("http://{}", server.address()),
+                host: server.url(),
                 method: "info_get".to_string(),
                 params: Some("{\"chain\": \"x\"}".to_string()),
                 headers: Some(HashMap::from_iter([(
@@ -863,21 +864,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_rest_json_ok() -> Result<()> {
-        let server = MockServer::start();
+        let mut server = mockito::Server::new();
 
-        let mock = server.mock(|when, then| {
-            when.method(GET)
-                .header("custom_header", "some value")
-                .path("/items");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(json!({"result": [1, 2, 3]}));
-        });
+        let mock = server
+            .mock("GET", "/items")
+            .match_header("custom_header", "some value")
+            .with_header("Content-Type", "application/json")
+            .with_body(json!({"result": [1, 2, 3]}).to_string())
+            .create();
 
         let service = build_babel_service_with_defaults().await?;
         let output = service
             .run_rest(Request::new(RestRequest {
-                url: format!("http://{}/items", server.address()),
+                url: format!("{}/items", server.url()),
                 headers: Some(HashMap::from_iter([(
                     "custom_header".to_string(),
                     "some value".to_string(),

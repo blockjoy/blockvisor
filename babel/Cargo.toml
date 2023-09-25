@@ -61,7 +61,6 @@ rlimit = "0.9.1"
 
 [dev-dependencies]
 assert_fs = "1"
-httpmock = "0.6.7"
 mockito = "1.2.0"
 mockall = "0.11.3"
 tokio-stream = {version = "0.1.11", features = ["net"]}
