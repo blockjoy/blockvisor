@@ -299,8 +299,8 @@ fn check_upload_and_download(node_id: &str) {
     Command::cargo_bin("upload_manifest_generator")
         .unwrap()
         .args([
-            "--s3-bucket=cookbook-dev", // TODO remove when after switch to 'archive' bucket
-            "chains_data/testing/validator/0.0.1/test/1",
+            "--s3-bucket=archive-dev", // TODO remove when after switch to 'archive' bucket
+            "testing/validator/0.0.1/test/1",
             "9",
             "/tmp/upload_manifest.json",
         ])

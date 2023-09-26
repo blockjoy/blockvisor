@@ -5,7 +5,7 @@
 3. Stop blockchain synchronization. Blockchain data should not be modified since now.
 4. Generate upload manifest with [upload_manifest_generator](https://github.com/blockjoy/blockvisor/releases/latest). For example:
 ```shell
-./upload_manifest_generator chains_data/testing/validator/0.0.1/test/1 8 manifest.json
+./upload_manifest_generator testing/validator/0.0.1/test/1 8 manifest.json
 ```
 See `./upload_manifest_generator --help` for more details.
 

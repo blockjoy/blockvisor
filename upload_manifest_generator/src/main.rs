@@ -3,14 +3,13 @@ use eyre::{bail, Result};
 use std::path::PathBuf;
 use std::time::Duration;
 
-const PREFIX_FORMAT: &str =
-    "chains_data/<protocol>/<node_type>/<min_node_version>/<network>/<data_version>";
+const PREFIX_FORMAT: &str = "<protocol>/<node_type>/<min_node_version>/<network>/<data_version>";
 
 #[derive(Parser, Debug, Clone)]
 #[clap(version, about, long_about = None)]
 pub struct CmdArgs {
-    /// S3 prefix, shall be in following form: 'chains_data/<protocol>/<node_type>/<min_node_version>/<network>/<data_version>',
-    /// e.g: chains_data/helium/validator/0.0.1/main/17
+    /// S3 prefix, shall be in following form: '<protocol>/<node_type>/<min_node_version>/<network>/<data_version>',
+    /// e.g: helium/validator/0.0.1/main/17
     /// <min_node_version> - data won't be offered for nodes below that version
     /// <data_version> - single number version, it may be simply incremented number or anything that is ordered (e.g. timestamp)
     pub s3_prefix: String,
@@ -95,9 +94,6 @@ fn validate_prefix(prefix: &str) -> Result<()> {
         };
         Ok(root)
     };
-    if expect_next()? != "chains_data" {
-        bail!("s3_prefix should start from 'chains_data'")
-    }
     expect_next()?; //<protocol>
     expect_next()?; //<node_type>
     let min_node_version = expect_next()?;
