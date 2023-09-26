@@ -11,8 +11,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use babel_api::engine::{
-    Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobStatus, RestartPolicy,
-    UploadManifest,
+    Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, JobStatus,
+    RestartPolicy, UploadManifest,
 };
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{anyhow, bail, ensure, Context, Result};
@@ -121,6 +121,14 @@ impl Uploader {
         } else {
             self.prepare_blueprint()?
         };
+        let total_chunks_count = u32::try_from(manifest.chunks.len())?;
+        let mut uploaded_chunks = u32::try_from(
+            manifest
+                .chunks
+                .iter()
+                .filter(|chunk| chunk.size != 0)
+                .count(),
+        )?;
         let mut parallel_uploaders_run = run.child_flag();
         let mut uploaders = ParallelChunkUploaders::new(
             parallel_uploaders_run.clone(),
@@ -146,7 +154,16 @@ impl Uploader {
                         bail!("internal error - finished upload of chunk that doesn't exists in manifest");
                     };
                     *blueprint = chunk;
+                    uploaded_chunks += 1;
                     save_job_data(&self.config.parts_file_path, &Some(&manifest))?;
+                    save_job_data(
+                        &self.config.progress_file_path,
+                        &JobProgress {
+                            total: total_chunks_count,
+                            current: uploaded_chunks,
+                            message: "".to_string(),
+                        },
+                    )?;
                 }
                 None => break,
             }
@@ -772,6 +789,12 @@ mod tests {
                 .run(RunFlag::default(), "name", &test_env.tmp_dir)
                 .await
         );
+
+        assert!(!test_env.upload_parts_path.exists());
+        assert!(test_env.upload_progress_path.exists());
+        let progress = fs::read_to_string(&test_env.upload_progress_path).unwrap();
+        assert_eq!(&progress, r#"{"total":3,"current":3,"message":""}"#);
+
         Ok(())
     }
 
