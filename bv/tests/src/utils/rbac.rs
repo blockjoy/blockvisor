@@ -8,6 +8,7 @@ pub async fn setup_rbac(db_url: &str) {
         ('blockjoy-admin', 'auth-admin-list-permissions'),
         ('blockjoy-admin', 'node-admin-create'),
         ('blockjoy-admin', 'node-admin-delete'),
+        ('blockjoy-admin', 'node-admin-get'),
         ('blockjoy-admin', 'node-admin-list'),
         ('blockjoy-admin', 'node-admin-restart'),
         ('blockjoy-admin', 'node-admin-start'),
@@ -122,7 +123,6 @@ pub async fn setup_rbac(db_url: &str) {
         ('grpc-login', 'command-create'),
         ('grpc-login', 'command-get'),
         ('grpc-login', 'command-pending'),
-        ('grpc-login', 'command-update'),
         ('grpc-login', 'discovery-services'),
         ('grpc-login', 'invitation-accept'),
         ('grpc-login', 'invitation-decline'),
@@ -155,6 +155,7 @@ pub async fn setup_rbac(db_url: &str) {
         ('grpc-new-host', 'babel-notify'),
         ('grpc-new-host', 'blockchain-get'),
         ('grpc-new-host', 'blockchain-list'),
+        ('grpc-new-host', 'bundle-list-bundle-versions'),
         ('grpc-new-host', 'command-ack'),
         ('grpc-new-host', 'command-create'),
         ('grpc-new-host', 'command-get'),
@@ -175,6 +176,7 @@ pub async fn setup_rbac(db_url: &str) {
         ('grpc-new-host', 'manifest-retrieve-download'),
         ('grpc-new-host', 'metrics-host'),
         ('grpc-new-host', 'metrics-node'),
+        ('grpc-new-host', 'mqtt-acl'),
         ('grpc-new-host', 'node-create'),
         ('grpc-new-host', 'node-delete'),
         ('grpc-new-host', 'node-get'),
@@ -182,7 +184,8 @@ pub async fn setup_rbac(db_url: &str) {
         ('grpc-new-host', 'node-restart'),
         ('grpc-new-host', 'node-start'),
         ('grpc-new-host', 'node-stop'),
-        ('grpc-new-host', 'node-update-config');
+        ('grpc-new-host', 'node-update-config'),
+        ('grpc-new-host', 'node-update-status');
         ",
         "
         insert into role_permissions (role, permission)
@@ -195,7 +198,6 @@ pub async fn setup_rbac(db_url: &str) {
         ('org-admin', 'host-billing-get'),
         ('org-admin', 'invitation-create'),
         ('org-admin', 'invitation-revoke'),
-        ('org-admin', 'node-update-status'),
         ('org-admin', 'org-remove-member'),
         ('org-admin', 'org-update'),
         ('org-admin', 'subscription-create'),
@@ -226,6 +228,7 @@ pub async fn setup_rbac(db_url: &str) {
         ('org-member', 'org-create'),
         ('org-member', 'org-get'),
         ('org-member', 'org-list'),
+        ('org-member', 'org-remove-self'),
         ('org-member', 'org-provision-get-token'),
         ('org-member', 'org-provision-reset-token'),
         ('org-member', 'subscription-get');
@@ -252,7 +255,6 @@ pub async fn setup_rbac(db_url: &str) {
         ('org-personal', 'node-start'),
         ('org-personal', 'node-stop'),
         ('org-personal', 'node-update-config'),
-        ('org-personal', 'node-update-status'),
         ('org-personal', 'org-create'),
         ('org-personal', 'org-get'),
         ('org-personal', 'org-list'),
