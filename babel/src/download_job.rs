@@ -1376,7 +1376,7 @@ mod tests {
         assert!(!test_env.download_parts_path.exists());
         assert!(test_env.download_progress_path.exists());
         let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
-        assert_eq!(&progress, r#"{"total":2,"current":1,"message":""}"#);
+        assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
         Ok(())
     }
 }

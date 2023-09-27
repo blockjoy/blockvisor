@@ -141,29 +141,35 @@ impl Uploader {
                 uploaders.launch_more();
             }
             match uploaders.wait_for_next().await {
-                Some(Err(err)) => {
-                    uploaders_result = Err(err);
-                    parallel_uploaders_run.stop();
-                }
-                Some(Ok(chunk)) => {
-                    let Some(blueprint) = manifest
-                        .chunks
-                        .iter_mut()
-                        .find(|item| item.key == chunk.key)
-                    else {
-                        bail!("internal error - finished upload of chunk that doesn't exists in manifest");
-                    };
-                    *blueprint = chunk;
-                    uploaded_chunks += 1;
-                    save_job_data(&self.config.parts_file_path, &Some(&manifest))?;
-                    save_job_data(
-                        &self.config.progress_file_path,
-                        &JobProgress {
-                            total: total_chunks_count,
-                            current: uploaded_chunks,
-                            message: "chunks".to_string(),
-                        },
-                    )?;
+                Some(result) => {
+                    if uploaders_result.is_ok() {
+                        match result {
+                            Ok(chunk) => {
+                                let Some(blueprint) = manifest
+                                    .chunks
+                                    .iter_mut()
+                                    .find(|item| item.key == chunk.key)
+                                else {
+                                    bail!("internal error - finished upload of chunk that doesn't exists in manifest");
+                                };
+                                *blueprint = chunk;
+                                uploaded_chunks += 1;
+                                save_job_data(&self.config.parts_file_path, &Some(&manifest))?;
+                                save_job_data(
+                                    &self.config.progress_file_path,
+                                    &JobProgress {
+                                        total: total_chunks_count,
+                                        current: uploaded_chunks,
+                                        message: "chunks".to_string(),
+                                    },
+                                )?;
+                            }
+                            Err(err) => {
+                                uploaders_result = Err(err);
+                                parallel_uploaders_run.stop();
+                            }
+                        }
+                    }
                 }
                 None => break,
             }
@@ -406,6 +412,8 @@ impl ChunkUploader {
                     resp.status().is_success(),
                     anyhow!("server responded with {}", resp.status())
                 );
+            } else {
+                bail!("upload interrupted");
             }
         }
         self.chunk.checksum = checksum_rx.borrow().clone();
@@ -793,7 +801,7 @@ mod tests {
         assert!(!test_env.upload_parts_path.exists());
         assert!(test_env.upload_progress_path.exists());
         let progress = fs::read_to_string(&test_env.upload_progress_path).unwrap();
-        assert_eq!(&progress, r#"{"total":3,"current":3,"message":""}"#);
+        assert_eq!(&progress, r#"{"total":3,"current":3,"message":"chunks"}"#);
 
         Ok(())
     }
