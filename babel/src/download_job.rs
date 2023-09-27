@@ -510,7 +510,7 @@ impl Writer {
                     &JobProgress {
                         total: u32::try_from(self.total_chunks_count)?,
                         current: u32::try_from(self.downloaded_chunks.len())?,
-                        message: "".to_string(),
+                        message: "chunks".to_string(),
                     },
                 )?;
             }

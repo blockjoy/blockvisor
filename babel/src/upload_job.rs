@@ -161,7 +161,7 @@ impl Uploader {
                         &JobProgress {
                             total: total_chunks_count,
                             current: uploaded_chunks,
-                            message: "".to_string(),
+                            message: "chunks".to_string(),
                         },
                     )?;
                 }
@@ -227,7 +227,7 @@ impl Uploader {
                 key: slot.key.clone(),
                 url: slot.url.clone(),
                 checksum: Checksum::Sha1(Default::default()), // unknown yet
-                size: Default::default(),                     // unknown yet
+                size: 0,                                      // unknown yet
                 destinations,
             });
         }
