@@ -66,13 +66,13 @@ pub async fn is_babel_config_applied<P: BabelPal>(pal: &P, config: &BabelConfig)
     Ok(pal
         .is_swap_file_set(config.swap_size_mb)
         .await
-        .with_context(|| "failed to add swap file")?
+        .with_context(|| "failed to check swap file")?
         && pal
             .is_ram_disks_set(config.ramdisks.clone())
             .await
-            .with_context(|| "failed to add ram disks")?
+            .with_context(|| "failed to add check disks")?
         && pal
             .is_data_drive_mounted(&config.data_directory_mount_point)
             .await
-            .with_context(|| "failed to mount data disks")?)
+            .with_context(|| "failed to check data disks")?)
 }

@@ -147,7 +147,7 @@ impl BabelPal for Pal {
         let df_out = run_cmd("df", ["--output=target"])
             .await
             .map_err(|err| anyhow!("can't check if data drive is mounted, df: {err}"))?;
-        Ok(df_out.contains(data_directory_mount_point))
+        Ok(df_out.contains(data_directory_mount_point.trim_end_matches('/')))
     }
 
     async fn set_hostname(&self, hostname: &str) -> eyre::Result<()> {
@@ -244,7 +244,7 @@ impl BabelPal for Pal {
             .map_err(|err| anyhow!("cant check mounted ramdisks with df: {err}"))?;
         Ok(ram_disks
             .iter()
-            .all(|disk| df_out.contains(&disk.ram_disk_mount_point)))
+            .all(|disk| df_out.contains(disk.ram_disk_mount_point.trim_end_matches('/'))))
     }
 }
 
