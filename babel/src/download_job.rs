@@ -608,6 +608,7 @@ mod tests {
                     config: TransferConfig {
                         max_opened_files: 1,
                         max_runners: 4,
+                        max_connections: 4,
                         max_buffer_size: 150,
                         max_retries: 0,
                         backoff_base_ms: 1,

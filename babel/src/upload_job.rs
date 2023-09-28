@@ -23,8 +23,10 @@ use std::{
     fs::File,
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
+    sync::Arc,
     usize,
 };
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info};
 
 pub struct UploadJob<T> {
@@ -306,16 +308,19 @@ struct ParallelChunkUploaders<'a> {
     config: TransferConfig,
     futures: FuturesUnordered<BoxFuture<'a, Result<Chunk>>>,
     chunks: Vec<Chunk>,
+    connection_pool: ConnectionPool,
 }
 
 impl<'a> ParallelChunkUploaders<'a> {
     fn new(run: RunFlag, chunks: Vec<Chunk>, mut config: TransferConfig) -> Self {
         config.max_runners = min(config.max_runners, config.max_opened_files);
+        let connection_pool = Arc::new(Semaphore::new(config.max_connections));
         Self {
             run,
             config,
             futures: FuturesUnordered::new(),
             chunks,
+            connection_pool,
         }
     }
 
@@ -328,7 +333,8 @@ impl<'a> ParallelChunkUploaders<'a> {
                 // skip chunks successfully uploaded in previous run
                 continue;
             }
-            let uploader = ChunkUploader::new(chunk, self.config.clone());
+            let uploader =
+                ChunkUploader::new(chunk, self.config.clone(), self.connection_pool.clone());
             self.futures.push(Box::pin(uploader.run(self.run.clone())));
         }
     }
@@ -338,18 +344,22 @@ impl<'a> ParallelChunkUploaders<'a> {
     }
 }
 
+type ConnectionPool = Arc<Semaphore>;
+
 struct ChunkUploader {
     chunk: Chunk,
     client: reqwest::Client,
     config: TransferConfig,
+    connection_pool: ConnectionPool,
 }
 
 impl ChunkUploader {
-    fn new(chunk: Chunk, config: TransferConfig) -> Self {
+    fn new(chunk: Chunk, config: TransferConfig, connection_pool: ConnectionPool) -> Self {
         Self {
             chunk,
             client: reqwest::Client::new(),
             config,
+            connection_pool,
         }
     }
 
@@ -393,6 +403,7 @@ impl ChunkUploader {
                     reqwest::Body::wrap_stream(futures_util::stream::iter(parts))
                 }
             };
+            let _connection_permit = self.connection_pool.acquire().await?;
             if let Some(resp) = run
                 .select(
                     self.client
@@ -625,6 +636,7 @@ mod tests {
                     config: TransferConfig {
                         max_opened_files: 1,
                         max_runners: 4,
+                        max_connections: 2,
                         max_buffer_size: 50,
                         max_retries: 0,
                         backoff_base_ms: 1,

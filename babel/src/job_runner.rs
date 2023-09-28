@@ -14,7 +14,7 @@ use std::{
 use tracing::{debug, error, info, warn};
 
 const MAX_OPENED_FILES: u64 = 1024;
-const MAX_RUNNERS: usize = 4;
+const MAX_RUNNERS: usize = 8;
 const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
 const MAX_RETRIES: u32 = 5;
 const BACKOFF_BASE_MS: u64 = 500;
@@ -49,6 +49,7 @@ impl<T: JobRunnerImpl + Send> JobRunner for T {
 pub struct TransferConfig {
     pub max_opened_files: usize,
     pub max_runners: usize,
+    pub max_connections: usize,
     pub max_buffer_size: usize,
     pub max_retries: u32,
     pub backoff_base_ms: u64,
@@ -62,11 +63,13 @@ impl TransferConfig {
         parts_file_path: PathBuf,
         progress_file_path: PathBuf,
         compression: Option<Compression>,
+        max_connections: usize,
     ) -> eyre::Result<Self> {
         let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
         Ok(Self {
             max_opened_files,
             max_runners: MAX_RUNNERS,
+            max_connections,
             max_buffer_size: MAX_BUFFER_SIZE,
             max_retries: MAX_RETRIES,
             backoff_base_ms: BACKOFF_BASE_MS,

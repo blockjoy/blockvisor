@@ -17,6 +17,8 @@ use tracing::{debug, info};
 /// temporary log server unavailability (e.g. while updating).
 const LOG_BUFFER_CAPACITY_LN: usize = 1024;
 const LOG_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_DOWNLOAD_CONNECTIONS: usize = 8;
+const MAX_UPLOAD_CONNECTIONS: usize = 3;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -78,7 +80,7 @@ async fn main() -> eyre::Result<()> {
                 manifest,
                 destination,
                 job_config.restart,
-                build_transfer_config(&job_name, compression)?,
+                build_transfer_config(&job_name, compression, MAX_DOWNLOAD_CONNECTIONS)?,
             )?
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;
@@ -95,7 +97,7 @@ async fn main() -> eyre::Result<()> {
                 source,
                 exclude.unwrap_or_default(),
                 job_config.restart,
-                build_transfer_config(&job_name, compression)?,
+                build_transfer_config(&job_name, compression, MAX_UPLOAD_CONNECTIONS)?,
             )?
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;
@@ -107,6 +109,7 @@ async fn main() -> eyre::Result<()> {
 fn build_transfer_config(
     job_name: &str,
     compression: Option<Compression>,
+    max_connections: usize,
 ) -> eyre::Result<TransferConfig> {
     TransferConfig::new(
         jobs::JOBS_DIR
@@ -116,6 +119,7 @@ fn build_transfer_config(
             .join(jobs::STATUS_SUBDIR)
             .join(format!("{job_name}.progress")),
         compression,
+        max_connections,
     )
 }
 
