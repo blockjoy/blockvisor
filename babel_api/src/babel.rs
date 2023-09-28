@@ -1,7 +1,5 @@
 use crate::{
-    engine::{
-        HttpResponse, JobConfig, JobProgress, JobStatus, JrpcRequest, RestRequest, ShResponse,
-    },
+    engine::{HttpResponse, JobConfig, JobInfo, JobProgress, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig, KeysConfig},
     utils::{Binary, BinaryStatus},
 };
@@ -33,12 +31,12 @@ pub trait Babel {
     fn start_job(job_name: String, job: JobConfig);
     /// Stop background job with given unique name if running.
     fn stop_job(job_name: String);
-    /// Get background job status by unique name.
-    fn job_status(job_name: String) -> JobStatus;
+    /// Get background job info by unique name.
+    fn job_info(job_name: String) -> JobInfo;
     /// Get background job progress by unique name.
     fn job_progress(job_name: String) -> JobProgress;
     /// Get jobs list.
-    fn get_jobs() -> Vec<(String, JobStatus)>;
+    fn get_jobs() -> Vec<(String, JobInfo)>;
 
     /// Send a Jrpc request to the current blockchain.
     fn run_jrpc(req: JrpcRequest) -> HttpResponse;

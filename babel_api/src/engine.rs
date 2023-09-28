@@ -292,6 +292,16 @@ pub enum JobStatus {
     Stopped,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct JobInfo {
+    /// Job status.
+    pub status: JobStatus,
+    /// Restart count from last 24h.
+    pub restart_count: usize,
+    /// Job related logs from last 24h (max. 1024 entries).
+    pub logs: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct JobProgress {
     /// Total amount of units of work to process

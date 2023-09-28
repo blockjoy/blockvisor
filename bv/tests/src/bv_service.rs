@@ -332,7 +332,7 @@ fn check_upload_and_download(node_id: &str) {
     println!("wait for upload finished");
     let start = std::time::Instant::now();
     while let Err(err) = test_env::try_bv_run(
-        &["node", "job", node_id, "status", "upload"],
+        &["node", "job", node_id, "info", "upload"],
         r#"Finished { exit_code: Some(0), message: "" }"#,
         None,
     ) {
@@ -359,7 +359,7 @@ fn check_upload_and_download(node_id: &str) {
     println!("wait for download finished");
     let start = std::time::Instant::now();
     while let Err(err) = test_env::try_bv_run(
-        &["node", "job", node_id, "status", "download"],
+        &["node", "job", node_id, "info", "download"],
         r#"Finished { exit_code: Some(0), message: "" }"#,
         None,
     ) {

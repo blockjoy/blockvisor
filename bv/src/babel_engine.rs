@@ -18,8 +18,8 @@ use crate::{
 };
 use babel_api::{
     engine::{
-        HttpResponse, JobConfig, JobProgress, JobStatus, JobType, JrpcRequest, RestRequest,
-        ShResponse,
+        HttpResponse, JobConfig, JobInfo, JobProgress, JobStatus, JobType, JrpcRequest,
+        RestRequest, ShResponse,
     },
     metadata::KeysConfig,
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
@@ -247,17 +247,17 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     /// Returns the list of jobs from blockchain jobs.
-    pub async fn get_jobs(&mut self) -> Result<Vec<(String, JobStatus)>> {
+    pub async fn get_jobs(&mut self) -> Result<Vec<(String, JobInfo)>> {
         let babel_client = self.node_connection.babel_client().await?;
         let jobs = with_retry!(babel_client.get_jobs(()))?.into_inner();
         Ok(jobs)
     }
 
     /// Returns status of single job.
-    pub async fn job_status(&mut self, name: &str) -> Result<JobStatus> {
+    pub async fn job_info(&mut self, name: &str) -> Result<JobInfo> {
         let babel_client = self.node_connection.babel_client().await?;
-        let status = with_retry!(babel_client.job_status(name.to_owned()))?.into_inner();
-        Ok(status)
+        let info = with_retry!(babel_client.job_info(name.to_owned()))?.into_inner();
+        Ok(info)
     }
 
     /// Returns progress of single job.
@@ -423,9 +423,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 response_tx,
             } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
-                    Ok(babel_client) => with_retry!(babel_client.job_status(job_name.clone()))
+                    Ok(babel_client) => with_retry!(babel_client.job_info(job_name.clone()))
                         .map_err(|err| self.handle_connection_errors(err))
-                        .map(|v| v.into_inner()),
+                        .map(|v| v.into_inner().status),
                     Err(err) => Err(err),
                 });
             }
@@ -691,7 +691,7 @@ mod tests {
     use async_trait::async_trait;
     use babel_api::{
         babel::BlockchainKey,
-        engine::{Engine, JobType, RestartPolicy},
+        engine::{Engine, JobInfo, JobType, RestartPolicy},
         metadata::BabelConfig,
     };
     use mockall::*;
@@ -740,9 +740,9 @@ mod tests {
                 request: Request<(String, JobConfig)>,
             ) -> Result<Response<()>, Status>;
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
-            async fn job_status(&self, request: Request<String>) -> Result<Response<JobStatus>, Status>;
+            async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
             async fn job_progress(&self, request: Request<String>) -> Result<Response<JobProgress>, Status>;
-            async fn get_jobs(&self, request: Request<()>) -> Result<Response<Vec<(String, JobStatus)>>, Status>;
+            async fn get_jobs(&self, request: Request<()>) -> Result<Response<Vec<(String, JobInfo)>>, Status>;
             async fn run_jrpc(
                 &self,
                 request: Request<JrpcRequest>,
@@ -1018,9 +1018,15 @@ mod tests {
             .withf(|req| req.get_ref() == "custom_name")
             .return_once(|_| Ok(Response::new(())));
         babel_mock
-            .expect_job_status()
+            .expect_job_info()
             .withf(|req| req.get_ref() == "custom_name")
-            .return_once(|_| Ok(Response::new(JobStatus::Running)));
+            .return_once(|_| {
+                Ok(Response::new(JobInfo {
+                    status: JobStatus::Running,
+                    restart_count: 0,
+                    logs: vec![],
+                }))
+            });
         babel_mock
             .expect_run_jrpc()
             .withf(|req| {

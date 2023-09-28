@@ -34,7 +34,7 @@ use std::{
 use sysinfo::{DiskExt, System, SystemExt};
 use tokio::sync::Semaphore;
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 pub struct DownloadJob<T> {
     downloader: Downloader,
@@ -99,8 +99,10 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
     /// Run and restart downloader until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
-        info!("download job '{name}' started");
-        debug!("with manifest: {:?}", self.downloader.manifest);
+        info!(
+            "download job '{name}' started, with manifest: {:?}",
+            self.downloader.manifest
+        );
 
         let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
         while run.load() {

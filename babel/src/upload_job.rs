@@ -27,7 +27,7 @@ use std::{
     usize,
 };
 use tokio::sync::Semaphore;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 pub struct UploadJob<T> {
     uploader: Uploader,
@@ -91,8 +91,10 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for UploadJob<T> {
     /// Run and restart uploader until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
-        info!("upload job '{name}' started");
-        debug!("with manifest: {:?}", self.uploader.manifest);
+        info!(
+            "upload job '{name}' started, with manifest: {:?}",
+            self.uploader.manifest
+        );
 
         let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
         while run.load() {

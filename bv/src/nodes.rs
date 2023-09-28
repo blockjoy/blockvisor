@@ -1,5 +1,5 @@
 use babel_api::{
-    engine::{JobProgress, JobStatus},
+    engine::{JobInfo, JobProgress},
     metadata::{firewall, BlockchainMetadata, Requirements},
     rhai_plugin,
 };
@@ -392,7 +392,7 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn jobs(&self, id: Uuid) -> Result<Vec<(String, JobStatus)>> {
+    pub async fn jobs(&self, id: Uuid) -> Result<Vec<(String, JobInfo)>> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
@@ -403,14 +403,14 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn job_status(&self, id: Uuid, job_name: &str) -> Result<JobStatus> {
+    pub async fn job_info(&self, id: Uuid, job_name: &str) -> Result<JobInfo> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
             .ok_or_else(|| id_not_found(id))?
             .write()
             .await;
-        node.babel_engine.job_status(job_name).await
+        node.babel_engine.job_info(job_name).await
     }
 
     #[instrument(skip(self))]

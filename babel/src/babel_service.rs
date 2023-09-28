@@ -5,9 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::{
     babel::BlockchainKey,
-    engine::{
-        HttpResponse, JobConfig, JobProgress, JobStatus, JrpcRequest, RestRequest, ShResponse,
-    },
+    engine::{HttpResponse, JobConfig, JobInfo, JobProgress, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig, KeysConfig},
 };
 use eyre::{bail, eyre, Context, ContextCompat, Result};
@@ -267,13 +265,13 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(()))
     }
 
-    async fn job_status(&self, request: Request<String>) -> Result<Response<JobStatus>, Status> {
-        let status = self
+    async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status> {
+        let info = self
             .jobs_manager
-            .status(&request.into_inner())
+            .info(&request.into_inner())
             .await
             .map_err(|err| Status::internal(format!("job_status failed: {err}")))?;
-        Ok(Response::new(status))
+        Ok(Response::new(info))
     }
 
     async fn job_progress(
@@ -291,7 +289,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
     async fn get_jobs(
         &self,
         _request: Request<()>,
-    ) -> Result<Response<Vec<(String, JobStatus)>>, Status> {
+    ) -> Result<Response<Vec<(String, JobInfo)>>, Status> {
         let jobs = self
             .jobs_manager
             .list()
@@ -543,10 +541,10 @@ mod tests {
             async fn startup(&self) -> Result<()>;
             async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
             async fn shutdown(&self) -> Result<()>;
-            async fn list(&self) -> Result<Vec<(String, JobStatus)>>;
+            async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
             async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
             async fn stop(&self, name: &str) -> Result<()>;
-            async fn status(&self, name: &str) -> Result<JobStatus>;
+            async fn info(&self, name: &str) -> Result<JobInfo>;
             async fn progress(&self, name: &str) -> Result<JobProgress>;
         }
     }

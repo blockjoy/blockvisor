@@ -213,16 +213,16 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     if let Some(name) = name {
                         client.stop_node_job((id, name)).await?;
                     } else {
-                        for (name, status) in client.get_node_jobs(id).await?.into_inner() {
-                            if JobStatus::Running == status {
+                        for (name, info) in client.get_node_jobs(id).await?.into_inner() {
+                            if JobStatus::Running == info.status {
                                 client.stop_node_job((id, name)).await?;
                             }
                         }
                     }
                 }
-                JobCommand::Status { name } => {
-                    let status = client.get_node_job_status((id, name)).await?.into_inner();
-                    println!("{status:?}");
+                JobCommand::Info { name } => {
+                    let info = client.get_node_job_info((id, name)).await?.into_inner();
+                    println!("{info:?}");
                 }
                 JobCommand::Progress { name } => {
                     let progress = client.get_node_job_progress((id, name)).await?.into_inner();

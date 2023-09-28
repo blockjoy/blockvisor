@@ -27,8 +27,8 @@ trait Service {
     fn start_node(id: Uuid);
     fn stop_node(id: Uuid, force: bool);
     fn delete_node(id: Uuid);
-    fn get_node_jobs(id: Uuid) -> Vec<(String, babel_api::engine::JobStatus)>;
-    fn get_node_job_status(id: Uuid, job_name: String) -> babel_api::engine::JobStatus;
+    fn get_node_jobs(id: Uuid) -> Vec<(String, babel_api::engine::JobInfo)>;
+    fn get_node_job_info(id: Uuid, job_name: String) -> babel_api::engine::JobInfo;
     fn get_node_job_progress(id: Uuid, job_name: String) -> babel_api::engine::JobProgress;
     fn stop_node_job(id: Uuid, job_name: String);
     fn get_node_logs(id: Uuid) -> Vec<String>;
@@ -203,7 +203,7 @@ where
     async fn get_node_jobs(
         &self,
         request: Request<Uuid>,
-    ) -> Result<Response<Vec<(String, babel_api::engine::JobStatus)>>, Status> {
+    ) -> Result<Response<Vec<(String, babel_api::engine::JobInfo)>>, Status> {
         status_check().await?;
         let id = request.into_inner();
         let jobs = self
@@ -215,18 +215,18 @@ where
     }
 
     #[instrument(skip(self))]
-    async fn get_node_job_status(
+    async fn get_node_job_info(
         &self,
         request: Request<(Uuid, String)>,
-    ) -> Result<Response<babel_api::engine::JobStatus>, Status> {
+    ) -> Result<Response<babel_api::engine::JobInfo>, Status> {
         status_check().await?;
         let (id, job_name) = request.into_inner();
-        let status = self
+        let info = self
             .nodes
-            .job_status(id, &job_name)
+            .job_info(id, &job_name)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
-        Ok(Response::new(status))
+        Ok(Response::new(info))
     }
 
     #[instrument(skip(self))]

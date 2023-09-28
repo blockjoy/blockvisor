@@ -250,8 +250,8 @@ pub enum JobCommand {
         all: bool,
     },
 
-    /// Get job status.
-    Status {
+    /// Get job info.
+    Info {
         /// Job name.
         name: String,
     },

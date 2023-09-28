@@ -568,11 +568,11 @@ mod tests {
             async fn get_node_jobs(
                 &self,
                 request: tonic::Request<Uuid>,
-            ) -> Result<tonic::Response<Vec<(String, babel_api::engine::JobStatus)>>, tonic::Status>;
-            async fn get_node_job_status(
+            ) -> Result<tonic::Response<Vec<(String, babel_api::engine::JobInfo)>>, tonic::Status>;
+            async fn get_node_job_info(
                 &self,
                 request: tonic::Request<(Uuid, String)>,
-            ) -> Result<tonic::Response<babel_api::engine::JobStatus>, tonic::Status>;
+            ) -> Result<tonic::Response<babel_api::engine::JobInfo>, tonic::Status>;
             async fn get_node_job_progress(
                 &self,
                 request: tonic::Request<(Uuid, String)>,

@@ -1,6 +1,8 @@
 use crate::job_runner::load_job_data;
 use babel_api::engine::{JobConfig, JobProgress, JobStatus};
+use chrono::{DateTime, Local};
 use eyre::{Context, Result};
+use std::collections::HashSet;
 use std::{
     collections::HashMap,
     fs,
@@ -17,6 +19,9 @@ lazy_static::lazy_static! {
 
 pub const CONFIG_SUBDIR: &str = "config";
 pub const STATUS_SUBDIR: &str = "status";
+pub const LOG_EXPIRE_DAYS: i64 = 1;
+pub const MAX_JOB_LOGS: usize = 1024;
+pub const MAX_LOG_ENTRY_LEN: usize = 1024;
 
 pub type JobsRegistry = Arc<Mutex<Jobs>>;
 
@@ -38,6 +43,49 @@ pub enum JobState {
 pub struct Job {
     pub state: JobState,
     pub config: JobConfig,
+    pub logs: Vec<(DateTime<Local>, String)>,
+    pub restart_stamps: HashSet<DateTime<Local>>,
+}
+
+impl Job {
+    pub fn new(state: JobState, config: JobConfig) -> Self {
+        Self {
+            state,
+            config,
+            logs: Default::default(),
+            restart_stamps: Default::default(),
+        }
+    }
+
+    /// Add restart timestamp to `Job` internal state.
+    pub fn register_restart(&mut self) {
+        let time = self.update();
+        self.restart_stamps.insert(time);
+    }
+
+    /// Push log message with timestamp to `Job` internal state.
+    pub fn push_log(&mut self, message: &str) {
+        let time = self.update();
+        if let Some((index, _)) = message.char_indices().nth(MAX_LOG_ENTRY_LEN) {
+            message.to_string().truncate(index);
+        }
+        self.logs.push((time, format!("{time}| {message}")));
+    }
+
+    /// Update `Job` internal state, by removing outdated logs and restart stamps.
+    /// Return `now()` time for convenience.
+    pub fn update(&mut self) -> DateTime<Local> {
+        let time = Local::now();
+        let not_old = |timestamp: &DateTime<Local>| {
+            time.signed_duration_since(*timestamp).num_days() < LOG_EXPIRE_DAYS
+        };
+        self.restart_stamps.retain(not_old);
+        self.logs.retain(|(timestamp, _)| not_old(timestamp));
+        if self.logs.len() >= MAX_JOB_LOGS {
+            self.logs = self.logs.split_off(MAX_JOB_LOGS - 1);
+        }
+        time
+    }
 }
 
 pub fn load_config(path: &Path) -> Result<JobConfig> {
