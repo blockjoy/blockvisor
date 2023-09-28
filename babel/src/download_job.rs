@@ -148,8 +148,10 @@ impl Downloader {
             }
             match downloaders.wait_for_next().await {
                 Some(Err(err)) => {
-                    downloaders_result = Err(err);
-                    parallel_downloaders_run.stop();
+                    if downloaders_result.is_ok() {
+                        downloaders_result = Err(err);
+                        parallel_downloaders_run.stop();
+                    }
                 }
                 Some(Ok(_)) => {}
                 None => break,
@@ -337,8 +339,7 @@ impl ChunkDownloader {
                 self.send_to_writer(decoder.consume()?, &mut destination)
                     .await?;
             } else {
-                // interrupt download, but without error - error is raised somewhere else
-                return Ok(());
+                bail!("download interrupted");
             }
         }
         let calculated_checksum = digest.into_bytes();
