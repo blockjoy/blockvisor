@@ -195,8 +195,7 @@ impl JobsManagerClient for Client {
     }
 
     async fn start(&self, name: &str, config: JobConfig) -> Result<()> {
-        info!("Requested '{name} job to start'");
-        debug!("Requested '{name} job to start with {config:?}");
+        info!("Requested '{name}' job to start: {config:?}",);
         let (jobs, jobs_data) = &mut *self.jobs_registry.lock().await;
         if let Some(Job {
             state: JobState::Active(_),

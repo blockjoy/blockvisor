@@ -2,6 +2,7 @@ use eyre::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    fmt,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -140,7 +141,7 @@ pub enum Compression {
 /// Download manifest, describing a cloud to disk mapping.
 /// Sometimes it is necessary to put data into the cloud in a different form,
 /// because of cloud limitations or needed optimization.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct DownloadManifest {
     /// Total size of uncompressed data
     pub total_size: u64,
@@ -164,7 +165,7 @@ pub struct Slot {
 /// of pre-signed upload urls for each chunk to be uploaded.
 /// And extra slot for manifest file.
 /// This is just placeholder that MAY be used to upload data represented then by `DownloadManifest`.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct UploadManifest {
     pub slots: Vec<Slot>,
     pub manifest_slot: Slot,
@@ -414,4 +415,27 @@ pub enum PosixSignal {
     SIGXFSZ,
     /// Window resize signal (4.3BSD, Sun)
     SIGWINCH,
+}
+
+impl fmt::Debug for DownloadManifest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "DownloadManifest(total_size: {:?}, compression: {:?}, chunks: [{:?}, ...])",
+            self.total_size,
+            self.compression,
+            self.chunks.first()
+        )
+    }
+}
+
+impl fmt::Debug for UploadManifest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "UploadManifest(manifest_slot: {:?}, slots: [{:?}, ...])",
+            self.manifest_slot,
+            self.slots.first()
+        )
+    }
 }
