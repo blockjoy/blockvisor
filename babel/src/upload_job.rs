@@ -573,7 +573,7 @@ impl<E: Coder> Iterator for DestinationsReader<E> {
 mod tests {
     use super::*;
     use assert_fs::TempDir;
-    use babel_api::engine::Slot;
+    use babel_api::engine::{RestartConfig, Slot};
     use bv_utils::timer::SysTimer;
     use mockito::{Matcher, Server, ServerGuard};
     use std::fs;
@@ -815,10 +815,17 @@ mod tests {
             .create();
         let mut encoder = ZstdEncoder::new(5)?;
         encoder.feed([120u8; 91].to_vec())?;
+        let expected_b_body = encoder.finalize()?;
         test_env
             .server
             .mock("PUT", "/url.b")
-            .match_body(Matcher::from(encoder.finalize()?))
+            .with_status(404)
+            .match_body(Matcher::from(expected_b_body.clone()))
+            .create();
+        test_env
+            .server
+            .mock("PUT", "/url.b")
+            .match_body(Matcher::from(expected_b_body))
             .create();
         let mut encoder = ZstdEncoder::new(5)?;
         encoder.feed(
@@ -911,6 +918,11 @@ mod tests {
 
         let mut job = test_env.upload_job(test_env.dummy_upload_manifest()?);
         job.uploader.config.compression = Some(Compression::ZSTD(5));
+        job.restart_policy = RestartPolicy::OnFailure(RestartConfig {
+            backoff_timeout_ms: 1000,
+            backoff_base_ms: 1,
+            max_retries: Some(1),
+        });
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(0),

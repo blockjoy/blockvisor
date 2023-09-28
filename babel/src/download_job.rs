@@ -573,7 +573,7 @@ mod tests {
     use super::*;
     use crate::compression::ZstdEncoder;
     use assert_fs::TempDir;
-    use babel_api::engine::Checksum;
+    use babel_api::engine::{Checksum, RestartConfig};
     use bv_utils::timer::SysTimer;
     use mockito::{Server, ServerGuard};
     use std::fs;
@@ -816,6 +816,12 @@ mod tests {
             ],
         };
 
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=0-23")
+            .with_status(404)
+            .create();
         let mut encoder = ZstdEncoder::new(5)?;
         encoder.feed(vec![0u8; 100])?;
         encoder.feed(vec![1u8; 200])?;
@@ -840,6 +846,11 @@ mod tests {
             .create();
         let mut job = test_env.download_job(manifest);
         job.downloader.config.compression = Some(Compression::ZSTD(5));
+        job.restart_policy = RestartPolicy::OnFailure(RestartConfig {
+            backoff_timeout_ms: 1000,
+            backoff_base_ms: 1,
+            max_retries: Some(1),
+        });
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(0),
