@@ -17,8 +17,8 @@ use tracing::{debug, info};
 /// temporary log server unavailability (e.g. while updating).
 const LOG_BUFFER_CAPACITY_LN: usize = 1024;
 const LOG_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-const MAX_DOWNLOAD_CONNECTIONS: usize = 5;
-const MAX_UPLOAD_CONNECTIONS: usize = 3;
+const DEFAULT_MAX_DOWNLOAD_CONNECTIONS: usize = 3;
+const DEFAULT_MAX_UPLOAD_CONNECTIONS: usize = 3;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -70,6 +70,7 @@ async fn main() -> eyre::Result<()> {
         JobType::Download {
             manifest,
             destination,
+            max_connections,
         } => {
             let Some(manifest) = manifest else {
                 bail!("missing DownloadManifest")
@@ -80,7 +81,11 @@ async fn main() -> eyre::Result<()> {
                 manifest,
                 destination,
                 job_config.restart,
-                build_transfer_config(&job_name, compression, MAX_DOWNLOAD_CONNECTIONS)?,
+                build_transfer_config(
+                    &job_name,
+                    compression,
+                    max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
+                )?,
             )?
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;
@@ -90,6 +95,7 @@ async fn main() -> eyre::Result<()> {
             source,
             exclude,
             compression,
+            max_connections,
         } => {
             UploadJob::new(
                 bv_utils::timer::SysTimer,
@@ -97,7 +103,11 @@ async fn main() -> eyre::Result<()> {
                 source,
                 exclude.unwrap_or_default(),
                 job_config.restart,
-                build_transfer_config(&job_name, compression, MAX_UPLOAD_CONNECTIONS)?,
+                build_transfer_config(
+                    &job_name,
+                    compression,
+                    max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
+                )?,
             )?
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;

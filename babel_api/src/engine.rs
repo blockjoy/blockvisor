@@ -185,6 +185,8 @@ pub enum JobType {
         manifest: Option<DownloadManifest>,
         /// Destination directory for downloaded files.
         destination: PathBuf,
+        /// Maximum number of parallel opened connections.
+        max_connections: Option<usize>,
     },
     /// Upload data - according to given manifest.
     Upload {
@@ -200,6 +202,8 @@ pub enum JobType {
         exclude: Option<Vec<String>>,
         /// Compression to be used on chunks.
         compression: Option<Compression>,
+        /// Maximum number of parallel opened connections.
+        max_connections: Option<usize>,
     },
 }
 

@@ -537,6 +537,7 @@ mod tests {
                     job_type: JobType::Download {
                         manifest: None,
                         destination: PathBuf::from("destination/path/for/blockchain_data"),
+                        max_connections: None,
                     },
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,
