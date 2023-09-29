@@ -9,8 +9,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
 const MAX_OPENED_FILES: u64 = 1024;
@@ -18,6 +20,8 @@ const MAX_RUNNERS: usize = 8;
 const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
 const MAX_RETRIES: u32 = 5;
 const BACKOFF_BASE_MS: u64 = 500;
+
+pub type ConnectionPool = Arc<Semaphore>;
 
 #[async_trait]
 pub trait JobRunnerImpl {

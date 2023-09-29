@@ -5,8 +5,8 @@
 use crate::{
     compression::{Coder, NoCoder, ZstdEncoder},
     job_runner::{
-        cleanup_job_data, load_job_data, save_job_data, JobBackoff, JobRunner, JobRunnerImpl,
-        TransferConfig,
+        cleanup_job_data, load_job_data, save_job_data, ConnectionPool, JobBackoff, JobRunner,
+        JobRunnerImpl, TransferConfig,
     },
 };
 use async_trait::async_trait;
@@ -344,8 +344,6 @@ impl<'a> ParallelChunkUploaders<'a> {
     }
 }
 
-type ConnectionPool = Arc<Semaphore>;
-
 struct ChunkUploader {
     chunk: Chunk,
     client: reqwest::Client,
@@ -403,7 +401,7 @@ impl ChunkUploader {
                     reqwest::Body::wrap_stream(futures_util::stream::iter(parts))
                 }
             };
-            let _connection_permit = self.connection_pool.acquire().await?;
+            let connection_permit = self.connection_pool.acquire().await?;
             if let Some(resp) = run
                 .select(
                     self.client
@@ -422,6 +420,7 @@ impl ChunkUploader {
             } else {
                 bail!("upload interrupted");
             }
+            drop(connection_permit);
         }
         self.chunk.checksum = checksum_rx.borrow().clone();
         self.chunk.url.clear();

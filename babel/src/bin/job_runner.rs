@@ -17,7 +17,7 @@ use tracing::{debug, info};
 /// temporary log server unavailability (e.g. while updating).
 const LOG_BUFFER_CAPACITY_LN: usize = 1024;
 const LOG_RETRY_INTERVAL: Duration = Duration::from_secs(1);
-const MAX_DOWNLOAD_CONNECTIONS: usize = 8;
+const MAX_DOWNLOAD_CONNECTIONS: usize = 5;
 const MAX_UPLOAD_CONNECTIONS: usize = 3;
 
 #[tokio::main]

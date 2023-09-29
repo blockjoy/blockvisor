@@ -6,8 +6,8 @@ use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
     job_runner::{
-        cleanup_job_data, load_job_data, save_job_data, JobBackoff, JobRunner, JobRunnerImpl,
-        TransferConfig,
+        cleanup_job_data, load_job_data, save_job_data, ConnectionPool, JobBackoff, JobRunner,
+        JobRunnerImpl, TransferConfig,
     },
 };
 use async_trait::async_trait;
@@ -19,6 +19,7 @@ use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
+use std::sync::Arc;
 use std::{
     cmp::min,
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -31,6 +32,7 @@ use std::{
     usize,
 };
 use sysinfo::{DiskExt, System, SystemExt};
+use tokio::sync::Semaphore;
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
 use tracing::{debug, error, info};
 
@@ -217,6 +219,7 @@ struct ParallelChunkDownloaders<'a> {
     config: TransferConfig,
     futures: FuturesUnordered<BoxFuture<'a, Result<()>>>,
     chunks: Iter<'a, Chunk>,
+    connection_pool: ConnectionPool,
 }
 
 impl<'a> ParallelChunkDownloaders<'a> {
@@ -227,6 +230,7 @@ impl<'a> ParallelChunkDownloaders<'a> {
         chunks: &'a [Chunk],
         config: TransferConfig,
     ) -> Self {
+        let connection_pool = Arc::new(Semaphore::new(config.max_connections));
         Self {
             run,
             tx,
@@ -234,6 +238,7 @@ impl<'a> ParallelChunkDownloaders<'a> {
             config,
             futures: FuturesUnordered::new(),
             chunks: chunks.iter(),
+            connection_pool,
         }
     }
 
@@ -246,8 +251,12 @@ impl<'a> ParallelChunkDownloaders<'a> {
                 // skip chunks successfully downloaded in previous run
                 continue;
             }
-            let downloader =
-                ChunkDownloader::new(chunk.clone(), self.tx.clone(), self.config.clone());
+            let downloader = ChunkDownloader::new(
+                chunk.clone(),
+                self.tx.clone(),
+                self.config.clone(),
+                self.connection_pool.clone(),
+            );
             self.futures
                 .push(Box::pin(downloader.run(self.run.clone())));
         }
@@ -275,15 +284,22 @@ struct ChunkDownloader {
     tx: mpsc::Sender<ChunkData>,
     client: reqwest::Client,
     config: TransferConfig,
+    connection_pool: ConnectionPool,
 }
 
 impl ChunkDownloader {
-    fn new(chunk: Chunk, tx: mpsc::Sender<ChunkData>, config: TransferConfig) -> Self {
+    fn new(
+        chunk: Chunk,
+        tx: mpsc::Sender<ChunkData>,
+        config: TransferConfig,
+        connection_pool: ConnectionPool,
+    ) -> Self {
         Self {
             chunk,
             tx,
             client: reqwest::Client::new(),
             config,
+            connection_pool,
         }
     }
 
@@ -368,12 +384,14 @@ impl ChunkDownloader {
     async fn download_part(&self, pos: usize, chunk_size: usize) -> Result<Vec<u8>> {
         let buffer_size = min(chunk_size - pos, self.config.max_buffer_size);
         let mut buffer = Vec::with_capacity(buffer_size);
+        let connection_permit = self.connection_pool.acquire().await?;
         let mut resp = self
             .client
             .get(&self.chunk.url)
             .header(RANGE, format!("bytes={}-{}", pos, pos + buffer_size - 1))
             .send()
             .await?;
+        drop(connection_permit);
         ensure!(
             resp.status().is_success(),
             anyhow!("server responded with {}", resp.status())
