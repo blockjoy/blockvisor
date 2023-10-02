@@ -82,3 +82,9 @@ pub struct BlockchainKey {
 pub trait LogsCollector {
     fn send_log(log: String);
 }
+
+#[tonic_rpc::tonic_rpc(bincode)]
+pub trait JobsMonitor {
+    fn push_log(name: String, log: String);
+    fn register_restart(name: String);
+}

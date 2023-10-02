@@ -1,14 +1,14 @@
-use crate::utils::gracefully_terminate_process;
-/// Jobs Manager consists of two parts:
-/// .1 Client - allow asynchronous operations on jobs: start, stop and get status
-/// .2 Monitor - background worker that monitor job runners and take proper actions when some job runner ends
-/// It also start/stop requested jobs.
+/// Jobs Manager consists of three parts:
+/// .1 Client - allow asynchronously request operations on jobs (like start, stop and get info)
+///             and other interactions with `Manager`
+/// .2 Monitor - service listening `job_runner`s for job related logs and restart info
+/// .3 Manager - background worker that maintains job runners and take proper actions when some job runner ends
 use crate::{
     async_pid_watch::AsyncPidWatch,
     babel_service::JobRunnerLock,
     jobs,
     jobs::{Job, JobState, Jobs, JobsData, JobsRegistry, CONFIG_SUBDIR, STATUS_SUBDIR},
-    utils::find_processes,
+    utils::{find_processes, gracefully_terminate_process},
 };
 use async_trait::async_trait;
 use babel_api::engine::{
@@ -23,6 +23,7 @@ use tokio::{
     select,
     sync::{watch, Mutex},
 };
+use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -37,7 +38,7 @@ pub fn create(
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: &Path,
     state: JobsManagerState,
-) -> Result<(Client, Manager)> {
+) -> Result<(Client, Monitor, Manager)> {
     let jobs_config_dir = jobs_dir.join(CONFIG_SUBDIR);
     if !jobs_config_dir.exists() {
         fs::create_dir_all(jobs_config_dir)?;
@@ -55,6 +56,9 @@ pub fn create(
             jobs_registry: jobs_registry.clone(),
             job_added_tx,
             jobs_manager_state_tx,
+        },
+        Monitor {
+            jobs_registry: jobs_registry.clone(),
         },
         Manager {
             jobs_registry,
@@ -287,6 +291,33 @@ fn terminate_job(name: &str, pid: &Pid, config: &JobConfig) -> Result<()> {
         bail!("Failed to terminate job_runner for '{name}' job (pid {pid}), timeout expired!");
     }
     Ok(())
+}
+
+pub struct Monitor {
+    jobs_registry: JobsRegistry,
+}
+
+#[tonic::async_trait]
+impl babel_api::babel::jobs_monitor_server::JobsMonitor for Monitor {
+    async fn push_log(&self, request: Request<(String, String)>) -> Result<Response<()>, Status> {
+        let (name, message) = request.into_inner();
+        let (jobs, _) = &mut *self.jobs_registry.lock().await;
+        let job = jobs
+            .get_mut(&name)
+            .ok_or(Status::not_found(format!("job '{name}' not found")))?;
+        job.push_log(&message);
+        Ok(Response::new(()))
+    }
+
+    async fn register_restart(&self, request: Request<String>) -> Result<Response<()>, Status> {
+        let name = request.into_inner();
+        let (jobs, _) = &mut *self.jobs_registry.lock().await;
+        let job = jobs
+            .get_mut(&name)
+            .ok_or(Status::not_found(format!("job '{name}' not found")))?;
+        job.register_restart();
+        Ok(Response::new(()))
+    }
 }
 
 pub struct Manager {
@@ -529,7 +560,7 @@ mod tests {
         test_job_runner_path: PathBuf,
         run: RunFlag,
         client: Client,
-        monitor: Option<Manager>,
+        manager: Option<Manager>,
     }
 
     impl TestEnv {
@@ -541,7 +572,7 @@ mod tests {
             let jobs_status_dir = jobs_dir.join(STATUS_SUBDIR);
             let test_job_runner_path = tmp_root.join("test_job_runner");
             let run = RunFlag::default();
-            let (client, monitor) = create(
+            let (client, _monitor, manager) = create(
                 &jobs_dir,
                 Arc::new(RwLock::new(Some(0))),
                 &test_job_runner_path,
@@ -555,12 +586,12 @@ mod tests {
                 test_job_runner_path,
                 run,
                 client,
-                monitor: Some(monitor),
+                manager: Some(manager),
             })
         }
 
         fn spawn_monitor(&mut self) -> JoinHandle<()> {
-            tokio::spawn(self.monitor.take().unwrap().run(self.run.clone()))
+            tokio::spawn(self.manager.take().unwrap().run(self.run.clone()))
         }
 
         fn create_infinite_job_runner(&self) -> Result<()> {
@@ -625,7 +656,7 @@ mod tests {
         let saved_config = jobs::load_config(&test_env.jobs_config_dir.join("test_job.cfg"))?;
         assert_eq!(config, saved_config);
         assert!(test_env
-            .monitor
+            .manager
             .unwrap()
             .job_added_rx
             .has_changed()

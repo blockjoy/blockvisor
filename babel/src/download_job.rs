@@ -104,7 +104,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
             self.downloader.manifest
         );
 
-        let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
+        let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
         while run.load() {
             backoff.start();
             match self.downloader.download(run.clone()).await {

@@ -96,7 +96,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for UploadJob<T> {
             self.uploader.manifest
         );
 
-        let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
+        let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
         while run.load() {
             backoff.start();
             match self.uploader.upload(run.clone()).await {

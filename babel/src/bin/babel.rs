@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use babel::{
     babel_service, babel_service::BabelServiceState, is_babel_config_applied, jobs::JOBS_DIR,
     jobs_manager, jobs_manager::JobsManagerState, load_config, logs_service::LogsService, utils,
-    BabelPal, BABEL_LOGS_UDS_PATH,
+    BabelPal, BABEL_LOGS_UDS_PATH, JOBS_MONITOR_UDS_PATH,
 };
 use babel_api::metadata::RamdiskConfiguration;
 use bv_utils::{cmd::run_cmd, logging::setup_logging, run_flag::RunFlag};
@@ -63,7 +63,7 @@ async fn main() -> eyre::Result<()> {
             )
         };
 
-    let (client, manager) = jobs_manager::create(
+    let (client, monitor, manager) = jobs_manager::create(
         &JOBS_DIR,
         job_runner_lock.clone(),
         &JOB_RUNNER_BIN_PATH,
@@ -90,13 +90,16 @@ async fn main() -> eyre::Result<()> {
         }
     });
 
-    let res = Server::builder()
-        .max_concurrent_streams(2)
-        .add_service(babel_api::babel::babel_server::BabelServer::new(
-            babel_service,
-        ))
-        .serve_with_incoming_shutdown(vsock_listener.incoming(), run.wait())
-        .await;
+    let monitor_run = run.clone();
+    let (res, _) = tokio::join!(
+        Server::builder()
+            .max_concurrent_streams(2)
+            .add_service(babel_api::babel::babel_server::BabelServer::new(
+                babel_service,
+            ))
+            .serve_with_incoming_shutdown(vsock_listener.incoming(), run.wait()),
+        serve_jobs_monitor(monitor_run, monitor)
+    );
     if run.load() {
         // make sure to stop manager gracefully
         // in case of abnormal server shutdown
@@ -255,6 +258,23 @@ async fn serve_logs(mut run: RunFlag, logs_service: LogsService) -> eyre::Result
     Server::builder()
         .add_service(
             babel_api::babel::logs_collector_server::LogsCollectorServer::new(logs_service),
+        )
+        .serve_with_incoming_shutdown(uds_stream, run.wait())
+        .await?;
+    Ok(())
+}
+
+async fn serve_jobs_monitor(
+    mut run: RunFlag,
+    jobs_monitor_service: jobs_manager::Monitor,
+) -> eyre::Result<()> {
+    let _ = fs::remove_file(*JOBS_MONITOR_UDS_PATH).await;
+    let uds_stream =
+        UnixListenerStream::new(tokio::net::UnixListener::bind(*JOBS_MONITOR_UDS_PATH)?);
+
+    Server::builder()
+        .add_service(
+            babel_api::babel::jobs_monitor_server::JobsMonitorServer::new(jobs_monitor_service),
         )
         .serve_with_incoming_shutdown(uds_stream, run.wait())
         .await?;

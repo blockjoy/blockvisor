@@ -24,6 +24,7 @@ use tracing::info;
 
 lazy_static::lazy_static! {
     pub static ref BABEL_LOGS_UDS_PATH: &'static Path = Path::new("/var/lib/babel/logs.socket");
+    pub static ref JOBS_MONITOR_UDS_PATH: &'static Path = Path::new("/var/lib/babel/jobs_monitor.socket");
 }
 
 /// Trait that allows to inject custom PAL implementation.

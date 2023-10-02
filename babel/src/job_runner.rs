@@ -1,9 +1,13 @@
 use crate::{
     jobs,
     utils::{Backoff, LimitStatus},
+    JOBS_MONITOR_UDS_PATH,
 };
 use async_trait::async_trait;
-use babel_api::engine::{Compression, JobStatus, RestartConfig, RestartPolicy};
+use babel_api::{
+    babel::jobs_monitor_client::JobsMonitorClient,
+    engine::{Compression, JobStatus, RestartConfig, RestartPolicy},
+};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -12,7 +16,8 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::sync::Semaphore;
+use tokio::{net::UnixStream, sync::Semaphore};
+use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::{debug, error, info, warn};
 
 const MAX_OPENED_FILES: u64 = 1024;
@@ -108,13 +113,16 @@ pub fn cleanup_job_data(file_path: &Path) {
 }
 
 pub struct JobBackoff<T> {
+    job_name: String,
     backoff: Option<Backoff<T>>,
     max_retries: Option<u32>,
     restart_always: bool,
+    job_monitor_client: JobsMonitorClient<Channel>,
 }
 
 impl<T: AsyncTimer> JobBackoff<T> {
-    pub fn new(timer: T, mut run: RunFlag, policy: &RestartPolicy) -> Self {
+    pub fn new(job_name: &str, timer: T, mut run: RunFlag, policy: &RestartPolicy) -> Self {
+        let job_name = job_name.to_owned();
         let build_backoff = move |cfg: &RestartConfig| {
             Some(Backoff::new(
                 timer,
@@ -123,21 +131,35 @@ impl<T: AsyncTimer> JobBackoff<T> {
                 Duration::from_millis(cfg.backoff_timeout_ms),
             ))
         };
+        let job_monitor_client = JobsMonitorClient::new(
+            Endpoint::from_static("http://[::]:50052")
+                .timeout(Duration::from_secs(3))
+                .connect_timeout(Duration::from_secs(3))
+                .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+                    UnixStream::connect(JOBS_MONITOR_UDS_PATH.to_path_buf())
+                })),
+        );
         match policy {
             RestartPolicy::Never => Self {
+                job_name,
                 backoff: None,
                 max_retries: None,
                 restart_always: false,
+                job_monitor_client,
             },
             RestartPolicy::Always(cfg) => Self {
+                job_name,
                 backoff: build_backoff(cfg),
                 max_retries: cfg.max_retries,
                 restart_always: true,
+                job_monitor_client,
             },
             RestartPolicy::OnFailure(cfg) => Self {
+                job_name,
                 backoff: build_backoff(cfg),
                 max_retries: cfg.max_retries,
                 restart_always: false,
+                job_monitor_client,
             },
         }
     }
@@ -165,17 +187,29 @@ impl<T: AsyncTimer> JobBackoff<T> {
                     message: message.clone(),
                 }
             };
+            let _ = self
+                .job_monitor_client
+                .push_log((self.job_name.clone(), message.clone()))
+                .await;
             if let Some(backoff) = &mut self.backoff {
                 if let Some(max_retries) = self.max_retries {
                     if backoff.wait_with_limit(max_retries).await == LimitStatus::Exceeded {
                         Err(job_failed())
                     } else {
                         debug!("{message}  - retry");
+                        let _ = self
+                            .job_monitor_client
+                            .register_restart(self.job_name.clone())
+                            .await;
                         Ok(())
                     }
                 } else {
                     backoff.wait().await;
                     debug!("{message}  - retry");
+                    let _ = self
+                        .job_monitor_client
+                        .register_restart(self.job_name.clone())
+                        .await;
                     Ok(())
                 }
             } else {
@@ -202,7 +236,7 @@ mod tests {
     async fn test_stopped_restart_never() -> Result<()> {
         let test_run = RunFlag::default();
         let timer_mock = MockAsyncTimer::new();
-        let mut backoff = JobBackoff::new(timer_mock, test_run, &RestartPolicy::Never);
+        let mut backoff = JobBackoff::new("job_name", timer_mock, test_run, &RestartPolicy::Never);
         backoff.start(); // should do nothing
         assert_eq!(
             JobStatus::Finished {
@@ -236,6 +270,7 @@ mod tests {
         timer_mock.expect_sleep().returning(|_| ());
 
         let mut backoff = JobBackoff::new(
+            "job_name",
             timer_mock,
             test_run,
             &RestartPolicy::Always(RestartConfig {
@@ -271,6 +306,7 @@ mod tests {
         timer_mock.expect_sleep().returning(|_| ());
 
         let mut backoff = JobBackoff::new(
+            "job_name",
             timer_mock,
             test_run,
             &RestartPolicy::OnFailure(RestartConfig {

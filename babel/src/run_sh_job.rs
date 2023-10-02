@@ -69,7 +69,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
         cmd.args(args.clone())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut backoff = JobBackoff::new(self.timer, run.clone(), &self.restart_policy);
+        let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
         while run.load() {
             backoff.start();
             match cmd.spawn() {
