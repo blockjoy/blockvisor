@@ -101,7 +101,12 @@ pub async fn collect_metric<N: NodeConnection>(babel_engine: &mut BabelEngine<N>
         true => timeout(babel_engine.sync_status()).await.ok(),
         false => None,
     };
-    let progress = timeout(babel_engine.job_progress("download")).await.ok();
+
+    let progress = timeout(babel_engine.get_jobs()).await.ok().and_then(|v| {
+        v.iter()
+            .find(|(name, _)| name == "download")
+            .map(|(_, info)| info.progress.clone())
+    }); // TODO use all jobs after update to new protos
 
     Metric {
         // these could be optional

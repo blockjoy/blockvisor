@@ -204,8 +204,8 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     let jobs = client.get_node_jobs(id).await?.into_inner();
                     if !jobs.is_empty() {
                         println!("{:<30} STATUS", "NAME");
-                        for (name, status) in jobs {
-                            println!("{name:<30} {status:?}");
+                        for (name, info) in jobs {
+                            println!("{name:<30} {status:?}", status = info.status);
                         }
                     }
                 }
@@ -222,11 +222,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 }
                 JobCommand::Info { name } => {
                     let info = client.get_node_job_info((id, name)).await?.into_inner();
-                    println!("{info:?}");
-                }
-                JobCommand::Progress { name } => {
-                    let progress = client.get_node_job_progress((id, name)).await?.into_inner();
-                    println!("{progress:?}");
+                    println!("{info:#?}");
                 }
             }
         }

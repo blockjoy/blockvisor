@@ -5,7 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::{
     babel::BlockchainKey,
-    engine::{HttpResponse, JobConfig, JobInfo, JobProgress, JrpcRequest, RestRequest, ShResponse},
+    engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig, KeysConfig},
 };
 use eyre::{bail, eyre, Context, ContextCompat, Result};
@@ -274,18 +274,6 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(info))
     }
 
-    async fn job_progress(
-        &self,
-        request: Request<String>,
-    ) -> Result<Response<JobProgress>, Status> {
-        let progress = self
-            .jobs_manager
-            .progress(&request.into_inner())
-            .await
-            .map_err(|err| Status::internal(format!("job_progress failed: {err}")))?;
-        Ok(Response::new(progress))
-    }
-
     async fn get_jobs(
         &self,
         _request: Request<()>,
@@ -545,7 +533,6 @@ mod tests {
             async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
             async fn stop(&self, name: &str) -> Result<()>;
             async fn info(&self, name: &str) -> Result<JobInfo>;
-            async fn progress(&self, name: &str) -> Result<JobProgress>;
         }
     }
 

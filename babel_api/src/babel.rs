@@ -1,5 +1,5 @@
 use crate::{
-    engine::{HttpResponse, JobConfig, JobInfo, JobProgress, JrpcRequest, RestRequest, ShResponse},
+    engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig, KeysConfig},
     utils::{Binary, BinaryStatus},
 };
@@ -33,8 +33,6 @@ pub trait Babel {
     fn stop_job(job_name: String);
     /// Get background job info by unique name.
     fn job_info(job_name: String) -> JobInfo;
-    /// Get background job progress by unique name.
-    fn job_progress(job_name: String) -> JobProgress;
     /// Get jobs list.
     fn get_jobs() -> Vec<(String, JobInfo)>;
 

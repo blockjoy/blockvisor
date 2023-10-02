@@ -129,7 +129,6 @@ pub trait JobsManagerClient {
     async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
     async fn stop(&self, name: &str) -> Result<()>;
     async fn info(&self, name: &str) -> Result<JobInfo>;
-    async fn progress(&self, name: &str) -> Result<JobProgress>;
 }
 
 pub struct Client {
@@ -182,12 +181,15 @@ impl JobsManagerClient for Client {
     }
 
     async fn list(&self) -> Result<Vec<(String, JobInfo)>> {
-        let (jobs, _) = &mut *self.jobs_registry.lock().await;
+        let (jobs, jobs_data) = &mut *self.jobs_registry.lock().await;
         let res = jobs
             .iter_mut()
             .map(|(name, job)| {
                 job.update();
-                (name.clone(), build_job_info(job))
+                (
+                    name.clone(),
+                    build_job_info(job, jobs_data.load_progress(name)),
+                )
             })
             .collect();
         Ok(res)
@@ -240,28 +242,18 @@ impl JobsManagerClient for Client {
     }
 
     async fn info(&self, name: &str) -> Result<JobInfo> {
-        let (jobs, _) = &mut *self.jobs_registry.lock().await;
+        let (jobs, jobs_data) = &mut *self.jobs_registry.lock().await;
         let job = jobs
             .get_mut(name)
             .with_context(|| format!("unknown status, job '{name}' not found"))?;
         job.update();
-        Ok(build_job_info(job))
-    }
-
-    async fn progress(&self, name: &str) -> Result<JobProgress> {
-        let (jobs, jobs_data) = &*self.jobs_registry.lock().await;
-        let progress = if jobs.contains_key(name) {
-            jobs_data.load_progress(name)
-        } else {
-            bail!("unknown progress, job '{name}' not found")
-        };
-        Ok(progress)
+        Ok(build_job_info(job, jobs_data.load_progress(name)))
     }
 }
 
-fn build_job_info(job: &Job) -> JobInfo {
+fn build_job_info(job: &Job, progress: JobProgress) -> JobInfo {
     let restart_count = job.restart_stamps.len();
-    let logs = job.logs.iter().map(|(_, log)| log.clone()).collect();
+    let logs = job.logs.iter().rev().map(|(_, log)| log.clone()).collect();
     JobInfo {
         status: if let Job {
             state: JobState::Inactive(status),
@@ -272,6 +264,7 @@ fn build_job_info(job: &Job) -> JobInfo {
         } else {
             JobStatus::Running
         },
+        progress,
         restart_count,
         logs,
     }
@@ -664,6 +657,7 @@ mod tests {
         assert_eq!(
             JobInfo {
                 status: JobStatus::Pending,
+                progress: Default::default(),
                 restart_count: 0,
                 logs: vec![],
             },
@@ -1092,6 +1086,7 @@ mod tests {
         assert_eq!(
             JobInfo {
                 status: JobStatus::Running,
+                progress: Default::default(),
                 restart_count: 0,
                 logs: vec![],
             },
@@ -1105,14 +1100,14 @@ mod tests {
         let mut info = test_env.client.info("test_restarting_job").await?;
         assert_eq!(JobStatus::Running, info.status);
         assert_eq!(1, info.restart_count);
+        assert!(
+            info.logs.pop().unwrap().contains("can't load job 'test_restarting_job' status from file after it stopped, with: Failed to read job status file")
+        );
         assert!(info
             .logs
             .pop()
             .unwrap()
             .contains("babel_job_runner process ended unexpectedly"));
-        assert!(
-            info.logs.pop().unwrap().contains("can't load job 'test_restarting_job' status from file after it stopped, with: Failed to read job status file")
-        );
 
         test_env.run.stop();
         monitor_handle.await?;

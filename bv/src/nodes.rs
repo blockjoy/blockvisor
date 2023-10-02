@@ -1,5 +1,5 @@
 use babel_api::{
-    engine::{JobInfo, JobProgress},
+    engine::JobInfo,
     metadata::{firewall, BlockchainMetadata, Requirements},
     rhai_plugin,
 };
@@ -411,17 +411,6 @@ impl<P: Pal + Debug> Nodes<P> {
             .write()
             .await;
         node.babel_engine.job_info(job_name).await
-    }
-
-    #[instrument(skip(self))]
-    pub async fn job_progress(&self, id: Uuid, job_name: &str) -> Result<JobProgress> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| id_not_found(id))?
-            .write()
-            .await;
-        node.babel_engine.job_progress(job_name).await
     }
 
     #[instrument(skip(self))]
