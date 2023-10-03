@@ -157,7 +157,7 @@ impl JobsData {
         load_status(&status_file_path(name, &self.jobs_status_dir))
     }
 
-    pub fn load_progress(&self, name: &str) -> JobProgress {
+    pub fn load_progress(&self, name: &str) -> Option<JobProgress> {
         load_job_data(&progress_file_path(name, &self.jobs_status_dir))
     }
 }

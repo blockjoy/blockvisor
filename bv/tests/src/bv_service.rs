@@ -373,7 +373,7 @@ fn check_upload_and_download(node_id: &str) {
     println!("check download progress");
     test_env::bv_run(
         &["node", "job", node_id, "info", "download"],
-        "total: 9,\n        current: 9",
+        "total: 9,\n            current: 9,",
         None,
     );
 

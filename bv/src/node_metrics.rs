@@ -5,11 +5,16 @@ use crate::node_data::NodeStatus;
 use crate::nodes::Nodes;
 use crate::pal::{NodeConnection, Pal};
 use crate::services::api::pb;
-use babel_api::plugin::{ApplicationStatus, StakingStatus, SyncStatus};
+use babel_api::engine::JobStatus;
+use babel_api::{
+    engine::JobInfo,
+    plugin::{ApplicationStatus, StakingStatus, SyncStatus},
+};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use tracing::warn;
 
@@ -34,9 +39,7 @@ pub struct Metric {
     pub consensus: Option<bool>,
     pub application_status: Option<ApplicationStatus>,
     pub sync_status: Option<SyncStatus>,
-    pub data_sync_progress_total: Option<u32>,
-    pub data_sync_progress_current: Option<u32>,
-    pub data_sync_progress_message: Option<String>,
+    pub jobs: Vec<(String, JobInfo)>,
 }
 
 impl Metrics {
@@ -49,6 +52,20 @@ impl Metrics {
                 || m.application_status.is_some()
                 || m.sync_status.is_some()
         })
+    }
+}
+
+impl Deref for Metrics {
+    type Target = HashMap<NodeId, Metric>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Metrics {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -102,11 +119,10 @@ pub async fn collect_metric<N: NodeConnection>(babel_engine: &mut BabelEngine<N>
         false => None,
     };
 
-    let progress = timeout(babel_engine.get_jobs()).await.ok().and_then(|v| {
-        v.iter()
-            .find(|(name, _)| name == "download")
-            .map(|(_, info)| info.progress.clone())
-    }); // TODO use all jobs after update to new protos
+    let jobs = timeout(babel_engine.get_jobs())
+        .await
+        .ok()
+        .unwrap_or_default();
 
     Metric {
         // these could be optional
@@ -117,10 +133,7 @@ pub async fn collect_metric<N: NodeConnection>(babel_engine: &mut BabelEngine<N>
         sync_status,
         // these are expected in every chain
         application_status: timeout(babel_engine.application_status()).await.ok(),
-        // this could be used to keep track of long download job progress
-        data_sync_progress_total: progress.as_ref().map(|p| p.total),
-        data_sync_progress_current: progress.as_ref().map(|p| p.current),
-        data_sync_progress_message: progress.map(|p| p.message),
+        jobs,
     }
 }
 
@@ -154,16 +167,47 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
             .0
             .into_iter()
             .map(|(k, v)| {
+                let jobs = v
+                    .jobs
+                    .into_iter()
+                    .map(|(name, info)| {
+                        let (status, exit_code, message) = match info.status {
+                            JobStatus::Pending => (pb::NodeJobStatus::Pending, None, None),
+                            JobStatus::Running => (pb::NodeJobStatus::Running, None, None),
+                            JobStatus::Finished { exit_code, message } => (
+                                if exit_code == Some(0) {
+                                    pb::NodeJobStatus::Finished
+                                } else {
+                                    pb::NodeJobStatus::Failed
+                                },
+                                exit_code,
+                                Some(message),
+                            ),
+                            JobStatus::Stopped => (pb::NodeJobStatus::Stopped, None, None),
+                        };
+                        pb::NodeJob {
+                            name,
+                            status: status.into(),
+                            exit_code,
+                            message,
+                            logs: info.logs,
+                            restarts: u64::try_from(info.restart_count).unwrap_or_default(),
+                            progress: info.progress.map(|progress| pb::NodeJobProgress {
+                                total: Some(progress.total),
+                                current: Some(progress.current),
+                                message: Some(progress.message),
+                            }),
+                        }
+                    })
+                    .collect();
                 let mut metrics = pb::NodeMetrics {
                     height: v.height,
                     block_age: v.block_age,
                     consensus: v.consensus,
-                    data_sync_progress_total: v.data_sync_progress_total,
-                    data_sync_progress_current: v.data_sync_progress_current,
-                    data_sync_progress_message: v.data_sync_progress_message,
                     staking_status: None,
                     application_status: None,
                     sync_status: None,
+                    jobs,
                 };
                 if let Some(v) = v.staking_status.map(Into::into) {
                     metrics.set_staking_status(v);

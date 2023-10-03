@@ -16,11 +16,18 @@ use bv_utils::run_flag::RunFlag;
 use eyre::{Context, Result};
 use metrics::{register_counter, Counter};
 use metrics_exporter_prometheus::PrometheusBuilder;
-use std::time::Instant;
-use std::{collections::HashMap, fmt::Debug, net::SocketAddr, str::FromStr, sync::Arc};
-use tokio::sync::watch::Sender;
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    fmt::Debug,
+    hash::{Hash, Hasher},
+    net::SocketAddr,
+    str::FromStr,
+    sync::Arc,
+    time::Instant,
+};
 use tokio::{
     net::TcpListener,
+    sync::watch::Sender,
     sync::{watch, watch::Receiver},
     time::{sleep, Duration},
 };
@@ -319,12 +326,13 @@ where
         endpoint: &Endpoint,
         config: SharedConfig,
     ) -> Option<()> {
+        let mut job_info_cache: HashMap<(uuid::Uuid, String), u64> = HashMap::new();
         while run.load() {
             run.select(sleep(with_jitter(node_metrics::COLLECT_INTERVAL)))
                 .await;
-
             let now = Instant::now();
-            let metrics = node_metrics::collect_metrics(nodes.clone()).await;
+            let mut metrics = node_metrics::collect_metrics(nodes.clone()).await;
+            let mut job_info_cache_update: HashMap<(uuid::Uuid, String), u64> = HashMap::new();
             // do not bother api with empty updates
             if metrics.has_any() {
                 let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
@@ -342,9 +350,29 @@ where
                     }
                 };
                 let mut client = api::MetricsClient::with_auth(channel, token);
+                for (id, metric) in metrics.iter_mut() {
+                    // go through all jobs info in metrics and leave only this that has changed
+                    // since last time
+                    metric.jobs.retain(|(name, info)| {
+                        let mut state = DefaultHasher::new();
+                        info.hash(&mut state);
+                        let new_hash = state.finish();
+                        let key = (*id, name.clone());
+                        if Some(&new_hash) != job_info_cache.get(&key) {
+                            job_info_cache_update.insert(key, new_hash);
+                            debug!("job info for '{name}' on {id} has changed - adding to metrics");
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                }
                 let metrics: pb::MetricsServiceNodeRequest = metrics.into();
                 if let Err(e) = client.node(metrics).await {
                     error!("Could not send node metrics! `{e}`");
+                } else {
+                    // update cache only if request succeed
+                    job_info_cache.extend(job_info_cache_update.into_iter());
                 }
                 BV_NODES_METRICS_COUNTER.increment(1);
                 BV_NODES_METRICS_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);

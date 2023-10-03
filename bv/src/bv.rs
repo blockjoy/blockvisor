@@ -324,12 +324,31 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 fmt_opt(metrics.application_status)
             );
             println!("Sync Status:    {:>12}", fmt_opt(metrics.sync_status));
-            let progress = format!(
-                "{}/{}",
-                fmt_opt(metrics.data_sync_progress_current),
-                fmt_opt(metrics.data_sync_progress_total)
-            );
-            println!("Data Sync:      {:>12}", progress);
+            if !metrics.jobs.is_empty() {
+                println!("Jobs:");
+                for (name, mut info) in metrics.jobs {
+                    println!("  - \"{name}\"");
+                    println!("    Status: {:?}", info.status);
+                    println!("    Restarts: {}", info.restart_count);
+                    if let Some(progress) = info.progress {
+                        println!(
+                            "    Progress: {}/{} {}",
+                            progress.current, progress.total, progress.message
+                        );
+                    }
+                    if !info.logs.is_empty() {
+                        if info.logs.len() > 7 {
+                            let _ = info.logs.split_off(6);
+                            info.logs
+                                .push(format!("... use `bv node job info {}` to get more", name));
+                        }
+                        println!("    Logs:");
+                        for log in info.logs {
+                            println!("      {}", log);
+                        }
+                    }
+                }
+            }
         }
         NodeCommand::Check { id_or_name } => {
             let id = client

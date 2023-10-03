@@ -251,7 +251,7 @@ impl JobsManagerClient for Client {
     }
 }
 
-fn build_job_info(job: &Job, progress: JobProgress) -> JobInfo {
+fn build_job_info(job: &Job, progress: Option<JobProgress>) -> JobInfo {
     let restart_count = job.restart_stamps.len();
     let logs = job.logs.iter().rev().map(|(_, log)| log.clone()).collect();
     JobInfo {

@@ -271,7 +271,7 @@ pub struct RestartConfig {
     pub max_retries: Option<u32>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
     /// The current job was requested to start, but the process has not been launched yet.
@@ -292,19 +292,19 @@ pub enum JobStatus {
     Stopped,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Hash)]
 pub struct JobInfo {
     /// Job status.
     pub status: JobStatus,
     /// Job progress
-    pub progress: JobProgress,
+    pub progress: Option<JobProgress>,
     /// Restart count from last 24h.
     pub restart_count: usize,
     /// Job related logs from last 24h (max. 1024 entries).
     pub logs: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Hash)]
 pub struct JobProgress {
     /// Total amount of units of work to process
     pub total: u32,
