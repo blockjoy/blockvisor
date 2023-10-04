@@ -132,6 +132,13 @@ async fn main() -> Result<()> {
     let bv_root = bv_root();
     let cmd_args = CmdArgs::parse();
     let api_config = if !cmd_args.skip_init {
+        //
+        if run_cmd("systemctl", ["is-active", "blockvisor.service"])
+            .await
+            .is_ok()
+        {
+            bail!("Can't provision and init blockvisor configuration, while it is running, `bv stop` first.");
+        }
         println!("Provision and init blockvisor configuration");
 
         let net = discover_net_params(&cmd_args.ifa).await.unwrap_or_default();
