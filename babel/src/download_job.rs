@@ -33,6 +33,7 @@ use std::{
 };
 use sysinfo::{DiskExt, System, SystemExt};
 use tokio::sync::Semaphore;
+use tokio::task::JoinError;
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
 use tracing::{error, info};
 
@@ -219,7 +220,7 @@ struct ParallelChunkDownloaders<'a> {
     tx: mpsc::Sender<ChunkData>,
     downloaded_chunks: HashSet<String>,
     config: TransferConfig,
-    futures: FuturesUnordered<BoxFuture<'a, Result<()>>>,
+    futures: FuturesUnordered<BoxFuture<'a, Result<Result<()>, JoinError>>>,
     chunks: Iter<'a, Chunk>,
     connection_pool: ConnectionPool,
 }
@@ -260,12 +261,15 @@ impl<'a> ParallelChunkDownloaders<'a> {
                 self.connection_pool.clone(),
             );
             self.futures
-                .push(Box::pin(downloader.run(self.run.clone())));
+                .push(Box::pin(tokio::spawn(downloader.run(self.run.clone()))));
         }
     }
 
     async fn wait_for_next(&mut self) -> Option<Result<()>> {
-        self.futures.next().await
+        self.futures
+            .next()
+            .await
+            .map(|r| r.unwrap_or_else(|err| bail!("{err}")))
     }
 }
 

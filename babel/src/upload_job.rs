@@ -27,6 +27,7 @@ use std::{
     usize,
 };
 use tokio::sync::Semaphore;
+use tokio::task::JoinError;
 use tracing::{error, info};
 
 pub struct UploadJob<T> {
@@ -308,7 +309,7 @@ fn build_destinations(chunk_size: u64, sources: &mut Vec<FileLocation>) -> Vec<F
 struct ParallelChunkUploaders<'a> {
     run: RunFlag,
     config: TransferConfig,
-    futures: FuturesUnordered<BoxFuture<'a, Result<Chunk>>>,
+    futures: FuturesUnordered<BoxFuture<'a, Result<Result<Chunk>, JoinError>>>,
     chunks: Vec<Chunk>,
     connection_pool: ConnectionPool,
 }
@@ -337,12 +338,16 @@ impl<'a> ParallelChunkUploaders<'a> {
             }
             let uploader =
                 ChunkUploader::new(chunk, self.config.clone(), self.connection_pool.clone());
-            self.futures.push(Box::pin(uploader.run(self.run.clone())));
+            self.futures
+                .push(Box::pin(tokio::spawn(uploader.run(self.run.clone()))));
         }
     }
 
     async fn wait_for_next(&mut self) -> Option<Result<Chunk>> {
-        self.futures.next().await
+        self.futures
+            .next()
+            .await
+            .map(|r| r.unwrap_or_else(|err| bail!("{err}")))
     }
 }
 
