@@ -538,6 +538,7 @@ mod tests {
                         manifest: None,
                         destination: PathBuf::from("destination/path/for/blockchain_data"),
                         max_connections: None,
+                        max_runners: None,
                     },
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,

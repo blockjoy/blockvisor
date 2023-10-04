@@ -19,6 +19,7 @@ const LOG_BUFFER_CAPACITY_LN: usize = 1024;
 const LOG_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const DEFAULT_MAX_DOWNLOAD_CONNECTIONS: usize = 3;
 const DEFAULT_MAX_UPLOAD_CONNECTIONS: usize = 3;
+const DEFAULT_MAX_RUNNERS: usize = 8;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -71,6 +72,7 @@ async fn main() -> eyre::Result<()> {
             manifest,
             destination,
             max_connections,
+            max_runners,
         } => {
             let Some(manifest) = manifest else {
                 bail!("missing DownloadManifest")
@@ -85,6 +87,7 @@ async fn main() -> eyre::Result<()> {
                     &job_name,
                     compression,
                     max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
+                    max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
                 )?,
             )?
             .run(run, &job_name, &jobs::JOBS_DIR)
@@ -96,6 +99,7 @@ async fn main() -> eyre::Result<()> {
             exclude,
             compression,
             max_connections,
+            max_runners,
         } => {
             UploadJob::new(
                 bv_utils::timer::SysTimer,
@@ -107,6 +111,7 @@ async fn main() -> eyre::Result<()> {
                     &job_name,
                     compression,
                     max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
+                    max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
                 )?,
             )?
             .run(run, &job_name, &jobs::JOBS_DIR)
@@ -120,6 +125,7 @@ fn build_transfer_config(
     job_name: &str,
     compression: Option<Compression>,
     max_connections: usize,
+    max_runners: usize,
 ) -> eyre::Result<TransferConfig> {
     TransferConfig::new(
         jobs::JOBS_DIR
@@ -130,6 +136,7 @@ fn build_transfer_config(
             .join(format!("{job_name}.progress")),
         compression,
         max_connections,
+        max_runners,
     )
 }
 

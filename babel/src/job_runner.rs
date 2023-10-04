@@ -21,7 +21,6 @@ use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::{debug, error, info, warn};
 
 const MAX_OPENED_FILES: u64 = 1024;
-const MAX_RUNNERS: usize = 8;
 const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
 const MAX_RETRIES: u32 = 5;
 const BACKOFF_BASE_MS: u64 = 500;
@@ -73,11 +72,12 @@ impl TransferConfig {
         progress_file_path: PathBuf,
         compression: Option<Compression>,
         max_connections: usize,
+        max_runners: usize,
     ) -> eyre::Result<Self> {
         let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
         Ok(Self {
             max_opened_files,
-            max_runners: MAX_RUNNERS,
+            max_runners,
             max_connections,
             max_buffer_size: MAX_BUFFER_SIZE,
             max_retries: MAX_RETRIES,

@@ -187,6 +187,8 @@ pub enum JobType {
         destination: PathBuf,
         /// Maximum number of parallel opened connections.
         max_connections: Option<usize>,
+        /// Maximum number of parallel workers.
+        max_runners: Option<usize>,
     },
     /// Upload data - according to given manifest.
     Upload {
@@ -204,6 +206,8 @@ pub enum JobType {
         compression: Option<Compression>,
         /// Maximum number of parallel opened connections.
         max_connections: Option<usize>,
+        /// Maximum number of parallel workers.
+        max_runners: Option<usize>,
     },
 }
 
