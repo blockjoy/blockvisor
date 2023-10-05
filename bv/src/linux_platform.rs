@@ -19,7 +19,6 @@ use std::{
 };
 use uuid::Uuid;
 
-pub const DEFAULT_BRIDGE_IFACE: &str = "bvbr0";
 const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
 
 #[derive(Debug)]
@@ -88,12 +87,18 @@ impl Pal for LinuxPlatform {
         index: u32,
         ip: IpAddr,
         gateway: IpAddr,
+        config: &SharedConfig,
     ) -> Result<Self::NetInterface> {
         let name = format!("bv{index}");
         // First create the interface.
         run_cmd("ip", ["tuntap", "add", &name, "mode", "tap"]).await?;
 
-        Ok(LinuxNetInterface { name, ip, gateway })
+        Ok(LinuxNetInterface {
+            name,
+            bridge_ifa: config.read().await.iface.clone(),
+            ip,
+            gateway,
+        })
     }
 
     type CommandsStream = services::mqtt::MqttStream;
@@ -136,6 +141,7 @@ impl Pal for LinuxPlatform {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct LinuxNetInterface {
     pub name: String,
+    pub bridge_ifa: String,
     pub ip: IpAddr,
     pub gateway: IpAddr,
 }
@@ -156,7 +162,7 @@ impl NetInterface for LinuxNetInterface {
 
     /// Remaster the network interface.
     async fn remaster(&self) -> Result<()> {
-        remaster(&self.name).await
+        remaster(&self.name, &self.bridge_ifa).await
     }
 
     /// Delete the network interface.
@@ -165,13 +171,13 @@ impl NetInterface for LinuxNetInterface {
     }
 }
 
-async fn remaster(name: &str) -> Result<()> {
+async fn remaster(name: &str, bridge_ifa: &str) -> Result<()> {
     // Try to create interface if it's not present (possibly after host reboot)
     let _ = run_cmd("ip", ["tuntap", "add", name, "mode", "tap"]).await;
 
     // Set bridge as the interface's master.
     // TODO: we will need to read this from config
-    run_cmd("ip", ["link", "set", name, "master", DEFAULT_BRIDGE_IFACE])
+    run_cmd("ip", ["link", "set", name, "master", bridge_ifa])
         // Start the interface.
         .and_then(|_| run_cmd("ip", ["link", "set", name, "up"]))
         .await?;

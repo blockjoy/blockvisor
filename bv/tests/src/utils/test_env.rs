@@ -256,6 +256,7 @@ impl Pal for DummyPlatform {
         index: u32,
         ip: IpAddr,
         gateway: IpAddr,
+        _config: &SharedConfig,
     ) -> Result<Self::NetInterface> {
         let name = format!("bv{}t{}", index, self.token);
         // remove remnants after failed tests if any

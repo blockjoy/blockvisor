@@ -1,8 +1,6 @@
 use crate::{
     config::{Config, CONFIG_PATH},
-    internal_server,
-    linux_platform::DEFAULT_BRIDGE_IFACE,
-    ServiceStatus,
+    internal_server, ServiceStatus,
 };
 use async_trait::async_trait;
 use bv_utils::{timer::Timer, with_retry};
@@ -67,6 +65,7 @@ enum BackupStatus {
 
 pub struct Installer<T, S> {
     paths: InstallerPaths,
+    config: Config,
     bv_client: internal_server::service_client::ServiceClient<Channel>,
     backup_status: BackupStatus,
     timer: T,
@@ -76,15 +75,12 @@ pub struct Installer<T, S> {
 impl<T: Timer, S: BvService> Installer<T, S> {
     pub async fn new(timer: T, bv_service: S, bv_root: &Path) -> Result<Self> {
         let config = Config::load(bv_root).await?;
-
+        let channel = Channel::from_shared(format!("http://localhost:{}", config.blockvisor_port))?
+            .timeout(BV_REQ_TIMEOUT)
+            .connect_timeout(BV_CONNECT_TIMEOUT)
+            .connect_lazy();
         Ok(Self::internal_new(
-            timer,
-            bv_service,
-            bv_root,
-            Channel::from_shared(format!("http://localhost:{}", config.blockvisor_port))?
-                .timeout(BV_REQ_TIMEOUT)
-                .connect_timeout(BV_CONNECT_TIMEOUT)
-                .connect_lazy(),
+            timer, bv_service, bv_root, config, channel,
         ))
     }
 
@@ -92,7 +88,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         if self.is_blacklisted(THIS_VERSION)? {
             bail!("BV {THIS_VERSION} is on a blacklist - can't install")
         }
-        check_requirements().await.with_context(|| {
+        self.check_requirements().await.with_context(|| {
             format!("Host doesn't meet the requirements, see [Host Setup Guide]('https://github.com/blockjoy/bv-host-setup/releases/tag/{THIS_VERSION}') for more details.")
         })?;
         info!("installing BV {THIS_VERSION}...");
@@ -108,7 +104,13 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         }
     }
 
-    fn internal_new(timer: T, bv_service: S, bv_root: &Path, bv_channel: Channel) -> Self {
+    fn internal_new(
+        timer: T,
+        bv_service: S,
+        bv_root: &Path,
+        config: Config,
+        bv_channel: Channel,
+    ) -> Self {
         let install_path = bv_root.join(INSTALL_PATH);
         let current = install_path.join(CURRENT_LINK);
         let this_version = install_path.join(THIS_VERSION);
@@ -126,6 +128,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
                 backup,
                 blacklist,
             },
+            config,
             bv_client: internal_server::service_client::ServiceClient::new(bv_channel),
             backup_status: BackupStatus::NothingToBackup,
             timer,
@@ -460,14 +463,21 @@ impl<T: Timer, S: BvService> Installer<T, S> {
 
         Ok(())
     }
-}
 
-async fn check_requirements() -> Result<()> {
-    info!("checking BV {THIS_VERSION} requirements ...");
-    check_cli_dependencies().await?;
-    check_kernel_requirements()?;
-    check_network_setup().await?;
-    Ok(())
+    async fn check_requirements(&self) -> Result<()> {
+        info!("checking BV {THIS_VERSION} requirements ...");
+        check_cli_dependencies().await?;
+        check_kernel_requirements()?;
+        self.check_network_setup().await?;
+        Ok(())
+    }
+
+    async fn check_network_setup(&self) -> Result<()> {
+        bv_utils::cmd::run_cmd("ip", ["link", "show", &self.config.iface])
+            .await
+            .with_context(|| format!("bridge interface '{}' not configured", self.config.iface))?;
+        Ok(())
+    }
 }
 
 async fn check_cli_dependencies() -> Result<()> {
@@ -493,13 +503,6 @@ fn check_kernel_requirements() -> Result<()> {
     if kernel_version < MIN_KERNEL_VERSION || kernel_version >= MAX_KERNEL_VERSION {
         bail!("supported kernel versions are >={MIN_KERNEL_VERSION} and <{MAX_KERNEL_VERSION}, but {kernel_version} found")
     }
-    Ok(())
-}
-
-async fn check_network_setup() -> Result<()> {
-    bv_utils::cmd::run_cmd("ip", ["link", "show", DEFAULT_BRIDGE_IFACE])
-        .await
-        .with_context(|| format!("bridge interface '{DEFAULT_BRIDGE_IFACE}' not configured"))?;
     Ok(())
 }
 
@@ -654,6 +657,16 @@ mod tests {
                 timer,
                 bv_service,
                 &self.tmp_root,
+                Config {
+                    id: "".to_string(),
+                    token: "".to_string(),
+                    refresh_token: "".to_string(),
+                    blockjoy_api_url: "".to_string(),
+                    blockjoy_mqtt_url: None,
+                    update_check_interval_secs: None,
+                    blockvisor_port: 0,
+                    iface: "bvbr0".to_string(),
+                },
                 test_channel(&self.tmp_root),
             )
         }

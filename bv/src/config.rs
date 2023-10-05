@@ -1,4 +1,3 @@
-use crate::linux_platform::DEFAULT_BRIDGE_IFACE;
 use crate::services::api::{pb, AuthClient, AuthToken};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -7,6 +6,7 @@ use tokio::{fs, sync::RwLockWriteGuard};
 use tracing::{debug, info};
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.json";
+const DEFAULT_BRIDGE_IFACE: &str = "bvbr0";
 
 pub fn default_blockvisor_port() -> u16 {
     9001

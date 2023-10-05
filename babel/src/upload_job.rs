@@ -79,7 +79,7 @@ impl<T: AsyncTimer + Send> UploadJob<T> {
                 // job finished successfully or is going to be continued after restart, so do nothing
             }
             JobStatus::Finished { .. } | JobStatus::Stopped => {
-                // job failed or manually stopped - remove both progress metadata
+                // job failed - remove parts metadata
                 cleanup_job_data(&parts_file_path);
             }
         }

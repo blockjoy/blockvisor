@@ -82,7 +82,7 @@ impl<T: AsyncTimer + Send> DownloadJob<T> {
                 // job finished successfully or is going to be continued after restart, so do nothing
             }
             JobStatus::Finished { .. } | JobStatus::Stopped => {
-                // job failed or manually stopped - remove both parts metadata and partially downloaded files
+                // job failed - remove both parts metadata and partially downloaded files
                 cleanup_job_data(&parts_file_path);
                 for chunk in chunks {
                     for destination in chunk.destinations {

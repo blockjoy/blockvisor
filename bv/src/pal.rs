@@ -45,6 +45,7 @@ pub trait Pal {
         index: u32,
         ip: IpAddr,
         gateway: IpAddr,
+        config: &SharedConfig,
     ) -> Result<Self::NetInterface>;
 
     /// Type representing commands stream.

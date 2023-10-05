@@ -35,9 +35,11 @@ apt install tmux pigz util-linux e2fsprogs chrony
 
 ### Network Setup
 
-Since BV uses Firecracker to run blockchain nodes, it requires bridge interface named `bvbr0` to be configured.
+Since BV uses Firecracker to run blockchain nodes, it requires bridge interface to be configured. 
+If bridge interface name is different thant default `bvbr0`, then it must be explicitly passed to `bvup`
+when provisioning(see `bvup --help` for more details).
 
-See [firecracker docs](https://github.com/firecracker-microvm/firecracker/blob/main/docs/network-setup.md#advanced-setting-up-a-bridge-interface) for more details.
+See [firecracker docs](https://github.com/firecracker-microvm/firecracker/blob/main/docs/network-setup.md#advanced-setting-up-a-bridge-interface) for more details on network setup.
 
 **Example:**
 

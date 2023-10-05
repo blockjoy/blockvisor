@@ -30,9 +30,9 @@ pub struct CmdArgs {
     #[clap(long = "mqtt")]
     pub blockjoy_mqtt_url: Option<String>,
 
-    /// Network interface name
+    /// Network bridge interface name
     #[clap(long = "ifa", default_value = "bvbr0")]
-    pub ifa: String,
+    pub bridge_ifa: String,
 
     /// Network gateway IPv4 address
     #[clap(long = "ip-gateway")]
@@ -141,10 +141,12 @@ async fn main() -> Result<()> {
         }
         println!("Provision and init blockvisor configuration");
 
-        let net = discover_net_params(&cmd_args.ifa).await.unwrap_or_default();
+        let net = discover_net_params(&cmd_args.bridge_ifa)
+            .await
+            .unwrap_or_default();
         // if network params are not provided, try to use auto-discovered values
         // or fail if both methods do not resolve to useful values
-        let ip = get_ip_address(&cmd_args.ifa)
+        let ip = get_ip_address(&cmd_args.bridge_ifa)
             .ok()
             .or(net.ip)
             .ok_or_else(|| anyhow!("Failed to resolve `ip` address"))?;
@@ -237,7 +239,7 @@ async fn main() -> Result<()> {
             blockvisor_port: cmd_args
                 .blockvisor_port
                 .unwrap_or_else(config::default_blockvisor_port),
-            iface: cmd_args.ifa,
+            iface: cmd_args.bridge_ifa,
         };
         api_config.save(&bv_root).await?;
         Some(api_config)
