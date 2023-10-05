@@ -205,6 +205,16 @@ fn upload(param) {
     "Upload started!"
 }
 
+fn start_progress_job(name) {
+    start_job(name, #{
+        job_type: #{
+            run_sh: "i=0;while true; do echo {\\\"current\\\":$i,\\\"total\\\":100,\\\"message\\\":\\\"items\\\"} > /var/lib/babel/jobs/status/" + name + ".progress; i=$((1+i%100)); sleep 1; done",
+        },
+        restart: "never",
+    });
+    "job " + name + " started"
+}
+
 fn test_height_value(param) {
     if height() < 0 {
         throw "Invalid node height value: " + height();
