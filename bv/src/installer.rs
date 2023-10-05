@@ -93,7 +93,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         })?;
         info!("installing BV {THIS_VERSION}...");
 
-        self.preinstall()?; // TODO: try to send install failed status to the backend in error case
+        self.preinstall()?;
         if let Err(err) = self.install().await {
             self.handle_broken_installation(err).await
         } else {
@@ -172,16 +172,13 @@ impl<T: Timer, S: BvService> Installer<T, S> {
 
         match self.backup_status {
             BackupStatus::Done(_) => {
-                // TODO: try to send install failed status to the backend
                 self.rollback().await?;
                 bail!("installation failed with: {err}, but rolled back to previous version")
             }
             BackupStatus::ThisIsRollback => {
-                // TODO: try to send rollback failed status to the backend
                 bail!("rollback failed - host needs manual fix: {err}")
             }
             BackupStatus::NothingToBackup => {
-                // TODO: try to send install failed status to the backend
                 bail!("installation failed: {err}");
             }
         }

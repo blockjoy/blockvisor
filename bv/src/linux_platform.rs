@@ -176,7 +176,6 @@ async fn remaster(name: &str, bridge_ifa: &str) -> Result<()> {
     let _ = run_cmd("ip", ["tuntap", "add", name, "mode", "tap"]).await;
 
     // Set bridge as the interface's master.
-    // TODO: we will need to read this from config
     run_cmd("ip", ["link", "set", name, "master", bridge_ifa])
         // Start the interface.
         .and_then(|_| run_cmd("ip", ["link", "set", name, "up"]))
