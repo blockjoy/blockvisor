@@ -26,23 +26,21 @@ fn bv_user() -> Option<String> {
 /// Build shell command in form of cmd and args, in order to run something in shell
 ///
 /// If we want to run as custom user, we will be using `su`, otherwise just `sh`
-pub fn bv_shell(body: &str) -> (String, Vec<String>) {
+pub fn bv_shell(body: &str) -> (&str, Vec<String>) {
     if let Some(user) = bv_user() {
         (
-            "su".to_owned(),
+            "su",
             vec!["-".to_owned(), user, "-c".to_owned(), body.to_owned()],
         )
     } else {
-        ("sh".to_owned(), vec!["-c".to_owned(), body.to_owned()])
+        ("sh", vec!["-c".to_owned(), body.to_owned()])
     }
 }
 
 /// Kill all processes that match `cmd` and passed `args`.
-///
-/// TODO: (maybe) try to use &[&str] instead of Vec<String>
 pub fn kill_all_processes(
     cmd: &str,
-    args: Vec<String>,
+    args: &[&str],
     timeout: Option<Duration>,
     signal: PosixSignal,
 ) {
@@ -85,7 +83,7 @@ pub fn kill_process_tree(
 }
 
 /// Kill process by name and args.
-pub fn kill_process_by_name(cmd: &str, args: Vec<String>) {
+pub fn kill_process_by_name(cmd: &str, args: &[&str]) {
     let mut sys = System::new();
     sys.refresh_processes();
     let ps = sys.processes();
@@ -116,22 +114,22 @@ pub fn gracefully_terminate_process(pid: &Pid, timeout: Duration) -> bool {
 /// Find all processes that match `cmd` and passed `args`.
 pub fn find_processes<'a>(
     cmd: &'a str,
-    args: Vec<String>,
+    args: &'a [&'a str],
     ps: &'a HashMap<Pid, Process>,
 ) -> impl Iterator<Item = (&'a Pid, &'a Process)> {
     ps.iter().filter(move |(_, process)| {
-        let proc_call = process.cmd();
+        let proc_call = process
+            .cmd()
+            .iter()
+            .map(|item| item.as_str())
+            .collect::<Vec<_>>();
         if let Some(proc_cmd) = proc_call.first() {
+            // first element is cmd, rest are arguments
+            (cmd == *proc_cmd && *args == proc_call[1..])
             // if not a binary, but a script (with shebang) is executed,
-            // then the process looks like: /bin/sh ./lalala.sh
-            // TODO: consider matching not only /bin/sh but other kinds of interpreters
-            if proc_cmd == "/bin/sh" {
-                // first element is shell, second is cmd, rest are arguments
-                proc_call.len() > 1 && cmd == proc_call[1] && args == proc_call[2..]
-            } else {
-                // first element is cmd, rest are arguments
-                cmd == proc_cmd && args == proc_call[1..]
-            }
+            // then the process looks like: /bin/sh ./lalala.sh,
+            // so first element is shebang, second is cmd, rest are arguments
+            || (proc_call.len() > 1 && cmd == proc_call[1] && *args == proc_call[2..])
         } else {
             false
         }
@@ -367,7 +365,7 @@ mod tests {
         wait_for_process(&ctrl_file).await;
         kill_all_processes(
             &cmd_path.to_string_lossy(),
-            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            &["a", "b", "c"],
             Some(Duration::from_secs(3)),
             PosixSignal::SIGTERM,
         );

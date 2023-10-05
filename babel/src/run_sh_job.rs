@@ -50,8 +50,11 @@ impl<T: AsyncTimer + Send> RunShJob<T> {
         // If so, just kill it.
         let (cmd, args) = utils::bv_shell(&self.sh_body);
         utils::kill_all_processes(
-            &cmd,
-            args,
+            cmd,
+            args.iter()
+                .map(|item| item.as_str())
+                .collect::<Vec<_>>()
+                .as_slice(),
             Some(self.shutdown_timeout),
             self.shutdown_signal,
         );
@@ -69,6 +72,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
         cmd.args(args.clone())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        let args = args.iter().map(|item| item.as_str()).collect::<Vec<_>>();
         let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
         while run.load() {
             backoff.start();
@@ -85,8 +89,8 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
                     } else {
                         info!("Job runner requested to stop, killing job '{name}'");
                         utils::kill_all_processes(
-                            &cmd_name,
-                            args.clone(),
+                            cmd_name,
+                            args.as_slice(),
                             None,
                             self.shutdown_signal,
                         );

@@ -88,12 +88,8 @@ fn load_jobs(jobs_dir: &Path, job_runner_bin_path: &Path) -> Result<Jobs> {
             let name = name.to_string_lossy().to_string();
             match jobs::load_config(&path) {
                 Ok(config) => {
-                    let state = if let Some((pid, _)) = find_processes(
-                        &job_runner_bin_path.to_string_lossy(),
-                        vec![name.to_string()],
-                        ps,
-                    )
-                    .next()
+                    let state = if let Some((pid, _)) =
+                        find_processes(&job_runner_bin_path.to_string_lossy(), &[&name], ps).next()
                     {
                         info!("{name} - Active(PID: {pid})");
                         JobState::Active(*pid)
@@ -613,7 +609,7 @@ mod tests {
         fn kill_job(&self, name: &str) {
             kill_process_by_name(
                 &self.test_job_runner_path.to_owned().to_string_lossy(),
-                vec![name.to_string()],
+                &[name],
             )
         }
     }
@@ -836,7 +832,7 @@ mod tests {
         let ps = sys.processes();
         assert!(find_processes(
             &test_env.test_job_runner_path.to_string_lossy(),
-            vec!["test_job".to_string()],
+            &["test_job"],
             ps
         )
         .next()

@@ -34,7 +34,7 @@ pub async fn run<T: AsyncTimer>(
     if let Some(supervisor) = wait_for_setup(timer, run.clone(), babel_path, sup_config_rx).await {
         // Check if there are no babel after previous run.
         // If so, just kill it.
-        kill_process_by_name(&supervisor.babel_path.to_string_lossy(), vec![]);
+        kill_process_by_name(&supervisor.babel_path.to_string_lossy(), &[]);
 
         supervisor.run_babel(run, babel_change_rx).await;
     }
