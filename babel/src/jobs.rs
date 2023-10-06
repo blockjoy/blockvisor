@@ -1,17 +1,17 @@
-use crate::job_runner::load_job_data;
-use babel_api::engine::{JobConfig, JobProgress, JobStatus};
+use crate::download_job;
+use babel_api::engine::{JobConfig, JobProgress, JobStatus, JobType};
 use chrono::{DateTime, Local};
 use eyre::{Context, Result};
-use std::collections::HashSet;
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use sysinfo::Pid;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 
 lazy_static::lazy_static! {
     pub static ref JOBS_DIR: &'static Path = Path::new("/var/lib/babel/jobs");
@@ -88,6 +88,77 @@ impl Job {
     }
 }
 
+impl JobsData {
+    pub fn new(jobs_dir: &Path) -> Self {
+        Self {
+            jobs_config_dir: jobs_dir.join(CONFIG_SUBDIR),
+            jobs_status_dir: jobs_dir.join(STATUS_SUBDIR),
+        }
+    }
+
+    pub fn save_config(&self, config: &JobConfig, name: &str) -> Result<()> {
+        save_config(config, name, &self.jobs_config_dir)
+    }
+
+    pub fn clear_status(&self, name: &str) {
+        let _ = fs::remove_file(status_file_path(name, &self.jobs_status_dir));
+    }
+
+    pub fn save_status(&self, status: &JobStatus, name: &str) -> Result<()> {
+        save_status(status, name, &self.jobs_status_dir)
+    }
+
+    pub fn load_status(&self, name: &str) -> Result<JobStatus> {
+        load_status(&status_file_path(name, &self.jobs_status_dir))
+    }
+
+    pub fn load_progress(&self, name: &str) -> Option<JobProgress> {
+        load_job_data(&progress_file_path(name, &self.jobs_status_dir))
+    }
+
+    pub fn cleanup_job(&self, name: &str, config: &JobConfig) {
+        match &config.job_type {
+            JobType::Download {
+                manifest,
+                destination,
+                ..
+            } => download_job::cleanup_job(
+                &parts_file_path(name, &self.jobs_status_dir),
+                manifest
+                    .as_ref()
+                    .map(|manifest| (destination.as_path(), &manifest.chunks)),
+            ),
+            JobType::Upload { .. } => {
+                cleanup_job_data(&parts_file_path(name, &self.jobs_status_dir))
+            }
+            _ => {}
+        }
+    }
+}
+
+pub fn load_job_data<T: DeserializeOwned + Default>(file_path: &Path) -> T {
+    if file_path.exists() {
+        fs::read_to_string(file_path)
+            .and_then(|json| Ok(serde_json::from_str(&json)?))
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    }
+}
+
+pub fn save_job_data<T: Serialize>(file_path: &Path, data: &T) -> eyre::Result<()> {
+    Ok(fs::write(file_path, serde_json::to_string(data)?)?)
+}
+
+pub fn cleanup_job_data(file_path: &Path) {
+    if let Err(err) = fs::remove_file(file_path) {
+        warn!(
+            "failed to cleanup job data file `{}`: {err:#}",
+            file_path.display()
+        );
+    }
+}
+
 pub fn load_config(path: &Path) -> Result<JobConfig> {
     info!("Reading job config file: {}", path.display());
     fs::read_to_string(path)
@@ -101,11 +172,6 @@ pub fn save_config(config: &JobConfig, name: &str, jobs_config_dir: &Path) -> Re
     let config = serde_json::to_string(config)?;
     fs::write(&path, config)?;
     Ok(())
-}
-
-pub fn config_file_path(name: &str, jobs_config_dir: &Path) -> PathBuf {
-    let filename = format!("{}.cfg", name);
-    jobs_config_dir.join(filename)
 }
 
 pub fn load_status(path: &Path) -> Result<JobStatus> {
@@ -123,6 +189,11 @@ pub fn save_status(status: &JobStatus, name: &str, jobs_status_dir: &Path) -> Re
         .with_context(|| format!("failed to save job '{}' status {:?}", name, status))
 }
 
+pub fn config_file_path(name: &str, jobs_config_dir: &Path) -> PathBuf {
+    let filename = format!("{}.cfg", name);
+    jobs_config_dir.join(filename)
+}
+
 pub fn status_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
     let filename = format!("{}.status", name);
     jobs_status_dir.join(filename)
@@ -133,31 +204,7 @@ pub fn progress_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
     jobs_status_dir.join(filename)
 }
 
-impl JobsData {
-    pub fn new(jobs_dir: &Path) -> Self {
-        Self {
-            jobs_config_dir: jobs_dir.join(CONFIG_SUBDIR),
-            jobs_status_dir: jobs_dir.join(STATUS_SUBDIR),
-        }
-    }
-
-    pub fn clear_status(&self, name: &str) {
-        let _ = fs::remove_file(status_file_path(name, &self.jobs_status_dir));
-    }
-
-    pub fn save_config(&self, config: &JobConfig, name: &str) -> Result<()> {
-        save_config(config, name, &self.jobs_config_dir)
-    }
-
-    pub fn save_status(&self, status: &JobStatus, name: &str) -> Result<()> {
-        save_status(status, name, &self.jobs_status_dir)
-    }
-
-    pub fn load_status(&self, name: &str) -> Result<JobStatus> {
-        load_status(&status_file_path(name, &self.jobs_status_dir))
-    }
-
-    pub fn load_progress(&self, name: &str) -> Option<JobProgress> {
-        load_job_data(&progress_file_path(name, &self.jobs_status_dir))
-    }
+pub fn parts_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
+    let filename = format!("{}.parts", name);
+    jobs_status_dir.join(filename)
 }

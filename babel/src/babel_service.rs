@@ -532,6 +532,7 @@ mod tests {
             async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
             async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
             async fn stop(&self, name: &str) -> Result<()>;
+            async fn cleanup(&self, name: &str) -> Result<()>;
             async fn info(&self, name: &str) -> Result<JobInfo>;
         }
     }

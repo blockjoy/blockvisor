@@ -124,6 +124,7 @@ pub trait JobsManagerClient {
     async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
     async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
     async fn stop(&self, name: &str) -> Result<()>;
+    async fn cleanup(&self, name: &str) -> Result<()>;
     async fn info(&self, name: &str) -> Result<JobInfo>;
 }
 
@@ -194,14 +195,24 @@ impl JobsManagerClient for Client {
     async fn start(&self, name: &str, config: JobConfig) -> Result<()> {
         info!("Requested '{name}' job to start: {config:?}",);
         let (jobs, jobs_data) = &mut *self.jobs_registry.lock().await;
+
         if let Some(Job {
-            state: JobState::Active(_),
+            state,
             config: old_config,
             ..
         }) = jobs.get(name)
         {
-            if config != *old_config {
-                bail!("can't start, job '{name}' is already running with different config")
+            if let JobState::Active(_) = state {
+                if config == *old_config {
+                    return Ok(());
+                } else {
+                    bail!("can't start job '{name}' with different config while it is already running")
+                }
+            } else if config == *old_config {
+                info!(
+                    "job '{name}' started with different config - cleanup after previous run first"
+                );
+                jobs_data.cleanup_job(name, old_config);
             }
         }
 
@@ -233,6 +244,21 @@ impl JobsManagerClient for Client {
             jobs_data.save_status(&JobStatus::Stopped, name)?;
         } else {
             bail!("can't stop, job '{name}' not found")
+        }
+        Ok(())
+    }
+
+    async fn cleanup(&self, name: &str) -> Result<()> {
+        info!("Requested '{name} job to cleanup'");
+        let (jobs, jobs_data) = &*self.jobs_registry.lock().await;
+        if let Some(job) = jobs.get(name) {
+            if let JobState::Inactive(_) = job.state {
+                jobs_data.cleanup_job(name, &job.config);
+            } else {
+                bail!("can't cleanup active job '{name}'");
+            }
+        } else {
+            bail!("can't cleanup, job '{name}' not found");
         }
         Ok(())
     }

@@ -128,12 +128,8 @@ fn build_transfer_config(
     max_runners: usize,
 ) -> eyre::Result<TransferConfig> {
     TransferConfig::new(
-        jobs::JOBS_DIR
-            .join(jobs::STATUS_SUBDIR)
-            .join(format!("{job_name}.parts")),
-        jobs::JOBS_DIR
-            .join(jobs::STATUS_SUBDIR)
-            .join(format!("{job_name}.progress")),
+        jobs::parts_file_path(job_name, &jobs::JOBS_DIR.join(jobs::STATUS_SUBDIR)),
+        jobs::progress_file_path(job_name, &jobs::JOBS_DIR.join(jobs::STATUS_SUBDIR)),
         compression,
         max_connections,
         max_runners,

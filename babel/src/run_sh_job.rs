@@ -68,7 +68,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
     /// is stopped explicitly.  
     async fn try_run_job(self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
         let (cmd_name, args) = utils::bv_shell(&self.sh_body);
-        let mut cmd = Command::new(cmd_name.clone());
+        let mut cmd = Command::new(cmd_name);
         cmd.args(args.clone())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

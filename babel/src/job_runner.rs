@@ -9,9 +9,7 @@ use babel_api::{
     engine::{Compression, JobStatus, RestartConfig, RestartPolicy},
 };
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    fs,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -86,29 +84,6 @@ impl TransferConfig {
             progress_file_path,
             compression,
         })
-    }
-}
-
-pub fn load_job_data<T: DeserializeOwned + Default>(file_path: &Path) -> T {
-    if file_path.exists() {
-        fs::read_to_string(file_path)
-            .and_then(|json| Ok(serde_json::from_str(&json)?))
-            .unwrap_or_default()
-    } else {
-        Default::default()
-    }
-}
-
-pub fn save_job_data<T: Serialize>(file_path: &Path, data: &T) -> eyre::Result<()> {
-    Ok(fs::write(file_path, serde_json::to_string(data)?)?)
-}
-
-pub fn cleanup_job_data(file_path: &Path) {
-    if let Err(err) = fs::remove_file(file_path) {
-        warn!(
-            "failed to remove `{}` metadata file, after finished data transfer: {err:#}",
-            file_path.display()
-        );
     }
 }
 

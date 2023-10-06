@@ -4,10 +4,8 @@
 /// Backoff timeout and retry count are reset if upload continue without errors for at least `backoff_timeout_ms`.
 use crate::{
     compression::{Coder, NoCoder, ZstdEncoder},
-    job_runner::{
-        cleanup_job_data, load_job_data, save_job_data, ConnectionPool, JobBackoff, JobRunner,
-        JobRunnerImpl, TransferConfig,
-    },
+    job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
+    jobs::{cleanup_job_data, load_job_data, save_job_data},
 };
 use async_trait::async_trait;
 use babel_api::engine::{
@@ -74,11 +72,12 @@ impl<T: AsyncTimer + Send> UploadJob<T> {
             JobStatus::Finished {
                 exit_code: Some(0), ..
             }
+            | JobStatus::Stopped
             | JobStatus::Pending
             | JobStatus::Running => {
                 // job finished successfully or is going to be continued after restart, so do nothing
             }
-            JobStatus::Finished { .. } | JobStatus::Stopped => {
+            JobStatus::Finished { .. } => {
                 // job failed - remove parts metadata
                 cleanup_job_data(&parts_file_path);
             }

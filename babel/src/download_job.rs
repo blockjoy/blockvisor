@@ -5,10 +5,8 @@
 use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
-    job_runner::{
-        cleanup_job_data, load_job_data, save_job_data, ConnectionPool, JobBackoff, JobRunner,
-        JobRunnerImpl, TransferConfig,
-    },
+    job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
+    jobs::{cleanup_job_data, load_job_data, save_job_data},
 };
 use async_trait::async_trait;
 use babel_api::engine::{
@@ -36,6 +34,17 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinError;
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
 use tracing::{error, info};
+
+pub fn cleanup_job(parts_file_path: &Path, chunks: Option<(&Path, &Vec<Chunk>)>) {
+    cleanup_job_data(parts_file_path);
+    if let Some((destination_dir, chunks)) = chunks {
+        for chunk in chunks {
+            for destination in &chunk.destinations {
+                let _ = fs::remove_file(destination_dir.join(&destination.path));
+            }
+        }
+    }
+}
 
 pub struct DownloadJob<T> {
     downloader: Downloader,
@@ -77,18 +86,14 @@ impl<T: AsyncTimer + Send> DownloadJob<T> {
             JobStatus::Finished {
                 exit_code: Some(0), ..
             }
+            | JobStatus::Stopped
             | JobStatus::Pending
             | JobStatus::Running => {
                 // job finished successfully or is going to be continued after restart, so do nothing
             }
-            JobStatus::Finished { .. } | JobStatus::Stopped => {
+            JobStatus::Finished { .. } => {
                 // job failed - remove both parts metadata and partially downloaded files
-                cleanup_job_data(&parts_file_path);
-                for chunk in chunks {
-                    for destination in chunk.destinations {
-                        let _ = fs::remove_file(destination_dir.join(destination.path));
-                    }
-                }
+                cleanup_job(&parts_file_path, Some((&destination_dir, &chunks)));
             }
         }
         job_status
@@ -169,7 +174,7 @@ impl Downloader {
         if !run.load() {
             bail!("download interrupted");
         }
-        cleanup_job_data(&self.config.parts_file_path);
+        cleanup_job(&self.config.parts_file_path, None);
         Ok(())
     }
 
