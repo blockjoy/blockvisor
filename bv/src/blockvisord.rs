@@ -337,8 +337,8 @@ where
                 let container_status = match status {
                     NodeStatus::Running => pb::ContainerStatus::Running,
                     NodeStatus::Stopped => pb::ContainerStatus::Stopped,
-                    NodeStatus::Failed => pb::ContainerStatus::Unspecified,
-                    NodeStatus::Busy => pb::ContainerStatus::Unspecified,
+                    NodeStatus::Failed => pb::ContainerStatus::Failed,
+                    NodeStatus::Busy => pb::ContainerStatus::Busy,
                 };
                 let mut update = pb::NodeServiceUpdateStatusRequest {
                     id: node_id.to_string(),
