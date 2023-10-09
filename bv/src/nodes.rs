@@ -425,6 +425,17 @@ impl<P: Pal + Debug> Nodes<P> {
     }
 
     #[instrument(skip(self))]
+    pub async fn cleanup_job(&self, id: Uuid, job_name: &str) -> Result<()> {
+        let nodes = self.nodes.read().await;
+        let mut node = nodes
+            .get(&id)
+            .ok_or_else(|| id_not_found(id))?
+            .write()
+            .await;
+        node.babel_engine.cleanup_job(job_name).await
+    }
+
+    #[instrument(skip(self))]
     pub async fn logs(&self, id: Uuid) -> Result<Vec<String>> {
         let nodes = self.nodes.read().await;
         let mut node = nodes

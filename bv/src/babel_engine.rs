@@ -266,6 +266,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(())
     }
 
+    /// Request to cleanup given job.
+    pub async fn cleanup_job(&mut self, name: &str) -> Result<()> {
+        let babel_client = self.node_connection.babel_client().await?;
+        with_retry!(babel_client.cleanup_job(name.to_owned()))?;
+        Ok(())
+    }
+
     /// Returns the list of logs from blockchain jobs.
     pub async fn get_logs(&mut self) -> Result<Vec<String>> {
         let client = self.node_connection.babel_client().await?;
@@ -732,6 +739,7 @@ mod tests {
                 request: Request<(String, JobConfig)>,
             ) -> Result<Response<()>, Status>;
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
+            async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
             async fn get_jobs(&self, request: Request<()>) -> Result<Response<Vec<(String, JobInfo)>>, Status>;
             async fn run_jrpc(

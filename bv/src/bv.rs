@@ -220,6 +220,9 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                         }
                     }
                 }
+                JobCommand::Cleanup { name } => {
+                    client.cleanup_node_job((id, name)).await?;
+                }
                 JobCommand::Info { name } => {
                     let info = client.get_node_job_info((id, name)).await?.into_inner();
                     println!("{info:#?}");

@@ -257,6 +257,12 @@ pub enum JobCommand {
         all: bool,
     },
 
+    /// Cleanup job - remove any intermediate files, so next time it will start from scratch.
+    Cleanup {
+        /// Job name to be cleaned up.
+        name: String,
+    },
+
     /// Get job info.
     Info {
         /// Job name.

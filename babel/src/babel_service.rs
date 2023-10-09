@@ -265,6 +265,14 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(()))
     }
 
+    async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status> {
+        self.jobs_manager
+            .cleanup(&request.into_inner())
+            .await
+            .map_err(|err| Status::internal(format!("cleanup_job failed: {err}")))?;
+        Ok(Response::new(()))
+    }
+
     async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status> {
         let info = self
             .jobs_manager

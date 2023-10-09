@@ -9,7 +9,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::pal::NetInterface;
@@ -85,7 +85,13 @@ impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
         info!("Reading nodes config file: {}", path.display());
         fs::read_to_string(&path)
             .await
-            .and_then(|s| serde_json::from_str::<Self>(&s).map_err(Into::into))
+            .and_then(|s| match serde_json::from_str::<Self>(&s) {
+                Ok(r) => Ok(r),
+                Err(err) => {
+                    error!("{err:#}");
+                    Err(err.into())
+                }
+            })
             .with_context(|| format!("Failed to read node file `{}`", path.display()))
     }
 
