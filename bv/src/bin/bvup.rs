@@ -1,15 +1,12 @@
 use blockvisord::config::SharedConfig;
 use blockvisord::{
     config, config::Config, hosts::HostInfo, linux_platform::bv_root, self_updater,
-    services::api::pb, BV_VAR_PATH,
+    services::api::pb, utils, BV_VAR_PATH,
 };
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use bv_utils::system::get_ip_address;
-use cidr_utils::cidr::Ipv4Cidr;
 use clap::{crate_version, ArgGroup, Parser};
 use eyre::{anyhow, bail, Context, Result};
-use serde::{Deserialize, Serialize};
-use std::net::Ipv4Addr;
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]
@@ -63,61 +60,6 @@ pub struct CmdArgs {
     yes: bool,
 }
 
-/// Struct to capture output of linux `ip --json route` command
-#[derive(Deserialize, Serialize, Debug)]
-struct IpRoute {
-    pub dst: String,
-    pub gateway: Option<String>,
-    pub dev: String,
-    pub prefsrc: Option<String>,
-}
-
-#[derive(Default, Debug, PartialEq)]
-struct NetParams {
-    pub ip: Option<String>,
-    pub gateway: Option<String>,
-    pub ip_from: Option<String>,
-    pub ip_to: Option<String>,
-}
-
-fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Result<NetParams> {
-    let mut routes: Vec<IpRoute> = serde_json::from_str(routes_json_str)?;
-    routes.retain(|r| r.dev == ifa_name);
-    if routes.len() != 2 {
-        bail!("Routes count for `{ifa_name}` not equal to 2");
-    }
-
-    let mut params = NetParams::default();
-    for route in routes {
-        if route.dst == "default" {
-            // Host gateway IP address
-            params.gateway = route.gateway;
-        } else {
-            // IP range available for VMs
-            let cidr = Ipv4Cidr::from_str(&route.dst)
-                .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
-            let mut ips = cidr.iter();
-            if cidr.get_bits() <= 30 {
-                // For routing mask values <= 30, first and last IPs are
-                // base and broadcast addresses and are unusable.
-                ips.next();
-                ips.next_back();
-            }
-            params.ip_from = ips.next().map(|u| Ipv4Addr::from(u).to_string());
-            params.ip_to = ips.next_back().map(|u| Ipv4Addr::from(u).to_string());
-            // Host IP address
-            params.ip = route.prefsrc;
-        }
-    }
-    Ok(params)
-}
-
-async fn discover_net_params(ifa_name: &str) -> Result<NetParams> {
-    let routes = run_cmd("ip", ["--json", "route"]).await?;
-    let params = parse_net_params_from_str(ifa_name, &routes)?;
-    Ok(params)
-}
-
 /// Simple host init tool. It provision host with PROVISION_TOKEN then download and install latest bv bundle.
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -133,7 +75,7 @@ async fn main() -> Result<()> {
         }
         println!("Provision and init blockvisor configuration");
 
-        let net = discover_net_params(&cmd_args.bridge_ifa)
+        let net = utils::discover_net_params(&cmd_args.bridge_ifa)
             .await
             .unwrap_or_default();
         // if network params are not provided, try to use auto-discovered values
@@ -285,12 +227,15 @@ mod tests {
             }
          ]
          "#;
-        let expected = NetParams {
+        let expected = utils::NetParams {
             ip: Some("192.69.220.82".to_string()),
             gateway: Some("192.69.220.81".to_string()),
             ip_from: Some("192.69.220.81".to_string()),
             ip_to: Some("192.69.220.94".to_string()),
         };
-        assert_eq!(parse_net_params_from_str("bvbr0", json).unwrap(), expected);
+        assert_eq!(
+            utils::parse_net_params_from_str("bvbr0", json).unwrap(),
+            expected
+        );
     }
 }

@@ -12,7 +12,7 @@ use crate::{
     services::cookbook::{
         CookbookService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOT_FS_FILE,
     },
-    workspace, BV_VAR_PATH,
+    utils, workspace, BV_VAR_PATH,
 };
 use babel_api::engine::JobStatus;
 use bv_utils::cmd::{ask_confirm, run_cmd};
@@ -75,7 +75,11 @@ pub async fn process_host_command(config: SharedConfig, command: HostCommand) ->
     Ok(())
 }
 
-pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Result<()> {
+pub async fn process_node_command(
+    config: SharedConfig,
+    bv_url: String,
+    command: NodeCommand,
+) -> Result<()> {
     let mut client = NodeClient::new(bv_url).await?;
     match command {
         NodeCommand::List { running } => {
@@ -103,14 +107,22 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
         }
         NodeCommand::Create {
             image,
-            ip,
-            gateway,
+            ip: maybe_ip,
+            gateway: maybe_gateway,
             props,
             network,
         } => {
             let id = Uuid::new_v4();
             let name = Petnames::default().generate_one(3, "_");
             let image = parse_image(&image_id_with_fallback(image)?)?;
+            let net = utils::discover_net_params(&config.read().await.iface).await?;
+            let used_ips = client
+                .get_nodes(())
+                .await?
+                .into_inner()
+                .into_iter()
+                .map(|node| node.ip)
+                .collect::<Vec<_>>();
             let props: HashMap<String, String> = props
                 .as_deref()
                 .map(serde_json::from_str)
@@ -120,9 +132,32 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 .into_iter()
                 .chain([("network".to_string(), network.clone())])
                 .collect();
+            let mut output = vec![format!(
+                "Created new node from `{image}` image with ID `{id}` and name `{name}`"
+            )];
+            let ip = match maybe_ip {
+                None => {
+                    let ip = net.next_ip(&used_ips).map_err(|err| {
+                        anyhow!("failed to auto assign ip - provide it manually : {err}")
+                    })?;
+                    output.push(format!("Auto-assigned ip: `{ip}`"));
+                    ip
+                }
+                Some(ip) => ip,
+            };
+            let gateway = match maybe_gateway {
+                None => {
+                    let gateway = net
+                        .gateway
+                        .ok_or(anyhow!("can't auto discover gateway - provide it manually"))?;
+                    output.push(format!("Auto-discovered gateway: `{gateway}`"));
+                    gateway
+                }
+                Some(gateway) => gateway,
+            };
             let config = NodeConfig {
                 name: name.clone(),
-                image: image.clone(),
+                image,
                 ip,
                 gateway,
                 properties,
@@ -130,7 +165,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 rules: vec![],
             };
             client.client.create_node((id, config)).await?;
-            println!("Created new node from `{image}` image with ID `{id}` and name `{name}`");
+            println!("{}", output.join(";\n"));
             let _ = workspace::set_active_node(&std::env::current_dir()?, id, &name);
         }
         NodeCommand::Upgrade { id_or_names, image } => {

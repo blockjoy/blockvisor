@@ -1,16 +1,12 @@
 use bv_utils::cmd::run_cmd;
-use eyre::{bail, Result};
+use cidr_utils::cidr::Ipv4Cidr;
+use eyre::{anyhow, bail, Context, Result};
 use rand::Rng;
 use semver::Version;
-use std::cmp::Ordering;
-use std::ffi::OsStr;
-use std::net::Ipv4Addr;
-use std::path::PathBuf;
-use std::time::Duration;
+use serde::{Deserialize, Serialize};
+use std::{cmp::Ordering, ffi::OsStr, net::Ipv4Addr, path::PathBuf, time::Duration};
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
-use tokio::time::sleep;
+use tokio::{fs, io::AsyncWriteExt, time::sleep};
 use tonic::Request;
 use tracing::{debug, warn};
 
@@ -149,6 +145,81 @@ pub fn ip_to_mac(ip: &Ipv4Addr) -> String {
         "CA:92:{:02X}:{:02X}:{:02X}:{:02X}",
         octets[0], octets[1], octets[2], octets[3]
     )
+}
+
+/// Struct to capture output of linux `ip --json route` command
+#[derive(Deserialize, Serialize, Debug)]
+struct IpRoute {
+    dst: String,
+    gateway: Option<String>,
+    dev: String,
+    prefsrc: Option<String>,
+}
+
+#[derive(Default, Debug, PartialEq)]
+pub struct NetParams {
+    pub ip: Option<String>,
+    pub gateway: Option<String>,
+    pub ip_from: Option<String>,
+    pub ip_to: Option<String>,
+}
+
+impl NetParams {
+    pub fn next_ip(&self, used: &[String]) -> Result<String> {
+        let range = ipnet::Ipv4AddrRange::new(
+            self.ip_from
+                .as_ref()
+                .ok_or(anyhow!("missing ip_from"))?
+                .parse()?,
+            self.ip_to
+                .as_ref()
+                .ok_or(anyhow!("missing ip_to"))?
+                .parse()?,
+        );
+        range
+            .into_iter()
+            .find(|ip| !used.contains(&ip.to_string()))
+            .map(|ip| ip.to_string())
+            .ok_or(anyhow!("no available ip in range {:?}", range))
+    }
+}
+
+pub fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Result<NetParams> {
+    let mut routes: Vec<IpRoute> = serde_json::from_str(routes_json_str)?;
+    routes.retain(|r| r.dev == ifa_name);
+    if routes.len() != 2 {
+        bail!("Routes count for `{ifa_name}` not equal to 2");
+    }
+
+    let mut params = NetParams::default();
+    for route in routes {
+        if route.dst == "default" {
+            // Host gateway IP address
+            params.gateway = route.gateway;
+        } else {
+            // IP range available for VMs
+            let cidr = Ipv4Cidr::from_str(&route.dst)
+                .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
+            let mut ips = cidr.iter();
+            if cidr.get_bits() <= 30 {
+                // For routing mask values <= 30, first and last IPs are
+                // base and broadcast addresses and are unusable.
+                ips.next();
+                ips.next_back();
+            }
+            params.ip_from = ips.next().map(|u| Ipv4Addr::from(u).to_string());
+            params.ip_to = ips.next_back().map(|u| Ipv4Addr::from(u).to_string());
+            // Host IP address
+            params.ip = route.prefsrc;
+        }
+    }
+    Ok(params)
+}
+
+pub async fn discover_net_params(ifa_name: &str) -> Result<NetParams> {
+    let routes = run_cmd("ip", ["--json", "route"]).await?;
+    let params = parse_net_params_from_str(ifa_name, &routes)?;
+    Ok(params)
 }
 
 #[cfg(test)]
