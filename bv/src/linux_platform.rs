@@ -1,5 +1,6 @@
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
+    config,
     config::SharedConfig,
     firecracker_machine, node_connection,
     node_data::NodeData,
@@ -141,9 +142,14 @@ impl Pal for LinuxPlatform {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct LinuxNetInterface {
     pub name: String,
+    #[serde(default = "default_bridge_ifa")]
     pub bridge_ifa: String,
     pub ip: IpAddr,
     pub gateway: IpAddr,
+}
+
+fn default_bridge_ifa() -> String {
+    config::DEFAULT_BRIDGE_IFACE.to_string()
 }
 
 #[async_trait]

@@ -6,7 +6,7 @@ use tokio::{fs, sync::RwLockWriteGuard};
 use tracing::{debug, info};
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.json";
-const DEFAULT_BRIDGE_IFACE: &str = "bvbr0";
+pub const DEFAULT_BRIDGE_IFACE: &str = "bvbr0";
 
 pub fn default_blockvisor_port() -> u16 {
     9001
