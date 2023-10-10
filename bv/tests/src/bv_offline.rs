@@ -89,7 +89,40 @@ async fn test_bv_cmd_jobs() -> Result<()> {
     test_env.bv_run(&["node", "start", vm_id], "Started node");
 
     println!("check jobs");
-    test_env.bv_run(&["node", "job", vm_id, "ls"], "echo");
+    test_env.bv_run(&["node", "job", vm_id, "ls"], "upload");
+
+    println!("stop job");
+    test_env.bv_run(&["node", "job", vm_id, "stop", "upload"], "");
+
+    println!("job info");
+    test_env.bv_run(&["node", "job", vm_id, "info", "upload"], "status: Stopped");
+
+    println!("start job");
+    test_env.bv_run(&["node", "job", vm_id, "start", "upload"], "");
+
+    println!("wait for upload finished");
+    let start = std::time::Instant::now();
+    while let Err(err) = test_env.try_bv_run(
+        &["node", "job", vm_id, "info", "upload"],
+        "status: Finished {\n        exit_code: Some(\n            0,\n        ),\n        message: \"\",\n    }",
+    ) {
+        if start.elapsed() < Duration::from_secs(120) {
+            std::thread::sleep(Duration::from_secs(1));
+        } else {
+            panic!("timeout expired: {err:#}")
+        }
+    }
+
+    let _ = test_env.sh_inside(vm_id, "touch /var/lib/babel/jobs/status/upload.parts");
+    println!("cleanup job");
+    test_env.bv_run(&["node", "job", vm_id, "cleanup", "upload"], "");
+    assert!(test_env
+        .sh_inside(
+            vm_id,
+            "if ! [[ -e /var/lib/babel/jobs/status/upload.parts ]]; then echo cleanup_done; fi;"
+        )
+        .contains("cleanup_done"));
+
     Ok(())
 }
 

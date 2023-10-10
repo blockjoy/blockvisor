@@ -183,6 +183,27 @@ impl TestEnv {
         let vm_name = stdout.split('`').rev().nth(1).unwrap().to_string();
         (vm_id, vm_name)
     }
+
+    pub fn sh_inside(&self, node_id: &str, sh_script: &str) -> String {
+        String::from_utf8(
+            Command::cargo_bin("bv")
+                .unwrap()
+                .args([
+                    "node",
+                    "run",
+                    &format!("--param={sh_script}"),
+                    "sh_inside",
+                    node_id,
+                ])
+                .env("BV_ROOT", &self.bv_root)
+                .assert()
+                .success()
+                .get_output()
+                .stdout
+                .to_owned(),
+        )
+        .unwrap()
+    }
 }
 
 impl Drop for TestEnv {
