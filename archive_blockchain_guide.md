@@ -9,6 +9,6 @@
 ```
 See `./upload_manifest_generator --help` for more details.
 
-5. Start upload with `bv node run upload` --param-file=manifest.json <NODE_NAME/ID>.
-6. Check upload status with `bv node run upload_status <NODE_NAME/ID>`.
+5. Start upload with `bv node run upload --param-file=manifest.json <NODE_NAME/ID>`.
+6. Check upload status with `bv node job <NODE_NAME/ID> info upload`.
 7. Once it is `Finished` blockchain synchronization can be turned on again.

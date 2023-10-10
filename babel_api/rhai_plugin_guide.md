@@ -235,7 +235,9 @@ fn some_custom_function(arg) {
 
 To make implementation of Babel Plugin interface possible, BV provides following functions to Rhai script.
 
-- `start_job(job_name, job_config)` - Start background job with unique name. See 'Backgound Jobs' section for more details.
+- `create_job(job_name, job_config)` - Create background job with unique name. See 'Backgound Jobs' section for more details.
+- `start_job(job_name, job_config)` - Create and immediately start background job with unique name.
+- `start_job(job_name)` - Start previously created background job with given name.
 - `stop_job(job_name)` - Stop background job with given unique name if running.
 - `job_status(job_name)` - Get background job status by unique name.
   <br>**Possible return values**: _pending_, _running_, _stopped_, _finished{exit_code, message}_
@@ -322,13 +324,28 @@ Each background job has its unique name and configuration structure described by
         // "never" indicates that this job will never be restarted, whether succeeded or not - appropriate for jobs
         // that can't be simply restarted on failure (e.g. need some manual actions).
         restart: "never",
+
+        // [optional] Job shutdown timeout - how long it may take to gracefully shutdown the job.
+        // After given time job won't be killed, but babel will rise the error.
+        // If not set default to 60s.
+        shutdown_timeout_secs: 15,
+
+        // [optional] POSIX signal that will be sent to child processes on job shutdown.
+        // See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
+        // If not set default to `SIGTERM`.
+        shutdown_signal: "SIGINT",
     };
-    start_job("job_name_A", job_config_A);
+    create_job("job_name_A", job_config_A);
 
     let job_config_B = #{
             job_type: #{
                 download: #{
-                    destination: "destination/path/for/blockchain_data",    
+                    // Destination directory for downloaded files.
+                    destination: "destination/path/for/blockchain_data",
+                    // [optional] Maximum number of parallel opened connections.
+                    max_connections: 5,
+                    // [optional] Maximum number of parallel workers.
+                    max_runners: 8,                    
                 },
             },
             
@@ -375,12 +392,25 @@ Each background job has its unique name and configuration structure described by
         // [optional] List of job names that this job needs to be finished before start, may be empty.
         needs: ["job_name_A", "job_name_B"],
     };
+    start_job("job_name_A");
     start_job("unique_entrypoint_name", entrypoint_config);
 
     let upload_job_config = #{
         job_type: #{
             upload: #{
+                // Source directory with files to be uploaded.
                 source: "source/path/for/blockchain_data",
+                // [optional] List of exclude patterns. Files in `source` directory that match any of pattern,
+                // won't be taken into account.
+                exclude: ["file_to_be_excluded", "or_more/**"],
+                // [optional] Compression to be used on chunks.
+                compression: #{
+                    ZSTD: 3, // compression level
+                },
+                // [optional] Maximum number of parallel opened connections.
+                max_connections: 4,
+                // [optional] Maximum number of parallel workers.
+                max_runners: 8,
             },
         },
         restart: "never",
@@ -388,8 +418,8 @@ Each background job has its unique name and configuration structure described by
     start_job("upload_job_name", upload_job_config);
 ```
 
-Once job has been started, other functions in the script may fetch for its state with `job_status(job_name)`,
-or stopped on demand with `stop_job(job_name)`.
+Once job has been created, other functions in the script may fetch for its state with `job_status(job_name)`, start it
+or stop on demand with `start_job(job_name)`/`stop_job(job_name)`.
 
 ## Logging
 
