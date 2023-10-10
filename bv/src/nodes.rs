@@ -106,12 +106,13 @@ struct CommonData {
 impl<P: Pal + Debug> Nodes<P> {
     #[instrument(skip(self))]
     pub async fn create(&self, id: Uuid, config: NodeConfig) -> Result<()> {
+        let mut node_ids = self.node_ids.write().await;
         if self.nodes.read().await.contains_key(&id) {
             warn!("Node with id `{id}` exists");
             return Ok(());
         }
 
-        if self.node_ids.read().await.contains_key(&config.name) {
+        if node_ids.contains_key(&config.name) {
             bail!("Node with name `{}` exists", config.name);
         }
 
@@ -175,7 +176,7 @@ impl<P: Pal + Debug> Nodes<P> {
 
         let node = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
         self.nodes.write().await.insert(id, RwLock::new(node));
-        self.node_ids.write().await.insert(config.name, id);
+        node_ids.insert(config.name, id);
         self.node_data_cache
             .write()
             .await
