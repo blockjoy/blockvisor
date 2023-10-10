@@ -259,6 +259,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(info)
     }
 
+    /// Request to start given job.
+    pub async fn start_job(&mut self, name: &str) -> Result<()> {
+        let babel_client = self.node_connection.babel_client().await?;
+        with_retry!(babel_client.start_job(name.to_owned()))?;
+        Ok(())
+    }
+
     /// Request to stop given job.
     pub async fn stop_job(&mut self, name: &str) -> Result<()> {
         let babel_client = self.node_connection.babel_client().await?;
@@ -399,12 +406,18 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::StartJob {
+            NodeRequest::CreateJob {
                 job_name,
                 job_config,
                 response_tx,
             } => {
-                let _ = response_tx.send(self.handle_start_job(job_name, job_config).await);
+                let _ = response_tx.send(self.handle_create_job(job_name, job_config).await);
+            }
+            NodeRequest::StartJob {
+                job_name,
+                response_tx,
+            } => {
+                let _ = response_tx.send(self.handle_start_job(job_name).await);
             }
             NodeRequest::StopJob {
                 job_name,
@@ -461,7 +474,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         .into()
     }
 
-    async fn handle_start_job(
+    async fn handle_create_job(
         &mut self,
         job_name: String,
         mut job_config: JobConfig,
@@ -500,7 +513,14 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             }
             _ => {}
         }
-        with_retry!(babel_client.start_job((job_name.clone(), job_config.clone())))
+        with_retry!(babel_client.create_job((job_name.clone(), job_config.clone())))
+            .map_err(|err| self.handle_connection_errors(err))
+            .map(|v| v.into_inner())
+    }
+
+    async fn handle_start_job(&mut self, job_name: String) -> std::result::Result<(), Error> {
+        let babel_client = self.node_connection.babel_client().await?;
+        with_retry!(babel_client.start_job(job_name.clone()))
             .map_err(|err| self.handle_connection_errors(err))
             .map(|v| v.into_inner())
     }
@@ -520,9 +540,13 @@ type ResponseTx<T> = tokio::sync::oneshot::Sender<T>;
 
 #[derive(Debug)]
 enum NodeRequest {
-    StartJob {
+    CreateJob {
         job_name: String,
         job_config: JobConfig,
+        response_tx: ResponseTx<Result<()>>,
+    },
+    StartJob {
+        job_name: String,
         response_tx: ResponseTx<Result<()>>,
     },
     StopJob {
@@ -557,11 +581,20 @@ enum NodeRequest {
 }
 
 impl babel_api::engine::Engine for Engine {
-    fn start_job(&self, job_name: &str, job_config: JobConfig) -> Result<()> {
+    fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx.blocking_send(NodeRequest::CreateJob {
+            job_name: job_name.to_string(),
+            job_config,
+            response_tx,
+        })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn start_job(&self, job_name: &str) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(NodeRequest::StartJob {
             job_name: job_name.to_string(),
-            job_config,
             response_tx,
         })?;
         response_rx.blocking_recv()?
@@ -734,9 +767,13 @@ mod tests {
                 &self,
                 request: Request<Streaming<babel_api::utils::Binary>>,
             ) -> Result<Response<()>, Status>;
-            async fn start_job(
+            async fn create_job(
                 &self,
                 request: Request<(String, JobConfig)>,
+            ) -> Result<Response<()>, Status>;
+            async fn start_job(
+                &self,
+                request: Request<String>,
             ) -> Result<Response<()>, Status>;
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
@@ -832,7 +869,7 @@ mod tests {
             Ok(())
         }
         fn call_custom_method(&self, name: &str, param: &str) -> Result<String> {
-            self.engine.start_job(
+            self.engine.create_job(
                 name,
                 JobConfig {
                     job_type: JobType::RunSh(param.to_string()),
@@ -842,6 +879,7 @@ mod tests {
                     needs: None,
                 },
             )?;
+            self.engine.start_job(name)?;
             self.engine.stop_job(name)?;
             self.engine.job_status(name)?;
             self.engine.run_jrpc(
@@ -1008,10 +1046,17 @@ mod tests {
                 }))
             });
         babel_mock
-            .expect_start_job()
+            .expect_create_job()
             .withf(|req| {
                 let (name, config) = req.get_ref();
                 name == "custom_name" && config.job_type == JobType::RunSh("param".to_string())
+            })
+            .return_once(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_start_job()
+            .withf(|req| {
+                let name = req.get_ref();
+                name == "custom_name"
             })
             .return_once(|_| Ok(Response::new(())));
         babel_mock

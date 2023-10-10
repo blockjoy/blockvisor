@@ -244,6 +244,9 @@ pub async fn process_node_command(
                         }
                     }
                 }
+                JobCommand::Start { name } => {
+                    client.start_node_job((id, name)).await?;
+                }
                 JobCommand::Stop { name, .. } => {
                     if let Some(name) = name {
                         client.stop_node_job((id, name)).await?;

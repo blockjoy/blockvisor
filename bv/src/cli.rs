@@ -247,6 +247,12 @@ pub enum JobCommand {
     #[clap(alias = "ls")]
     List,
 
+    /// Start job with given name.
+    Start {
+        /// Job name to be started.
+        name: String,
+    },
+
     /// Stop job.
     #[clap(group(ArgGroup::new("job_input").required(true).args(&["name", "all"])))]
     Stop {

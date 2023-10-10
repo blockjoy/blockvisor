@@ -12,7 +12,7 @@ fn test_testing() -> eyre::Result<()> {
     babel.expect_save_data().returning(|_| Ok(()));
 
     babel
-        .expect_start_job()
+        .expect_create_job()
         .withf(|name, config| {
             if let JobType::Upload {
                 manifest: Some(_), ..
@@ -24,6 +24,10 @@ fn test_testing() -> eyre::Result<()> {
             }
         })
         .returning(|_, _| Ok(()));
+    babel
+        .expect_start_job()
+        .withf(|name| name == "upload")
+        .returning(|_| Ok(()));
     babel.expect_job_status().returning(|_| {
         Ok(JobStatus::Finished {
             exit_code: Some(0),
@@ -31,7 +35,7 @@ fn test_testing() -> eyre::Result<()> {
         })
     });
     babel
-        .expect_start_job()
+        .expect_create_job()
         .withf(|name, config| {
             if let JobType::Download {
                 manifest: Some(_), ..
@@ -43,7 +47,12 @@ fn test_testing() -> eyre::Result<()> {
             }
         })
         .returning(|_, _| Ok(()));
-    babel.expect_start_job().returning(|_, _| Ok(()));
+    babel
+        .expect_start_job()
+        .withf(|name| name == "download")
+        .returning(|_| Ok(()));
+    babel.expect_create_job().returning(|_, _| Ok(()));
+    babel.expect_start_job().returning(|_| Ok(()));
     babel.expect_stop_job().returning(|_| Ok(()));
     babel
         .expect_job_status()

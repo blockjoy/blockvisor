@@ -573,6 +573,10 @@ mod tests {
                 &self,
                 request: tonic::Request<(Uuid, String)>,
             ) -> Result<tonic::Response<babel_api::engine::JobInfo>, tonic::Status>;
+            async fn start_node_job(
+                &self,
+                request: tonic::Request<(Uuid, String)>,
+            ) -> Result<tonic::Response<()>, tonic::Status>;
             async fn stop_node_job(
                 &self,
                 request: tonic::Request<(Uuid, String)>,

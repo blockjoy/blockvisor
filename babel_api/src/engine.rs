@@ -13,8 +13,10 @@ pub const DEFAULT_JOB_SHUTDOWN_SIGNAL: PosixSignal = PosixSignal::SIGTERM;
 
 /// Plugin engine must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
-    /// Start background job with unique name.
-    fn start_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
+    /// Create background job with unique name.
+    fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
+    /// Start background job with given unique name.
+    fn start_job(&self, job_name: &str) -> Result<()>;
     /// Stop background job with given unique name if running.
     fn stop_job(&self, job_name: &str) -> Result<()>;
     /// Get background job status by unique name.

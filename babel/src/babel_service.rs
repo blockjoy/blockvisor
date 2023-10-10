@@ -245,13 +245,22 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(()))
     }
 
-    async fn start_job(
+    async fn create_job(
         &self,
         request: Request<(String, JobConfig)>,
     ) -> Result<Response<()>, Status> {
         let (name, config) = request.into_inner();
         self.jobs_manager
-            .start(&name, config)
+            .create(&name, config)
+            .await
+            .map_err(|err| Status::internal(format!("create_job failed: {err}")))?;
+        Ok(Response::new(()))
+    }
+
+    async fn start_job(&self, request: Request<String>) -> Result<Response<()>, Status> {
+        let name = request.into_inner();
+        self.jobs_manager
+            .start(&name)
             .await
             .map_err(|err| Status::internal(format!("start_job failed: {err}")))?;
         Ok(Response::new(()))
@@ -538,7 +547,8 @@ mod tests {
             async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
             async fn shutdown(&self) -> Result<()>;
             async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
-            async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
+            async fn create(&self, name: &str, config: JobConfig) -> Result<()>;
+            async fn start(&self, name: &str) -> Result<()>;
             async fn stop(&self, name: &str) -> Result<()>;
             async fn cleanup(&self, name: &str) -> Result<()>;
             async fn info(&self, name: &str) -> Result<JobInfo>;

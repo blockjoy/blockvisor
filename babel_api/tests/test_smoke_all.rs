@@ -12,7 +12,8 @@ pub fn rhai_smoke(path: &Path) -> eyre::Result<BlockchainMetadata> {
     let mut babel = utils::MockBabelEngine::new();
     babel.expect_save_data().returning(|_| Ok(()));
     babel.expect_log().returning(|_, _| {});
-    babel.expect_start_job().returning(|_, _| Ok(()));
+    babel.expect_create_job().returning(|_, _| Ok(()));
+    babel.expect_start_job().returning(|_| Ok(()));
     babel.expect_stop_job().returning(|_| Ok(()));
     babel
         .expect_job_status()

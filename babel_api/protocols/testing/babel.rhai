@@ -69,7 +69,15 @@ fn init(keys) {
         throw res;
     }
     let param = sanitize_sh_param(node_params().TESTING_PARAM);
-    start_job("echo", #{
+    start_job("upload", #{
+        job_type: #{
+            run_sh: "echo dummu_upload",
+        },
+        restart: "never",
+        shutdown_signal: "SIGINT",
+        needs: [],
+    });
+    create_job("echo", #{
         job_type: #{
             run_sh: "echo \"Testing entry_point not configured, but parametrized with " + param + "!\"",
         },
@@ -80,8 +88,9 @@ fn init(keys) {
             },
         },
         shutdown_signal: "SIGINT",
-        needs: [],
+        needs: ["upload"],
     });
+    start_job("echo");
 }
 
 fn height() {
@@ -179,6 +188,7 @@ fn sh_inside(param) {
 }
 
 fn upload(param) {
+    stop_job("echo");
     start_job("upload", #{
         job_type: #{
             upload: #{
@@ -202,6 +212,7 @@ fn upload(param) {
             },
         },
     });
+    start_job("echo");
     "Upload started!"
 }
 

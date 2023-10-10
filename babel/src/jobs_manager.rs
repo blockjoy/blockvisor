@@ -122,7 +122,8 @@ pub trait JobsManagerClient {
     async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
     async fn shutdown(&self) -> Result<()>;
     async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
-    async fn start(&self, name: &str, config: JobConfig) -> Result<()>;
+    async fn create(&self, name: &str, config: JobConfig) -> Result<()>;
+    async fn start(&self, name: &str) -> Result<()>;
     async fn stop(&self, name: &str) -> Result<()>;
     async fn cleanup(&self, name: &str) -> Result<()>;
     async fn info(&self, name: &str) -> Result<JobInfo>;
@@ -192,7 +193,7 @@ impl JobsManagerClient for Client {
         Ok(res)
     }
 
-    async fn start(&self, name: &str, config: JobConfig) -> Result<()> {
+    async fn create(&self, name: &str, config: JobConfig) -> Result<()> {
         info!("Requested '{name}' job to start: {config:?}",);
         let (jobs, jobs_data) = &mut *self.jobs_registry.lock().await;
 
@@ -203,14 +204,10 @@ impl JobsManagerClient for Client {
         }) = jobs.get(name)
         {
             if let JobState::Active(_) = state {
-                if config == *old_config {
-                    return Ok(());
-                } else {
-                    bail!("can't start job '{name}' with different config while it is already running")
-                }
+                bail!("can't create job '{name}' while it is already running")
             } else if config == *old_config {
                 info!(
-                    "job '{name}' started with different config - cleanup after previous run first"
+                    "job '{name}' recreated with different config - cleanup after previous run first"
                 );
                 jobs_data.cleanup_job(name, old_config);
             }
@@ -218,12 +215,29 @@ impl JobsManagerClient for Client {
 
         jobs_data.clear_status(name);
         jobs_data.save_config(&config, name).with_context(|| {
-            format!("failed to start job '{name}', can't save job config to file")
+            format!("failed to create job '{name}', can't save job config to file")
         })?;
         jobs.insert(
             name.to_string(),
-            Job::new(JobState::Inactive(JobStatus::Pending), config),
+            Job::new(JobState::Inactive(JobStatus::Stopped), config),
         );
+        let _ = self.job_added_tx.send(());
+        Ok(())
+    }
+
+    async fn start(&self, name: &str) -> Result<()> {
+        info!("Requested '{name} job to start'");
+        let (jobs, _) = &mut *self.jobs_registry.lock().await;
+        if let Some(job) = jobs.get_mut(name) {
+            match &mut job.state {
+                JobState::Active(_) => return Ok(()),
+                JobState::Inactive(status) => {
+                    *status = JobStatus::Pending;
+                }
+            }
+        } else {
+            bail!("can't start, job '{name}' not found")
+        }
         let _ = self.job_added_tx.send(());
         Ok(())
     }
@@ -651,7 +665,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_start() -> Result<()> {
+    async fn test_client_create_and_start() -> Result<()> {
         let test_env = TestEnv::setup()?;
         let _ = test_env.client.info("missing_job").await.unwrap_err();
 
@@ -666,7 +680,12 @@ mod tests {
             writeln!(status_file, "empty")?;
         }
         let config = dummy_job_config();
-        test_env.client.start("test_job", config.clone()).await?;
+        test_env.client.create("test_job", config.clone()).await?;
+        assert_eq!(
+            JobStatus::Stopped,
+            test_env.client.info("test_job").await?.status
+        );
+        test_env.client.start("test_job").await?;
         assert!(!status_path.exists());
         let saved_config = jobs::load_config(&test_env.jobs_config_dir.join("test_job.cfg"))?;
         assert_eq!(config, saved_config);
@@ -702,7 +721,7 @@ mod tests {
         );
         let _ = test_env
             .client
-            .start(
+            .create(
                 "test_job",
                 JobConfig {
                     job_type: JobType::RunSh("different".to_string()),
@@ -826,8 +845,9 @@ mod tests {
         let mut test_env = TestEnv::setup()?;
         test_env
             .client
-            .start("test_job", dummy_job_config())
+            .create("test_job", dummy_job_config())
             .await?;
+        test_env.client.start("test_job").await?;
         test_env.create_infinite_job_runner()?;
 
         test_env
@@ -876,8 +896,9 @@ mod tests {
         let mut test_env = TestEnv::setup()?;
         test_env
             .client
-            .start("test_job", dummy_job_config())
+            .create("test_job", dummy_job_config())
             .await?;
+        test_env.client.start("test_job").await?;
 
         let monitor_handle = test_env.spawn_monitor();
 
@@ -913,7 +934,7 @@ mod tests {
         test_env.create_infinite_job_runner()?;
         test_env
             .client
-            .start(
+            .create(
                 "test_invalid_job",
                 JobConfig {
                     job_type: JobType::RunSh("".to_string()),
@@ -924,13 +945,15 @@ mod tests {
                 },
             )
             .await?;
+        test_env.client.start("test_invalid_job").await?;
         test_env
             .client
-            .start("test_job", dummy_job_config())
+            .create("test_job", dummy_job_config())
             .await?;
+        test_env.client.start("test_job").await?;
         test_env
             .client
-            .start(
+            .create(
                 "test_pending_job",
                 JobConfig {
                     job_type: JobType::RunSh("".to_string()),
@@ -941,6 +964,7 @@ mod tests {
                 },
             )
             .await?;
+        test_env.client.start("test_pending_job").await?;
 
         let monitor_handle = test_env.spawn_monitor();
         test_env.wait_for_job_runner().await?;
@@ -1001,11 +1025,12 @@ mod tests {
         test_env.create_infinite_job_runner()?;
         test_env
             .client
-            .start("test_job", dummy_job_config())
+            .create("test_job", dummy_job_config())
             .await?;
+        test_env.client.start("test_job").await?;
         test_env
             .client
-            .start(
+            .create(
                 "test_pending_job",
                 JobConfig {
                     job_type: JobType::RunSh("".to_string()),
@@ -1016,6 +1041,7 @@ mod tests {
                 },
             )
             .await?;
+        test_env.client.start("test_pending_job").await?;
         // emulate failed job
         jobs::save_status(
             &JobStatus::Finished {
@@ -1062,8 +1088,9 @@ mod tests {
 
         test_env
             .client
-            .start("test_job", dummy_job_config())
+            .create("test_job", dummy_job_config())
             .await?;
+        test_env.client.start("test_job").await?;
         test_env.wait_for_job_runner().await?;
 
         assert_eq!(
@@ -1075,7 +1102,7 @@ mod tests {
         test_env.kill_job("test_job");
         test_env
             .client
-            .start(
+            .create(
                 "test_restarting_job",
                 JobConfig {
                     job_type: JobType::RunSh("".to_string()),
@@ -1090,6 +1117,7 @@ mod tests {
                 },
             )
             .await?;
+        test_env.client.start("test_restarting_job").await?;
         test_env.wait_for_job_runner().await?;
 
         let info = test_env.client.info("test_job").await?;

@@ -9,7 +9,8 @@ mock! {
     pub BabelEngine {}
 
     impl Engine for BabelEngine {
-        fn start_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
+        fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
+        fn start_job(&self, job_name: &str) -> Result<()>;
         fn stop_job(&self, job_name: &str) -> Result<()>;
         fn job_status(&self, job_name: &str) -> Result<JobStatus>;
         fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;

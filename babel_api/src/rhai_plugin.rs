@@ -72,8 +72,22 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
     fn init_rhai_engine(&mut self) {
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
+            .register_fn("create_job", move |job_name: &str, job_config: Dynamic| {
+                into_rhai_result(babel_engine.create_job(job_name, from_dynamic(&job_config)?))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("start_job", move |job_name: &str| {
+                into_rhai_result(babel_engine.start_job(job_name))
+            });
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
             .register_fn("start_job", move |job_name: &str, job_config: Dynamic| {
-                into_rhai_result(babel_engine.start_job(job_name, from_dynamic(&job_config)?))
+                into_rhai_result(
+                    babel_engine
+                        .create_job(job_name, from_dynamic(&job_config)?)
+                        .and_then(|_| babel_engine.start_job(job_name)),
+                )
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
@@ -324,7 +338,8 @@ mod tests {
         pub BabelEngine {}
 
         impl Engine for BabelEngine {
-            fn start_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
+            fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
+            fn start_job(&self, job_name: &str) -> Result<()>;
             fn stop_job(&self, job_name: &str) -> Result<()>;
             fn job_status(&self, job_name: &str) -> Result<JobStatus>;
             fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
@@ -466,7 +481,7 @@ mod tests {
             },
             needs: ["needed"],
         });
-        start_job("download_job_name", #{
+        create_job("download_job_name", #{
              job_type: #{
                 download: #{
                     destination: "destination/path/for/blockchain_data",    
@@ -474,6 +489,7 @@ mod tests {
             },
             restart: "never",
         });
+        start_job("download_job_name");
         stop_job("test_job_name");
         out += "|" + job_status("test_job_name");
         out += "|" + run_jrpc(#{host: "host", method: "method", headers: #{"custom_header": "header value"}}).body;
@@ -513,7 +529,7 @@ mod tests {
             .with(predicate::eq(Level::Error), predicate::eq("error message"))
             .return_once(|_, _| ());
         babel
-            .expect_start_job()
+            .expect_create_job()
             .with(
                 predicate::eq("test_job_name"),
                 predicate::eq(JobConfig {
@@ -531,6 +547,10 @@ mod tests {
             .return_once(|_, _| Ok(()));
         babel
             .expect_start_job()
+            .with(predicate::eq("test_job_name"))
+            .return_once(|_| Ok(()));
+        babel
+            .expect_create_job()
             .with(
                 predicate::eq("download_job_name"),
                 predicate::eq(JobConfig {
@@ -547,6 +567,10 @@ mod tests {
                 }),
             )
             .return_once(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("download_job_name"))
+            .return_once(|_| Ok(()));
         babel
             .expect_stop_job()
             .with(predicate::eq("test_job_name"))

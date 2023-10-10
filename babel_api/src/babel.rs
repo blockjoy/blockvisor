@@ -27,8 +27,11 @@ pub trait Babel {
     /// Upload JobRunner binary, overriding existing one (if any).
     #[client_streaming]
     fn upload_job_runner(babel_bin: Binary);
+    /// Create background job with unique name. Created job is initialized with `Stopped` state.
+    /// Use `start_job` to when it is time to start.
+    fn create_job(job_name: String, job: JobConfig);
     /// Start background job with unique name.
-    fn start_job(job_name: String, job: JobConfig);
+    fn start_job(job_name: String);
     /// Stop background job with given unique name if running.
     fn stop_job(job_name: String);
     /// Cleanup background job with given unique name - remove any intermediate files,
