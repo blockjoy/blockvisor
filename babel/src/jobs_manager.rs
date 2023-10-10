@@ -26,6 +26,8 @@ use tokio::{
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
+pub const MAX_JOBS: usize = 16;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum JobsManagerState {
     NotReady,
@@ -211,6 +213,8 @@ impl JobsManagerClient for Client {
                 );
                 jobs_data.cleanup_job(name, old_config);
             }
+        } else if jobs.len() >= MAX_JOBS {
+            bail!("Exceeded max number of supported jobs: {MAX_JOBS}");
         }
 
         jobs_data.clear_status(name);
@@ -662,6 +666,38 @@ mod tests {
             shutdown_signal: None,
             needs: None,
         }
+    }
+
+    #[tokio::test]
+    async fn test_client_create_max_jobs() -> Result<()> {
+        let test_env = TestEnv::setup()?;
+        let _ = test_env.client.info("missing_job").await.unwrap_err();
+
+        // start OK
+        let status_path = test_env.jobs_status_dir.join("test_job.status");
+        {
+            // create dummy status file to make sure it is removed after start
+            let mut status_file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(&status_path)?;
+            writeln!(status_file, "empty")?;
+        }
+        let config = dummy_job_config();
+
+        for i in 0..MAX_JOBS {
+            test_env
+                .client
+                .create(&format!("test_job_{i}"), config.clone())
+                .await?;
+        }
+        let _ = test_env
+            .client
+            .create("test_job_16", config.clone())
+            .await
+            .unwrap_err();
+
+        Ok(())
     }
 
     #[tokio::test]
