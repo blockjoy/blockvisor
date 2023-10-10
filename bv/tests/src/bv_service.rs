@@ -235,7 +235,9 @@ async fn test_bv_service_e2e() {
         .await
         .unwrap();
 
-    let list_blockchains = pb::BlockchainServiceListRequest {};
+    let list_blockchains = pb::BlockchainServiceListRequest {
+        org_id: Some(org_id.to_string()),
+    };
     let list = client
         .list(with_auth(list_blockchains, &auth_token))
         .await
