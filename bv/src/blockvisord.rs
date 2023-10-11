@@ -327,13 +327,18 @@ where
                         None
                     };
                     debug!("Collected node `{id}` info: s={status}, a={maybe_address:?}");
-                    updates.push((node.id(), status, maybe_address));
+                    updates.push((
+                        node.id(),
+                        status,
+                        maybe_address,
+                        node.data.image.node_version.clone(),
+                    ));
                 } else {
                     debug!("Skipping node info collection, node `{id}` busy");
                 }
             }
 
-            for (node_id, status, address) in updates {
+            for (node_id, status, address, image_version) in updates {
                 let container_status = match status {
                     NodeStatus::Running => pb::ContainerStatus::Running,
                     NodeStatus::Stopped => pb::ContainerStatus::Stopped,
@@ -344,7 +349,7 @@ where
                     id: node_id.to_string(),
                     container_status: None, // We use the setter to set this field for type-safety
                     address,
-                    version: None,
+                    image_version: Some(image_version),
                 };
                 update.set_container_status(container_status);
 
