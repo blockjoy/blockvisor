@@ -1,5 +1,5 @@
-use crate::services::api::{pb, AuthClient, AuthToken};
-use eyre::{Context, Result};
+use crate::services::api::{connect_to_api_service, pb, AuthClient, AuthToken};
+use eyre::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::{fs, sync::RwLockWriteGuard};
@@ -38,6 +38,31 @@ impl SharedConfig {
         self.config.write().await
     }
 
+    pub async fn org_id(&self) -> Result<String> {
+        if let Some(org_id) = self.read().await.org_id {
+            Ok(org_id)
+        } else {
+            let mut host_client = connect_to_api_service(
+                self,
+                pb::host_service_client::HostServiceClient::with_interceptor,
+            )
+            .await
+            .with_context(|| "error connecting to api")?;
+            let host_id = self.read().await.id.clone();
+            let org_id = host_client
+                .get(pb::HostServiceGetRequest {
+                    id: host_id.clone(),
+                })
+                .await?
+                .into_inner()
+                .host
+                .ok_or(anyhow!("host {host_id} not found in API"))?
+                .org_id;
+            self.config.write().await.org_id = Some(org_id.clone());
+            Ok(org_id)
+        }
+    }
+
     pub async fn token(&self) -> Result<AuthToken> {
         let token = self.refreshed_token().await?;
         Ok(AuthToken(token))
@@ -73,6 +98,8 @@ impl SharedConfig {
 pub struct Config {
     /// Host uuid
     pub id: String,
+    /// Host organization uuid
+    pub org_id: Option<String>,
     /// Host auth token
     pub token: String,
     /// The refresh token.

@@ -6,13 +6,15 @@ use crate::{
     node_data::{NodeImage, NodeStatus},
     nodes::{self, NodeConfig, Nodes},
     pal::{NetInterface, Pal},
+    services::{api, api::pb},
     {get_bv_status, set_bv_status, utils, ServiceStatus}, {node_metrics, BV_VAR_PATH},
 };
 use chrono::Utc;
-use eyre::anyhow;
+use eyre::{anyhow, Context};
 use petname::Petnames;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::str::FromStr;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
@@ -191,7 +193,9 @@ where
                 .await
                 .map_err(|err| Status::unknown(format!("{err:#}")))?
         } else {
-            unimplemented!()
+            self.create_node_with_api(req)
+                .await
+                .map_err(|err| Status::unknown(format!("{err:#}")))?
         }))
     }
 
@@ -202,21 +206,37 @@ where
     ) -> Result<Response<()>, Status> {
         status_check().await?;
         let (id, image) = request.into_inner();
-        self.nodes
-            .upgrade(id, image)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
-        Ok(Response::new(()))
+
+        if self.is_standalone_node(id).await? {
+            self.nodes
+                .upgrade(id, image)
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+            Ok(Response::new(()))
+        } else {
+            Err(Status::unimplemented(
+                "non-standalone nodes are upgraded automatically by API,\
+             manual trigger for upgrade is not implemented yet",
+            ))
+        }
     }
 
     #[instrument(skip(self), ret(Debug))]
     async fn delete_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
         status_check().await?;
         let id = request.into_inner();
-        self.nodes
-            .delete(id)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        if self.is_standalone_node(id).await? {
+            self.nodes
+                .delete(id)
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        } else {
+            self.connect_to_node_service()
+                .await?
+                .delete(pb::NodeServiceDeleteRequest { id: id.to_string() })
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        }
         Ok(Response::new(()))
     }
 
@@ -224,10 +244,18 @@ where
     async fn start_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
         status_check().await?;
         let id = request.into_inner();
-        self.nodes
-            .start(id, true)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        if self.is_standalone_node(id).await? {
+            self.nodes
+                .start(id, true)
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        } else {
+            self.connect_to_node_service()
+                .await?
+                .start(pb::NodeServiceStartRequest { id: id.to_string() })
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        }
         Ok(Response::new(()))
     }
 
@@ -235,10 +263,18 @@ where
     async fn stop_node(&self, request: Request<(Uuid, bool)>) -> Result<Response<()>, Status> {
         status_check().await?;
         let (id, force) = request.into_inner();
-        self.nodes
-            .stop(id, force)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        if self.is_standalone_node(id).await? {
+            self.nodes
+                .stop(id, force)
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        } else {
+            self.connect_to_node_service()
+                .await?
+                .stop(pb::NodeServiceStopRequest { id: id.to_string() })
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        }
         Ok(Response::new(()))
     }
 
@@ -447,6 +483,30 @@ where
     P::NodeConnection: 'static + Send + Sync,
     P::VirtualMachine: 'static + Send + Sync,
 {
+    async fn is_standalone_node(&self, id: Uuid) -> eyre::Result<bool, Status> {
+        Ok(self.dev_mode
+            || self
+                .nodes
+                .nodes
+                .read()
+                .await
+                .get(&id)
+                .ok_or_else(|| Status::not_found(format!("node '{id}' not found")))?
+                .read()
+                .await
+                .data
+                .standalone)
+    }
+
+    async fn connect_to_node_service(&self) -> Result<api::NodesServiceClient, Status> {
+        api::connect_to_api_service(
+            &self.nodes.api_config,
+            pb::node_service_client::NodeServiceClient::with_interceptor,
+        )
+        .await
+        .map_err(|e| Status::unknown(format!("Error connecting to api: {e:#}")))
+    }
+
     async fn get_node_display_info(
         &self,
         id: Uuid,
@@ -555,6 +615,86 @@ where
             standalone: true,
             status: NodeStatus::Stopped,
             uptime: None,
+        })
+    }
+
+    async fn create_node_with_api(&self, req: NodeCreateRequest) -> eyre::Result<NodeDisplayInfo> {
+        // map properties into api format
+        let properties = req
+            .props
+            .as_deref()
+            .map(serde_json::from_str::<HashMap<String, String>>)
+            .transpose()?
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(key, value)| pb::NodeProperty {
+                name: key.clone(),
+                display_name: format!("BV CLI {key}"),
+                ui_type: pb::UiType::Text.into(),
+                disabled: false,
+                required: false,
+                value,
+            })
+            .collect();
+
+        // get org_id associated with this host
+        let host_id = self.nodes.api_config.read().await.id;
+        let org_id = self.nodes.api_config.org_id().await?;
+
+        // get blockchain id for given image
+        let mut blockchain_client = api::connect_to_api_service(
+            &self.nodes.api_config,
+            pb::blockchain_service_client::BlockchainServiceClient::with_interceptor,
+        )
+        .await
+        .with_context(|| "error connecting to api")?;
+        let blockchains = blockchain_client
+            .list(pb::BlockchainServiceListRequest {
+                org_id: Some(org_id.clone()),
+            })
+            .await?
+            .into_inner();
+        let blockchain_id = blockchains
+            .blockchains
+            .into_iter()
+            .find(|blockchain| blockchain.name == req.image.protocol)
+            .ok_or(anyhow!(
+                "blockchain id not found for {}",
+                req.image.protocol
+            ))?
+            .id;
+
+        let mut node_client = self.connect_to_node_service().await?;
+        let node = node_client
+            .create(pb::NodeServiceCreateRequest {
+                org_id,
+                blockchain_id,
+                version: req.image.node_version.clone(),
+                node_type: pb::NodeType::from_str(&req.image.node_type)?.into(),
+                properties,
+                network: req.network,
+                placement: Some(pb::NodePlacement {
+                    placement: Some(pb::node_placement::Placement::HostId(host_id)),
+                }),
+                allow_ips: vec![],
+                deny_ips: vec![],
+            })
+            .await?
+            .into_inner()
+            .node
+            .ok_or_else(|| anyhow!("empty node create response from API"))?;
+
+        Ok(NodeDisplayInfo {
+            id: Uuid::parse_str(&node.id).with_context(|| {
+                format!("node_create received invalid node id from API: {}", node.id)
+            })?,
+            name: node.name,
+            image: req.image,
+            ip: node.ip,
+            gateway: node.ip_gateway,
+            status: NodeStatus::Stopped,
+            uptime: None,
+            standalone: false,
         })
     }
 }

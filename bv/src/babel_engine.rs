@@ -1008,6 +1008,7 @@ mod tests {
                 SharedConfig::new(
                     Config {
                         id: "".to_string(),
+                        org_id: None,
                         token: "".to_string(),
                         refresh_token: "".to_string(),
                         blockjoy_api_url: "".to_string(),

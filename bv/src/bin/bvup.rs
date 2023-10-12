@@ -164,15 +164,16 @@ async fn main() -> Result<()> {
             pb::host_service_client::HostServiceClient::connect(cmd_args.blockjoy_api_url.clone())
                 .await?;
 
-        let host = client.create(create).await?.into_inner();
+        let host_resp = client.create(create).await?.into_inner();
+        let host = host_resp
+            .host
+            .ok_or_else(|| anyhow!("No `host` in response"))?;
 
         let api_config = Config {
-            id: host
-                .host
-                .ok_or_else(|| anyhow!("No `host` in response"))?
-                .id,
-            token: host.token,
-            refresh_token: host.refresh,
+            id: host.id,
+            org_id: Some(host.org_id),
+            token: host_resp.token,
+            refresh_token: host_resp.refresh,
             blockjoy_api_url: cmd_args.blockjoy_api_url.clone(),
             blockjoy_mqtt_url: cmd_args.blockjoy_mqtt_url,
             update_check_interval_secs: None,

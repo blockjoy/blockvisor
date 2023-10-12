@@ -11,9 +11,10 @@ use bv_utils::with_retry;
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
-    auth_service_client, command_service_client::CommandServiceClient, discovery_service_client,
-    host_service_client, manifest_service_client, node_command::Command, node_service_client,
-    Action, AuthServiceRefreshResponse, ChecksumType, Direction, Protocol, Rule,
+    auth_service_client, blockchain_service_client, command_service_client::CommandServiceClient,
+    discovery_service_client, host_service_client, manifest_service_client, node_command::Command,
+    node_service_client, Action, AuthServiceRefreshResponse, ChecksumType, Direction, Protocol,
+    Rule,
 };
 use std::{
     fmt::Debug,
@@ -152,6 +153,8 @@ pub type DiscoveryServiceClient =
 pub type HostsServiceClient = host_service_client::HostServiceClient<AuthenticatedService>;
 pub type ManifestServiceClient =
     manifest_service_client::ManifestServiceClient<AuthenticatedService>;
+pub type BlockchainServiceClient =
+    blockchain_service_client::BlockchainServiceClient<AuthenticatedService>;
 
 pub struct CommandsService {
     client: CommandServiceClient<AuthenticatedService>,
