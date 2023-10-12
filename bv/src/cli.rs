@@ -107,6 +107,10 @@ pub enum NodeCommand {
 
         /// Node Image identifier
         image: Option<String>,
+
+        /// Create node in standalone mode - without involvement of the API
+        #[clap(long, default_value = "false")]
+        standalone: bool,
     },
 
     /// Upgrade node

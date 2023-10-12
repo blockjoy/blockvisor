@@ -164,27 +164,27 @@ pub struct NetParams {
     pub ip_to: Option<String>,
 }
 
-impl NetParams {
-    pub fn next_ip(&self, used: &[String]) -> Result<String> {
-        let range = ipnet::Ipv4AddrRange::new(
-            self.ip_from
-                .as_ref()
-                .ok_or(anyhow!("missing ip_from"))?
-                .parse()?,
-            self.ip_to
-                .as_ref()
-                .ok_or(anyhow!("missing ip_to"))?
-                .parse()?,
-        );
-        range
-            .into_iter()
-            .find(|ip| !used.contains(&ip.to_string()))
-            .map(|ip| ip.to_string())
-            .ok_or(anyhow!("no available ip in range {:?}", range))
-    }
+pub fn next_available_ip(net_params: &NetParams, used: &[String]) -> Result<String> {
+    let range = ipnet::Ipv4AddrRange::new(
+        net_params
+            .ip_from
+            .as_ref()
+            .ok_or(anyhow!("missing ip_from"))?
+            .parse()?,
+        net_params
+            .ip_to
+            .as_ref()
+            .ok_or(anyhow!("missing ip_to"))?
+            .parse()?,
+    );
+    range
+        .into_iter()
+        .find(|ip| !used.contains(&ip.to_string()))
+        .map(|ip| ip.to_string())
+        .ok_or(anyhow!("no available ip in range {:?}", range))
 }
 
-pub fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Result<NetParams> {
+fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Result<NetParams> {
     let mut routes: Vec<IpRoute> = serde_json::from_str(routes_json_str)?;
     routes.retain(|r| r.dev == ifa_name);
     if routes.len() != 2 {
@@ -218,8 +218,7 @@ pub fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Resul
 
 pub async fn discover_net_params(ifa_name: &str) -> Result<NetParams> {
     let routes = run_cmd("ip", ["--json", "route"]).await?;
-    let params = parse_net_params_from_str(ifa_name, &routes)?;
-    Ok(params)
+    parse_net_params_from_str(ifa_name, &routes)
 }
 
 #[cfg(test)]
@@ -380,5 +379,34 @@ pub mod tests {
                     .unwrap();
             }),
         }
+    }
+
+    #[test]
+    fn test_parse_net_params_from_str() {
+        let json = r#"[
+            {
+               "dev" : "bvbr0",
+               "dst" : "default",
+               "flags" : [],
+               "gateway" : "192.69.220.81",
+               "protocol" : "static"
+            },
+            {
+               "dev" : "bvbr0",
+               "dst" : "192.69.220.80/28",
+               "flags" : [],
+               "prefsrc" : "192.69.220.82",
+               "protocol" : "kernel",
+               "scope" : "link"
+            }
+         ]
+         "#;
+        let expected = NetParams {
+            ip: Some("192.69.220.82".to_string()),
+            gateway: Some("192.69.220.81".to_string()),
+            ip_from: Some("192.69.220.81".to_string()),
+            ip_to: Some("192.69.220.94".to_string()),
+        };
+        assert_eq!(parse_net_params_from_str("bvbr0", json).unwrap(), expected);
     }
 }

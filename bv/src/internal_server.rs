@@ -1,20 +1,49 @@
-use crate::cluster::ClusterData;
-use crate::config::Config;
-use crate::linux_platform::LinuxPlatform;
-use crate::node::Node;
-use crate::node_data::{NodeDisplayInfo, NodeImage, NodeStatus};
-use crate::nodes::{self, Nodes};
-use crate::pal::{NetInterface, Pal};
-use crate::{get_bv_status, set_bv_status, ServiceStatus};
-use crate::{node_metrics, BV_VAR_PATH};
+use crate::{
+    cluster::ClusterData,
+    config::Config,
+    linux_platform::LinuxPlatform,
+    node::Node,
+    node_data::{NodeImage, NodeStatus},
+    nodes::{self, NodeConfig, Nodes},
+    pal::{NetInterface, Pal},
+    {get_bv_status, set_bv_status, utils, ServiceStatus}, {node_metrics, BV_VAR_PATH},
+};
 use chrono::Utc;
+use eyre::anyhow;
+use petname::Petnames;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::fmt::Debug;
-use std::sync::Arc;
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
-use tracing::instrument;
+use tracing::{info, instrument};
 use uuid::Uuid;
+
+// Data that we display in cli
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct NodeDisplayInfo {
+    pub id: Uuid,
+    pub name: String,
+    pub image: NodeImage,
+    pub ip: String,
+    pub gateway: String,
+    pub status: NodeStatus,
+    pub uptime: Option<i64>,
+    pub standalone: bool,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct NodeCreateRequest {
+    pub image: NodeImage,
+    pub network: String,
+    pub standalone: bool,
+    pub ip: Option<String>,
+    pub gateway: Option<String>,
+    pub props: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct CreateStandaloneNodeRequest {}
 
 #[tonic_rpc::tonic_rpc(bincode)]
 trait Service {
@@ -24,7 +53,7 @@ trait Service {
     fn get_node_status(id: Uuid) -> NodeStatus;
     fn get_node(id: Uuid) -> NodeDisplayInfo;
     fn get_nodes() -> Vec<NodeDisplayInfo>;
-    fn create_node(id: Uuid, config: nodes::NodeConfig);
+    fn create_node(request: NodeCreateRequest) -> NodeDisplayInfo;
     fn upgrade_node(id: Uuid, image: NodeImage);
     fn start_node(id: Uuid);
     fn stop_node(id: Uuid, force: bool);
@@ -47,6 +76,7 @@ trait Service {
 pub struct State<P: Pal + Debug> {
     pub nodes: Arc<Nodes<P>>,
     pub cluster: Arc<Option<ClusterData>>,
+    pub dev_mode: bool,
 }
 
 async fn status_check() -> Result<(), Status> {
@@ -146,15 +176,23 @@ where
     #[instrument(skip(self), ret(Debug))]
     async fn create_node(
         &self,
-        request: Request<(Uuid, nodes::NodeConfig)>,
-    ) -> Result<Response<()>, Status> {
+        request: Request<NodeCreateRequest>,
+    ) -> Result<Response<NodeDisplayInfo>, Status> {
         status_check().await?;
-        let (id, config) = request.into_inner();
-        self.nodes
-            .create(id, config)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
-        Ok(Response::new(()))
+        let req = request.into_inner();
+        let standalone = req.standalone || self.dev_mode;
+        if !standalone && (req.ip.is_some() || req.gateway.is_some()) {
+            return Err(Status::invalid_argument(
+                "custom ip and gateway is allowed only in standalone mode",
+            ));
+        }
+        Ok(Response::new(if standalone {
+            self.create_standalone_node(req)
+                .await
+                .map_err(|err| Status::unknown(format!("{err:#}")))?
+        } else {
+            unimplemented!()
+        }))
     }
 
     #[instrument(skip(self), ret(Debug))]
@@ -427,6 +465,7 @@ where
                     .data
                     .started_at
                     .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
+                standalone: node.data.standalone,
             }
         } else {
             let cache = self
@@ -444,7 +483,78 @@ where
                 uptime: cache
                     .started_at
                     .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
+                standalone: cache.standalone,
             }
+        })
+    }
+
+    async fn create_standalone_node(
+        &self,
+        req: NodeCreateRequest,
+    ) -> eyre::Result<NodeDisplayInfo> {
+        let id = Uuid::new_v4();
+        let mut used_ips = vec![];
+        for (_, node) in self.nodes.nodes.read().await.iter() {
+            used_ips.push(node.read().await.data.network_interface.ip().to_string());
+        }
+        let props: HashMap<String, String> = req
+            .props
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?
+            .unwrap_or_default();
+        let properties = props
+            .into_iter()
+            .chain([("network".to_string(), req.network.clone())])
+            .collect();
+        let net = utils::discover_net_params(&self.nodes.api_config.read().await.iface)
+            .await
+            .unwrap_or_default();
+        let ip = match req.ip {
+            None => {
+                let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {
+                    anyhow!("failed to auto assign ip - provide it manually : {err}")
+                })?;
+                info!("Auto-assigned ip `{ip}` for node '{id}'");
+                ip
+            }
+            Some(ip) => ip,
+        };
+        let name = Petnames::default().generate_one(3, "_");
+        let gateway = match req.gateway {
+            None => {
+                let gateway = net
+                    .gateway
+                    .ok_or(anyhow!("can't auto discover gateway - provide it manually",))?;
+                info!("Auto-discovered gateway `{gateway} for node '{id}'");
+                gateway
+            }
+            Some(gateway) => gateway,
+        };
+        self.nodes
+            .create(
+                id,
+                NodeConfig {
+                    name: name.clone(),
+                    image: req.image.clone(),
+                    ip: ip.clone(),
+                    gateway: gateway.clone(),
+                    properties,
+                    network: req.network,
+                    rules: vec![],
+                    standalone: true,
+                },
+            )
+            .await?;
+        Ok(NodeDisplayInfo {
+            id,
+            name,
+            image: req.image,
+            ip,
+            gateway,
+            standalone: true,
+            status: NodeStatus::Stopped,
+            uptime: None,
         })
     }
 }

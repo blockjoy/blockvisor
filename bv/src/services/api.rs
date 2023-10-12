@@ -346,6 +346,7 @@ async fn process_node_command<P: Pal + Debug>(
                             rules,
                             properties,
                             network: args.network,
+                            standalone: false,
                         },
                     )
                     .await?;

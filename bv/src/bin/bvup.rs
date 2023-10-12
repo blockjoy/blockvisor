@@ -1,10 +1,16 @@
-use blockvisord::config::SharedConfig;
 use blockvisord::{
-    config, config::Config, hosts::HostInfo, linux_platform::bv_root, self_updater,
-    services::api::pb, utils, BV_VAR_PATH,
+    config,
+    config::{Config, SharedConfig},
+    hosts::HostInfo,
+    linux_platform::bv_root,
+    self_updater,
+    services::api::pb,
+    utils, BV_VAR_PATH,
 };
-use bv_utils::cmd::{ask_confirm, run_cmd};
-use bv_utils::system::get_ip_address;
+use bv_utils::{
+    cmd::{ask_confirm, run_cmd},
+    system::get_ip_address,
+};
 use clap::{crate_version, ArgGroup, Parser};
 use eyre::{anyhow, bail, Context, Result};
 
@@ -201,41 +207,4 @@ async fn main() -> Result<()> {
         updater.download_and_install(bundle_id).await?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_net_params_from_str() {
-        let json = r#"[
-            {
-               "dev" : "bvbr0",
-               "dst" : "default",
-               "flags" : [],
-               "gateway" : "192.69.220.81",
-               "protocol" : "static"
-            },
-            {
-               "dev" : "bvbr0",
-               "dst" : "192.69.220.80/28",
-               "flags" : [],
-               "prefsrc" : "192.69.220.82",
-               "protocol" : "kernel",
-               "scope" : "link"
-            }
-         ]
-         "#;
-        let expected = utils::NetParams {
-            ip: Some("192.69.220.82".to_string()),
-            gateway: Some("192.69.220.81".to_string()),
-            ip_from: Some("192.69.220.81".to_string()),
-            ip_to: Some("192.69.220.94".to_string()),
-        };
-        assert_eq!(
-            utils::parse_net_params_from_str("bvbr0", json).unwrap(),
-            expected
-        );
-    }
 }

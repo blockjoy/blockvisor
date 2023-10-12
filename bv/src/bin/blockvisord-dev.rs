@@ -39,6 +39,7 @@ async fn main() -> Result<()> {
             internal_server::State {
                 nodes,
                 cluster: Arc::new(None),
+                dev_mode: true,
             },
         ))
         .serve_with_incoming_shutdown(

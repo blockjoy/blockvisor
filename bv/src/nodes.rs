@@ -65,11 +65,12 @@ pub struct NodeDataCache {
     pub ip: String,
     pub gateway: String,
     pub started_at: Option<DateTime<Utc>>,
+    pub standalone: bool,
 }
 
 #[derive(Debug)]
 pub struct Nodes<P: Pal + Debug> {
-    api_config: SharedConfig,
+    pub api_config: SharedConfig,
     pub nodes: RwLock<HashMap<Uuid, RwLock<Node<P>>>>,
     node_data_cache: RwLock<HashMap<Uuid, NodeDataCache>>,
     node_ids: RwLock<HashMap<String, Uuid>>,
@@ -86,6 +87,7 @@ pub struct NodeConfig {
     pub rules: Vec<firewall::Rule>,
     pub properties: NodeProperties,
     pub network: String,
+    pub standalone: bool,
 }
 
 #[derive(Error, Debug)]
@@ -156,6 +158,7 @@ impl<P: Pal + Debug> Nodes<P> {
             ip: network_interface.ip().to_string(),
             gateway: network_interface.gateway().to_string(),
             started_at: None,
+            standalone: config.standalone,
         };
 
         let node_data = NodeData {
@@ -171,6 +174,7 @@ impl<P: Pal + Debug> Nodes<P> {
             network: config.network,
             firewall_rules: config.rules,
             initialized: false,
+            standalone: config.standalone,
         };
         self.save().await?;
 
@@ -809,6 +813,7 @@ impl<P: Pal + Debug> Nodes<P> {
                             gateway: node.data.network_interface.gateway().to_string(),
                             image: node.data.image.clone(),
                             started_at: node.data.started_at,
+                            standalone: node.data.standalone,
                         },
                     );
                     nodes.insert(id, RwLock::new(node));

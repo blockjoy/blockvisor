@@ -507,9 +507,8 @@ fn check_kernel_requirements() -> Result<()> {
 mod tests {
     use super::*;
     use crate::internal_server;
-    use crate::node_data::{NodeDisplayInfo, NodeImage, NodeStatus};
+    use crate::node_data::{NodeImage, NodeStatus};
     use crate::node_metrics;
-    use crate::nodes;
     use crate::utils;
     use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
@@ -549,15 +548,15 @@ mod tests {
             async fn get_node(
                 &self,
                 _request: tonic::Request<Uuid>,
-            ) -> Result<tonic::Response<NodeDisplayInfo>, tonic::Status>;
+            ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
             async fn get_nodes(
                 &self,
                 _request: tonic::Request<()>,
-            ) -> Result<tonic::Response<Vec<NodeDisplayInfo>>, tonic::Status>;
+            ) -> Result<tonic::Response<Vec<internal_server::NodeDisplayInfo>>, tonic::Status>;
             async fn create_node(
                 &self,
-                request: tonic::Request<(Uuid, nodes::NodeConfig)>,
-            ) -> Result<tonic::Response<()>, tonic::Status>;
+                request: tonic::Request<internal_server::NodeCreateRequest>,
+            ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
             async fn upgrade_node(
                 &self,
                 request: tonic::Request<(Uuid, NodeImage)>,

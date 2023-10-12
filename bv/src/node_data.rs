@@ -66,18 +66,8 @@ pub struct NodeData<N> {
     #[serde(default)]
     pub properties: NodeProperties,
     pub network: String,
-}
-
-// Data that we display in cli
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct NodeDisplayInfo {
-    pub id: Uuid,
-    pub name: String,
-    pub status: NodeStatus,
-    pub image: NodeImage,
-    pub ip: String,
-    pub gateway: String,
-    pub uptime: Option<i64>,
+    #[serde(default)]
+    pub standalone: bool,
 }
 
 impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
