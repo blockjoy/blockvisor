@@ -82,9 +82,10 @@ pub async fn collect_metrics<P: Pal + Debug + 'static>(nodes: Arc<Nodes<P>>) -> 
             match n.try_write() {
                 Err(_) => None,
                 Ok(mut node) => {
-                    if node.status() == NodeStatus::Running {
+                    if node.status() == NodeStatus::Running && !node.data.standalone {
                         Some((node.id(), collect_metric(&mut node.babel_engine).await))
                     } else {
+                        // don't collect metrics for not running or standalone nodes
                         None
                     }
                 }
