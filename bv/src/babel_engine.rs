@@ -1,3 +1,5 @@
+use crate::services::api;
+use crate::services::api::pb;
 /// This module wraps all Babel related functionality. In particular it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
@@ -13,9 +15,9 @@ use crate::{
     node_connection::RPC_REQUEST_TIMEOUT,
     node_data::{NodeImage, NodeProperties},
     pal::NodeConnection,
-    services::api::ManifestService,
     utils::with_timeout,
 };
+use babel_api::engine::DownloadManifest;
 use babel_api::{
     engine::{
         HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, RestRequest, ShResponse,
@@ -483,19 +485,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         match &mut job_config.job_type {
             JobType::Download { manifest, .. } => {
                 if manifest.is_none() {
-                    let mut manifest_service = ManifestService::connect(&self.api_config)
-                        .await
-                        .with_context(|| "cannot connect to cookbook service")?;
                     manifest.replace(
-                        manifest_service
-                            .retrieve_manifest(&self.node_info.image, &self.node_info.network)
-                            .await
-                            .with_context(|| {
-                                format!(
-                                    "cannot retrieve download manifest for {:?}-{}",
-                                    self.node_info.image, self.node_info.network
-                                )
-                            })?,
+                        retrieve_download_manifest(
+                            &self.api_config,
+                            self.node_info.image.clone(),
+                            self.node_info.network.clone(),
+                        )
+                        .await?,
                     );
                 } // if already set it mean that plugin use some custom manifest source - other than the API
                 if let Some(manifest) = manifest {
@@ -524,6 +520,35 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             .map_err(|err| self.handle_connection_errors(err))
             .map(|v| v.into_inner())
     }
+}
+
+async fn retrieve_download_manifest(
+    config: &SharedConfig,
+    image: NodeImage,
+    network: String,
+) -> Result<DownloadManifest> {
+    let mut manifest_service = api::connect_to_api_service(
+        config,
+        pb::manifest_service_client::ManifestServiceClient::with_interceptor,
+    )
+    .await
+    .with_context(|| "cannot connect to manifest service")?;
+    manifest_service
+        .retrieve_download_manifest(pb::ManifestServiceRetrieveDownloadManifestRequest {
+            id: Some(image.clone().try_into()?),
+            network: network.clone(),
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "cannot retrieve download manifest for {:?}-{}",
+                image, network
+            )
+        })?
+        .into_inner()
+        .manifest
+        .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
+        .try_into()
 }
 
 /// Engine trait implementation. For methods that require interaction with async BV code, it translate

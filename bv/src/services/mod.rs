@@ -1,4 +1,5 @@
-use crate::{config::SharedConfig, services::api::DiscoveryService};
+use crate::config::SharedConfig;
+use crate::services::api::pb;
 use bv_utils::with_retry;
 use eyre::{Context, Result};
 use std::future::Future;
@@ -21,9 +22,15 @@ where
     } else {
         // if we can't connect - refresh urls and try again
         let services = {
-            let mut client = DiscoveryService::connect(config).await?;
-            with_retry!(client.get_services()).with_context(|| "get service urls failed")?
-        };
+            let mut client = api::connect_to_api_service(
+                config,
+                pb::discovery_service_client::DiscoveryServiceClient::with_interceptor,
+            )
+            .await?;
+            with_retry!(client.services(pb::DiscoveryServiceServicesRequest {}))
+                .with_context(|| "get service urls failed")?
+        }
+        .into_inner();
         {
             let mut w_lock = config.write().await;
             w_lock.blockjoy_mqtt_url = Some(services.notification_url);

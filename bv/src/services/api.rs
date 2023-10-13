@@ -1,11 +1,5 @@
 use crate::{
-    config::SharedConfig,
-    get_bv_status,
-    node_data::NodeImage,
-    nodes,
-    nodes::Nodes,
-    pal::Pal,
-    services::api::pb::{Action, ChecksumType, Direction, Protocol, Rule},
+    config::SharedConfig, get_bv_status, node_data::NodeImage, nodes, nodes::Nodes, pal::Pal,
     ServiceStatus,
 };
 use babel_api::{
@@ -17,9 +11,9 @@ use bv_utils::with_retry;
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
-    command_service_client::CommandServiceClient, discovery_service_client::DiscoveryServiceClient,
-    host_service_client::HostServiceClient, manifest_service_client::ManifestServiceClient,
-    metrics_service_client, node_command::Command, node_service_client,
+    auth_service_client, command_service_client::CommandServiceClient, discovery_service_client,
+    host_service_client, manifest_service_client, node_command::Command, node_service_client,
+    Action, AuthServiceRefreshResponse, ChecksumType, Direction, Protocol, Rule,
 };
 use std::{
     fmt::Debug,
@@ -33,8 +27,6 @@ use tonic::{
 };
 use tracing::{error, info, instrument};
 use uuid::Uuid;
-
-use self::pb::{auth_service_client, AuthServiceRefreshResponse};
 
 #[allow(clippy::large_enum_variant)]
 pub mod pb {
@@ -122,14 +114,6 @@ impl AuthToken {
 
 pub type AuthenticatedService = InterceptedService<Channel, AuthToken>;
 
-pub type MetricsClient = metrics_service_client::MetricsServiceClient<AuthenticatedService>;
-
-impl MetricsClient {
-    pub fn with_auth(channel: Channel, token: AuthToken) -> Self {
-        metrics_service_client::MetricsServiceClient::with_interceptor(channel, token)
-    }
-}
-
 pub struct AuthClient {
     client: auth_service_client::AuthServiceClient<Channel>,
 }
@@ -150,20 +134,34 @@ impl AuthClient {
     }
 }
 
+pub async fn connect_to_api_service<T, I>(config: &SharedConfig, with_interceptor: I) -> Result<T>
+where
+    I: Fn(Channel, AuthToken) -> T,
+{
+    let url = config.read().await.blockjoy_api_url;
+    let endpoint = Endpoint::from_str(&url)?;
+    let endpoint = Endpoint::connect(&endpoint)
+        .await
+        .with_context(|| format!("Failed to connect to api service at {url}"))?;
+    Ok(with_interceptor(endpoint, config.token().await?))
+}
+
+pub type NodesServiceClient = node_service_client::NodeServiceClient<AuthenticatedService>;
+pub type DiscoveryServiceClient =
+    discovery_service_client::DiscoveryServiceClient<AuthenticatedService>;
+pub type HostsServiceClient = host_service_client::HostServiceClient<AuthenticatedService>;
+pub type ManifestServiceClient =
+    manifest_service_client::ManifestServiceClient<AuthenticatedService>;
+
 pub struct CommandsService {
     client: CommandServiceClient<AuthenticatedService>,
 }
 
 impl CommandsService {
     pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        let url = config.read().await.blockjoy_api_url;
-        let endpoint = Endpoint::from_str(&url)?;
-        let endpoint = Endpoint::connect(&endpoint)
-            .await
-            .with_context(|| format!("Failed to connect to commands service at {url}"))?;
-        let client = CommandServiceClient::with_interceptor(endpoint, config.token().await?);
-
-        Ok(Self { client })
+        Ok(Self {
+            client: connect_to_api_service(config, CommandServiceClient::with_interceptor).await?,
+        })
     }
 
     pub async fn get_and_process_pending_commands<P: Pal + Debug>(
@@ -404,118 +402,6 @@ async fn process_node_command<P: Pal + Debug>(
     Ok(())
 }
 
-pub struct NodesService {
-    client: node_service_client::NodeServiceClient<AuthenticatedService>,
-}
-
-impl NodesService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        let url = config.read().await.blockjoy_api_url;
-        let endpoint = Endpoint::from_str(&url)?;
-        let endpoint = Endpoint::connect(&endpoint)
-            .await
-            .with_context(|| format!("Failed to connect to node service at {url}"))?;
-        let client = node_service_client::NodeServiceClient::with_interceptor(
-            endpoint,
-            config.token().await?,
-        );
-
-        Ok(Self { client })
-    }
-
-    #[instrument(skip(self))]
-    pub async fn send_node_status_update(
-        &mut self,
-        update: pb::NodeServiceUpdateStatusRequest,
-    ) -> Result<()> {
-        self.client.update_status(update).await?;
-        Ok(())
-    }
-}
-
-pub struct DiscoveryService {
-    client: DiscoveryServiceClient<AuthenticatedService>,
-}
-
-impl DiscoveryService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        let url = &config.read().await.blockjoy_api_url;
-        let endpoint = Endpoint::from_str(url)?;
-        let channel = Endpoint::connect(&endpoint)
-            .await
-            .with_context(|| format!("Failed to connect to discovery service at {url}"))?;
-        let client = DiscoveryServiceClient::with_interceptor(channel, config.token().await?);
-
-        Ok(Self { client })
-    }
-
-    #[instrument(skip(self))]
-    pub async fn get_services(&mut self) -> Result<pb::DiscoveryServiceServicesResponse> {
-        let request = pb::DiscoveryServiceServicesRequest {};
-        Ok(self.client.services(request).await?.into_inner())
-    }
-}
-
-pub struct HostsService {
-    client: HostServiceClient<AuthenticatedService>,
-}
-
-impl HostsService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        let url = &config.read().await.blockjoy_api_url;
-        let endpoint = Endpoint::from_str(url)?;
-        let channel = Endpoint::connect(&endpoint)
-            .await
-            .with_context(|| format!("Failed to connect to discovery service at {url}"))?;
-        let client = HostServiceClient::with_interceptor(channel, config.token().await?);
-        Ok(Self { client })
-    }
-
-    #[instrument(skip(self))]
-    pub async fn update(
-        &mut self,
-        request: pb::HostServiceUpdateRequest,
-    ) -> Result<pb::HostServiceUpdateResponse> {
-        Ok(self.client.update(request).await?.into_inner())
-    }
-}
-
-pub struct ManifestService {
-    client: ManifestServiceClient<AuthenticatedService>,
-}
-
-impl ManifestService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        let url = &config.read().await.blockjoy_api_url;
-        let endpoint = Endpoint::from_str(url)?;
-        let channel = Endpoint::connect(&endpoint)
-            .await
-            .with_context(|| format!("Failed to connect to manifest service at {url}"))?;
-        let client = ManifestServiceClient::with_interceptor(channel, config.token().await?);
-        Ok(Self { client })
-    }
-
-    #[instrument(skip(self))]
-    pub async fn retrieve_manifest(
-        &mut self,
-        image: &NodeImage,
-        network: &str,
-    ) -> Result<DownloadManifest> {
-        let manifest = self
-            .client
-            .retrieve_download_manifest(pb::ManifestServiceRetrieveDownloadManifestRequest {
-                id: Some(image.clone().try_into()?),
-                network: network.to_owned(),
-            })
-            .await?
-            .into_inner();
-        manifest
-            .manifest
-            .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
-            .try_into()
-    }
-}
-
 impl From<pb::ContainerImage> for NodeImage {
     fn from(image: pb::ContainerImage) -> Self {
         Self {
@@ -534,7 +420,7 @@ impl std::fmt::Display for pb::NodeType {
     }
 }
 
-impl std::str::FromStr for pb::NodeType {
+impl FromStr for pb::NodeType {
     type Err = eyre::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {

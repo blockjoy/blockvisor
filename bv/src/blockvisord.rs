@@ -418,7 +418,9 @@ where
                         continue;
                     }
                 };
-                let mut client = api::MetricsClient::with_auth(channel, token);
+                let mut client = pb::metrics_service_client::MetricsServiceClient::with_interceptor(
+                    channel, token,
+                );
                 for (id, metric) in metrics.iter_mut() {
                     // go through all jobs info in metrics and leave only this that has changed
                     // since last time
@@ -479,7 +481,10 @@ where
                             continue;
                         }
                     };
-                    let mut client = api::MetricsClient::with_auth(channel, token);
+                    let mut client =
+                        pb::metrics_service_client::MetricsServiceClient::with_interceptor(
+                            channel, token,
+                        );
                     metrics.set_all_gauges();
                     let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
                     if let Err(e) = client.host(metrics).await {
@@ -501,11 +506,14 @@ where
         config: &SharedConfig,
         update: pb::NodeServiceUpdateStatusRequest,
     ) -> Result<()> {
-        let mut client = api::NodesService::connect(config)
-            .await
-            .with_context(|| "Error connecting to api".to_string())?;
+        let mut client = api::connect_to_api_service(
+            config,
+            pb::node_service_client::NodeServiceClient::with_interceptor,
+        )
+        .await
+        .with_context(|| "Error connecting to api".to_string())?;
         client
-            .send_node_status_update(update)
+            .update_status(update)
             .await
             .with_context(|| "Cannot send node update".to_string())?;
         Ok(())
