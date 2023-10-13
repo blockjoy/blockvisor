@@ -6,7 +6,7 @@ use blockvisord::{
 };
 use predicates::prelude::*;
 use serial_test::serial;
-use std::{fs, net::ToSocketAddrs, path::Path};
+use std::{fs, net::ToSocketAddrs, path::Path, str};
 use tokio::time::{sleep, Duration};
 use tonic::{transport::Server, Request};
 
@@ -246,43 +246,23 @@ async fn test_bv_service_e2e() {
     let blockchain = list.blockchains.first().unwrap();
     println!("got blockchain: {:?}", blockchain);
 
-    let mut node_client = pb::node_service_client::NodeServiceClient::connect(url)
-        .await
-        .unwrap();
-
-    let node_create = pb::NodeServiceCreateRequest {
-        org_id: org_id.to_string(),
-        blockchain_id: blockchain.id.to_string(),
-        version: "0.0.3".to_string(),
-        node_type: 3, // validator
-        properties: vec![pb::NodeProperty {
-            name: "TESTING_PARAM".to_string(),
-            display_name: "TESTING_PARAM".to_string(),
-            ui_type: pb::UiType::Text.into(),
-            disabled: false,
-            required: true,
-            value: "I guess just some test value".to_string(),
-        }],
-        network: "test".to_string(),
-        placement: Some(pb::NodePlacement {
-            placement: Some(pb::node_placement::Placement::Scheduler(
-                pb::NodeScheduler {
-                    similarity: None,
-                    resource: pb::node_scheduler::ResourceAffinity::LeastResources.into(),
-                    region: "europe-bosnia-number-1".to_string(),
-                },
-            )),
-        }),
-        allow_ips: vec![],
-        deny_ips: vec![],
-    };
-    let resp = node_client
-        .create(with_auth(node_create, &auth_token))
-        .await
+    let image = "testing/validator/0.0.3";
+    let stdout = bv_run(&[
+        "node",
+        "create",
+        image,
+        "--props",
+        r#"{"TESTING_PARAM":"I guess just some test value"}"#,
+        "--network",
+        "test",
+    ]);
+    println!("created node: {stdout}");
+    let node_id = stdout
+        .trim_start_matches(&format!("Created new node from `{image}` image with ID "))
+        .split('`')
+        .nth(1)
         .unwrap()
-        .into_inner();
-    println!("created node: {resp:?}");
-    let node_id = resp.node.unwrap().id;
+        .to_string();
 
     println!("list created node, should be auto-started");
     test_env::wait_for_node_status(&node_id, "Running", Duration::from_secs(300), None).await;
@@ -292,36 +272,18 @@ async fn test_bv_service_e2e() {
 
     check_upload_and_download(&node_id);
 
-    let node_stop = pb::NodeServiceStopRequest {
-        id: node_id.clone(),
-    };
-    let resp = node_client
-        .stop(with_auth(node_stop, &auth_token))
-        .await
-        .unwrap()
-        .into_inner();
-    println!("executed stop node command: {resp:?}");
+    let stdout = bv_run(&["node", "stop", &node_id]);
+    println!("executed stop node command: {stdout:?}");
 
     println!("get node status");
     test_env::wait_for_node_status(&node_id, "Stopped", Duration::from_secs(60), None).await;
 
-    let node_delete = pb::NodeServiceDeleteRequest {
-        id: node_id.clone(),
-    };
-    node_client
-        .delete(with_auth(node_delete, &auth_token))
-        .await
-        .unwrap()
-        .into_inner();
+    bv_run(&["node", "delete", &node_id]);
 
     println!("check if node is deleted");
     let is_deleted = || {
-        let mut cmd = Command::cargo_bin("bv").unwrap();
-        cmd.args(["node", "status", &node_id])
-            .env("NO_COLOR", "1")
-            .assert()
-            .try_failure()
-            .is_ok()
+        let stdout = bv_run(&["node", "list"]);
+        stdout.contains(&node_id)
     };
     let start = std::time::Instant::now();
     while !is_deleted() {
@@ -469,4 +431,11 @@ fn sh_inside(node_id: &str, sh_script: &str) -> String {
             .to_owned(),
     )
     .unwrap()
+}
+
+fn bv_run(commands: &[&str]) -> String {
+    let mut cmd = Command::cargo_bin("bv").unwrap();
+    let cmd = cmd.args(commands).env("NO_COLOR", "1");
+    let output = cmd.output().unwrap();
+    str::from_utf8(&output.stdout).unwrap().to_string()
 }

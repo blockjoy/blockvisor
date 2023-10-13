@@ -53,7 +53,8 @@ impl SharedConfig {
                 .get(pb::HostServiceGetRequest {
                     id: host_id.clone(),
                 })
-                .await?
+                .await
+                .with_context(|| "can't get host details from API")?
                 .into_inner()
                 .host
                 .ok_or(anyhow!("host {host_id} not found in API"))?

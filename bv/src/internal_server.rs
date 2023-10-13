@@ -652,7 +652,8 @@ where
             .list(pb::BlockchainServiceListRequest {
                 org_id: Some(org_id.clone()),
             })
-            .await?
+            .await
+            .with_context(|| "can't fetch blockchains list")?
             .into_inner();
         let blockchain_id = blockchains
             .blockchains
@@ -679,7 +680,8 @@ where
                 allow_ips: vec![],
                 deny_ips: vec![],
             })
-            .await?
+            .await
+            .with_context(|| "create node via API failed")?
             .into_inner()
             .node
             .ok_or_else(|| anyhow!("empty node create response from API"))?;
