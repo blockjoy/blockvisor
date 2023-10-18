@@ -1,12 +1,11 @@
 use crate::{
     config::SharedConfig, get_bv_status, node_data::NodeImage, nodes, nodes::Nodes, pal::Pal,
-    ServiceStatus,
+    services, services::AuthenticatedService, ServiceStatus,
 };
 use babel_api::{
     engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation},
     metadata::firewall,
 };
-use base64::Engine;
 use bv_utils::with_retry;
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
@@ -21,10 +20,7 @@ use std::{
     {str::FromStr, sync::Arc},
 };
 use tokio::time::Instant;
-use tonic::{
-    codegen::InterceptedService, service::Interceptor, transport::Channel, transport::Endpoint,
-    Request, Status,
-};
+use tonic::{transport::Channel, transport::Endpoint};
 use tracing::{error, info, instrument};
 use uuid::Uuid;
 
@@ -61,59 +57,6 @@ lazy_static::lazy_static! {
     pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
 }
 
-pub struct AuthToken(pub String);
-
-impl Interceptor for AuthToken {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        let token = &self.0;
-        request
-            .metadata_mut()
-            .insert("authorization", format!("Bearer {token}").parse().unwrap());
-        Ok(request)
-    }
-}
-
-impl AuthToken {
-    pub fn expired(token: &str) -> Result<bool, Status> {
-        let margin = chrono::Duration::minutes(1);
-        Self::expiration(token).map(|exp| exp < chrono::Utc::now() - margin)
-    }
-
-    fn expiration(token: &str) -> Result<chrono::DateTime<chrono::Utc>, Status> {
-        use base64::engine::general_purpose::STANDARD_NO_PAD;
-        use chrono::TimeZone;
-
-        #[derive(serde::Deserialize)]
-        struct Field {
-            exp: i64,
-        }
-
-        let unauth = |s| move || Status::unauthenticated(s);
-        // Take the middle section of the jwt, which has the payload.
-        let middle = token
-            .split('.')
-            .nth(1)
-            .ok_or_else(unauth("Can't parse token"))?;
-        // Base64 decode the payload.
-        let decoded = STANDARD_NO_PAD
-            .decode(middle)
-            .ok()
-            .ok_or_else(unauth("Token is not base64"))?;
-        // Json-parse the payload, with only the `exp` field being of interest.
-        let parsed: Field = serde_json::from_slice(&decoded)
-            .ok()
-            .ok_or_else(unauth("Token is not JSON with exp field"))?;
-        // Now interpret this timestamp as an utc time.
-        match chrono::Utc.timestamp_opt(parsed.exp, 0) {
-            chrono::LocalResult::None => Err(unauth("Invalid timestamp")()),
-            chrono::LocalResult::Single(expiration) => Ok(expiration),
-            chrono::LocalResult::Ambiguous(expiration, _) => Ok(expiration),
-        }
-    }
-}
-
-pub type AuthenticatedService = InterceptedService<Channel, AuthToken>;
-
 pub struct AuthClient {
     client: auth_service_client::AuthServiceClient<Channel>,
 }
@@ -134,18 +77,6 @@ impl AuthClient {
     }
 }
 
-pub async fn connect_to_api_service<T, I>(config: &SharedConfig, with_interceptor: I) -> Result<T>
-where
-    I: Fn(Channel, AuthToken) -> T,
-{
-    let url = config.read().await.blockjoy_api_url;
-    let endpoint = Endpoint::from_str(&url)?;
-    let endpoint = Endpoint::connect(&endpoint)
-        .await
-        .with_context(|| format!("Failed to connect to api service at {url}"))?;
-    Ok(with_interceptor(endpoint, config.token().await?))
-}
-
 pub type NodesServiceClient = node_service_client::NodeServiceClient<AuthenticatedService>;
 pub type DiscoveryServiceClient =
     discovery_service_client::DiscoveryServiceClient<AuthenticatedService>;
@@ -160,7 +91,11 @@ pub struct CommandsService {
 impl CommandsService {
     pub async fn connect(config: &SharedConfig) -> Result<Self> {
         Ok(Self {
-            client: connect_to_api_service(config, CommandServiceClient::with_interceptor).await?,
+            client: services::connect_to_api_service(
+                config,
+                CommandServiceClient::with_interceptor,
+            )
+            .await?,
         })
     }
 

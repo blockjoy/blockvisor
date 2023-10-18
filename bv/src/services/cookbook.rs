@@ -1,15 +1,14 @@
 use crate::{
     config::SharedConfig, node_data::NodeImage, services, services::api::pb,
-    services::api::AuthenticatedService, utils, BV_VAR_PATH,
+    services::AuthenticatedService, utils, BV_VAR_PATH,
 };
 use bv_utils::with_retry;
-use eyre::{anyhow, Context, Result};
+use eyre::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use tokio::{
     fs::{self, File},
     io::AsyncWriteExt,
 };
-use tonic::transport::Endpoint;
 use tracing::{debug, info, instrument};
 
 pub const IMAGES_DIR: &str = "images";
@@ -26,22 +25,14 @@ pub struct CookbookService {
 
 impl CookbookService {
     pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        services::connect(config, |config| async {
-            let url = config.read().await.blockjoy_api_url;
-            let endpoint = Endpoint::from_shared(url.clone())?;
-            let channel = Endpoint::connect(&endpoint)
-                .await
-                .with_context(|| format!("Failed to connect to cookbook service at {url}"))?;
-            let client = pb::cookbook_service_client::CookbookServiceClient::with_interceptor(
-                channel,
-                config.token().await?,
-            );
-            Ok(Self {
-                client,
-                bv_root: config.bv_root.clone(),
-            })
+        Ok(Self {
+            client: services::connect_to_api_service(
+                config,
+                pb::cookbook_service_client::CookbookServiceClient::with_interceptor,
+            )
+            .await?,
+            bv_root: config.bv_root.clone(),
         })
-        .await
     }
 
     #[instrument(skip(self))]

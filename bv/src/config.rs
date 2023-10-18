@@ -1,4 +1,7 @@
-use crate::services::api::{pb, AuthClient, AuthToken};
+use crate::services::{
+    api::{pb, AuthClient},
+    AuthToken,
+};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;

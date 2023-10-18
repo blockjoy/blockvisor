@@ -1,10 +1,4 @@
-use crate::{
-    config::SharedConfig,
-    installer, services,
-    services::api::{pb, AuthToken, AuthenticatedService},
-    utils, BV_VAR_PATH,
-};
-use async_trait::async_trait;
+use crate::{config::SharedConfig, installer, services, services::api::pb, utils, BV_VAR_PATH};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{anyhow, Context, Result};
 use std::{
@@ -14,50 +8,15 @@ use std::{
     time::Duration,
 };
 use tokio::{fs, process::Command};
-use tonic::transport::Channel;
 use tracing::{debug, warn};
 
-const BUNDLES_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const BUNDLES_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DOWNLOADS: &str = "downloads";
 const BUNDLE: &str = "bundle";
 const BUNDLE_FILE: &str = "bundle.tar.gz";
 
-#[async_trait]
-pub trait BundleConnector {
-    async fn connect(&self) -> Result<BundleClient>;
-}
+pub type DefaultConnector = services::DefaultConnector;
 
-pub struct DefaultConnector {
-    config: SharedConfig,
-}
-
-#[async_trait]
-impl BundleConnector for DefaultConnector {
-    async fn connect(&self) -> Result<BundleClient> {
-        services::connect(&self.config, |config| async {
-            let url = config.read().await.blockjoy_api_url;
-            Ok(BundleClient::with_auth(
-                Channel::from_shared(url)?
-                    .timeout(BUNDLES_REQUEST_TIMEOUT)
-                    .connect_timeout(BUNDLES_CONNECT_TIMEOUT)
-                    .connect()
-                    .await?,
-                config.token().await?,
-            ))
-        })
-        .await
-    }
-}
-
-pub type BundleClient = pb::bundle_service_client::BundleServiceClient<AuthenticatedService>;
-
-impl BundleClient {
-    pub fn with_auth(channel: Channel, token: AuthToken) -> Self {
-        pb::bundle_service_client::BundleServiceClient::with_interceptor(channel, token)
-    }
-}
 pub struct SelfUpdater<T, C> {
     blacklist_path: PathBuf,
     download_path: PathBuf,
@@ -93,7 +52,7 @@ pub async fn new<T: AsyncTimer>(
     })
 }
 
-impl<T: AsyncTimer, C: BundleConnector> SelfUpdater<T, C> {
+impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
     pub async fn run(mut self, mut run: RunFlag) {
         if let Some(check_interval) = self.check_interval {
             while run.load() {
@@ -130,7 +89,7 @@ impl<T: AsyncTimer, C: BundleConnector> SelfUpdater<T, C> {
     pub async fn get_latest(&mut self) -> Result<Option<pb::BundleIdentifier>> {
         let mut resp: pb::BundleServiceListBundleVersionsResponse = self
             .bundles
-            .connect()
+            .connect(pb::bundle_service_client::BundleServiceClient::with_interceptor)
             .await
             .with_context(|| "cannot connect to bundle service")?
             .list_bundle_versions(pb::BundleServiceListBundleVersionsRequest {})
@@ -158,7 +117,7 @@ impl<T: AsyncTimer, C: BundleConnector> SelfUpdater<T, C> {
     pub async fn download_and_install(&mut self, bundle: pb::BundleIdentifier) -> Result<()> {
         let archive = self
             .bundles
-            .connect()
+            .connect(pb::bundle_service_client::BundleServiceClient::with_interceptor)
             .await?
             .retrieve(tonic::Request::new(pb::BundleServiceRetrieveRequest {
                 id: Some(bundle),
@@ -190,13 +149,16 @@ impl<T: AsyncTimer, C: BundleConnector> SelfUpdater<T, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::AuthToken;
     use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
+    use async_trait::async_trait;
     use bv_utils::{cmd::run_cmd, timer::MockAsyncTimer};
     use mockall::*;
     use std::ffi::OsStr;
     use std::path::Path;
     use tokio::io::AsyncWriteExt;
+    use tonic::transport::Channel;
     use tonic::Response;
 
     mock! {
@@ -227,9 +189,12 @@ mod tests {
     }
 
     #[async_trait]
-    impl BundleConnector for TestConnector {
-        async fn connect(&self) -> Result<BundleClient> {
-            Ok(BundleClient::with_auth(
+    impl services::ApiServiceConnector for TestConnector {
+        async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
+        where
+            I: Send + Sync + Fn(Channel, AuthToken) -> T,
+        {
+            Ok(with_interceptor(
                 test_channel(&self.tmp_root),
                 AuthToken("test_token".to_owned()),
             ))

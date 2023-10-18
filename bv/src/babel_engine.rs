@@ -1,5 +1,3 @@
-use crate::services::api;
-use crate::services::api::pb;
 /// This module wraps all Babel related functionality. In particular it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
@@ -15,6 +13,8 @@ use crate::{
     node_connection::RPC_REQUEST_TIMEOUT,
     node_data::{NodeImage, NodeProperties},
     pal::NodeConnection,
+    services,
+    services::api::pb,
     utils::with_timeout,
 };
 use babel_api::engine::DownloadManifest;
@@ -527,7 +527,7 @@ async fn retrieve_download_manifest(
     image: NodeImage,
     network: String,
 ) -> Result<DownloadManifest> {
-    let mut manifest_service = api::connect_to_api_service(
+    let mut manifest_service = services::connect_to_api_service(
         config,
         pb::manifest_service_client::ManifestServiceClient::with_interceptor,
     )

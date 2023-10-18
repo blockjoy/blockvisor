@@ -1,6 +1,6 @@
 use crate::config::SharedConfig;
 use crate::linux_platform::bv_root;
-use crate::services::api;
+use crate::services;
 use crate::services::api::pb;
 use crate::BV_VAR_PATH;
 use eyre::{anyhow, Result};
@@ -143,7 +143,7 @@ impl pb::MetricsServiceHostRequest {
 
 pub async fn send_info_update(config: SharedConfig) -> Result<()> {
     let info = HostInfo::collect()?;
-    let mut client = api::connect_to_api_service(
+    let mut client = services::connect_to_api_service(
         &config,
         pb::host_service_client::HostServiceClient::with_interceptor,
     )

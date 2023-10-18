@@ -8,7 +8,7 @@ use crate::{
     nodes::Nodes,
     pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
-    services::{api, api::pb, mqtt},
+    services::{self, api, api::pb, mqtt},
     try_set_bv_status,
     utils::with_jitter,
     ServiceStatus,
@@ -506,7 +506,7 @@ where
         config: &SharedConfig,
         update: pb::NodeServiceUpdateStatusRequest,
     ) -> Result<()> {
-        let mut client = api::connect_to_api_service(
+        let mut client = services::connect_to_api_service(
             config,
             pb::node_service_client::NodeServiceClient::with_interceptor,
         )

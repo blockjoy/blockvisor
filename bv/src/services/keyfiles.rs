@@ -1,10 +1,9 @@
 use crate::{
-    services::api::AuthenticatedService,
+    services::AuthenticatedService,
     {config::SharedConfig, services, services::api::pb},
 };
 use bv_utils::with_retry;
-use eyre::{Context, Result};
-use tonic::transport::Endpoint;
+use eyre::Result;
 use uuid::Uuid;
 
 pub struct KeyService {
@@ -13,19 +12,13 @@ pub struct KeyService {
 
 impl KeyService {
     pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        services::connect(config, |config| async {
-            let url = config.read().await.blockjoy_api_url;
-            let endpoint = Endpoint::from_shared(url.clone())?;
-            let channel = Endpoint::connect(&endpoint)
-                .await
-                .with_context(|| format!("Failed to connect to key service at {url}"))?;
-            let client = pb::key_file_service_client::KeyFileServiceClient::with_interceptor(
-                channel,
-                config.token().await?,
-            );
-            Ok(Self { client })
+        Ok(Self {
+            client: services::connect_to_api_service(
+                config,
+                pb::key_file_service_client::KeyFileServiceClient::with_interceptor,
+            )
+            .await?,
         })
-        .await
     }
 
     pub async fn download_keys(&mut self, node_id: Uuid) -> Result<Vec<pb::Keyfile>> {

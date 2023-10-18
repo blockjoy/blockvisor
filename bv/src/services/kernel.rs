@@ -1,12 +1,11 @@
 use crate::{
-    config::SharedConfig, services, services::api::pb, services::api::AuthenticatedService, utils,
+    config::SharedConfig, services, services::api::pb, services::AuthenticatedService, utils,
     BV_VAR_PATH,
 };
 use bv_utils::with_retry;
-use eyre::{anyhow, Context, Result};
+use eyre::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use tonic::transport::Endpoint;
 use tracing::{debug, info, instrument};
 
 pub const KERNELS_DIR: &str = "kernels";
@@ -20,22 +19,14 @@ pub struct KernelService {
 
 impl KernelService {
     pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        services::connect(config, |config| async {
-            let url = config.read().await.blockjoy_api_url;
-            let endpoint = Endpoint::from_shared(url.clone())?;
-            let channel = Endpoint::connect(&endpoint)
-                .await
-                .with_context(|| format!("Failed to connect to kernel service at {url}"))?;
-            let client = pb::kernel_service_client::KernelServiceClient::with_interceptor(
-                channel,
-                config.token().await?,
-            );
-            Ok(Self {
-                client,
-                bv_root: config.bv_root.clone(),
-            })
+        Ok(Self {
+            client: services::connect_to_api_service(
+                config,
+                pb::kernel_service_client::KernelServiceClient::with_interceptor,
+            )
+            .await?,
+            bv_root: config.bv_root.clone(),
         })
-        .await
     }
 
     #[instrument(skip(self))]
