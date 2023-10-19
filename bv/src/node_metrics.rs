@@ -75,7 +75,7 @@ impl DerefMut for Metrics {
 /// hundres of nanoseconds. Furthermore, we require unique access to the node to query a metric, so
 /// sequentially is easier to program.
 pub async fn collect_metrics<P: Pal + Debug + 'static>(nodes: Arc<Nodes<P>>) -> Metrics {
-    let nodes_lock = nodes.nodes.read().await;
+    let nodes_lock = nodes.nodes_list().await;
     let metrics_fut: Vec<_> = nodes_lock
         .values()
         .map(|n| async {

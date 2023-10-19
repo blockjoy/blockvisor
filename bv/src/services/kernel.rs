@@ -1,7 +1,4 @@
-use crate::{
-    config::SharedConfig, services, services::api::pb, services::AuthenticatedService, utils,
-    BV_VAR_PATH,
-};
+use crate::{services, services::api::pb, services::AuthenticatedService, utils, BV_VAR_PATH};
 use bv_utils::with_retry;
 use eyre::{anyhow, Result};
 use std::path::{Path, PathBuf};
@@ -18,14 +15,15 @@ pub struct KernelService {
 }
 
 impl KernelService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+    pub async fn connect(
+        connector: impl services::ApiServiceConnector,
+        bv_root: PathBuf,
+    ) -> Result<Self> {
         Ok(Self {
-            client: services::connect_to_api_service(
-                config,
-                pb::kernel_service_client::KernelServiceClient::with_interceptor,
-            )
-            .await?,
-            bv_root: config.bv_root.clone(),
+            client: connector
+                .connect(pb::kernel_service_client::KernelServiceClient::with_interceptor)
+                .await?,
+            bv_root,
         })
     }
 

@@ -1,6 +1,6 @@
 use crate::{
-    config::SharedConfig, node_data::NodeImage, services, services::api::pb,
-    services::AuthenticatedService, utils, BV_VAR_PATH,
+    node_data::NodeImage, services, services::api::pb, services::AuthenticatedService, utils,
+    BV_VAR_PATH,
 };
 use bv_utils::with_retry;
 use eyre::{anyhow, Result};
@@ -24,14 +24,15 @@ pub struct CookbookService {
 }
 
 impl CookbookService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+    pub async fn connect(
+        connector: impl services::ApiServiceConnector,
+        bv_root: PathBuf,
+    ) -> Result<Self> {
         Ok(Self {
-            client: services::connect_to_api_service(
-                config,
-                pb::cookbook_service_client::CookbookServiceClient::with_interceptor,
-            )
-            .await?,
-            bv_root: config.bv_root.clone(),
+            client: connector
+                .connect(pb::cookbook_service_client::CookbookServiceClient::with_interceptor)
+                .await?,
+            bv_root,
         })
     }
 

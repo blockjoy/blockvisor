@@ -3,7 +3,7 @@
 ///
 /// It defines `Pal` trait which is top level abstraction that contains definitions of sub layers.
 ///
-use crate::{config::SharedConfig, node_data::NodeData};
+use crate::{config::SharedConfig, node_data::NodeData, services};
 use async_trait::async_trait;
 use eyre::Result;
 use serde::{de::DeserializeOwned, Serialize};
@@ -57,6 +57,11 @@ pub trait Pal {
         &self,
         config: &SharedConfig,
     ) -> Self::CommandsStreamConnector;
+
+    /// Type representing API service connector.
+    type ApiServiceConnector: services::ApiServiceConnector;
+    /// Creates commands stream connector.
+    fn create_api_service_connector(&self, config: &SharedConfig) -> Self::ApiServiceConnector;
 
     /// Type representing node connection.
     type NodeConnection: NodeConnection + Debug;

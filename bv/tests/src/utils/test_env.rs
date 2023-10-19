@@ -1,6 +1,7 @@
 use assert_cmd::assert::AssertResult;
 use assert_cmd::Command;
 use async_trait::async_trait;
+use blockvisord::services::AuthToken;
 use blockvisord::{
     blockvisord::BlockvisorD,
     config::{Config, SharedConfig},
@@ -8,6 +9,7 @@ use blockvisord::{
     node::REGISTRY_CONFIG_DIR,
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
+    services,
     services::{cookbook::IMAGES_DIR, kernel::KERNELS_DIR},
     BV_VAR_PATH,
 };
@@ -24,6 +26,7 @@ use std::{
     time::Duration,
 };
 use tokio::{task::JoinHandle, time::sleep};
+use tonic::transport::Channel;
 use uuid::Uuid;
 
 /// Global integration tests token. All tests (that may run in parallel) share common FS and net
@@ -298,6 +301,11 @@ impl Pal for DummyPlatform {
         EmptyStreamConnector
     }
 
+    type ApiServiceConnector = DummyApiConnector;
+    fn create_api_service_connector(&self, _config: &SharedConfig) -> Self::ApiServiceConnector {
+        DummyApiConnector
+    }
+
     type NodeConnection = blockvisord::node_connection::NodeConnection;
 
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
@@ -322,6 +330,21 @@ impl Pal for DummyPlatform {
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
         firecracker_machine::build_vm_data_path(&self.bv_root, id)
+    }
+}
+
+pub struct DummyApiConnector;
+
+#[async_trait]
+impl services::ApiServiceConnector for DummyApiConnector {
+    async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
+    where
+        I: Send + Sync + Fn(Channel, AuthToken) -> T,
+    {
+        Ok(with_interceptor(
+            Channel::from_static("http://dummy.url").connect_lazy(),
+            AuthToken("test_token".to_owned()),
+        ))
     }
 }
 

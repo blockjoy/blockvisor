@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
+use tokio::sync::RwLockReadGuard;
 use tokio::{
     fs::{self, read_dir},
     sync::RwLock,
@@ -71,8 +72,8 @@ pub struct NodeDataCache {
 
 #[derive(Debug)]
 pub struct Nodes<P: Pal + Debug> {
-    pub api_config: SharedConfig,
-    pub nodes: RwLock<HashMap<Uuid, RwLock<Node<P>>>>,
+    api_config: SharedConfig,
+    nodes: RwLock<HashMap<Uuid, RwLock<Node<P>>>>,
     node_data_cache: RwLock<HashMap<Uuid, NodeDataCache>>,
     node_ids: RwLock<HashMap<String, Uuid>>,
     data: RwLock<CommonData>,
@@ -107,6 +108,10 @@ struct CommonData {
 }
 
 impl<P: Pal + Debug> Nodes<P> {
+    pub async fn nodes_list(&self) -> RwLockReadGuard<'_, HashMap<Uuid, RwLock<Node<P>>>> {
+        self.nodes.read().await
+    }
+
     #[instrument(skip(self))]
     pub async fn create(&self, id: Uuid, config: NodeConfig) -> Result<()> {
         let mut node_ids = self.node_ids.write().await;
@@ -299,9 +304,12 @@ impl<P: Pal + Debug> Nodes<P> {
             .await
             .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
         {
-            let mut cookbook_service = CookbookService::connect(&self.api_config)
-                .await
-                .with_context(|| "cannot connect to cookbook service")?;
+            let mut cookbook_service = CookbookService::connect(
+                self.pal.create_api_service_connector(&self.api_config),
+                bv_root.to_path_buf(),
+            )
+            .await
+            .with_context(|| "cannot connect to cookbook service")?;
             cookbook_service
                 .download_babel_plugin(image)
                 .await
@@ -319,9 +327,12 @@ impl<P: Pal + Debug> Nodes<P> {
             .await
             .with_context(|| format!("Failed to check kernel cache: `{}`", meta.kernel))?
         {
-            let mut kernel_service = KernelService::connect(&self.api_config)
-                .await
-                .with_context(|| "cannot connect to kernel service")?;
+            let mut kernel_service = KernelService::connect(
+                self.pal.create_api_service_connector(&self.api_config),
+                bv_root.to_path_buf(),
+            )
+            .await
+            .with_context(|| "cannot connect to kernel service")?;
             kernel_service
                 .download_kernel(&meta.kernel)
                 .await
@@ -653,7 +664,8 @@ impl<P: Pal + Debug> Nodes<P> {
     /// Synchronizes the keys in the key server with the keys available locally. Returns a
     /// refreshed set of all keys.
     async fn exchange_keys(&self, node: &mut Node<P>) -> Result<HashMap<String, Vec<u8>>> {
-        let mut key_service = KeyService::connect(&self.api_config).await?;
+        let mut key_service =
+            KeyService::connect(self.pal.create_api_service_connector(&self.api_config)).await?;
 
         let api_keys: HashMap<String, Vec<u8>> = key_service
             .download_keys(node.id())

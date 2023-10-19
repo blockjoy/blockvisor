@@ -30,13 +30,15 @@ async fn main() -> Result<()> {
     let config = Config::load(&bv_root).await?;
     let listener = TcpListener::bind(format!("0.0.0.0:{}", config.blockvisor_port)).await?;
 
-    let nodes = Nodes::load(pal, SharedConfig::new(config, bv_root)).await?;
+    let config = SharedConfig::new(config, bv_root);
+    let nodes = Nodes::load(pal, config.clone()).await?;
     let nodes = Arc::new(nodes);
 
     Server::builder()
         .max_concurrent_streams(1)
         .add_service(internal_server::service_server::ServiceServer::new(
             internal_server::State {
+                config,
                 nodes,
                 cluster: Arc::new(None),
                 dev_mode: true,

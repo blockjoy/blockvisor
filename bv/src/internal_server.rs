@@ -1,3 +1,4 @@
+use crate::config::SharedConfig;
 use crate::{
     cluster::ClusterData,
     config::Config,
@@ -74,6 +75,7 @@ trait Service {
 }
 
 pub struct State<P: Pal + Debug> {
+    pub config: SharedConfig,
     pub nodes: Arc<Nodes<P>>,
     pub cluster: Arc<Option<ClusterData>>,
     pub dev_mode: bool,
@@ -94,6 +96,7 @@ where
     P: Pal + Debug + Send + Sync + 'static,
     P::NetInterface: Send + Sync + 'static,
     P::NodeConnection: Send + Sync + 'static,
+    P::ApiServiceConnector: Send + Sync + 'static,
     P::VirtualMachine: Send + Sync + 'static,
 {
     #[instrument(skip(self), ret(Debug))]
@@ -146,7 +149,7 @@ where
     async fn get_node(&self, request: Request<Uuid>) -> Result<Response<NodeDisplayInfo>, Status> {
         status_check().await?;
         let id = request.into_inner();
-        let nodes_lock = self.nodes.nodes.read().await;
+        let nodes_lock = self.nodes.nodes_list().await;
         if let Some(node_lock) = nodes_lock.get(&id) {
             Ok(Response::new(
                 self.get_node_display_info(id, node_lock)
@@ -164,7 +167,7 @@ where
         _request: Request<()>,
     ) -> Result<Response<Vec<NodeDisplayInfo>>, Status> {
         status_check().await?;
-        let nodes_lock = self.nodes.nodes.read().await;
+        let nodes_lock = self.nodes.nodes_list().await;
         let mut nodes = vec![];
         for (id, node_lock) in nodes_lock.iter() {
             nodes.push(
@@ -213,17 +216,6 @@ where
     }
 
     #[instrument(skip(self), ret(Debug))]
-    async fn delete_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
-        status_check().await?;
-        let id = request.into_inner();
-        self.nodes
-            .delete(id)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
-        Ok(Response::new(()))
-    }
-
-    #[instrument(skip(self), ret(Debug))]
     async fn start_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
         status_check().await?;
         let id = request.into_inner();
@@ -240,6 +232,17 @@ where
         let (id, force) = request.into_inner();
         self.nodes
             .stop(id, force)
+            .await
+            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        Ok(Response::new(()))
+    }
+
+    #[instrument(skip(self), ret(Debug))]
+    async fn delete_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
+        status_check().await?;
+        let id = request.into_inner();
+        self.nodes
+            .delete(id)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
         Ok(Response::new(()))
@@ -497,7 +500,7 @@ where
     ) -> eyre::Result<NodeDisplayInfo> {
         let id = Uuid::new_v4();
         let mut used_ips = vec![];
-        for (_, node) in self.nodes.nodes.read().await.iter() {
+        for (_, node) in self.nodes.nodes_list().await.iter() {
             used_ips.push(node.read().await.data.network_interface.ip().to_string());
         }
         let props: HashMap<String, String> = req
@@ -510,7 +513,7 @@ where
             .into_iter()
             .chain([("network".to_string(), req.network.clone())])
             .collect();
-        let net = utils::discover_net_params(&self.nodes.api_config.read().await.iface)
+        let net = utils::discover_net_params(&self.config.read().await.iface)
             .await
             .unwrap_or_default();
         let ip = match req.ip {

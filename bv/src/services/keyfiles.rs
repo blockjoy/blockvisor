@@ -1,6 +1,6 @@
 use crate::{
     services::AuthenticatedService,
-    {config::SharedConfig, services, services::api::pb},
+    {services, services::api::pb},
 };
 use bv_utils::with_retry;
 use eyre::Result;
@@ -11,13 +11,11 @@ pub struct KeyService {
 }
 
 impl KeyService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
+    pub async fn connect(connector: impl services::ApiServiceConnector) -> Result<Self> {
         Ok(Self {
-            client: services::connect_to_api_service(
-                config,
-                pb::key_file_service_client::KeyFileServiceClient::with_interceptor,
-            )
-            .await?,
+            client: connector
+                .connect(pb::key_file_service_client::KeyFileServiceClient::with_interceptor)
+                .await?,
         })
     }
 

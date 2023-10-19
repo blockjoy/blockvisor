@@ -113,6 +113,13 @@ impl Pal for LinuxPlatform {
         }
     }
 
+    type ApiServiceConnector = services::DefaultConnector;
+    fn create_api_service_connector(&self, config: &SharedConfig) -> Self::ApiServiceConnector {
+        services::DefaultConnector {
+            config: config.clone(),
+        }
+    }
+
     type NodeConnection = node_connection::NodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
         node_connection::new(&self.bv_root.join(BV_VAR_PATH), node_id)

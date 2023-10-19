@@ -65,6 +65,7 @@ where
     P: Pal + Send + Sync + Debug + 'static,
     P::NetInterface: Send + Sync + Clone,
     P::NodeConnection: Send + Sync,
+    P::ApiServiceConnector: Send + Sync,
     P::VirtualMachine: Send + Sync,
 {
     pub async fn new(pal: P) -> Result<Self> {
@@ -120,6 +121,7 @@ where
         try_set_bv_status(ServiceStatus::Ok).await;
 
         let internal_api_server_future = Self::create_internal_api_server(
+            self.config.clone(),
             run.clone(),
             self.listener,
             nodes.clone(),
@@ -171,6 +173,7 @@ where
     }
 
     async fn create_internal_api_server(
+        config: SharedConfig,
         mut run: RunFlag,
         listener: TcpListener,
         nodes: Arc<Nodes<P>>,
@@ -180,6 +183,7 @@ where
             .max_concurrent_streams(1)
             .add_service(internal_server::service_server::ServiceServer::new(
                 internal_server::State {
+                    config,
                     nodes,
                     cluster,
                     dev_mode: false,
@@ -269,7 +273,7 @@ where
             if let Some(ref cluster) = *cluster {
                 // collect interesting information about nodes
                 let mut updates = vec![];
-                for (id, node) in nodes.nodes.read().await.iter() {
+                for (id, node) in nodes.nodes_list().await.iter() {
                     if let Ok(node) = node.try_read() {
                         let status = node.status();
                         let image = node.data.image.clone();
@@ -322,7 +326,7 @@ where
 
             let now = Instant::now();
             let mut updates = vec![];
-            for (id, node) in nodes.nodes.read().await.iter() {
+            for (id, node) in nodes.nodes_list().await.iter() {
                 if let Ok(mut node) = node.try_write() {
                     if node.data.standalone {
                         // don't send updates for standalone nodes

@@ -11,6 +11,7 @@ use crate::{
     node::REGISTRY_CONFIG_DIR,
     node_data::{NodeImage, NodeStatus},
     pretty_table::{PrettyTable, PrettyTableRow},
+    services,
     services::cookbook::{
         CookbookService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOT_FS_FILE,
     },
@@ -501,7 +502,7 @@ pub async fn process_image_command(bv_url: String, command: ImageCommand) -> Res
 
 pub async fn process_chain_command(command: ChainCommand) -> Result<()> {
     let bv_root = bv_root();
-    let config = SharedConfig::new(Config::load(&bv_root).await?, bv_root);
+    let config = SharedConfig::new(Config::load(&bv_root).await?, bv_root.clone());
 
     match command {
         ChainCommand::List {
@@ -509,7 +510,8 @@ pub async fn process_chain_command(command: ChainCommand) -> Result<()> {
             r#type,
             number,
         } => {
-            let mut cookbook_service = CookbookService::connect(&config).await?;
+            let mut cookbook_service =
+                CookbookService::connect(services::DefaultConnector { config }, bv_root).await?;
             let mut versions = cookbook_service.list_versions(&protocol, &r#type).await?;
 
             versions.truncate(number);
