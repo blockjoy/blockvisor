@@ -287,9 +287,6 @@ async fn test_bv_service_e2e() {
     println!("list created node, should be auto-started");
     test_env::wait_for_node_status(&node_id, "Running", Duration::from_secs(300), None).await;
 
-    println!("check node keys");
-    test_env::bv_run(&["node", "keys", &node_id], "first", None);
-
     check_upload_and_download(&node_id);
 
     let node_stop = pb::NodeServiceStopRequest {

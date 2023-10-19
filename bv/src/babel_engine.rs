@@ -172,6 +172,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     pub async fn init(&mut self, secret_keys: HashMap<String, Vec<u8>>) -> Result<()> {
+        // TODO get rid of all key exchange related code
         let mut node_keys = self
             .node_info
             .properties

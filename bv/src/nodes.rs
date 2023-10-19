@@ -8,7 +8,7 @@ use eyre::{anyhow, bail, Context, Result};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::Debug,
     net::IpAddr,
     path::{Path, PathBuf},
@@ -32,10 +32,8 @@ use crate::{
     node_metrics,
     pal::{NetInterface, Pal},
     services::{
-        api::pb,
         cookbook::{CookbookService, BABEL_PLUGIN_NAME},
         kernel::KernelService,
-        keyfiles::KeyService,
     },
     utils, BV_VAR_PATH,
 };
@@ -43,16 +41,18 @@ use crate::{
 pub const REGISTRY_CONFIG_FILENAME: &str = "nodes.json";
 const MAX_SUPPORTED_RULES: usize = 128;
 
-fn id_not_found(id: Uuid) -> eyre::Error {
-    anyhow!("Node with id `{}` not found", id)
-}
-
-fn name_not_found(name: &str) -> eyre::Error {
-    anyhow!("Node with name `{}` not found", name)
-}
-
 pub fn build_registry_filename(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_FILENAME)
+}
+
+#[derive(Debug)]
+pub struct Nodes<P: Pal + Debug> {
+    api_config: SharedConfig,
+    nodes: RwLock<HashMap<Uuid, RwLock<Node<P>>>>,
+    node_data_cache: RwLock<HashMap<Uuid, NodeDataCache>>,
+    node_ids: RwLock<HashMap<String, Uuid>>,
+    state: RwLock<State>,
+    pal: Arc<P>,
 }
 
 /// Container with some shallow information about the node
@@ -68,16 +68,6 @@ pub struct NodeDataCache {
     pub gateway: String,
     pub started_at: Option<DateTime<Utc>>,
     pub standalone: bool,
-}
-
-#[derive(Debug)]
-pub struct Nodes<P: Pal + Debug> {
-    api_config: SharedConfig,
-    nodes: RwLock<HashMap<Uuid, RwLock<Node<P>>>>,
-    node_data_cache: RwLock<HashMap<Uuid, NodeDataCache>>,
-    node_ids: RwLock<HashMap<String, Uuid>>,
-    data: RwLock<CommonData>,
-    pal: Arc<P>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -103,13 +93,60 @@ pub enum BabelError {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-struct CommonData {
+struct State {
     machine_index: u32,
 }
 
 impl<P: Pal + Debug> Nodes<P> {
+    pub async fn load(pal: P, api_config: SharedConfig) -> Result<Self> {
+        let bv_root = pal.bv_root();
+        let registry_dir = build_registry_dir(bv_root);
+        if !registry_dir.exists() {
+            fs::create_dir_all(&registry_dir).await?;
+        }
+        let registry_path = build_registry_filename(bv_root);
+        let pal = Arc::new(pal);
+        Ok(if registry_path.exists() {
+            let data = Self::load_data(&registry_path).await?;
+            let (nodes, node_ids, node_data_cache) =
+                Self::load_nodes(pal.clone(), api_config.clone(), &registry_dir).await?;
+
+            Self {
+                api_config,
+                state: RwLock::new(data),
+                nodes: RwLock::new(nodes),
+                node_ids: RwLock::new(node_ids),
+                node_data_cache: RwLock::new(node_data_cache),
+                pal,
+            }
+        } else {
+            let nodes = Self {
+                api_config,
+                state: RwLock::new(State { machine_index: 0 }),
+                nodes: Default::default(),
+                node_ids: Default::default(),
+                node_data_cache: Default::default(),
+                pal,
+            };
+            nodes.save_state().await?;
+            nodes
+        })
+    }
+
     pub async fn nodes_list(&self) -> RwLockReadGuard<'_, HashMap<Uuid, RwLock<Node<P>>>> {
         self.nodes.read().await
+    }
+
+    pub async fn node_id_for_name(&self, name: &str) -> Result<Uuid> {
+        let uuid = self
+            .node_ids
+            .read()
+            .await
+            .get(name)
+            .copied()
+            .ok_or_else(|| name_not_found(name))?;
+
+        Ok(uuid)
     }
 
     #[instrument(skip(self))]
@@ -182,7 +219,7 @@ impl<P: Pal + Debug> Nodes<P> {
             initialized: false,
             standalone: config.standalone,
         };
-        self.save().await?;
+        self.save_state().await?;
 
         let node = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
         self.nodes.write().await.insert(id, RwLock::new(node));
@@ -232,115 +269,14 @@ impl<P: Pal + Debug> Nodes<P> {
                 .write()
                 .await;
 
-            let need_to_restart = node.status() == NodeStatus::Running;
-            self.node_stop(&mut node, false).await?;
-
             node.upgrade(&image).await?;
-            debug!("Node upgraded");
 
             let mut cache = self.node_data_cache.write().await;
             cache.entry(id).and_modify(|data| {
                 data.image = image;
             });
-
-            if need_to_restart {
-                self.node_start(&mut node).await?;
-            }
         }
         Ok(())
-    }
-
-    /// Check if we have enough resources on the host to create/upgrade the node
-    ///
-    /// Optinal tolerance parameter is useful if we want to allow some overbooking.
-    /// It also can be used if we want to upgrade the node that exists.
-    #[instrument(skip(self))]
-    async fn check_node_requirements(
-        &self,
-        requirements: &Requirements,
-        tolerance: Option<&Requirements>,
-    ) -> Result<()> {
-        let host_info = HostInfo::collect()?;
-
-        let mut allocated_disk_size_gb = 0;
-        let mut allocated_mem_size_mb = 0;
-        let mut allocated_vcpu_count = 0;
-        for n in self.nodes.read().await.values() {
-            let node = n.read().await;
-            allocated_disk_size_gb += node.data.requirements.disk_size_gb;
-            allocated_mem_size_mb += node.data.requirements.mem_size_mb;
-            allocated_vcpu_count += node.data.requirements.vcpu_count;
-        }
-
-        let mut total_disk_size_gb = host_info.disk_space_bytes as usize / 1_000_000_000;
-        let mut total_mem_size_mb = host_info.memory_bytes as usize / 1_000_000;
-        let mut total_vcpu_count = host_info.cpu_count;
-        if let Some(tol) = tolerance {
-            total_disk_size_gb += tol.disk_size_gb;
-            total_mem_size_mb += tol.mem_size_mb;
-            total_vcpu_count += tol.vcpu_count;
-        }
-
-        if (allocated_disk_size_gb + requirements.disk_size_gb) > total_disk_size_gb {
-            bail!("Not enough disk space to allocate for the node");
-        }
-        if (allocated_mem_size_mb + requirements.mem_size_mb) > total_mem_size_mb {
-            bail!("Not enough memory to allocate for the node");
-        }
-        if (allocated_vcpu_count + requirements.vcpu_count) > total_vcpu_count {
-            bail!("Not enough vcpu to allocate for the node");
-        }
-
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    async fn fetch_image_data(&self, image: &NodeImage) -> Result<BlockchainMetadata> {
-        let bv_root = self.pal.bv_root();
-        let folder = CookbookService::get_image_download_folder_path(bv_root, image);
-        let rhai_path = folder.join(BABEL_PLUGIN_NAME);
-
-        let script = if !CookbookService::is_image_cache_valid(bv_root, image)
-            .await
-            .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
-        {
-            let mut cookbook_service = CookbookService::connect(
-                self.pal.create_api_service_connector(&self.api_config),
-                bv_root.to_path_buf(),
-            )
-            .await
-            .with_context(|| "cannot connect to cookbook service")?;
-            cookbook_service
-                .download_babel_plugin(image)
-                .await
-                .with_context(|| "cannot download babel plugin")?;
-            cookbook_service
-                .download_image(image)
-                .await
-                .with_context(|| "cannot download image")?;
-            fs::read_to_string(rhai_path).await?
-        } else {
-            fs::read_to_string(rhai_path).await?
-        };
-        let meta = rhai_plugin::read_metadata(&script)?;
-        if !KernelService::is_kernel_cache_valid(bv_root, &meta.kernel)
-            .await
-            .with_context(|| format!("Failed to check kernel cache: `{}`", meta.kernel))?
-        {
-            let mut kernel_service = KernelService::connect(
-                self.pal.create_api_service_connector(&self.api_config),
-                bv_root.to_path_buf(),
-            )
-            .await
-            .with_context(|| "cannot connect to kernel service")?;
-            kernel_service
-                .download_kernel(&meta.kernel)
-                .await
-                .with_context(|| "cannot download kernel")?;
-        }
-
-        info!("Reading blockchain requirements: {:?}", &meta.requirements);
-        Ok(meta)
     }
 
     #[instrument(skip(self))]
@@ -368,30 +304,25 @@ impl<P: Pal + Debug> Nodes<P> {
                 .await
                 .map_err(|err| BabelError::Internal { err })?;
         }
-        self.node_start(&mut node).await
-    }
-
-    async fn node_start(&self, node: &mut Node<P>) -> Result<()> {
         if NodeStatus::Running != node.expected_status() {
             node.start().await?;
-            debug!("Node started");
+        }
+        Ok(())
+    }
 
-            if !node.data.initialized {
-                let secret_keys = match self.exchange_keys(node).await {
-                    Ok(secret_keys) => secret_keys,
-                    Err(e) => {
-                        error!("Failed to retrieve keys when starting node: `{e}`");
-                        HashMap::new()
-                    }
-                };
-
-                node.babel_engine.init(secret_keys).await?;
-                node.data.initialized = true;
-                node.data.save(self.pal.bv_root()).await?;
-            }
-            // We save the `running` status only after all of the previous steps have succeeded.
-            node.set_expected_status(NodeStatus::Running).await?;
-            node.set_started_at(Some(Utc::now())).await?;
+    #[instrument(skip(self))]
+    pub async fn stop(&self, id: Uuid, force: bool) -> Result<()> {
+        let nodes_lock = self.nodes.read().await;
+        let mut node = nodes_lock
+            .get(&id)
+            .ok_or_else(|| id_not_found(id))?
+            .write()
+            .await;
+        if NodeStatus::Stopped != node.expected_status() || force {
+            node.stop(force).await?;
+            debug!("Node stopped");
+            node.set_expected_status(NodeStatus::Stopped).await?;
+            node.set_started_at(None).await?;
         }
         Ok(())
     }
@@ -406,6 +337,58 @@ impl<P: Pal + Debug> Nodes<P> {
             .write()
             .await;
         node.update(rules).await
+    }
+
+    #[instrument(skip(self))]
+    pub async fn status(&self, id: Uuid) -> Result<NodeStatus> {
+        let nodes = self.nodes.read().await;
+        let node = nodes.get(&id).ok_or_else(|| id_not_found(id))?.read().await;
+        Ok(node.status())
+    }
+
+    #[instrument(skip(self))]
+    async fn expected_status(&self, id: Uuid) -> Result<NodeStatus> {
+        let nodes = self.nodes.read().await;
+        let node = nodes.get(&id).ok_or_else(|| id_not_found(id))?.read().await;
+        Ok(node.expected_status())
+    }
+
+    /// Recovery helps nodes to achieve expected state,
+    /// in case of actual state and expected state do not match.
+    ///
+    /// There are several types of recovery:
+    /// - Node is stopped, but should be running - in that case we try to start the node
+    /// - Node is started, but should be stopped - stop the node
+    /// - Node is created, but data files are corrupted - recreate the node
+    #[instrument(skip(self))]
+    pub async fn recover(&self) -> Result<()> {
+        let nodes_lock = self.nodes.read().await;
+        let mut nodes_to_recreate = vec![];
+        for (id, node_lock) in nodes_lock.iter() {
+            if let Ok(mut node) = node_lock.try_write() {
+                if node.status() == NodeStatus::Failed
+                    && node.expected_status() != NodeStatus::Failed
+                {
+                    if !node.is_data_valid().await? {
+                        nodes_to_recreate.push(node.data.clone());
+                    } else if let Err(e) = node.recover().await {
+                        error!("Recovery: node with ID `{id}` failed: {e}");
+                    }
+                }
+            }
+        }
+        drop(nodes_lock);
+        for node_data in nodes_to_recreate {
+            let id = node_data.id;
+            // If some files are corrupted, the files will be recreated.
+            // Some intermediate data could be lost in that case.
+            self.fetch_image_data(&node_data.image).await?;
+            let new = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
+            self.nodes.write().await.insert(id, RwLock::new(new));
+            info!("Recovery: node with ID `{id}` recreated");
+        }
+
+        Ok(())
     }
 
     #[instrument(skip(self))]
@@ -556,40 +539,97 @@ impl<P: Pal + Debug> Nodes<P> {
         }
     }
 
+    /// Check if we have enough resources on the host to create/upgrade the node
+    ///
+    /// Optinal tolerance parameter is useful if we want to allow some overbooking.
+    /// It also can be used if we want to upgrade the node that exists.
     #[instrument(skip(self))]
-    pub async fn stop(&self, id: Uuid, force: bool) -> Result<()> {
-        let nodes_lock = self.nodes.read().await;
-        let mut node = nodes_lock
-            .get(&id)
-            .ok_or_else(|| id_not_found(id))?
-            .write()
-            .await;
+    async fn check_node_requirements(
+        &self,
+        requirements: &Requirements,
+        tolerance: Option<&Requirements>,
+    ) -> Result<()> {
+        let host_info = HostInfo::collect()?;
 
-        self.node_stop(&mut node, force).await
-    }
-
-    async fn node_stop(&self, node: &mut Node<P>, force: bool) -> Result<()> {
-        if NodeStatus::Stopped != node.expected_status() || force {
-            node.stop(force).await?;
-            debug!("Node stopped");
-            node.set_expected_status(NodeStatus::Stopped).await?;
-            node.set_started_at(None).await?;
+        let mut allocated_disk_size_gb = 0;
+        let mut allocated_mem_size_mb = 0;
+        let mut allocated_vcpu_count = 0;
+        for n in self.nodes.read().await.values() {
+            let node = n.read().await;
+            allocated_disk_size_gb += node.data.requirements.disk_size_gb;
+            allocated_mem_size_mb += node.data.requirements.mem_size_mb;
+            allocated_vcpu_count += node.data.requirements.vcpu_count;
         }
+
+        let mut total_disk_size_gb = host_info.disk_space_bytes as usize / 1_000_000_000;
+        let mut total_mem_size_mb = host_info.memory_bytes as usize / 1_000_000;
+        let mut total_vcpu_count = host_info.cpu_count;
+        if let Some(tol) = tolerance {
+            total_disk_size_gb += tol.disk_size_gb;
+            total_mem_size_mb += tol.mem_size_mb;
+            total_vcpu_count += tol.vcpu_count;
+        }
+
+        if (allocated_disk_size_gb + requirements.disk_size_gb) > total_disk_size_gb {
+            bail!("Not enough disk space to allocate for the node");
+        }
+        if (allocated_mem_size_mb + requirements.mem_size_mb) > total_mem_size_mb {
+            bail!("Not enough memory to allocate for the node");
+        }
+        if (allocated_vcpu_count + requirements.vcpu_count) > total_vcpu_count {
+            bail!("Not enough vcpu to allocate for the node");
+        }
+
         Ok(())
     }
 
     #[instrument(skip(self))]
-    pub async fn status(&self, id: Uuid) -> Result<NodeStatus> {
-        let nodes = self.nodes.read().await;
-        let node = nodes.get(&id).ok_or_else(|| id_not_found(id))?.read().await;
-        Ok(node.status())
-    }
+    async fn fetch_image_data(&self, image: &NodeImage) -> Result<BlockchainMetadata> {
+        let bv_root = self.pal.bv_root();
+        let folder = CookbookService::get_image_download_folder_path(bv_root, image);
+        let rhai_path = folder.join(BABEL_PLUGIN_NAME);
 
-    #[instrument(skip(self))]
-    async fn expected_status(&self, id: Uuid) -> Result<NodeStatus> {
-        let nodes = self.nodes.read().await;
-        let node = nodes.get(&id).ok_or_else(|| id_not_found(id))?.read().await;
-        Ok(node.expected_status())
+        let script = if !CookbookService::is_image_cache_valid(bv_root, image)
+            .await
+            .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
+        {
+            let mut cookbook_service = CookbookService::connect(
+                self.pal.create_api_service_connector(&self.api_config),
+                bv_root.to_path_buf(),
+            )
+            .await
+            .with_context(|| "cannot connect to cookbook service")?;
+            cookbook_service
+                .download_babel_plugin(image)
+                .await
+                .with_context(|| "cannot download babel plugin")?;
+            cookbook_service
+                .download_image(image)
+                .await
+                .with_context(|| "cannot download image")?;
+            fs::read_to_string(rhai_path).await?
+        } else {
+            fs::read_to_string(rhai_path).await?
+        };
+        let meta = rhai_plugin::read_metadata(&script)?;
+        if !KernelService::is_kernel_cache_valid(bv_root, &meta.kernel)
+            .await
+            .with_context(|| format!("Failed to check kernel cache: `{}`", meta.kernel))?
+        {
+            let mut kernel_service = KernelService::connect(
+                self.pal.create_api_service_connector(&self.api_config),
+                bv_root.to_path_buf(),
+            )
+            .await
+            .with_context(|| "cannot connect to kernel service")?;
+            kernel_service
+                .download_kernel(&meta.kernel)
+                .await
+                .with_context(|| "cannot download kernel")?;
+        }
+
+        info!("Reading blockchain requirements: {:?}", &meta.requirements);
+        Ok(meta)
     }
 
     #[instrument(skip(self))]
@@ -611,165 +651,7 @@ impl<P: Pal + Debug> Nodes<P> {
         Ok(cache)
     }
 
-    /// Recovery helps nodes to achieve expected state,
-    /// in case of actual state and expected state do not match.
-    ///
-    /// There are several types of recovery:
-    /// - Node is stopped, but should be running - in that case we try to start the node
-    /// - Node is started, but should be stopped - stop the node
-    /// - Node is created, but data files are corrupted - recreate the node
-    #[instrument(skip(self))]
-    pub async fn recover(&self) -> Result<()> {
-        let nodes_lock = self.nodes.read().await;
-        let mut nodes_to_recreate = vec![];
-        for (id, node_lock) in nodes_lock.iter() {
-            if let Ok(mut node) = node_lock.try_write() {
-                if node.status() == NodeStatus::Failed
-                    && node.expected_status() != NodeStatus::Failed
-                {
-                    if !node.is_data_valid().await? {
-                        nodes_to_recreate.push(node.data.clone());
-                    } else if let Err(e) = node.recover().await {
-                        error!("Recovery: node with ID `{id}` failed: {e}");
-                    }
-                }
-            }
-        }
-        drop(nodes_lock);
-        for node_data in nodes_to_recreate {
-            let id = node_data.id;
-            // If some files are corrupted, the files will be recreated.
-            // Some intermediate data could be lost in that case.
-            self.fetch_image_data(&node_data.image).await?;
-            let new = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
-            self.nodes.write().await.insert(id, RwLock::new(new));
-            info!("Recovery: node with ID `{id}` recreated");
-        }
-
-        Ok(())
-    }
-
-    pub async fn node_id_for_name(&self, name: &str) -> Result<Uuid> {
-        let uuid = self
-            .node_ids
-            .read()
-            .await
-            .get(name)
-            .copied()
-            .ok_or_else(|| name_not_found(name))?;
-
-        Ok(uuid)
-    }
-
-    /// Synchronizes the keys in the key server with the keys available locally. Returns a
-    /// refreshed set of all keys.
-    async fn exchange_keys(&self, node: &mut Node<P>) -> Result<HashMap<String, Vec<u8>>> {
-        let mut key_service =
-            KeyService::connect(self.pal.create_api_service_connector(&self.api_config)).await?;
-
-        let api_keys: HashMap<String, Vec<u8>> = key_service
-            .download_keys(node.id())
-            .await?
-            .into_iter()
-            .map(|k| (k.name, k.content))
-            .collect();
-        let api_keys_set: HashSet<&String> = HashSet::from_iter(api_keys.keys());
-        debug!("Received API keys: {api_keys_set:?}");
-
-        let node_keys: HashMap<String, Vec<u8>> = node
-            .babel_engine
-            .download_keys()
-            .await?
-            .into_iter()
-            .map(|k| (k.name, k.content))
-            .collect();
-        let node_keys_set: HashSet<&String> = HashSet::from_iter(node_keys.keys());
-        debug!("Received Node keys: {node_keys_set:?}");
-
-        // Keys present in API, but not on Node, will be sent to Node
-        let keys1: Vec<_> = api_keys_set
-            .difference(&node_keys_set)
-            .map(|n| babel_api::babel::BlockchainKey {
-                name: n.to_string(),
-                content: api_keys.get(*n).unwrap().to_vec(), // checked
-            })
-            .collect();
-        if !keys1.is_empty() {
-            node.babel_engine.upload_keys(keys1).await?;
-        }
-
-        // Keys present on Node, but not in API, will be sent to API
-        let keys2: Vec<_> = node_keys_set
-            .difference(&api_keys_set)
-            .map(|n| pb::Keyfile {
-                name: n.to_string(),
-                content: node_keys.get(*n).unwrap().to_vec(), // checked
-            })
-            .collect();
-        if !keys2.is_empty() {
-            key_service.upload_keys(node.id(), keys2).await?;
-        }
-
-        // Generate keys if we should (and can)
-        if api_keys_set.is_empty()
-            && node_keys_set.is_empty()
-            && node.babel_engine.has_capability("generate_keys").await?
-        {
-            node.babel_engine.generate_keys().await?;
-            let gen_keys: Vec<_> = node
-                .babel_engine
-                .download_keys()
-                .await?
-                .into_iter()
-                .map(|k| pb::Keyfile {
-                    name: k.name,
-                    content: k.content,
-                })
-                .collect();
-            key_service.upload_keys(node.id(), gen_keys.clone()).await?;
-            return Ok(gen_keys.into_iter().map(|k| (k.name, k.content)).collect());
-        }
-
-        let all_keys = api_keys.into_iter().chain(node_keys.into_iter()).collect();
-        Ok(all_keys)
-    }
-
-    pub async fn load(pal: P, api_config: SharedConfig) -> Result<Self> {
-        let bv_root = pal.bv_root();
-        let registry_dir = build_registry_dir(bv_root);
-        if !registry_dir.exists() {
-            fs::create_dir_all(&registry_dir).await?;
-        }
-        let registry_path = build_registry_filename(bv_root);
-        let pal = Arc::new(pal);
-        Ok(if registry_path.exists() {
-            let data = Self::load_data(&registry_path).await?;
-            let (nodes, node_ids, node_data_cache) =
-                Self::load_nodes(pal.clone(), api_config.clone(), &registry_dir).await?;
-
-            Self {
-                api_config,
-                data: RwLock::new(data),
-                nodes: RwLock::new(nodes),
-                node_ids: RwLock::new(node_ids),
-                node_data_cache: RwLock::new(node_data_cache),
-                pal,
-            }
-        } else {
-            let nodes = Self {
-                api_config,
-                data: RwLock::new(CommonData { machine_index: 0 }),
-                nodes: Default::default(),
-                node_ids: Default::default(),
-                node_data_cache: Default::default(),
-                pal,
-            };
-            nodes.save().await?;
-            nodes
-        })
-    }
-
-    async fn load_data(registry_path: &Path) -> Result<CommonData> {
+    async fn load_data(registry_path: &Path) -> Result<State> {
         info!(
             "Reading nodes common config file: {}",
             registry_path.display()
@@ -855,14 +737,14 @@ impl<P: Pal + Debug> Nodes<P> {
         Ok((nodes, node_ids, node_data_cache))
     }
 
-    async fn save(&self) -> Result<()> {
+    async fn save_state(&self) -> Result<()> {
         let registry_path = build_registry_filename(self.pal.bv_root());
         // We only save the common data file. The individual node data files save themselves.
         info!(
             "Writing nodes common config file: {}",
             registry_path.display()
         );
-        let config = serde_json::to_string(&*self.data.read().await)?;
+        let config = serde_json::to_string(&*self.state.read().await)?;
         fs::write(&*registry_path, &*config).await?;
 
         Ok(())
@@ -874,7 +756,7 @@ impl<P: Pal + Debug> Nodes<P> {
         ip: IpAddr,
         gateway: IpAddr,
     ) -> Result<P::NetInterface> {
-        let mut data = self.data.write().await;
+        let mut data = self.state.write().await;
         data.machine_index += 1;
         let iface = self
             .pal
@@ -895,4 +777,12 @@ fn check_user_firewall_rules(rules: &[firewall::Rule]) -> Result<()> {
     }
     babel_api::metadata::check_firewall_rules(rules)?;
     Ok(())
+}
+
+fn id_not_found(id: Uuid) -> eyre::Error {
+    anyhow!("Node with id `{}` not found", id)
+}
+
+fn name_not_found(name: &str) -> eyre::Error {
+    anyhow!("Node with name `{}` not found", name)
 }

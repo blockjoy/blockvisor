@@ -211,8 +211,9 @@ impl<P: Pal + Debug> Node<P> {
     /// Updates OS image for VM.
     #[instrument(skip(self))]
     pub async fn upgrade(&mut self, image: &NodeImage) -> Result<()> {
-        if self.status() != NodeStatus::Stopped {
-            bail!("Node should be stopped before running upgrade");
+        let need_to_restart = self.status() == NodeStatus::Running;
+        if need_to_restart {
+            self.stop(false).await?;
         }
 
         self.copy_os_image(image).await?;
@@ -227,6 +228,11 @@ impl<P: Pal + Debug> Node<P> {
         self.data.save(&self.paths.registry).await?;
         self.machine = self.pal.attach_vm(&self.data).await?;
 
+        if need_to_restart {
+            self.start().await?;
+        }
+
+        debug!("Node upgraded");
         Ok(())
     }
 
@@ -283,8 +289,14 @@ impl<P: Pal + Debug> Node<P> {
                 firewall_config.clone(),
                 fw_setup_timeout(&firewall_config)
             )))?;
+            self.babel_engine.init(Default::default()).await?;
+            self.data.initialized = true;
+            self.data.save(self.pal.bv_root()).await?;
         }
-
+        // We save the `running` status only after all of the previous steps have succeeded.
+        self.set_expected_status(NodeStatus::Running).await?;
+        self.set_started_at(Some(Utc::now())).await?;
+        debug!("Node started");
         Ok(())
     }
 
