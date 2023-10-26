@@ -146,7 +146,7 @@ pub trait NodeConnection {
     async fn babel_client(&mut self) -> Result<&mut BabelClient>;
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum VmState {
     /// Machine is not started or already shut down
     SHUTOFF,
