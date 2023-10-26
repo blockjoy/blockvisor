@@ -1400,6 +1400,16 @@ mod tests {
             failed_node_id,
             failed_node_config.clone(),
         );
+        let expected_ip = failed_node_config.ip.clone();
+        let expected_gateway = failed_node_config.gateway.clone();
+        pal.expect_create_net_interface()
+            .once()
+            .withf(move |index, ip, gateway, _| {
+                *index == 4
+                    && ip.to_string() == expected_ip
+                    && gateway.to_string() == expected_gateway
+            })
+            .returning(|_, _, _, _| bail!("failed to create net iface"));
 
         let nodes = Nodes::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
@@ -1441,6 +1451,14 @@ mod tests {
         );
         assert_eq!(
             "failed to create vm",
+            nodes
+                .create(failed_node_id, failed_node_config.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "failed to create VM bridge bv4",
             nodes
                 .create(failed_node_id, failed_node_config)
                 .await
