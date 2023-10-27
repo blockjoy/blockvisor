@@ -790,15 +790,13 @@ fn name_not_found(name: &str) -> eyre::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use crate::services::api::pb::ArchiveLocation;
-    use crate::services::cookbook::ROOT_FS_FILE;
     use crate::{
+        config::Config,
         pal::{
             BabelClient, BabelSupClient, CommandsStream, NodeConnection, ServiceConnector,
             VirtualMachine, VmState,
         },
-        services::{self, api::pb, AuthToken},
+        services::{self, api::pb, api::pb::ArchiveLocation, cookbook::ROOT_FS_FILE, AuthToken},
         utils::tests::test_channel,
     };
     use assert_fs::TempDir;
@@ -1188,7 +1186,7 @@ mod tests {
                 .withf(|req| {
                     req.get_ref().id
                         == Some(pb::KernelIdentifier {
-                            version: "5.10.174-build.1+fc.ufw".to_string(),
+                            version: TEST_KERNEL.to_string(),
                         })
                 })
                 .returning(move |_| {
@@ -1268,7 +1266,7 @@ mod tests {
                 started_at: None,
                 initialized: false,
                 image: config.image,
-                kernel: "5.10.174-build.1+fc.ufw".to_string(),
+                kernel: TEST_KERNEL.to_string(),
                 network_interface: DummyNet {
                     name: format!("bv{expected_index}"),
                     ip: IpAddr::from_str(&config.ip).unwrap(),
@@ -1330,7 +1328,7 @@ mod tests {
                 started_at: None,
                 initialized: false,
                 image: config.image,
-                kernel: "5.10.174-build.1+fc.ufw".to_string(),
+                kernel: TEST_KERNEL.to_string(),
                 network_interface: DummyNet {
                     name: format!("bv{expected_index}"),
                     ip: IpAddr::from_str(&config.ip).unwrap(),
@@ -1400,6 +1398,7 @@ mod tests {
             failed_node_id,
             failed_node_config.clone(),
         );
+        // expectations for create_net failed
         let expected_ip = failed_node_config.ip.clone();
         let expected_gateway = failed_node_config.gateway.clone();
         pal.expect_create_net_interface()
@@ -1618,6 +1617,104 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_load() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let pal = test_env.default_pal();
+        let config = test_env.default_config();
+
+        let nodes = Nodes::load(pal, config).await?;
+        assert!(nodes.nodes_list().await.is_empty());
+
+        let node_data = NodeData {
+            id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
+            name: "first node".to_string(),
+            expected_status: NodeStatus::Stopped,
+            started_at: None,
+            initialized: false,
+            image: test_env.test_image.clone(),
+            kernel: TEST_KERNEL.to_string(),
+            network_interface: DummyNet {
+                name: "bv1".to_string(),
+                ip: IpAddr::from_str("192.168.0.9").unwrap(),
+                gateway: IpAddr::from_str("192.168.0.1").unwrap(),
+                remaster_error: None,
+                delete_error: None,
+            },
+            requirements: Requirements {
+                vcpu_count: 1,
+                mem_size_mb: 1024,
+                disk_size_gb: 1,
+            },
+            firewall_rules: vec![],
+            properties: Default::default(),
+            network: "test".to_string(),
+            standalone: false,
+        };
+        let mut invalid_node_data = node_data.clone();
+        invalid_node_data.id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
+        let registry_dir = build_registry_dir(&test_env.tmp_root);
+        fs::create_dir_all(&registry_dir).await?;
+        node_data.save(&registry_dir).await?;
+        invalid_node_data.save(&registry_dir).await?;
+        fs::copy(
+            format!(
+                "{}/../babel_api/protocols/testing/babel.rhai",
+                env!("CARGO_MANIFEST_DIR")
+            ),
+            registry_dir.join(format!("{}.rhai", node_data.id)),
+        )
+        .await?;
+        fs::copy(
+            format!(
+                "{}/../babel_api/protocols/testing/babel.rhai",
+                env!("CARGO_MANIFEST_DIR")
+            ),
+            registry_dir.join(format!("{}.rhai", invalid_node_data.id)),
+        )
+        .await?;
+        fs::write(
+            registry_dir.join("4931bafa-92d9-4521-9fc6-a77eee047533.json"),
+            "invalid node data",
+        )
+        .await?;
+
+        let mut pal = test_env.default_pal();
+        pal.expect_create_node_connection()
+            .with(predicate::eq(node_data.id))
+            .returning(|_| MockTestNodeConnection::new());
+        pal.expect_attach_vm()
+            .with(predicate::eq(node_data.clone()))
+            .returning(|_| {
+                let mut vm = MockTestVM::new();
+                vm.expect_state().return_const(VmState::SHUTOFF);
+                Ok(vm)
+            });
+        pal.expect_create_node_connection()
+            .with(predicate::eq(invalid_node_data.id))
+            .returning(|_| MockTestNodeConnection::new());
+        pal.expect_attach_vm()
+            .with(predicate::eq(invalid_node_data.clone()))
+            .returning(|_| {
+                bail!("failed to attach");
+            });
+        let config = test_env.default_config();
+        let nodes = Nodes::load(pal, config).await?;
+        assert_eq!(1, nodes.nodes_list().await.len());
+        assert_eq!(
+            "first node",
+            nodes.node_data_cache(node_data.id).await?.name
+        );
+        assert_eq!(
+            NodeStatus::Stopped,
+            nodes.expected_status(node_data.id).await?
+        );
+        assert_eq!(node_data.id, nodes.node_id_for_name("first node").await?);
+
+        Ok(())
+    }
+
+    const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
     const HUGE_IMAGE_RHAI: &str = r#"
 const METADATA = #{
     min_babel_version: "0.0.9",
