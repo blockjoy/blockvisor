@@ -236,8 +236,6 @@ impl<P: Pal + Debug> Nodes<P> {
     #[instrument(skip(self))]
     pub async fn upgrade(&self, id: Uuid, image: NodeImage) -> Result<()> {
         if image != self.image(id).await? {
-            let new_meta = self.fetch_image_data(&image).await?;
-
             let nodes_lock = self.nodes.read().await;
             let data = nodes_lock
                 .get(&id)
@@ -253,6 +251,7 @@ impl<P: Pal + Debug> Nodes<P> {
             if image.node_type != data.image.node_type {
                 bail!("Cannot upgrade node type to `{}`", image.node_type);
             }
+            let new_meta = self.fetch_image_data(&image).await?;
             if data.kernel != new_meta.kernel {
                 bail!("Cannot upgrade kernel");
             }
@@ -541,7 +540,7 @@ impl<P: Pal + Debug> Nodes<P> {
 
     /// Check if we have enough resources on the host to create/upgrade the node
     ///
-    /// Optinal tolerance parameter is useful if we want to allow some overbooking.
+    /// Optional tolerance parameter is useful if we want to allow some overbooking.
     /// It also can be used if we want to upgrade the node that exists.
     #[instrument(skip(self))]
     async fn check_node_requirements(
@@ -796,7 +795,10 @@ mod tests {
             BabelClient, BabelSupClient, CommandsStream, NodeConnection, ServiceConnector,
             VirtualMachine, VmState,
         },
-        services::{self, api::pb, api::pb::ArchiveLocation, cookbook::ROOT_FS_FILE, AuthToken},
+        services::{
+            self, api::pb, api::pb::ArchiveLocation, cookbook::ROOT_FS_FILE, kernel::KERNELS_DIR,
+            AuthToken,
+        },
         utils::tests::test_channel,
     };
     use assert_fs::TempDir;
@@ -1086,110 +1088,71 @@ mod tests {
 
         async fn start_test_server(
             &self,
+            images: Vec<(NodeImage, Vec<u8>)>,
         ) -> (
             utils::tests::TestServer,
             mockito::ServerGuard,
             Vec<mockito::Mock>,
         ) {
-            let mut cookbook = MockTestCookbookService::new();
-            let node_image = Some(pb::ConfigIdentifier {
-                protocol: self.test_image.protocol.clone(),
-                node_type: pb::NodeType::from_str(&self.test_image.node_type)
-                    .unwrap()
-                    .into(),
-                node_version: self.test_image.node_version.clone(),
-            });
-            let expected_image = node_image.clone();
-            cookbook
-                .expect_retrieve_plugin()
-                .once()
-                .withf(move |req| req.get_ref().id == expected_image)
-                .returning(|req| {
-                    let id = req.into_inner().id.unwrap();
-                    Ok(tonic::Response::new(
-                        pb::CookbookServiceRetrievePluginResponse {
-                            plugin: Some(pb::Plugin {
-                                identifier: Some(id),
-                                rhai_content: include_bytes!(
-                                    "../../babel_api/protocols/testing/babel.rhai"
-                                )
-                                .to_vec(),
-                            }),
-                        },
-                    ))
-                });
-            cookbook
-                .expect_retrieve_plugin()
-                .once()
-                .withf(move |req| req.get_ref().id.clone().unwrap().protocol == "huge_blockchain")
-                .returning(|req| {
-                    let id = req.into_inner().id.unwrap();
-                    Ok(tonic::Response::new(
-                        pb::CookbookServiceRetrievePluginResponse {
-                            plugin: Some(pb::Plugin {
-                                identifier: Some(id),
-                                rhai_content: HUGE_IMAGE_RHAI.to_owned().into_bytes(),
-                            }),
-                        },
-                    ))
-                });
             self.generate_dummy_archive().await;
             let mut http_server = mockito::Server::new();
             let mut http_mocks = vec![];
-            let url = http_server.url();
-            let expected_image = node_image.clone();
-            cookbook
-                .expect_retrieve_image()
-                .once()
-                .withf(move |req| req.get_ref().id == expected_image)
-                .returning(move |_| {
-                    Ok(tonic::Response::new(
-                        pb::CookbookServiceRetrieveImageResponse {
-                            location: Some(ArchiveLocation {
-                                url: format!("{url}/image"),
-                            }),
-                        },
-                    ))
-                });
-            let url = http_server.url();
-            cookbook
-                .expect_retrieve_image()
-                .once()
-                .withf(move |req| req.get_ref().id.clone().unwrap().protocol == "huge_blockchain")
-                .returning(move |_| {
-                    Ok(tonic::Response::new(
-                        pb::CookbookServiceRetrieveImageResponse {
-                            location: Some(ArchiveLocation {
-                                url: format!("{url}/image"),
-                            }),
-                        },
-                    ))
-                });
-            http_mocks.push(
-                http_server
-                    .mock("GET", "/image")
-                    .with_body_from_file(&*self.tmp_root.join("blockjoy.gz").to_string_lossy())
-                    .create(),
-            );
-            http_mocks.push(
-                http_server
-                    .mock("GET", "/image")
-                    .with_body_from_file(&*self.tmp_root.join("blockjoy.gz").to_string_lossy())
-                    .create(),
-            );
 
+            // expect image retrieve and download for all images, but only once
+            let mut cookbook = MockTestCookbookService::new();
+            for (test_image, rhai_content) in images {
+                let node_image = Some(pb::ConfigIdentifier {
+                    protocol: test_image.protocol.clone(),
+                    node_type: pb::NodeType::from_str(&test_image.node_type)
+                        .unwrap()
+                        .into(),
+                    node_version: test_image.node_version.clone(),
+                });
+                let expected_image = node_image.clone();
+                let resp = tonic::Response::new(pb::CookbookServiceRetrievePluginResponse {
+                    plugin: Some(pb::Plugin {
+                        identifier: expected_image.clone(),
+                        rhai_content,
+                    }),
+                });
+                cookbook
+                    .expect_retrieve_plugin()
+                    .withf(move |req| req.get_ref().id == expected_image)
+                    .return_once(move |_| Ok(resp));
+                let url = http_server.url();
+                let expected_image = node_image.clone();
+                cookbook
+                    .expect_retrieve_image()
+                    .withf(move |req| req.get_ref().id == expected_image)
+                    .return_once(move |_| {
+                        Ok(tonic::Response::new(
+                            pb::CookbookServiceRetrieveImageResponse {
+                                location: Some(ArchiveLocation {
+                                    url: format!("{url}/image"),
+                                }),
+                            },
+                        ))
+                    });
+                http_mocks.push(
+                    http_server
+                        .mock("GET", "/image")
+                        .with_body_from_file(&*self.tmp_root.join("blockjoy.gz").to_string_lossy())
+                        .create(),
+                );
+            }
+
+            // expect kernel retrieve and download,but only once
             let url = http_server.url();
             let mut kernels = MockTestKernelService::new();
             kernels
                 .expect_retrieve()
-                .once()
                 .withf(|req| {
                     req.get_ref().id
                         == Some(pb::KernelIdentifier {
                             version: TEST_KERNEL.to_string(),
                         })
                 })
-                .returning(move |_| {
+                .return_once(move |_| {
                     Ok(tonic::Response::new(pb::KernelServiceRetrieveResponse {
                         location: Some(ArchiveLocation {
                             url: format!("{url}/kernel"),
@@ -1242,13 +1205,12 @@ mod tests {
         let expected_ip = config.ip.clone();
         let expected_gateway = config.gateway.clone();
         pal.expect_create_net_interface()
-            .once()
             .withf(move |index, ip, gateway, _| {
                 *index == expected_index
                     && ip.to_string() == expected_ip
                     && gateway.to_string() == expected_gateway
             })
-            .returning(|index, ip, gateway, _config| {
+            .return_once(|index, ip, gateway, _config| {
                 Ok(DummyNet {
                     name: format!("bv{index}"),
                     ip,
@@ -1258,41 +1220,20 @@ mod tests {
                 })
             });
         pal.expect_create_vm()
-            .once()
-            .with(predicate::eq(NodeData {
+            .with(predicate::eq(expected_node_data(
+                expected_index,
                 id,
-                name: config.name,
-                expected_status: NodeStatus::Stopped,
-                started_at: None,
-                initialized: false,
-                image: config.image,
-                kernel: TEST_KERNEL.to_string(),
-                network_interface: DummyNet {
-                    name: format!("bv{expected_index}"),
-                    ip: IpAddr::from_str(&config.ip).unwrap(),
-                    gateway: IpAddr::from_str(&config.gateway).unwrap(),
-                    remaster_error: None,
-                    delete_error: None,
-                },
-                requirements: Requirements {
-                    vcpu_count: 1,
-                    mem_size_mb: 2048,
-                    disk_size_gb: 1,
-                },
-                firewall_rules: config.rules,
-                properties: config.properties,
-                network: config.network,
-                standalone: config.standalone,
-            }))
-            .returning(|_| {
+                config,
+                None,
+            )))
+            .return_once(|_| {
                 let mut mock = MockTestVM::new();
                 mock.expect_state().once().return_const(VmState::SHUTOFF);
                 Ok(mock)
             });
         pal.expect_create_node_connection()
-            .once()
             .with(predicate::eq(id))
-            .returning(|_| MockTestNodeConnection::new());
+            .return_once(|_| MockTestNodeConnection::new());
     }
 
     fn add_create_node_fail_vm_expectations(
@@ -1304,13 +1245,12 @@ mod tests {
         let expected_ip = config.ip.clone();
         let expected_gateway = config.gateway.clone();
         pal.expect_create_net_interface()
-            .once()
             .withf(move |index, ip, gateway, _| {
                 *index == expected_index
                     && ip.to_string() == expected_ip
                     && gateway.to_string() == expected_gateway
             })
-            .returning(|index, ip, gateway, _config| {
+            .return_once(|index, ip, gateway, _config| {
                 Ok(DummyNet {
                     name: format!("bv{index}"),
                     ip,
@@ -1320,33 +1260,46 @@ mod tests {
                 })
             });
         pal.expect_create_vm()
-            .once()
-            .with(predicate::eq(NodeData {
+            .with(predicate::eq(expected_node_data(
+                expected_index,
                 id,
-                name: config.name,
-                expected_status: NodeStatus::Stopped,
-                started_at: None,
-                initialized: false,
-                image: config.image,
-                kernel: TEST_KERNEL.to_string(),
-                network_interface: DummyNet {
-                    name: format!("bv{expected_index}"),
-                    ip: IpAddr::from_str(&config.ip).unwrap(),
-                    gateway: IpAddr::from_str(&config.gateway).unwrap(),
-                    remaster_error: None,
-                    delete_error: None,
-                },
-                requirements: Requirements {
-                    vcpu_count: 1,
-                    mem_size_mb: 2048,
-                    disk_size_gb: 1,
-                },
-                firewall_rules: config.rules,
-                properties: config.properties,
-                network: config.network,
-                standalone: config.standalone,
-            }))
-            .returning(|_| bail!("failed to create vm"));
+                config,
+                None,
+            )))
+            .return_once(|_| bail!("failed to create vm"));
+    }
+
+    fn expected_node_data(
+        expected_index: u32,
+        id: Uuid,
+        config: NodeConfig,
+        image: Option<NodeImage>,
+    ) -> NodeData<DummyNet> {
+        NodeData {
+            id,
+            name: config.name,
+            expected_status: NodeStatus::Stopped,
+            started_at: None,
+            initialized: false,
+            image: image.unwrap_or(config.image),
+            kernel: TEST_KERNEL.to_string(),
+            network_interface: DummyNet {
+                name: format!("bv{expected_index}"),
+                ip: IpAddr::from_str(&config.ip).unwrap(),
+                gateway: IpAddr::from_str(&config.gateway).unwrap(),
+                remaster_error: None,
+                delete_error: None,
+            },
+            requirements: Requirements {
+                vcpu_count: 1,
+                mem_size_mb: 2048,
+                disk_size_gb: 1,
+            },
+            firewall_rules: config.rules,
+            properties: config.properties,
+            network: config.network,
+            standalone: config.standalone,
+        }
     }
 
     #[tokio::test]
@@ -1402,18 +1355,32 @@ mod tests {
         let expected_ip = failed_node_config.ip.clone();
         let expected_gateway = failed_node_config.gateway.clone();
         pal.expect_create_net_interface()
-            .once()
             .withf(move |index, ip, gateway, _| {
                 *index == 4
                     && ip.to_string() == expected_ip
                     && gateway.to_string() == expected_gateway
             })
-            .returning(|_, _, _, _| bail!("failed to create net iface"));
+            .return_once(|_, _, _, _| bail!("failed to create net iface"));
 
         let nodes = Nodes::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
 
-        let (test_server, _http_server, http_mocks) = test_env.start_test_server().await;
+        let (test_server, _http_server, http_mocks) = test_env
+            .start_test_server(vec![
+                (
+                    test_env.test_image.clone(),
+                    include_bytes!("../../babel_api/protocols/testing/babel.rhai").to_vec(),
+                ),
+                (
+                    NodeImage {
+                        protocol: "huge_blockchain".to_string(),
+                        node_type: "validator".to_string(),
+                        node_version: "1.2.3".to_string(),
+                    },
+                    HUGE_IMAGE_RHAI.to_owned().into_bytes(),
+                ),
+            ])
+            .await;
 
         nodes
             .create(first_node_id, first_node_config.clone())
@@ -1714,7 +1681,220 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_upgrade_node() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let mut pal = test_env.default_pal();
+        let config = test_env.default_config();
+
+        let node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
+        let node_config = NodeConfig {
+            name: "node name".to_string(),
+            image: test_env.test_image.clone(),
+            ip: "192.168.0.7".to_string(),
+            gateway: "192.168.0.1".to_string(),
+            rules: vec![],
+            properties: Default::default(),
+            network: "test".to_string(),
+            standalone: true,
+        };
+        let new_image = NodeImage {
+            protocol: "testing".to_string(),
+            node_type: "validator".to_string(),
+            node_version: "3.2.1".to_string(),
+        };
+        let invalid_kernel_image = NodeImage {
+            protocol: "testing".to_string(),
+            node_type: "validator".to_string(),
+            node_version: "3.4.5".to_string(),
+        };
+        let invalid_disk_size_image = NodeImage {
+            protocol: "testing".to_string(),
+            node_type: "validator".to_string(),
+            node_version: "3.4.6".to_string(),
+        };
+        let cpu_devourer_image = NodeImage {
+            protocol: "testing".to_string(),
+            node_type: "validator".to_string(),
+            node_version: "3.4.7".to_string(),
+        };
+        add_create_node_expectations(&mut pal, 1, node_id, node_config.clone());
+        pal.expect_attach_vm()
+            .with(predicate::eq(expected_node_data(
+                1,
+                node_id,
+                node_config.clone(),
+                Some(new_image.clone()),
+            )))
+            .return_once(|_| Ok(MockTestVM::new()));
+
+        let nodes = Nodes::load(pal, config).await?;
+
+        let (test_server, _http_server, http_mocks) = test_env
+            .start_test_server(vec![
+                (
+                    test_env.test_image.clone(),
+                    include_bytes!("../../babel_api/protocols/testing/babel.rhai").to_vec(),
+                ),
+                (
+                    new_image.clone(),
+                    format!("{} kernel: \"{}\", requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
+                            UPGRADED_IMAGE_RHAI_TEMPLATE, TEST_KERNEL, 1, 2048, 1).into_bytes(),
+                ),
+                (
+                    invalid_kernel_image.clone(),
+                    format!("{} kernel: \"{}\", requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
+                            UPGRADED_IMAGE_RHAI_TEMPLATE, "5.10.175", 1, 2048, 1).into_bytes(),
+                ),
+                (
+                    invalid_disk_size_image.clone(),
+                    format!("{} kernel: \"{}\", requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
+                            UPGRADED_IMAGE_RHAI_TEMPLATE, TEST_KERNEL, 1, 2048, 2).into_bytes(),
+                ),
+                (
+                    cpu_devourer_image.clone(),
+                    CPU_DEVOURER_IMAGE_RHAI.to_owned().into_bytes(),
+                ),
+            ])
+            .await;
+
+        nodes.create(node_id, node_config.clone()).await?;
+        assert_eq!(
+            NodeDataCache {
+                name: node_config.name.clone(),
+                image: node_config.image.clone(),
+                ip: node_config.ip.clone(),
+                gateway: node_config.gateway.clone(),
+                started_at: None,
+                standalone: node_config.standalone,
+            },
+            nodes.node_data_cache(node_id).await?
+        );
+        {
+            let mut nodes_list = nodes.nodes.write().await;
+            let mut node = nodes_list.get_mut(&node_id).unwrap().write().await;
+            node.data.initialized = true;
+            assert!(node.babel_engine.has_capability("info").await?);
+        }
+        nodes.upgrade(node_id, new_image.clone()).await?;
+        assert_eq!(
+            NodeDataCache {
+                name: node_config.name,
+                image: new_image.clone(),
+                ip: node_config.ip,
+                gateway: node_config.gateway,
+                started_at: None,
+                standalone: node_config.standalone,
+            },
+            nodes.node_data_cache(node_id).await?
+        );
+        {
+            let mut nodes_list = nodes.nodes.write().await;
+            let mut node = nodes_list.get_mut(&node_id).unwrap().write().await;
+            assert!(!node.data.initialized);
+            assert!(!node.babel_engine.has_capability("info").await?);
+        }
+        fs::create_dir_all(
+            test_env
+                .tmp_root
+                .join(BV_VAR_PATH)
+                .join(KERNELS_DIR)
+                .join("5.10.175"),
+        )
+        .await?;
+        fs::copy(
+            KernelService::get_kernel_path(&test_env.tmp_root, TEST_KERNEL),
+            KernelService::get_kernel_path(&test_env.tmp_root, "5.10.175"),
+        )
+        .await?;
+        assert_eq!(
+            "Cannot upgrade kernel",
+            nodes
+                .upgrade(node_id, invalid_kernel_image.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "Cannot upgrade disk requirements",
+            nodes
+                .upgrade(node_id, invalid_disk_size_image.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "Not enough vcpu to allocate for the node",
+            nodes
+                .upgrade(node_id, cpu_devourer_image.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "Cannot upgrade protocol to `differen_chain`",
+            nodes
+                .upgrade(
+                    node_id,
+                    NodeImage {
+                        protocol: "differen_chain".to_string(),
+                        node_type: "validator".to_string(),
+                        node_version: "1.2.3".to_string(),
+                    }
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "Cannot upgrade node type to `node`",
+            nodes
+                .upgrade(
+                    node_id,
+                    NodeImage {
+                        protocol: "testing".to_string(),
+                        node_type: "node".to_string(),
+                        node_version: "1.2.3".to_string(),
+                    }
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
+        for mock in http_mocks {
+            mock.assert();
+        }
+        test_server.assert().await;
+        Ok(())
+    }
+
     const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
+    const UPGRADED_IMAGE_RHAI_TEMPLATE: &str = r#"
+const METADATA = #{
+    min_babel_version: "0.0.9",
+    node_version: "1.15.9",
+    protocol: "testing",
+    node_type: "validator",
+    nets: #{
+        test: #{
+            url: "https://testnet-api.helium.wtf/v1/",
+            net_type: "test",
+        },
+    },
+    babel_config: #{
+        data_directory_mount_point: "/blockjoy/miner/data",
+        log_buffer_capacity_ln: 1024,
+        swap_size_mb: 512,
+        ramdisks: []
+    },
+    firewall: #{
+        enabled: true,
+        default_in: "deny",
+        default_out: "allow",
+        rules: [],
+    },
+"#;
     const HUGE_IMAGE_RHAI: &str = r#"
 const METADATA = #{
     min_babel_version: "0.0.9",
@@ -1726,6 +1906,39 @@ const METADATA = #{
         vcpu_count: 1073741824,
         mem_size_mb: 1073741824,
         disk_size_gb: 1073741824,
+    },
+    nets: #{
+        test: #{
+            url: "https://testnet-api.helium.wtf/v1/",
+            net_type: "test",
+        },
+    },
+    babel_config: #{
+        data_directory_mount_point: "/blockjoy/miner/data",
+        log_buffer_capacity_ln: 1024,
+        swap_size_mb: 512,
+        ramdisks: []
+    },
+    firewall: #{
+        enabled: true,
+        default_in: "deny",
+        default_out: "allow",
+        rules: [],
+    },
+};
+"#;
+
+    const CPU_DEVOURER_IMAGE_RHAI: &str = r#"
+const METADATA = #{
+    min_babel_version: "0.0.9",
+    kernel: "5.10.174-build.1+fc.ufw",
+    node_version: "1.15.9",
+    protocol: "huge_blockchain",
+    node_type: "validator",
+    requirements: #{
+        vcpu_count: 2048,
+        mem_size_mb: 2048,
+        disk_size_gb: 1,
     },
     nets: #{
         test: #{
