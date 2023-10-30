@@ -33,6 +33,7 @@ services:
     ports:
       - 8080:8080
     environment:
+      EMAIL_TEMPLATE_DIR: /emails
       CHARGEBEE_SECRET: asdfasdf
       DATABASE_URL: postgres://blockvisor:password@database:5432/blockvisor_db
       TOKEN_EXPIRATION_MINS: 10

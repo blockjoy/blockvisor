@@ -19,6 +19,7 @@ pub async fn setup_rbac(db_url: &str) {
         ('blockjoy-admin', 'node-admin-stop'),
         ('blockjoy-admin', 'node-admin-update-config'),
         ('blockjoy-admin', 'node-admin-update-status'),
+        ('blockjoy-admin', 'org-admin-get'),
         ('blockjoy-admin', 'org-admin-list'),
         ('blockjoy-admin', 'user-admin-filter'),
         ('blockjoy-admin', 'user-admin-get'),
