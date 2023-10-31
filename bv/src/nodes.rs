@@ -1854,6 +1854,109 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_recovery() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let mut pal = test_env.default_pal();
+        let config = test_env.default_config();
+        let node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
+        let node_config = NodeConfig {
+            name: "node name".to_string(),
+            image: test_env.test_image.clone(),
+            ip: "192.168.0.7".to_string(),
+            gateway: "192.168.0.1".to_string(),
+            rules: vec![],
+            properties: Default::default(),
+            network: "test".to_string(),
+            standalone: true,
+        };
+
+        pal.expect_create_net_interface()
+            .return_once(|index, ip, gateway, _config| {
+                Ok(DummyNet {
+                    name: format!("bv{index}"),
+                    ip,
+                    gateway,
+                    remaster_error: Some("remaster failed".to_string()),
+                    delete_error: None,
+                })
+            });
+        pal.expect_create_vm().return_once(|_| {
+            let mut mock = MockTestVM::new();
+            mock.expect_state().times(7).return_const(VmState::SHUTOFF);
+            mock.expect_state().times(3).return_const(VmState::RUNNING);
+            Ok(mock)
+        });
+        pal.expect_create_node_connection().return_once(|_| {
+            let mut mock = MockTestNodeConnection::new();
+            mock.expect_babel_client()
+                .times(1)
+                .returning(|| bail!("no babel client"));
+            mock.expect_is_broken().times(1).returning(|| true);
+            mock.expect_test().times(1).returning(|| Ok(()));
+            mock.expect_is_closed().times(2).returning(|| false);
+            mock
+        });
+
+        let mut sut = RecoverySut {
+            node_id,
+            nodes: Nodes::load(pal, config).await?,
+        };
+
+        let (test_server, _http_server, http_mocks) = test_env
+            .start_test_server(vec![(
+                test_env.test_image.clone(),
+                include_bytes!("../../babel_api/protocols/testing/babel.rhai").to_vec(),
+            )])
+            .await;
+        sut.nodes.create(node_id, node_config.clone()).await?;
+        sut.nodes.recover().await;
+
+        sut.on_node(|node| node.data.expected_status = NodeStatus::Failed)
+            .await;
+        sut.nodes.recover().await;
+
+        sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
+            .await;
+        sut.nodes.recover().await;
+
+        sut.on_node(|node| node.data.expected_status = NodeStatus::Stopped)
+            .await;
+        sut.nodes.recover().await;
+
+        sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
+            .await;
+        sut.nodes.recover().await;
+
+        for mock in http_mocks {
+            mock.assert();
+        }
+        test_server.assert().await;
+
+        Ok(())
+    }
+
+    struct RecoverySut {
+        node_id: Uuid,
+        nodes: Nodes<MockTestPal>,
+    }
+
+    impl RecoverySut {
+        async fn on_node(&mut self, call_on_node: impl FnOnce(&mut Node<MockTestPal>)) {
+            call_on_node(
+                &mut *self
+                    .nodes
+                    .nodes
+                    .write()
+                    .await
+                    .get_mut(&self.node_id)
+                    .unwrap()
+                    .write()
+                    .await,
+            );
+        }
+    }
+
     const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
     const UPGRADED_IMAGE_RHAI_TEMPLATE: &str = r#"
 const METADATA = #{
