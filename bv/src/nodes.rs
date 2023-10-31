@@ -360,34 +360,19 @@ impl<P: Pal + Debug> Nodes<P> {
     /// - Node is started, but should be stopped - stop the node
     /// - Node is created, but data files are corrupted - recreate the node
     #[instrument(skip(self))]
-    pub async fn recover(&self) -> Result<()> {
+    pub async fn recover(&self) {
         let nodes_lock = self.nodes.read().await;
-        let mut nodes_to_recreate = vec![];
         for (id, node_lock) in nodes_lock.iter() {
             if let Ok(mut node) = node_lock.try_write() {
                 if node.status() == NodeStatus::Failed
                     && node.expected_status() != NodeStatus::Failed
                 {
-                    if !node.is_data_valid().await? {
-                        nodes_to_recreate.push(node.data.clone());
-                    } else if let Err(e) = node.recover().await {
-                        error!("Recovery: node with ID `{id}` failed: {e}");
+                    if let Err(e) = node.recover().await {
+                        error!("node `{id}` recovery failed with: {e}");
                     }
                 }
             }
         }
-        drop(nodes_lock);
-        for node_data in nodes_to_recreate {
-            let id = node_data.id;
-            // If some files are corrupted, the files will be recreated.
-            // Some intermediate data could be lost in that case.
-            self.fetch_image_data(&node_data.image).await?;
-            let new = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
-            self.nodes.write().await.insert(id, RwLock::new(new));
-            info!("Recovery: node with ID `{id}` recreated");
-        }
-
-        Ok(())
     }
 
     #[instrument(skip(self))]

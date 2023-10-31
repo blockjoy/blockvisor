@@ -311,7 +311,7 @@ where
     async fn nodes_recovery(mut run: RunFlag, nodes: Arc<Nodes<P>>) {
         while run.load() {
             let now = Instant::now();
-            let _ = nodes.recover().await;
+            nodes.recover().await;
             BV_NODES_RECOVERY_COUNTER.increment(1);
             BV_NODES_RECOVERY_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             run.select(sleep(RECOVERY_CHECK_INTERVAL)).await;

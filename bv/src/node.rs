@@ -8,10 +8,7 @@ use crate::{
     pal::NodeConnection,
     pal::VirtualMachine,
     pal::{NetInterface, Pal},
-    services::{
-        cookbook::{CookbookService, BABEL_PLUGIN_NAME, DATA_FILE, ROOT_FS_FILE},
-        kernel::KERNEL_FILE,
-    },
+    services::cookbook::{CookbookService, BABEL_PLUGIN_NAME, DATA_FILE, ROOT_FS_FILE},
     utils::with_timeout,
     BV_VAR_PATH,
 };
@@ -531,22 +528,6 @@ impl<P: Pal + Debug> Node<P> {
             .setup_firewall(with_timeout(firewall.clone(), fw_setup_timeout(&firewall))))?;
         self.data.firewall_rules = rules;
         self.data.save(&self.paths.registry).await
-    }
-
-    /// Check if chroot location contains valid data
-    pub async fn is_data_valid(&self) -> Result<bool> {
-        let data_dir = &self.paths.data_dir;
-
-        let root = data_dir.join(ROOT_FS_FILE);
-        let kernel = data_dir.join(KERNEL_FILE);
-        let data = data_dir.join(DATA_FILE);
-        if !root.exists() || !kernel.exists() || !data.exists() {
-            return Ok(false);
-        }
-
-        Ok(fs::metadata(root).await?.len() > 0
-            && fs::metadata(kernel).await?.len() > 0
-            && fs::metadata(data).await?.len() > 0)
     }
 
     /// Copy OS drive into chroot location.
