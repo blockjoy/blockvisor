@@ -6,7 +6,7 @@ use blockvisord::{
     blockvisord::BlockvisorD,
     config::{Config, SharedConfig},
     firecracker_machine,
-    node::REGISTRY_CONFIG_DIR,
+    node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
     services,

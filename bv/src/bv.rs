@@ -8,7 +8,7 @@ use crate::{
     internal_server,
     internal_server::NodeCreateRequest,
     linux_platform::bv_root,
-    node::REGISTRY_CONFIG_DIR,
+    node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeImage, NodeStatus},
     pretty_table::{PrettyTable, PrettyTableRow},
     services,

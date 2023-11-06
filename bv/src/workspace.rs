@@ -1,5 +1,5 @@
 use crate::{
-    linux_platform::bv_root, node::REGISTRY_CONFIG_DIR, node_data::NodeImage,
+    linux_platform::bv_root, node_context::REGISTRY_CONFIG_DIR, node_data::NodeImage,
     services::cookbook::BABEL_PLUGIN_NAME, BV_VAR_PATH,
 };
 use eyre::Result;

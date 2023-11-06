@@ -11,6 +11,7 @@ pub mod internal_server;
 pub mod linux_platform;
 pub mod node;
 pub mod node_connection;
+pub mod node_context;
 pub mod node_data;
 pub mod node_metrics;
 pub mod nodes_manager;

@@ -1,16 +1,16 @@
-use crate::node_connection::RPC_REQUEST_TIMEOUT;
 use crate::{
     babel_engine,
     babel_engine::NodeInfo,
     config::SharedConfig,
+    node_connection::RPC_REQUEST_TIMEOUT,
+    node_context::NodeContext,
     node_data::{NodeData, NodeImage, NodeStatus},
     pal,
     pal::NodeConnection,
     pal::VirtualMachine,
     pal::{NetInterface, Pal},
-    services::cookbook::{CookbookService, BABEL_PLUGIN_NAME, DATA_FILE, ROOT_FS_FILE},
+    services::cookbook::{CookbookService, ROOT_FS_FILE},
     utils::with_timeout,
-    BV_VAR_PATH,
 };
 use babel_api::{
     babelsup::SupervisorConfig,
@@ -21,13 +21,7 @@ use babel_api::{
 use bv_utils::{cmd::run_cmd, with_retry};
 use chrono::{DateTime, Utc};
 use eyre::{bail, Context, Result};
-use std::{
-    ffi::OsStr,
-    fmt::Debug,
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
-};
+use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
 use tokio::{
     fs::{self, File},
     io::{AsyncReadExt, BufReader},
@@ -42,9 +36,6 @@ const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FW_SETUP_TIMEOUT_SEC: u64 = 30;
 const FW_RULE_SETUP_TIMEOUT_SEC: u64 = 1;
-pub const REGISTRY_CONFIG_DIR: &str = "nodes";
-pub const DATA_CACHE_DIR: &str = "blocks";
-const DATA_CACHE_EXPIRATION: Duration = Duration::from_secs(7 * 24 * 3600);
 const MAX_START_TRIES: usize = 3;
 const MAX_STOP_TRIES: usize = 3;
 const MAX_RECONNECT_TRIES: usize = 3;
@@ -52,10 +43,6 @@ const SUPERVISOR_CONFIG: SupervisorConfig = SupervisorConfig {
     backoff_timeout_ms: 3000,
     backoff_base_ms: 200,
 };
-
-pub fn build_registry_dir(bv_root: &Path) -> PathBuf {
-    bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR)
-}
 
 pub type BabelEngine<N> = babel_engine::BabelEngine<N, RhaiPlugin<babel_engine::Engine>>;
 
@@ -65,7 +52,7 @@ pub struct Node<P: Pal> {
     pub babel_engine: BabelEngine<P::NodeConnection>,
     metadata: BlockchainMetadata,
     machine: P::VirtualMachine,
-    paths: Paths,
+    context: NodeContext,
     pal: Arc<P>,
     recovery_counters: RecoveryCounters,
 }
@@ -77,31 +64,6 @@ struct RecoveryCounters {
     start: usize,
 }
 
-#[derive(Debug)]
-struct Paths {
-    bv_root: PathBuf,
-    data_cache_dir: PathBuf,
-    data_dir: PathBuf,
-    plugin_data: PathBuf,
-    plugin_script: PathBuf,
-    registry: PathBuf,
-}
-
-impl Paths {
-    fn build(pal: &impl Pal, id: Uuid) -> Self {
-        let bv_root = pal.bv_root();
-        let registry = build_registry_dir(bv_root);
-        Self {
-            bv_root: bv_root.to_path_buf(),
-            data_cache_dir: bv_root.join(BV_VAR_PATH).join(DATA_CACHE_DIR),
-            data_dir: pal.build_vm_data_path(id),
-            plugin_data: registry.join(format!("{id}.data")),
-            plugin_script: registry.join(format!("{id}.rhai")),
-            registry,
-        }
-    }
-}
-
 impl<P: Pal + Debug> Node<P> {
     /// Creates a new node according to specs.
     #[instrument(skip(pal, api_config))]
@@ -111,16 +73,16 @@ impl<P: Pal + Debug> Node<P> {
         data: NodeData<P::NetInterface>,
     ) -> Result<Self> {
         let node_id = data.id;
-        let paths = Paths::build(pal.as_ref(), node_id);
+        let context = NodeContext::build(pal.as_ref(), node_id);
         info!("Creating node with ID: {node_id}");
 
-        let (script, metadata) = Self::copy_and_check_plugin(&paths, &data.image).await?;
+        let (script, metadata) = context.copy_and_check_plugin(&data.image).await?;
 
-        let _ = tokio::fs::remove_dir_all(&paths.data_dir).await;
-        Self::prepare_data_image(&paths, &data).await?;
+        let _ = tokio::fs::remove_dir_all(&context.data_dir).await;
+        context.prepare_data_image::<P>(&data).await?;
         let machine = pal.create_vm(&data).await?;
 
-        data.save(&paths.registry).await?;
+        data.save(&context.registry).await?;
 
         let babel_engine = BabelEngine::new(
             NodeInfo {
@@ -132,14 +94,14 @@ impl<P: Pal + Debug> Node<P> {
             pal.create_node_connection(node_id),
             api_config,
             |engine| RhaiPlugin::new(&script, engine),
-            paths.plugin_data.clone(),
+            context.plugin_data.clone(),
         )?;
         Ok(Self {
             data,
             babel_engine,
             metadata,
             machine,
-            paths,
+            context,
             pal,
             recovery_counters: Default::default(),
         })
@@ -153,10 +115,10 @@ impl<P: Pal + Debug> Node<P> {
         data: NodeData<P::NetInterface>,
     ) -> Result<Self> {
         let node_id = data.id;
-        let paths = Paths::build(pal.as_ref(), node_id);
+        let context = NodeContext::build(pal.as_ref(), node_id);
         info!("Attaching to node with ID: {node_id}");
 
-        let script = fs::read_to_string(&paths.plugin_script).await?;
+        let script = fs::read_to_string(&context.plugin_script).await?;
         let metadata = rhai_plugin::read_metadata(&script)?;
 
         let mut node_conn = pal.create_node_connection(node_id);
@@ -187,14 +149,14 @@ impl<P: Pal + Debug> Node<P> {
             node_conn,
             api_config,
             |engine| RhaiPlugin::new(&script, engine),
-            paths.plugin_data.clone(),
+            context.plugin_data.clone(),
         )?;
         Ok(Self {
             data,
             babel_engine,
             metadata,
             machine,
-            paths,
+            context,
             pal,
             recovery_counters: Default::default(),
         })
@@ -215,7 +177,7 @@ impl<P: Pal + Debug> Node<P> {
 
         self.copy_os_image(image).await?;
 
-        let (script, metadata) = Self::copy_and_check_plugin(&self.paths, image).await?;
+        let (script, metadata) = self.context.copy_and_check_plugin(image).await?;
         self.metadata = metadata;
         self.babel_engine
             .update_plugin(|engine| RhaiPlugin::new(&script, engine))?;
@@ -223,7 +185,7 @@ impl<P: Pal + Debug> Node<P> {
         self.data.image = image.clone();
         self.data.requirements = self.metadata.requirements.clone();
         self.data.initialized = false;
-        self.data.save(&self.paths.registry).await?;
+        self.data.save(&self.context.registry).await?;
         self.machine = self.pal.attach_vm(&self.data).await?;
 
         if need_to_restart {
@@ -236,7 +198,7 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Read script content and update plugin with metadata
     pub async fn reload_plugin(&mut self) -> Result<()> {
-        let script = fs::read_to_string(&self.paths.plugin_script).await?;
+        let script = fs::read_to_string(&self.context.plugin_script).await?;
         self.metadata = rhai_plugin::read_metadata(&script)?;
         self.babel_engine
             .update_plugin(|engine| RhaiPlugin::new(&script, engine))
@@ -300,12 +262,12 @@ impl<P: Pal + Debug> Node<P> {
 
     pub async fn set_expected_status(&mut self, status: NodeStatus) -> Result<()> {
         self.data.expected_status = status;
-        self.data.save(&self.paths.registry).await
+        self.data.save(&self.context.registry).await
     }
 
     pub async fn set_started_at(&mut self, started_at: Option<DateTime<Utc>>) -> Result<()> {
         self.data.started_at = started_at;
-        self.data.save(&self.paths.registry).await
+        self.data.save(&self.context.registry).await
     }
 
     /// Returns the actual status of the node.
@@ -515,9 +477,9 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(self))]
     pub async fn delete(self) -> Result<()> {
         self.machine.delete().await?;
-        let _ = fs::remove_file(&self.paths.plugin_script).await;
-        let _ = fs::remove_file(&self.paths.plugin_data).await;
-        self.data.delete(&self.paths.registry).await
+        let _ = fs::remove_file(&self.context.plugin_script).await;
+        let _ = fs::remove_file(&self.context.plugin_data).await;
+        self.data.delete(&self.context.registry).await
     }
 
     pub async fn update(&mut self, rules: Vec<firewall::Rule>) -> Result<()> {
@@ -527,78 +489,21 @@ impl<P: Pal + Debug> Node<P> {
         with_retry!(babel_client
             .setup_firewall(with_timeout(firewall.clone(), fw_setup_timeout(&firewall))))?;
         self.data.firewall_rules = rules;
-        self.data.save(&self.paths.registry).await
+        self.data.save(&self.context.registry).await
     }
 
     /// Copy OS drive into chroot location.
     async fn copy_os_image(&self, image: &NodeImage) -> Result<()> {
         let root_fs_path =
-            CookbookService::get_image_download_folder_path(&self.paths.bv_root, image)
+            CookbookService::get_image_download_folder_path(&self.context.bv_root, image)
                 .join(ROOT_FS_FILE);
 
-        let data_dir = &self.paths.data_dir;
+        let data_dir = &self.context.data_dir;
         fs::create_dir_all(data_dir).await?;
 
         run_cmd("cp", [root_fs_path.as_os_str(), data_dir.as_os_str()]).await?;
 
         Ok(())
-    }
-
-    /// Create new data drive in chroot location, or copy it from cache
-    async fn prepare_data_image(paths: &Paths, data: &NodeData<P::NetInterface>) -> Result<()> {
-        let data_dir = &paths.data_dir;
-        fs::create_dir_all(data_dir).await?;
-        let path = data_dir.join(DATA_FILE);
-        let data_cache_path = paths
-            .data_cache_dir
-            .join(&data.image.protocol)
-            .join(&data.image.node_type)
-            .join(&data.network)
-            .join(DATA_FILE);
-        let disk_size_gb = data.requirements.disk_size_gb;
-
-        // check local cache
-        if data_cache_path.exists() {
-            let elapsed = data_cache_path.metadata()?.created()?.elapsed()?;
-            if elapsed < DATA_CACHE_EXPIRATION {
-                run_cmd("cp", [data_cache_path.as_os_str(), path.as_os_str()]).await?;
-                // TODO: ask Sean how to better resize images
-                // in case cached image size is different from disk_size_gb
-            } else {
-                // clean up expired cache data
-                fs::remove_file(data_cache_path).await?;
-                // TODO: use cookbook to download new image
-            }
-        }
-
-        // allocate new image on location, if it's not there yet
-        if !path.exists() {
-            let gb = &format!("{disk_size_gb}GB");
-            run_cmd(
-                "fallocate",
-                [OsStr::new("-l"), OsStr::new(gb), path.as_os_str()],
-            )
-            .await?;
-            run_cmd("mkfs.ext4", [path.as_os_str()]).await?;
-        }
-
-        Ok(())
-    }
-
-    /// copy plugin script into nodes registry and read metadata form it
-    async fn copy_and_check_plugin(
-        paths: &Paths,
-        image: &NodeImage,
-    ) -> Result<(String, BlockchainMetadata)> {
-        fs::copy(
-            CookbookService::get_image_download_folder_path(&paths.bv_root, image)
-                .join(BABEL_PLUGIN_NAME),
-            &paths.plugin_script,
-        )
-        .await?;
-        let script = fs::read_to_string(&paths.plugin_script).await?;
-        let metadata = rhai_plugin::read_metadata(&script)?;
-        Ok((script, metadata))
     }
 }
 
