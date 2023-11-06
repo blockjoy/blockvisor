@@ -6,7 +6,7 @@ use crate::{
 };
 use babel_api::{metadata::BlockchainMetadata, rhai_plugin};
 use bv_utils::cmd::run_cmd;
-use eyre::Result;
+use eyre::{Context, Result};
 use std::{
     ffi::OsStr,
     fmt::Debug,
@@ -98,7 +98,8 @@ impl NodeContext {
                 .join(BABEL_PLUGIN_NAME),
             &self.plugin_script,
         )
-        .await?;
+        .await
+        .with_context(|| format!("Babel plugin not found for {image}"))?;
         let script = fs::read_to_string(&self.plugin_script).await?;
         let metadata = rhai_plugin::read_metadata(&script)?;
         Ok((script, metadata))

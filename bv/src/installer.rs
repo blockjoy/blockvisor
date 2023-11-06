@@ -506,11 +506,11 @@ fn check_kernel_requirements() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal_server;
     use crate::node_data::{NodeImage, NodeStatus};
     use crate::node_metrics;
     use crate::utils;
     use crate::utils::tests::test_channel;
+    use crate::{internal_server, start_test_server};
     use assert_fs::TempDir;
     use bv_utils::timer::MockTimer;
     use eyre::anyhow;
@@ -521,6 +521,7 @@ mod tests {
     use std::sync::Arc;
     use std::thread::sleep;
     use std::time::Instant;
+    use tokio_stream::wrappers::UnixListenerStream;
     use tonic::Response;
     use uuid::Uuid;
 
@@ -650,9 +651,9 @@ mod tests {
         }
 
         fn start_test_server(&self, bv_mock: MockTestBV) -> utils::tests::TestServer {
-            utils::tests::start_test_server(
+            start_test_server!(
                 &self.tmp_root,
-                internal_server::service_server::ServiceServer::new(bv_mock),
+                internal_server::service_server::ServiceServer::new(bv_mock)
             )
         }
 

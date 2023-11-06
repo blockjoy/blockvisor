@@ -512,3 +512,509 @@ fn fw_setup_timeout(config: &firewall::Config) -> Duration {
         FW_SETUP_TIMEOUT_SEC + FW_RULE_SETUP_TIMEOUT_SEC * config.rules.len() as u64,
     )
 }
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::{
+        config::Config,
+        node_context::build_registry_dir,
+        pal::{
+            BabelClient, BabelSupClient, CommandsStream, NodeConnection, ServiceConnector,
+            VirtualMachine, VmState,
+        },
+        services::{self, cookbook::BABEL_PLUGIN_NAME, AuthToken},
+        start_test_server, utils,
+        utils::tests::test_channel,
+    };
+    use assert_fs::TempDir;
+    use async_trait::async_trait;
+    use babel_api::utils::BinaryStatus;
+    use babel_api::{
+        babel::BlockchainKey,
+        engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
+        metadata::{BabelConfig, Requirements},
+    };
+    use mockall::*;
+    use serde::{Deserialize, Serialize};
+    use std::{
+        net::IpAddr,
+        path::{Path, PathBuf},
+        str::FromStr,
+        time::Duration,
+    };
+    use tokio_stream::wrappers::UnixListenerStream;
+    use tonic::{transport::Channel, Request, Response, Status, Streaming};
+
+    pub const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
+    pub fn testing_babel_path_absolute() -> String {
+        format!(
+            "{}/../babel_api/protocols/testing/babel.rhai",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    }
+
+    #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+    pub struct DummyNet {
+        pub name: String,
+        pub ip: IpAddr,
+        pub gateway: IpAddr,
+        pub remaster_error: Option<String>,
+        pub delete_error: Option<String>,
+    }
+
+    #[async_trait]
+    impl NetInterface for DummyNet {
+        fn name(&self) -> &String {
+            &self.name
+        }
+        fn ip(&self) -> &IpAddr {
+            &self.ip
+        }
+        fn gateway(&self) -> &IpAddr {
+            &self.gateway
+        }
+        async fn remaster(&self) -> Result<()> {
+            if let Some(err) = &self.remaster_error {
+                bail!(err.clone())
+            } else {
+                Ok(())
+            }
+        }
+        async fn delete(self) -> Result<()> {
+            if let Some(err) = self.delete_error {
+                bail!(err)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct EmptyStreamConnector;
+    pub struct EmptyStream;
+
+    #[async_trait]
+    impl ServiceConnector<EmptyStream> for EmptyStreamConnector {
+        async fn connect(&self) -> Result<EmptyStream> {
+            Ok(EmptyStream)
+        }
+    }
+
+    #[async_trait]
+    impl CommandsStream for EmptyStream {
+        async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>> {
+            Ok(None)
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct TestConnector {
+        pub tmp_root: PathBuf,
+    }
+
+    #[async_trait]
+    impl services::ApiServiceConnector for TestConnector {
+        async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
+        where
+            I: Send + Sync + Fn(Channel, AuthToken) -> T,
+        {
+            Ok(with_interceptor(
+                test_channel(&self.tmp_root),
+                AuthToken("test_token".to_owned()),
+            ))
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
+        pub TestNodeConnection {}
+
+        #[async_trait]
+        impl NodeConnection for TestNodeConnection {
+            async fn open(&mut self, _max_delay: Duration) -> Result<()>;
+            fn close(&mut self);
+            fn is_closed(&self) -> bool;
+            fn mark_broken(&mut self);
+            fn is_broken(&self) -> bool;
+            async fn test(&self) -> Result<()>;
+            async fn babelsup_client<'a>(&'a mut self) -> Result<&'a mut BabelSupClient>;
+            async fn babel_client<'a>(&'a mut self) -> Result<&'a mut BabelClient>;
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
+        pub TestVM {}
+
+        #[async_trait]
+        impl VirtualMachine for TestVM {
+            fn state(&self) -> VmState;
+            async fn delete(self) -> Result<()>;
+            async fn shutdown(&mut self) -> Result<()>;
+            async fn force_shutdown(&mut self) -> Result<()>;
+            async fn start(&mut self) -> Result<()>;
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
+        pub TestPal {}
+
+        #[tonic::async_trait]
+        impl Pal for TestPal {
+            fn bv_root(&self) -> &Path;
+            fn babel_path(&self) -> &Path;
+            fn job_runner_path(&self) -> &Path;
+            type NetInterface = DummyNet;
+            async fn create_net_interface(
+                &self,
+                index: u32,
+                ip: IpAddr,
+                gateway: IpAddr,
+                config: &SharedConfig,
+            ) -> Result<DummyNet>;
+
+            type CommandsStream = EmptyStream;
+            type CommandsStreamConnector = EmptyStreamConnector;
+            fn create_commands_stream_connector(
+                &self,
+                config: &SharedConfig,
+            ) -> EmptyStreamConnector;
+
+            type ApiServiceConnector = TestConnector;
+            fn create_api_service_connector(&self, config: &SharedConfig) -> TestConnector;
+
+            type NodeConnection = MockTestNodeConnection;
+            fn create_node_connection(&self, node_id: Uuid) -> MockTestNodeConnection;
+
+            type VirtualMachine = MockTestVM;
+            async fn create_vm(
+                &self,
+                node_data: &NodeData<DummyNet>,
+            ) -> Result<MockTestVM>;
+            async fn attach_vm(
+                &self,
+                node_data: &NodeData<DummyNet>,
+            ) -> Result<MockTestVM>;
+            fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
+        }
+    }
+
+    mock! {
+        pub TestBabelSupService {}
+
+        #[tonic::async_trait]
+        impl babel_api::babelsup::babel_sup_server::BabelSup for TestBabelSupService {
+            async fn get_version(&self, request: Request<()>) -> Result<Response<String>, Status>;
+            async fn check_babel(
+                &self,
+                request: Request<u32>,
+            ) -> Result<Response<babel_api::utils::BinaryStatus>, Status>;
+            async fn start_new_babel(
+                &self,
+                request: Request<Streaming<babel_api::utils::Binary>>,
+            ) -> Result<Response<()>, Status>;
+            async fn setup_supervisor(
+                &self,
+                request: Request<SupervisorConfig>,
+            ) -> Result<Response<()>, Status>;
+        }
+    }
+
+    mock! {
+        pub TestBabelService {}
+
+        #[allow(clippy::type_complexity)]
+        #[tonic::async_trait]
+        impl babel_api::babel::babel_server::Babel for TestBabelService {
+            async fn setup_babel(
+                &self,
+                request: Request<(String, BabelConfig)>,
+            ) -> Result<Response<()>, Status>;
+            async fn get_babel_shutdown_timeout(
+                &self,
+                request: Request<()>,
+            ) -> Result<Response<Duration>, Status>;
+            async fn shutdown_babel(
+                &self,
+                request: Request<()>,
+            ) -> Result<Response<()>, Status>;
+            async fn setup_firewall(
+                &self,
+                request: Request<babel_api::metadata::firewall::Config>,
+            ) -> Result<Response<()>, Status>;
+            async fn download_keys(
+                &self,
+                request: Request<babel_api::metadata::KeysConfig>,
+            ) -> Result<Response<Vec<BlockchainKey>>, Status>;
+            async fn upload_keys(
+                &self,
+                request: Request<(babel_api::metadata::KeysConfig, Vec<BlockchainKey>)>,
+            ) -> Result<Response<String>, Status>;
+            async fn check_job_runner(
+                &self,
+                request: Request<u32>,
+            ) -> Result<Response<babel_api::utils::BinaryStatus>, Status>;
+            async fn upload_job_runner(
+                &self,
+                request: Request<Streaming<babel_api::utils::Binary>>,
+            ) -> Result<Response<()>, Status>;
+            async fn create_job(
+                &self,
+                request: Request<(String, JobConfig)>,
+            ) -> Result<Response<()>, Status>;
+            async fn start_job(
+                &self,
+                request: Request<String>,
+            ) -> Result<Response<()>, Status>;
+            async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
+            async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
+            async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
+            async fn get_jobs(&self, request: Request<()>) -> Result<Response<Vec<(String, JobInfo)>>, Status>;
+            async fn run_jrpc(
+                &self,
+                request: Request<JrpcRequest>,
+            ) -> Result<Response<HttpResponse>, Status>;
+            async fn run_rest(
+                &self,
+                request: Request<RestRequest>,
+            ) -> Result<Response<HttpResponse>, Status>;
+            async fn run_sh(
+                &self,
+                request: Request<String>,
+            ) -> Result<Response<ShResponse>, Status>;
+            async fn render_template(
+                &self,
+                request: Request<(PathBuf, PathBuf, String)>,
+            ) -> Result<Response<()>, Status>;
+            type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
+            async fn get_logs(
+                &self,
+                _request: Request<()>,
+            ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
+            type GetBabelLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
+            async fn get_babel_logs(
+                &self,
+                _request: Request<u32>,
+            ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
+        }
+    }
+
+    pub fn default_config(bv_root: PathBuf) -> SharedConfig {
+        SharedConfig::new(
+            Config {
+                id: "host_id".to_string(),
+                token: "token".to_string(),
+                refresh_token: "refresh_token".to_string(),
+                blockjoy_api_url: "api.url".to_string(),
+                blockjoy_mqtt_url: Some("mqtt.url".to_string()),
+                update_check_interval_secs: None,
+                blockvisor_port: 888,
+                iface: "bvbr7".to_string(),
+                cluster_id: None,
+                cluster_seed_urls: None,
+            },
+            bv_root,
+        )
+    }
+
+    struct TestEnv {
+        tmp_root: PathBuf,
+        _async_panic_checker: utils::tests::AsyncPanicChecker,
+    }
+
+    impl TestEnv {
+        async fn new() -> Result<Self> {
+            let tmp_root = TempDir::new()?.to_path_buf();
+
+            fs::create_dir_all(build_registry_dir(&tmp_root)).await?;
+
+            Ok(Self {
+                tmp_root,
+                _async_panic_checker: Default::default(),
+            })
+        }
+
+        fn default_pal(&self) -> MockTestPal {
+            let mut pal = MockTestPal::new();
+            pal.expect_bv_root()
+                .return_const(self.tmp_root.to_path_buf());
+            pal.expect_babel_path()
+                .return_const(self.tmp_root.join("babel"));
+            pal.expect_job_runner_path()
+                .return_const(self.tmp_root.join("job_runner"));
+            let tmp_root = self.tmp_root.clone();
+            pal.expect_build_vm_data_path()
+                .returning(move |id| tmp_root.clone().join(format!("vm_data_{id}")));
+            pal.expect_create_commands_stream_connector()
+                .return_const(EmptyStreamConnector);
+            pal.expect_create_api_service_connector()
+                .return_const(TestConnector {
+                    tmp_root: self.tmp_root.clone(),
+                });
+            pal
+        }
+
+        async fn generate_dummy_bins(&self) {
+            fs::write(&self.tmp_root.join("babel"), "dummy babel")
+                .await
+                .unwrap();
+            fs::write(&self.tmp_root.join("job_runner"), "dummy job_runner")
+                .await
+                .unwrap();
+        }
+
+        fn default_node_data(&self) -> NodeData<DummyNet> {
+            NodeData {
+                id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
+                name: "node name".to_string(),
+                expected_status: NodeStatus::Stopped,
+                started_at: None,
+                initialized: false,
+                image: NodeImage {
+                    protocol: "testing".to_string(),
+                    node_type: "validator".to_string(),
+                    node_version: "1.2.3".to_string(),
+                },
+                kernel: TEST_KERNEL.to_string(),
+                network_interface: DummyNet {
+                    name: "bv1".to_string(),
+                    ip: IpAddr::from_str("172.16.0.10").unwrap(),
+                    gateway: IpAddr::from_str("172.16.0.1").unwrap(),
+                    remaster_error: None,
+                    delete_error: None,
+                },
+                requirements: Requirements {
+                    vcpu_count: 1,
+                    mem_size_mb: 16,
+                    disk_size_gb: 1,
+                },
+                firewall_rules: vec![],
+                properties: Default::default(),
+                network: "test".to_string(),
+                standalone: true,
+            }
+        }
+
+        async fn start_server(
+            &self,
+            babel_sup_mock: MockTestBabelSupService,
+            babel_mock: MockTestBabelService,
+        ) -> utils::tests::TestServer {
+            start_test_server!(
+                &self.tmp_root,
+                babel_api::babelsup::babel_sup_server::BabelSupServer::new(babel_sup_mock),
+                babel_api::babel::babel_server::BabelServer::new(babel_mock)
+            )
+        }
+
+        fn test_babel_sup_client(&self) -> &'static mut BabelSupClient {
+            // need to leak client, to mock method that return clients reference
+            // because of mock used which expect `static lifetime
+            Box::leak(Box::new(
+                babel_api::babelsup::babel_sup_client::BabelSupClient::with_interceptor(
+                    test_channel(&self.tmp_root),
+                    pal::DefaultTimeout(Duration::from_secs(1)),
+                ),
+            ))
+        }
+
+        fn test_babel_client(&self) -> &'static mut BabelClient {
+            // need to leak client, to mock method that return clients reference
+            // because of mock used which expect `static lifetime
+            Box::leak(Box::new(
+                babel_api::babel::babel_client::BabelClient::with_interceptor(
+                    test_channel(&self.tmp_root),
+                    pal::DefaultTimeout(Duration::from_secs(1)),
+                ),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_node() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let mut pal = test_env.default_pal();
+        let config = default_config(test_env.tmp_root.clone());
+        let node_data = test_env.default_node_data();
+        let images_dir =
+            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+        fs::create_dir_all(&images_dir).await?;
+        fs::copy(
+            testing_babel_path_absolute(),
+            images_dir.join(BABEL_PLUGIN_NAME),
+        )
+        .await?;
+
+        pal.expect_create_node_connection()
+            .with(predicate::eq(node_data.id))
+            .return_once(|_| MockTestNodeConnection::new());
+        pal.expect_create_vm()
+            .with(predicate::eq(node_data.clone()))
+            .return_once(|_| Ok(MockTestVM::new()));
+
+        let pal = Arc::new(pal);
+        let node = Node::create(pal, config, node_data).await?;
+        assert_eq!(NodeStatus::Stopped, node.expected_status());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_attach_node() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let babelsup_client = test_env.test_babel_sup_client();
+        let babel_client = test_env.test_babel_client();
+        let mut pal = test_env.default_pal();
+        test_env.generate_dummy_bins().await;
+        let config = default_config(test_env.tmp_root.clone());
+        let mut node_data = test_env.default_node_data();
+        node_data.expected_status = NodeStatus::Running;
+        let registry_dir = build_registry_dir(&test_env.tmp_root);
+        fs::create_dir_all(&registry_dir).await?;
+        fs::copy(
+            testing_babel_path_absolute(),
+            registry_dir.join(format!("{}.rhai", node_data.id)),
+        )
+        .await?;
+
+        pal.expect_create_node_connection()
+            .with(predicate::eq(node_data.id))
+            .return_once(|_| {
+                let mut mock = MockTestNodeConnection::new();
+                mock.expect_open().return_once(|_| Ok(()));
+                mock.expect_babelsup_client()
+                    .return_once(|| Ok(babelsup_client));
+                mock.expect_babel_client().return_once(|| Ok(babel_client));
+                mock
+            });
+        pal.expect_attach_vm()
+            .with(predicate::eq(node_data.clone()))
+            .return_once(|_| {
+                let mut mock = MockTestVM::new();
+                mock.expect_state().return_const(VmState::RUNNING);
+                Ok(mock)
+            });
+        let mut babel_sup_mock = MockTestBabelSupService::new();
+        babel_sup_mock
+            .expect_check_babel()
+            .returning(|_| Ok(Response::new(BinaryStatus::ChecksumMismatch)));
+        babel_sup_mock
+            .expect_start_new_babel()
+            .returning(|_| Ok(Response::new(())));
+        let mut babel_mock = MockTestBabelService::new();
+        babel_mock
+            .expect_check_job_runner()
+            .returning(|_| Ok(Response::new(BinaryStatus::ChecksumMismatch)));
+        babel_mock
+            .expect_upload_job_runner()
+            .returning(|_| Ok(Response::new(())));
+
+        let server = test_env.start_server(babel_sup_mock, babel_mock).await;
+        let pal = Arc::new(pal);
+        let node = Node::attach(pal, config, node_data).await?;
+        assert_eq!(NodeStatus::Running, node.expected_status());
+        server.assert().await;
+        Ok(())
+    }
+}

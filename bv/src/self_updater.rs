@@ -150,6 +150,7 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
 mod tests {
     use super::*;
     use crate::services::AuthToken;
+    use crate::start_test_server;
     use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
     use async_trait::async_trait;
@@ -158,6 +159,7 @@ mod tests {
     use std::ffi::OsStr;
     use std::path::Path;
     use tokio::io::AsyncWriteExt;
+    use tokio_stream::wrappers::UnixListenerStream;
     use tonic::transport::Channel;
     use tonic::Response;
 
@@ -239,9 +241,9 @@ mod tests {
             &self,
             bundles_mock: MockTestBundleService,
         ) -> utils::tests::TestServer {
-            utils::tests::start_test_server(
+            start_test_server!(
                 &self.tmp_root,
-                pb::bundle_service_server::BundleServiceServer::new(bundles_mock),
+                pb::bundle_service_server::BundleServiceServer::new(bundles_mock)
             )
         }
 

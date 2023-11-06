@@ -235,9 +235,6 @@ pub async fn discover_net_params(ifa_name: &str) -> Result<NetParams> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use http::{Request, Response};
-    use hyper::Body;
-    use std::convert::Infallible;
     use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::{atomic, Arc};
@@ -245,10 +242,7 @@ pub mod tests {
     use std::time::Duration;
     use tokio::net::UnixStream;
     use tokio::task::JoinHandle;
-    use tokio_stream::wrappers::UnixListenerStream;
-    use tonic::body::BoxBody;
-    use tonic::codegen::Service;
-    use tonic::transport::{Channel, Endpoint, NamedService, Server, Uri};
+    use tonic::transport::{Channel, Endpoint, Uri};
 
     #[test]
     pub fn test_ip_to_mac() {
@@ -365,32 +359,27 @@ pub mod tests {
         }
     }
 
-    pub fn start_test_server<S>(tmp_root: &Path, service_mock: S) -> TestServer
-    where
-        S: Service<Request<Body>, Response = Response<BoxBody>, Error = Infallible>
-            + NamedService
-            + Clone
-            + Send
-            + 'static,
-        S::Future: Send + 'static,
-    {
-        let socket_path = tmp_root.join("test_socket");
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        TestServer {
-            tx,
-            handle: tokio::spawn(async move {
-                let uds_stream =
-                    UnixListenerStream::new(tokio::net::UnixListener::bind(socket_path).unwrap());
-                Server::builder()
-                    .max_concurrent_streams(1)
-                    .add_service(service_mock)
-                    .serve_with_incoming_shutdown(uds_stream, async {
-                        rx.await.ok();
-                    })
-                    .await
-                    .unwrap();
-            }),
-        }
+    #[macro_export]
+    macro_rules! start_test_server {
+        ($tmp_root:expr, $($mock:expr), +) => {{
+            let socket_path = $tmp_root.join("test_socket");
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            $crate::utils::tests::TestServer {
+                tx,
+                handle: tokio::spawn(async move {
+                    let uds_stream =
+                        UnixListenerStream::new(tokio::net::UnixListener::bind(socket_path).unwrap());
+                    tonic::transport::server::Server::builder()
+                        .max_concurrent_streams(1)
+                        .$(add_service($mock)). +
+                        .serve_with_incoming_shutdown(uds_stream, async {
+                            rx.await.ok();
+                        })
+                        .await
+                        .unwrap();
+                }),
+            }
+        }};
     }
 
     #[test]

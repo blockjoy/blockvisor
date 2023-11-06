@@ -776,26 +776,19 @@ fn name_not_found(name: &str) -> eyre::Error {
 mod tests {
     use super::*;
     use crate::{
-        config::Config,
-        pal::{
-            BabelClient, BabelSupClient, CommandsStream, NodeConnection, ServiceConnector,
-            VirtualMachine, VmState,
-        },
+        node::tests::*,
+        pal::VmState,
         services::{
-            self, api::pb, api::pb::ArchiveLocation, cookbook::ROOT_FS_FILE, kernel::KERNELS_DIR,
-            AuthToken,
+            api::pb, api::pb::ArchiveLocation, cookbook::ROOT_FS_FILE, kernel::KERNELS_DIR,
         },
-        utils::tests::test_channel,
+        start_test_server,
     };
     use assert_fs::TempDir;
-    use async_trait::async_trait;
     use bv_utils::cmd::run_cmd;
     use mockall::*;
     use std::ffi::OsStr;
     use std::str::FromStr;
-    use std::{path::Path, time::Duration};
     use tokio_stream::wrappers::UnixListenerStream;
-    use tonic::transport::Channel;
 
     mock! {
         pub TestKernelService {}
@@ -852,153 +845,6 @@ mod tests {
         }
     }
 
-    #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-    pub struct DummyNet {
-        pub name: String,
-        pub ip: IpAddr,
-        pub gateway: IpAddr,
-        pub remaster_error: Option<String>,
-        pub delete_error: Option<String>,
-    }
-
-    #[async_trait]
-    impl NetInterface for DummyNet {
-        fn name(&self) -> &String {
-            &self.name
-        }
-        fn ip(&self) -> &IpAddr {
-            &self.ip
-        }
-        fn gateway(&self) -> &IpAddr {
-            &self.gateway
-        }
-        async fn remaster(&self) -> Result<()> {
-            if let Some(err) = &self.remaster_error {
-                bail!(err.clone())
-            } else {
-                Ok(())
-            }
-        }
-        async fn delete(self) -> Result<()> {
-            if let Some(err) = self.delete_error {
-                bail!(err)
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct EmptyStreamConnector;
-    pub struct EmptyStream;
-
-    #[async_trait]
-    impl ServiceConnector<EmptyStream> for EmptyStreamConnector {
-        async fn connect(&self) -> Result<EmptyStream> {
-            Ok(EmptyStream)
-        }
-    }
-
-    #[async_trait]
-    impl CommandsStream for EmptyStream {
-        async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>> {
-            Ok(None)
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct TestConnector {
-        tmp_root: PathBuf,
-    }
-
-    #[async_trait]
-    impl services::ApiServiceConnector for TestConnector {
-        async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
-        where
-            I: Send + Sync + Fn(Channel, AuthToken) -> T,
-        {
-            Ok(with_interceptor(
-                test_channel(&self.tmp_root),
-                AuthToken("test_token".to_owned()),
-            ))
-        }
-    }
-
-    mock! {
-        #[derive(Debug)]
-        pub TestNodeConnection {}
-
-        #[async_trait]
-        impl NodeConnection for TestNodeConnection {
-            async fn open(&mut self, _max_delay: Duration) -> Result<()>;
-            fn close(&mut self);
-            fn is_closed(&self) -> bool;
-            fn mark_broken(&mut self);
-            fn is_broken(&self) -> bool;
-            async fn test(&self) -> Result<()>;
-            async fn babelsup_client<'a>(&'a mut self) -> Result<&'a mut BabelSupClient>;
-            async fn babel_client<'a>(&'a mut self) -> Result<&'a mut BabelClient>;
-        }
-    }
-
-    mock! {
-        #[derive(Debug)]
-        pub TestVM {}
-
-        #[async_trait]
-        impl VirtualMachine for TestVM {
-            fn state(&self) -> VmState;
-            async fn delete(self) -> Result<()>;
-            async fn shutdown(&mut self) -> Result<()>;
-            async fn force_shutdown(&mut self) -> Result<()>;
-            async fn start(&mut self) -> Result<()>;
-        }
-    }
-
-    mock! {
-        #[derive(Debug)]
-        pub TestPal {}
-
-        #[tonic::async_trait]
-        impl Pal for TestPal {
-            fn bv_root(&self) -> &Path;
-            fn babel_path(&self) -> &Path;
-            fn job_runner_path(&self) -> &Path;
-            type NetInterface = DummyNet;
-            async fn create_net_interface(
-                &self,
-                index: u32,
-                ip: IpAddr,
-                gateway: IpAddr,
-                config: &SharedConfig,
-            ) -> Result<DummyNet>;
-
-            type CommandsStream = EmptyStream;
-            type CommandsStreamConnector = EmptyStreamConnector;
-            fn create_commands_stream_connector(
-                &self,
-                config: &SharedConfig,
-            ) -> EmptyStreamConnector;
-
-            type ApiServiceConnector = TestConnector;
-            fn create_api_service_connector(&self, config: &SharedConfig) -> TestConnector;
-
-            type NodeConnection = MockTestNodeConnection;
-            fn create_node_connection(&self, node_id: Uuid) -> MockTestNodeConnection;
-
-            type VirtualMachine = MockTestVM;
-            async fn create_vm(
-                &self,
-                node_data: &NodeData<DummyNet>,
-            ) -> Result<MockTestVM>;
-            async fn attach_vm(
-                &self,
-                node_data: &NodeData<DummyNet>,
-            ) -> Result<MockTestVM>;
-            fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
-        }
-    }
-
     struct TestEnv {
         tmp_root: PathBuf,
         test_image: NodeImage,
@@ -1039,24 +885,6 @@ mod tests {
                     tmp_root: self.tmp_root.clone(),
                 });
             pal
-        }
-
-        fn default_config(&self) -> SharedConfig {
-            SharedConfig::new(
-                Config {
-                    id: "host_id".to_string(),
-                    token: "token".to_string(),
-                    refresh_token: "refresh_token".to_string(),
-                    blockjoy_api_url: "api.url".to_string(),
-                    blockjoy_mqtt_url: Some("mqtt.url".to_string()),
-                    update_check_interval_secs: None,
-                    blockvisor_port: 888,
-                    iface: "bvbr7".to_string(),
-                    cluster_id: None,
-                    cluster_seed_urls: None,
-                },
-                self.tmp_root.clone(),
-            )
         }
 
         async fn generate_dummy_archive(&self) {
@@ -1152,30 +980,12 @@ mod tests {
                     .create(),
             );
 
-            let socket_path = self.tmp_root.join("test_socket");
-            let (tx, rx) = tokio::sync::oneshot::channel();
             (
-                utils::tests::TestServer {
-                    tx,
-                    handle: tokio::spawn(async move {
-                        let uds_stream = UnixListenerStream::new(
-                            tokio::net::UnixListener::bind(socket_path).unwrap(),
-                        );
-                        tonic::transport::server::Server::builder()
-                            .max_concurrent_streams(1)
-                            .add_service(pb::kernel_service_server::KernelServiceServer::new(
-                                kernels,
-                            ))
-                            .add_service(pb::cookbook_service_server::CookbookServiceServer::new(
-                                cookbook,
-                            ))
-                            .serve_with_incoming_shutdown(uds_stream, async {
-                                rx.await.ok();
-                            })
-                            .await
-                            .unwrap();
-                    }),
-                },
+                start_test_server!(
+                    &self.tmp_root,
+                    pb::kernel_service_server::KernelServiceServer::new(kernels),
+                    pb::cookbook_service_server::CookbookServiceServer::new(cookbook)
+                ),
                 http_server,
                 http_mocks,
             )
@@ -1292,7 +1102,7 @@ mod tests {
     async fn test_create_node() -> Result<()> {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
-        let config = test_env.default_config();
+        let config = default_config(test_env.tmp_root.clone());
 
         let first_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
         let first_node_config = NodeConfig {
@@ -1574,7 +1384,7 @@ mod tests {
     async fn test_load() -> Result<()> {
         let test_env = TestEnv::new().await?;
         let pal = test_env.default_pal();
-        let config = test_env.default_config();
+        let config = default_config(test_env.tmp_root.clone());
 
         let nodes = NodesManager::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
@@ -1611,18 +1421,12 @@ mod tests {
         node_data.save(&registry_dir).await?;
         invalid_node_data.save(&registry_dir).await?;
         fs::copy(
-            format!(
-                "{}/../babel_api/protocols/testing/babel.rhai",
-                env!("CARGO_MANIFEST_DIR")
-            ),
+            testing_babel_path_absolute(),
             registry_dir.join(format!("{}.rhai", node_data.id)),
         )
         .await?;
         fs::copy(
-            format!(
-                "{}/../babel_api/protocols/testing/babel.rhai",
-                env!("CARGO_MANIFEST_DIR")
-            ),
+            testing_babel_path_absolute(),
             registry_dir.join(format!("{}.rhai", invalid_node_data.id)),
         )
         .await?;
@@ -1651,7 +1455,7 @@ mod tests {
             .returning(|_| {
                 bail!("failed to attach");
             });
-        let config = test_env.default_config();
+        let config = default_config(test_env.tmp_root.clone());
         let nodes = NodesManager::load(pal, config).await?;
         assert_eq!(1, nodes.nodes_list().await.len());
         assert_eq!(
@@ -1671,7 +1475,7 @@ mod tests {
     async fn test_upgrade_node() -> Result<()> {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
-        let config = test_env.default_config();
+        let config = default_config(test_env.tmp_root.clone());
 
         let node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
         let node_config = NodeConfig {
@@ -1859,7 +1663,7 @@ mod tests {
     async fn test_recovery() -> Result<()> {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
-        let config = test_env.default_config();
+        let config = default_config(test_env.tmp_root.clone());
         let node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
         let node_config = NodeConfig {
             name: "node name".to_string(),
@@ -1958,7 +1762,6 @@ mod tests {
         }
     }
 
-    const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
     const UPGRADED_IMAGE_RHAI_TEMPLATE: &str = r#"
 const METADATA = #{
     min_babel_version: "0.0.9",
