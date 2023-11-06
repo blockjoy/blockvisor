@@ -167,41 +167,40 @@ impl<P: Pal + Debug> Node<P> {
         self.data.id
     }
 
-    /// Updates OS image for VM.
-    #[instrument(skip(self))]
-    pub async fn upgrade(&mut self, image: &NodeImage) -> Result<()> {
-        let need_to_restart = self.status() == NodeStatus::Running;
-        if need_to_restart {
-            self.stop(false).await?;
+    /// Returns the actual status of the node.
+    pub fn status(&self) -> NodeStatus {
+        let machine_status = match self.machine.state() {
+            pal::VmState::RUNNING => NodeStatus::Running,
+            pal::VmState::SHUTOFF => NodeStatus::Stopped,
+        };
+        if machine_status == self.data.expected_status {
+            if machine_status == NodeStatus::Running
+                && (self.babel_engine.node_connection.is_closed()
+                    || self.babel_engine.node_connection.is_broken())
+            {
+                // node is running, but there is no babel connection or is broken for some reason
+                NodeStatus::Failed
+            } else {
+                machine_status
+            }
+        } else {
+            NodeStatus::Failed
         }
-
-        self.copy_os_image(image).await?;
-
-        let (script, metadata) = self.context.copy_and_check_plugin(image).await?;
-        self.metadata = metadata;
-        self.babel_engine
-            .update_plugin(|engine| RhaiPlugin::new(&script, engine))?;
-
-        self.data.image = image.clone();
-        self.data.requirements = self.metadata.requirements.clone();
-        self.data.initialized = false;
-        self.data.save(&self.context.registry).await?;
-        self.machine = self.pal.attach_vm(&self.data).await?;
-
-        if need_to_restart {
-            self.start().await?;
-        }
-
-        debug!("Node upgraded");
-        Ok(())
     }
 
-    /// Read script content and update plugin with metadata
-    pub async fn reload_plugin(&mut self) -> Result<()> {
-        let script = fs::read_to_string(&self.context.plugin_script).await?;
-        self.metadata = rhai_plugin::read_metadata(&script)?;
-        self.babel_engine
-            .update_plugin(|engine| RhaiPlugin::new(&script, engine))
+    /// Returns the expected status of the node.
+    pub fn expected_status(&self) -> NodeStatus {
+        self.data.expected_status
+    }
+
+    pub async fn set_expected_status(&mut self, status: NodeStatus) -> Result<()> {
+        self.data.expected_status = status;
+        self.data.save(&self.context.registry).await
+    }
+
+    pub async fn set_started_at(&mut self, started_at: Option<DateTime<Utc>>) -> Result<()> {
+        self.data.started_at = started_at;
+        self.data.save(&self.context.registry).await
     }
 
     /// Starts the node.
@@ -260,35 +259,103 @@ impl<P: Pal + Debug> Node<P> {
         Ok(())
     }
 
-    pub async fn set_expected_status(&mut self, status: NodeStatus) -> Result<()> {
-        self.data.expected_status = status;
-        self.data.save(&self.context.registry).await
-    }
-
-    pub async fn set_started_at(&mut self, started_at: Option<DateTime<Utc>>) -> Result<()> {
-        self.data.started_at = started_at;
-        self.data.save(&self.context.registry).await
-    }
-
-    /// Returns the actual status of the node.
-    pub fn status(&self) -> NodeStatus {
-        let machine_status = match self.machine.state() {
-            pal::VmState::RUNNING => NodeStatus::Running,
-            pal::VmState::SHUTOFF => NodeStatus::Stopped,
-        };
-        if machine_status == self.data.expected_status {
-            if machine_status == NodeStatus::Running
-                && (self.babel_engine.node_connection.is_closed()
-                    || self.babel_engine.node_connection.is_broken())
-            {
-                // node is running, but there is no babel connection or is broken for some reason
-                NodeStatus::Failed
-            } else {
-                machine_status
+    /// Stops the running node.
+    #[instrument(skip(self))]
+    pub async fn stop(&mut self, force: bool) -> Result<()> {
+        if !force {
+            let babel_client = self.babel_engine.node_connection.babel_client().await?;
+            let timeout = with_retry!(babel_client.get_babel_shutdown_timeout(()))?.into_inner();
+            if let Err(err) = with_retry!(
+                babel_client.shutdown_babel(with_timeout((), timeout + RPC_REQUEST_TIMEOUT))
+            ) {
+                bail!("Failed to gracefully shutdown babel and background jobs: {err:#}");
             }
-        } else {
-            NodeStatus::Failed
         }
+        match self.machine.state() {
+            pal::VmState::SHUTOFF => {}
+            pal::VmState::RUNNING => {
+                if let Err(err) = self.machine.shutdown().await {
+                    warn!("Graceful shutdown failed: {err}");
+
+                    if let Err(err) = self.machine.force_shutdown().await {
+                        bail!("Forced shutdown failed: {err}");
+                    }
+                }
+            }
+        }
+
+        let start = Instant::now();
+        loop {
+            match self.machine.state() {
+                pal::VmState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
+                    debug!("VM not shutdown yet, will retry");
+                    tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
+                }
+                pal::VmState::RUNNING => {
+                    bail!("VM shutdown timeout");
+                }
+                pal::VmState::SHUTOFF => break,
+            }
+        }
+        self.babel_engine.node_connection.close();
+
+        Ok(())
+    }
+
+    /// Deletes the node.
+    #[instrument(skip(self))]
+    pub async fn delete(self) -> Result<()> {
+        self.machine.delete().await?;
+        let _ = fs::remove_file(&self.context.plugin_script).await;
+        let _ = fs::remove_file(&self.context.plugin_data).await;
+        self.data.delete(&self.context.registry).await
+    }
+
+    pub async fn update(&mut self, rules: Vec<firewall::Rule>) -> Result<()> {
+        let mut firewall = self.metadata.firewall.clone();
+        firewall.rules.append(&mut rules.clone());
+        let babel_client = self.babel_engine.node_connection.babel_client().await?;
+        with_retry!(babel_client
+            .setup_firewall(with_timeout(firewall.clone(), fw_setup_timeout(&firewall))))?;
+        self.data.firewall_rules = rules;
+        self.data.save(&self.context.registry).await
+    }
+
+    /// Updates OS image for VM.
+    #[instrument(skip(self))]
+    pub async fn upgrade(&mut self, image: &NodeImage) -> Result<()> {
+        let need_to_restart = self.status() == NodeStatus::Running;
+        if need_to_restart {
+            self.stop(false).await?;
+        }
+
+        self.copy_os_image(image).await?;
+
+        let (script, metadata) = self.context.copy_and_check_plugin(image).await?;
+        self.metadata = metadata;
+        self.babel_engine
+            .update_plugin(|engine| RhaiPlugin::new(&script, engine))?;
+
+        self.data.image = image.clone();
+        self.data.requirements = self.metadata.requirements.clone();
+        self.data.initialized = false;
+        self.data.save(&self.context.registry).await?;
+        self.machine = self.pal.attach_vm(&self.data).await?;
+
+        if need_to_restart {
+            self.start().await?;
+        }
+
+        debug!("Node upgraded");
+        Ok(())
+    }
+
+    /// Read script content and update plugin with metadata
+    pub async fn reload_plugin(&mut self) -> Result<()> {
+        let script = fs::read_to_string(&self.context.plugin_script).await?;
+        self.metadata = rhai_plugin::read_metadata(&script)?;
+        self.babel_engine
+            .update_plugin(|engine| RhaiPlugin::new(&script, engine))
     }
 
     pub async fn recover(&mut self) -> Result<()> {
@@ -423,73 +490,6 @@ impl<P: Pal + Debug> Node<P> {
     fn post_recovery(&mut self) {
         // reset counters on successful recovery
         self.recovery_counters = Default::default();
-    }
-
-    /// Returns the expected status of the node.
-    pub fn expected_status(&self) -> NodeStatus {
-        self.data.expected_status
-    }
-
-    /// Stops the running node.
-    #[instrument(skip(self))]
-    pub async fn stop(&mut self, force: bool) -> Result<()> {
-        if !force {
-            let babel_client = self.babel_engine.node_connection.babel_client().await?;
-            let timeout = with_retry!(babel_client.get_babel_shutdown_timeout(()))?.into_inner();
-            if let Err(err) = with_retry!(
-                babel_client.shutdown_babel(with_timeout((), timeout + RPC_REQUEST_TIMEOUT))
-            ) {
-                bail!("Failed to gracefully shutdown babel and background jobs: {err:#}");
-            }
-        }
-        match self.machine.state() {
-            pal::VmState::SHUTOFF => {}
-            pal::VmState::RUNNING => {
-                if let Err(err) = self.machine.shutdown().await {
-                    warn!("Graceful shutdown failed: {err}");
-
-                    if let Err(err) = self.machine.force_shutdown().await {
-                        bail!("Forced shutdown failed: {err}");
-                    }
-                }
-            }
-        }
-
-        let start = Instant::now();
-        loop {
-            match self.machine.state() {
-                pal::VmState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
-                    debug!("VM not shutdown yet, will retry");
-                    tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
-                }
-                pal::VmState::RUNNING => {
-                    bail!("VM shutdown timeout");
-                }
-                pal::VmState::SHUTOFF => break,
-            }
-        }
-        self.babel_engine.node_connection.close();
-
-        Ok(())
-    }
-
-    /// Deletes the node.
-    #[instrument(skip(self))]
-    pub async fn delete(self) -> Result<()> {
-        self.machine.delete().await?;
-        let _ = fs::remove_file(&self.context.plugin_script).await;
-        let _ = fs::remove_file(&self.context.plugin_data).await;
-        self.data.delete(&self.context.registry).await
-    }
-
-    pub async fn update(&mut self, rules: Vec<firewall::Rule>) -> Result<()> {
-        let mut firewall = self.metadata.firewall.clone();
-        firewall.rules.append(&mut rules.clone());
-        let babel_client = self.babel_engine.node_connection.babel_client().await?;
-        with_retry!(babel_client
-            .setup_firewall(with_timeout(firewall.clone(), fw_setup_timeout(&firewall))))?;
-        self.data.firewall_rules = rules;
-        self.data.save(&self.context.registry).await
     }
 
     /// Copy OS drive into chroot location.
