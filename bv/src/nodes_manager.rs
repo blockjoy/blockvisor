@@ -46,7 +46,7 @@ pub fn build_registry_filename(bv_root: &Path) -> PathBuf {
 }
 
 #[derive(Debug)]
-pub struct Nodes<P: Pal + Debug> {
+pub struct NodesManager<P: Pal + Debug> {
     api_config: SharedConfig,
     nodes: RwLock<HashMap<Uuid, RwLock<Node<P>>>>,
     node_data_cache: RwLock<HashMap<Uuid, NodeDataCache>>,
@@ -97,7 +97,7 @@ struct State {
     machine_index: u32,
 }
 
-impl<P: Pal + Debug> Nodes<P> {
+impl<P: Pal + Debug> NodesManager<P> {
     pub async fn load(pal: P, api_config: SharedConfig) -> Result<Self> {
         let bv_root = pal.bv_root();
         let registry_dir = build_registry_dir(bv_root);
@@ -1347,7 +1347,7 @@ mod tests {
             })
             .return_once(|_, _, _, _| bail!("failed to create net iface"));
 
-        let nodes = Nodes::load(pal, config).await?;
+        let nodes = NodesManager::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
 
         let (test_server, _http_server, http_mocks) = test_env
@@ -1575,7 +1575,7 @@ mod tests {
         let pal = test_env.default_pal();
         let config = test_env.default_config();
 
-        let nodes = Nodes::load(pal, config).await?;
+        let nodes = NodesManager::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
 
         let node_data = NodeData {
@@ -1651,7 +1651,7 @@ mod tests {
                 bail!("failed to attach");
             });
         let config = test_env.default_config();
-        let nodes = Nodes::load(pal, config).await?;
+        let nodes = NodesManager::load(pal, config).await?;
         assert_eq!(1, nodes.nodes_list().await.len());
         assert_eq!(
             "first node",
@@ -1713,7 +1713,7 @@ mod tests {
             )))
             .return_once(|_| Ok(MockTestVM::new()));
 
-        let nodes = Nodes::load(pal, config).await?;
+        let nodes = NodesManager::load(pal, config).await?;
 
         let (test_server, _http_server, http_mocks) = test_env
             .start_test_server(vec![
@@ -1900,7 +1900,7 @@ mod tests {
 
         let mut sut = RecoverySut {
             node_id,
-            nodes: Nodes::load(pal, config).await?,
+            nodes: NodesManager::load(pal, config).await?,
         };
 
         let (test_server, _http_server, http_mocks) = test_env
@@ -1938,7 +1938,7 @@ mod tests {
 
     struct RecoverySut {
         node_id: Uuid,
-        nodes: Nodes<MockTestPal>,
+        nodes: NodesManager<MockTestPal>,
     }
 
     impl RecoverySut {

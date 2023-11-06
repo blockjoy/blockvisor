@@ -2,7 +2,7 @@ use blockvisord::{
     config::{Config, SharedConfig},
     internal_server,
     linux_platform::LinuxPlatform,
-    nodes::Nodes,
+    nodes_manager::NodesManager,
     pal::Pal,
     set_bv_status, ServiceStatus,
 };
@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", config.blockvisor_port)).await?;
 
     let config = SharedConfig::new(config, bv_root);
-    let nodes = Nodes::load(pal, config.clone()).await?;
+    let nodes = NodesManager::load(pal, config.clone()).await?;
     let nodes = Arc::new(nodes);
 
     Server::builder()
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
         .add_service(internal_server::service_server::ServiceServer::new(
             internal_server::State {
                 config,
-                nodes,
+                nodes_manager: nodes,
                 cluster: Arc::new(None),
                 dev_mode: true,
             },

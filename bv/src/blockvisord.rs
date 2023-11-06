@@ -5,7 +5,7 @@ use crate::{
     internal_server,
     node_data::NodeStatus,
     node_metrics,
-    nodes::Nodes,
+    nodes_manager::NodesManager,
     pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
     services::{self, api, api::pb, mqtt},
@@ -115,8 +115,8 @@ where
             .unwrap_or_else(|e| error!("Cannot create Prometheus endpoint: {e}"));
 
         let cmds_connector = self.pal.create_commands_stream_connector(&self.config);
-        let nodes = Nodes::load(self.pal, self.config.clone()).await?;
-        let nodes = Arc::new(nodes);
+        let nodes_manager = NodesManager::load(self.pal, self.config.clone()).await?;
+        let nodes_manager = Arc::new(nodes_manager);
 
         try_set_bv_status(ServiceStatus::Ok).await;
 
@@ -124,14 +124,14 @@ where
             self.config.clone(),
             run.clone(),
             self.listener,
-            nodes.clone(),
+            nodes_manager.clone(),
             self.cluster.clone(),
         );
 
         let (cmd_watch_tx, cmd_watch_rx) = watch::channel(());
         let external_api_client_future = Self::create_external_api_listener(
             run.clone(),
-            nodes.clone(),
+            nodes_manager.clone(),
             cmd_watch_rx,
             &self.config,
         );
@@ -139,16 +139,20 @@ where
             Self::create_commands_listener(run.clone(), cmds_connector, cmd_watch_tx);
 
         let cluster_updates_future =
-            Self::cluster_updates(run.clone(), nodes.clone(), self.cluster.clone());
+            Self::cluster_updates(run.clone(), nodes_manager.clone(), self.cluster.clone());
 
-        let nodes_recovery_future = Self::nodes_recovery(run.clone(), nodes.clone());
+        let nodes_recovery_future = Self::nodes_recovery(run.clone(), nodes_manager.clone());
 
         let node_updates_future =
-            Self::node_updates(run.clone(), nodes.clone(), self.config.clone());
+            Self::node_updates(run.clone(), nodes_manager.clone(), self.config.clone());
 
         let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
-        let node_metrics_future =
-            Self::node_metrics(run.clone(), nodes.clone(), &endpoint, self.config.clone());
+        let node_metrics_future = Self::node_metrics(
+            run.clone(),
+            nodes_manager.clone(),
+            &endpoint,
+            self.config.clone(),
+        );
         let host_metrics_future =
             Self::host_metrics(run.clone(), config.id, &endpoint, self.config.clone());
 
@@ -176,7 +180,7 @@ where
         config: SharedConfig,
         mut run: RunFlag,
         listener: TcpListener,
-        nodes: Arc<Nodes<P>>,
+        nodes_manager: Arc<NodesManager<P>>,
         cluster: Arc<Option<cluster::ClusterData>>,
     ) -> Result<()> {
         Server::builder()
@@ -184,7 +188,7 @@ where
             .add_service(internal_server::service_server::ServiceServer::new(
                 internal_server::State {
                     config,
-                    nodes,
+                    nodes_manager,
                     cluster,
                     dev_mode: false,
                 },
@@ -200,7 +204,7 @@ where
 
     async fn create_external_api_listener(
         mut run: RunFlag,
-        nodes: Arc<Nodes<P>>,
+        nodes_manager: Arc<NodesManager<P>>,
         mut cmd_watch_rx: Receiver<()>,
         config: &SharedConfig,
     ) {
@@ -210,7 +214,10 @@ where
             match api::CommandsService::connect(config).await {
                 Ok(mut client) => {
                     if let Err(e) = client
-                        .get_and_process_pending_commands(&config.read().await.id, nodes.clone())
+                        .get_and_process_pending_commands(
+                            &config.read().await.id,
+                            nodes_manager.clone(),
+                        )
                         .await
                     {
                         error!("Error processing pending commands: {:#}", e);
@@ -265,7 +272,7 @@ where
     /// This task runs periodically to update nodes info in p2p network.
     async fn cluster_updates(
         mut run: RunFlag,
-        nodes: Arc<Nodes<P>>,
+        nodes_manager: Arc<NodesManager<P>>,
         cluster: Arc<Option<cluster::ClusterData>>,
     ) {
         while run.load() {
@@ -273,7 +280,7 @@ where
             if let Some(ref cluster) = *cluster {
                 // collect interesting information about nodes
                 let mut updates = vec![];
-                for (id, node) in nodes.nodes_list().await.iter() {
+                for (id, node) in nodes_manager.nodes_list().await.iter() {
                     if let Ok(node) = node.try_read() {
                         let status = node.status();
                         let image = node.data.image.clone();
@@ -308,10 +315,10 @@ where
         }
     }
     /// This task runs periodically to make sure actual nodes state is equal to expected.
-    async fn nodes_recovery(mut run: RunFlag, nodes: Arc<Nodes<P>>) {
+    async fn nodes_recovery(mut run: RunFlag, nodes_manager: Arc<NodesManager<P>>) {
         while run.load() {
             let now = Instant::now();
-            nodes.recover().await;
+            nodes_manager.recover().await;
             BV_NODES_RECOVERY_COUNTER.increment(1);
             BV_NODES_RECOVERY_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             run.select(sleep(RECOVERY_CHECK_INTERVAL)).await;
@@ -319,14 +326,18 @@ where
     }
 
     /// This task runs periodically to send important info about nodes to API.
-    async fn node_updates(mut run: RunFlag, nodes: Arc<Nodes<P>>, config: SharedConfig) {
+    async fn node_updates(
+        mut run: RunFlag,
+        nodes_manager: Arc<NodesManager<P>>,
+        config: SharedConfig,
+    ) {
         let mut updates_cache = HashMap::new();
         while run.load() {
             run.select(sleep(with_jitter(INFO_UPDATE_INTERVAL))).await;
 
             let now = Instant::now();
             let mut updates = vec![];
-            for (id, node) in nodes.nodes_list().await.iter() {
+            for (id, node) in nodes_manager.nodes_list().await.iter() {
                 if let Ok(mut node) = node.try_write() {
                     if node.data.standalone {
                         // don't send updates for standalone nodes
@@ -395,7 +406,7 @@ where
     /// nodes, query their metrics, then send them to blockvisor-api.
     async fn node_metrics(
         mut run: RunFlag,
-        nodes: Arc<Nodes<P>>,
+        nodes_manager: Arc<NodesManager<P>>,
         endpoint: &Endpoint,
         config: SharedConfig,
     ) -> Option<()> {
@@ -404,7 +415,7 @@ where
             run.select(sleep(with_jitter(node_metrics::COLLECT_INTERVAL)))
                 .await;
             let now = Instant::now();
-            let mut metrics = node_metrics::collect_metrics(nodes.clone()).await;
+            let mut metrics = node_metrics::collect_metrics(nodes_manager.clone()).await;
             let mut job_info_cache_update: HashMap<(uuid::Uuid, String), u64> = HashMap::new();
             // do not bother api with empty updates
             if metrics.has_any() {

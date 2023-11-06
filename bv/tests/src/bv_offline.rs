@@ -8,7 +8,7 @@ use assert_fs::TempDir;
 use blockvisord::{
     config::{Config, SharedConfig},
     firecracker_machine::FC_BIN_NAME,
-    nodes::Nodes,
+    nodes_manager::NodesManager,
     services,
     services::{api, api::pb},
     set_bv_status, utils, ServiceStatus,
@@ -595,13 +595,14 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     let config = SharedConfig::new(config.clone(), "/conf.jason".into());
     let config_clone = config.clone();
 
-    let nodes = Arc::new(Nodes::load(test_env.build_dummy_platform(), config).await?);
+    let nodes_manager =
+        Arc::new(NodesManager::load(test_env.build_dummy_platform(), config).await?);
 
     let client_future = async {
         match api::CommandsService::connect(&config_clone).await {
             Ok(mut client) => {
                 if let Err(e) = client
-                    .get_and_process_pending_commands(&host_id, nodes.clone())
+                    .get_and_process_pending_commands(&host_id, nodes_manager)
                     .await
                 {
                     println!("Error processing pending commands: {:?}", e);

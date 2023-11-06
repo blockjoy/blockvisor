@@ -5,7 +5,7 @@ use crate::{
     linux_platform::LinuxPlatform,
     node::Node,
     node_data::{NodeImage, NodeStatus},
-    nodes::{self, NodeConfig, Nodes},
+    nodes_manager::{self, NodeConfig, NodesManager},
     pal::{NetInterface, Pal},
     services,
     services::{api, api::pb},
@@ -79,7 +79,7 @@ trait Service {
 
 pub struct State<P: Pal + Debug> {
     pub config: SharedConfig,
-    pub nodes: Arc<Nodes<P>>,
+    pub nodes_manager: Arc<NodesManager<P>>,
     pub cluster: Arc<Option<ClusterData>>,
     pub dev_mode: bool,
 }
@@ -141,7 +141,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         let status = self
-            .nodes
+            .nodes_manager
             .status(id)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -152,7 +152,7 @@ where
     async fn get_node(&self, request: Request<Uuid>) -> Result<Response<NodeDisplayInfo>, Status> {
         status_check().await?;
         let id = request.into_inner();
-        let nodes_lock = self.nodes.nodes_list().await;
+        let nodes_lock = self.nodes_manager.nodes_list().await;
         if let Some(node_lock) = nodes_lock.get(&id) {
             Ok(Response::new(
                 self.get_node_display_info(id, node_lock)
@@ -170,7 +170,7 @@ where
         _request: Request<()>,
     ) -> Result<Response<Vec<NodeDisplayInfo>>, Status> {
         status_check().await?;
-        let nodes_lock = self.nodes.nodes_list().await;
+        let nodes_lock = self.nodes_manager.nodes_list().await;
         let mut nodes = vec![];
         for (id, node_lock) in nodes_lock.iter() {
             nodes.push(
@@ -215,7 +215,7 @@ where
         let (id, image) = request.into_inner();
 
         if self.is_standalone_node(id).await? {
-            self.nodes
+            self.nodes_manager
                 .upgrade(id, image)
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -232,7 +232,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         if self.is_standalone_node(id).await? {
-            self.nodes
+            self.nodes_manager
                 .start(id, true)
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -251,7 +251,7 @@ where
         status_check().await?;
         let (id, force) = request.into_inner();
         if self.is_standalone_node(id).await? {
-            self.nodes
+            self.nodes_manager
                 .stop(id, force)
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -270,7 +270,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         if self.is_standalone_node(id).await? {
-            self.nodes
+            self.nodes_manager
                 .delete(id)
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -292,7 +292,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         let jobs = self
-            .nodes
+            .nodes_manager
             .jobs(id)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -307,7 +307,7 @@ where
         status_check().await?;
         let (id, job_name) = request.into_inner();
         let info = self
-            .nodes
+            .nodes_manager
             .job_info(id, &job_name)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -321,7 +321,7 @@ where
     ) -> Result<Response<()>, Status> {
         status_check().await?;
         let (id, job_name) = request.into_inner();
-        self.nodes
+        self.nodes_manager
             .start_job(id, &job_name)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -335,7 +335,7 @@ where
     ) -> Result<Response<()>, Status> {
         status_check().await?;
         let (id, job_name) = request.into_inner();
-        self.nodes
+        self.nodes_manager
             .stop_job(id, &job_name)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -349,7 +349,7 @@ where
     ) -> Result<Response<()>, Status> {
         status_check().await?;
         let (id, job_name) = request.into_inner();
-        self.nodes
+        self.nodes_manager
             .cleanup_job(id, &job_name)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -361,7 +361,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         let logs = self
-            .nodes
+            .nodes_manager
             .logs(id)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -376,7 +376,7 @@ where
         status_check().await?;
         let (id, max_lines) = request.into_inner();
         let logs = self
-            .nodes
+            .nodes_manager
             .babel_logs(id, max_lines)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -389,7 +389,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         let keys = self
-            .nodes
+            .nodes_manager
             .keys(id)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -405,7 +405,7 @@ where
         status_check().await?;
         let name = request.into_inner();
         let id = self
-            .nodes
+            .nodes_manager
             .node_id_for_name(&name)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -420,7 +420,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         let capabilities = self
-            .nodes
+            .nodes_manager
             .capabilities(id)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -436,15 +436,15 @@ where
         status_check().await?;
         let (id, method, param) = request.into_inner();
         let value = self
-            .nodes
+            .nodes_manager
             .call_method(id, &method, &param, true)
             .await
             .map_err(|e| match e {
-                nodes::BabelError::MethodNotFound => {
+                nodes_manager::BabelError::MethodNotFound => {
                     Status::not_found("blockchain method not found")
                 }
-                nodes::BabelError::Internal { err } => Status::internal(format!("{err:#}")),
-                nodes::BabelError::Plugin { err } => Status::unknown(format!("{err:#}")),
+                nodes_manager::BabelError::Internal { err } => Status::internal(format!("{err:#}")),
+                nodes_manager::BabelError::Plugin { err } => Status::unknown(format!("{err:#}")),
             })?;
         Ok(Response::new(value))
     }
@@ -457,7 +457,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         let metrics = self
-            .nodes
+            .nodes_manager
             .metrics(id)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -492,7 +492,7 @@ where
     async fn is_standalone_node(&self, id: Uuid) -> eyre::Result<bool, Status> {
         Ok(self.dev_mode
             || self
-                .nodes
+                .nodes_manager
                 .nodes_list()
                 .await
                 .get(&id)
@@ -534,7 +534,7 @@ where
             }
         } else {
             let cache = self
-                .nodes
+                .nodes_manager
                 .node_data_cache(id)
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
@@ -566,7 +566,7 @@ where
             .collect();
 
         let (ip, gateway) = self.discover_ip_and_gateway(&req, id).await?;
-        self.nodes
+        self.nodes_manager
             .create(
                 id,
                 NodeConfig {
@@ -656,7 +656,7 @@ where
         let ip = match &req.ip {
             None => {
                 let mut used_ips = vec![];
-                for (_, node) in self.nodes.nodes_list().await.iter() {
+                for (_, node) in self.nodes_manager.nodes_list().await.iter() {
                     used_ips.push(node.read().await.data.network_interface.ip().to_string());
                 }
                 let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {

@@ -13,7 +13,7 @@ pub mod node;
 pub mod node_connection;
 pub mod node_data;
 pub mod node_metrics;
-pub mod nodes;
+pub mod nodes_manager;
 pub mod pal;
 pub mod pretty_table;
 pub mod self_updater;

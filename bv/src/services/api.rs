@@ -1,6 +1,6 @@
 use crate::{
-    config::SharedConfig, get_bv_status, node_data::NodeImage, nodes, nodes::Nodes, pal::Pal,
-    services, services::AuthenticatedService, ServiceStatus,
+    config::SharedConfig, get_bv_status, node_data::NodeImage, nodes_manager,
+    nodes_manager::NodesManager, pal::Pal, services, services::AuthenticatedService, ServiceStatus,
 };
 use babel_api::{
     engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation},
@@ -105,13 +105,13 @@ impl CommandsService {
     pub async fn get_and_process_pending_commands<P: Pal + Debug>(
         &mut self,
         host_id: &str,
-        nodes: Arc<Nodes<P>>,
+        nodes_manager: Arc<NodesManager<P>>,
     ) -> Result<()> {
         let commands = self
             .get_pending_commands(host_id)
             .await
             .with_context(|| "cannot get pending commands")?;
-        self.process_commands(commands, nodes)
+        self.process_commands(commands, nodes_manager)
             .await
             .with_context(|| "cannot process commands")?;
         Ok(())
@@ -132,7 +132,7 @@ impl CommandsService {
     pub async fn process_commands<P: Pal + Debug>(
         &mut self,
         commands: Vec<pb::Command>,
-        nodes: Arc<Nodes<P>>,
+        nodes_manager: Arc<NodesManager<P>>,
     ) -> Result<()> {
         info!("Processing {} commands", commands.len());
 
@@ -153,7 +153,7 @@ impl CommandsService {
                             .await
                             .with_context(|| "cannot ack command")?;
                         // process the command
-                        match process_node_command(nodes.clone(), node_command).await {
+                        match process_node_command(nodes_manager.clone(), node_command).await {
                             Err(error) => {
                                 error!("Error processing command: {error:?}");
                                 self.send_command_update(
@@ -248,7 +248,7 @@ impl CommandsService {
 }
 
 async fn process_node_command<P: Pal + Debug>(
-    nodes: Arc<Nodes<P>>,
+    nodes_manager: Arc<NodesManager<P>>,
     node_command: pb::NodeCommand,
 ) -> Result<()> {
     let node_id = Uuid::from_str(&node_command.node_id)?;
@@ -271,10 +271,10 @@ async fn process_node_command<P: Pal + Debug>(
                     .into_iter()
                     .map(|rule| rule.try_into())
                     .collect::<Result<Vec<_>>>()?;
-                nodes
+                nodes_manager
                     .create(
                         node_id,
-                        nodes::NodeConfig {
+                        nodes_manager::NodeConfig {
                             name: args.name,
                             image,
                             ip: args.ip,
@@ -290,23 +290,23 @@ async fn process_node_command<P: Pal + Debug>(
                 API_CREATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Delete(_) => {
-                nodes.delete(node_id).await?;
+                nodes_manager.delete(node_id).await?;
                 API_DELETE_COUNTER.increment(1);
                 API_DELETE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Start(_) => {
-                nodes.start(node_id, false).await?;
+                nodes_manager.start(node_id, false).await?;
                 API_START_COUNTER.increment(1);
                 API_START_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Stop(_) => {
-                nodes.stop(node_id, false).await?;
+                nodes_manager.stop(node_id, false).await?;
                 API_STOP_COUNTER.increment(1);
                 API_STOP_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Restart(_) => {
-                nodes.stop(node_id, false).await?;
-                nodes.start(node_id, false).await?;
+                nodes_manager.stop(node_id, false).await?;
+                nodes_manager.start(node_id, false).await?;
                 API_RESTART_COUNTER.increment(1);
                 API_RESTART_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
@@ -315,12 +315,12 @@ async fn process_node_command<P: Pal + Debug>(
                     .image
                     .ok_or_else(|| anyhow!("Image not provided"))?
                     .into();
-                nodes.upgrade(node_id, image).await?;
+                nodes_manager.upgrade(node_id, image).await?;
                 API_UPGRADE_COUNTER.increment(1);
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Update(pb::NodeUpdate { rules, .. }) => {
-                nodes
+                nodes_manager
                     .update(
                         node_id,
                         rules
