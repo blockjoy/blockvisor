@@ -56,6 +56,7 @@ used during debugging issues, not printed by default
 - `/var/lib/blockvisor/nodes/<uuid>.data` Babel plugin specific data
 - `/var/lib/blockvisor/firecracker/<uuid>/` node specific firecracker data (e.g. copy of images)
 - `/var/lib/blockvisor/images/<protocol>/<node_type>/<node_version>/` downloaded images cache
+- `/var/lib/blockvisor/kernels/<kernel_version>/kernel` downloaded kernels cache
 
 ### Node
 - `/usr/bin/babel`

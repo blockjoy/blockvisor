@@ -132,6 +132,7 @@ impl<P: Pal + Debug> Node<P> {
                 Self::connect(&mut node_conn, NODE_RECONNECT_TIMEOUT, pal.babel_path()).await
             {
                 warn!("failed to reestablish babel connection to running node {node_id}: {err}");
+                node_conn.close();
             } else if let Err(err) =
                 Self::check_job_runner(&mut node_conn, pal.job_runner_path()).await
             {
@@ -856,15 +857,6 @@ pub mod tests {
             pal
         }
 
-        async fn generate_dummy_bins(&self) {
-            fs::write(&self.tmp_root.join("babel"), "dummy babel")
-                .await
-                .unwrap();
-            fs::write(&self.tmp_root.join("job_runner"), "dummy job_runner")
-                .await
-                .unwrap();
-        }
-
         fn default_node_data(&self) -> NodeData<DummyNet> {
             NodeData {
                 id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
@@ -908,28 +900,28 @@ pub mod tests {
                 babel_api::babel::babel_server::BabelServer::new(babel_mock)
             )
         }
+    }
 
-        fn test_babel_sup_client(&self) -> &'static mut BabelSupClient {
-            // need to leak client, to mock method that return clients reference
-            // because of mock used which expect `static lifetime
-            Box::leak(Box::new(
-                babel_api::babelsup::babel_sup_client::BabelSupClient::with_interceptor(
-                    test_channel(&self.tmp_root),
-                    pal::DefaultTimeout(Duration::from_secs(1)),
-                ),
-            ))
-        }
+    fn test_babel_sup_client(tmp_root: &Path) -> &'static mut BabelSupClient {
+        // need to leak client, to mock method that return clients reference
+        // because of mock used which expect `static lifetime
+        Box::leak(Box::new(
+            babel_api::babelsup::babel_sup_client::BabelSupClient::with_interceptor(
+                test_channel(tmp_root),
+                pal::DefaultTimeout(Duration::from_secs(1)),
+            ),
+        ))
+    }
 
-        fn test_babel_client(&self) -> &'static mut BabelClient {
-            // need to leak client, to mock method that return clients reference
-            // because of mock used which expect `static lifetime
-            Box::leak(Box::new(
-                babel_api::babel::babel_client::BabelClient::with_interceptor(
-                    test_channel(&self.tmp_root),
-                    pal::DefaultTimeout(Duration::from_secs(1)),
-                ),
-            ))
-        }
+    fn test_babel_client(tmp_root: &Path) -> &'static mut BabelClient {
+        // need to leak client, to mock method that return clients reference
+        // because of mock used which expect `static lifetime
+        Box::leak(Box::new(
+            babel_api::babel::babel_client::BabelClient::with_interceptor(
+                test_channel(tmp_root),
+                pal::DefaultTimeout(Duration::from_secs(1)),
+            ),
+        ))
     }
 
     #[tokio::test]
@@ -938,23 +930,54 @@ pub mod tests {
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
         let node_data = test_env.default_node_data();
-        let images_dir =
-            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
-        fs::create_dir_all(&images_dir).await?;
-        fs::copy(
-            testing_babel_path_absolute(),
-            images_dir.join(BABEL_PLUGIN_NAME),
-        )
-        .await?;
 
         pal.expect_create_node_connection()
             .with(predicate::eq(node_data.id))
             .return_once(|_| MockTestNodeConnection::new());
         pal.expect_create_vm()
             .with(predicate::eq(node_data.clone()))
-            .return_once(|_| Ok(MockTestVM::new()));
-
+            .once()
+            .returning(|_| bail!("create VM error"));
+        pal.expect_create_vm()
+            .with(predicate::eq(node_data.clone()))
+            .once()
+            .returning(|_| Ok(MockTestVM::new()));
         let pal = Arc::new(pal);
+
+        assert_eq!(
+            "Babel plugin not found for testing/validator/1.2.3",
+            Node::create(pal.clone(), config.clone(), node_data.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
+        let images_dir =
+            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+        fs::create_dir_all(&images_dir).await?;
+
+        fs::write(images_dir.join(BABEL_PLUGIN_NAME), "malformed rhai script").await?;
+        assert_eq!(
+            "Expecting ';' to terminate this statement (line 1, position 11)",
+            Node::create(pal.clone(), config.clone(), node_data.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
+        fs::copy(
+            testing_babel_path_absolute(),
+            images_dir.join(BABEL_PLUGIN_NAME),
+        )
+        .await?;
+        assert_eq!(
+            "create VM error",
+            Node::create(pal.clone(), config.clone(), node_data.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
         let node = Node::create(pal, config, node_data).await?;
         assert_eq!(NodeStatus::Stopped, node.expected_status());
         Ok(())
@@ -963,34 +986,79 @@ pub mod tests {
     #[tokio::test]
     async fn test_attach_node() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let babelsup_client = test_env.test_babel_sup_client();
-        let babel_client = test_env.test_babel_client();
-        let mut pal = test_env.default_pal();
-        test_env.generate_dummy_bins().await;
-        let config = default_config(test_env.tmp_root.clone());
         let mut node_data = test_env.default_node_data();
         node_data.expected_status = NodeStatus::Running;
-        let registry_dir = build_registry_dir(&test_env.tmp_root);
-        fs::create_dir_all(&registry_dir).await?;
-        fs::copy(
-            testing_babel_path_absolute(),
-            registry_dir.join(format!("{}.rhai", node_data.id)),
-        )
-        .await?;
+        let mut failed_vm_node_data = node_data.clone();
+        failed_vm_node_data.id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
+        let mut missing_babel_node_data = node_data.clone();
+        missing_babel_node_data.id =
+            Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047532").unwrap();
+        let mut missing_job_runner_node_data = node_data.clone();
+        missing_job_runner_node_data.id =
+            Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047533").unwrap();
+        let config = default_config(test_env.tmp_root.clone());
+        let mut pal = test_env.default_pal();
 
+        let test_tmp_root = test_env.tmp_root.to_path_buf();
         pal.expect_create_node_connection()
             .with(predicate::eq(node_data.id))
-            .return_once(|_| {
+            .once()
+            .returning(move |_| {
                 let mut mock = MockTestNodeConnection::new();
                 mock.expect_open().return_once(|_| Ok(()));
+                let tmp_root = test_tmp_root.clone();
                 mock.expect_babelsup_client()
-                    .return_once(|| Ok(babelsup_client));
-                mock.expect_babel_client().return_once(|| Ok(babel_client));
+                    .once()
+                    .returning(move || Ok(test_babel_sup_client(&tmp_root)));
+                let tmp_root = test_tmp_root.clone();
+                mock.expect_babel_client()
+                    .return_once(move || Ok(test_babel_client(&tmp_root)));
+                mock
+            });
+        pal.expect_create_node_connection()
+            .with(predicate::eq(failed_vm_node_data.id))
+            .once()
+            .returning(move |_| MockTestNodeConnection::new());
+        pal.expect_create_node_connection()
+            .with(predicate::eq(missing_babel_node_data.id))
+            .once()
+            .returning(move |_| {
+                let mut mock = MockTestNodeConnection::new();
+                mock.expect_open().return_once(|_| Ok(()));
+                mock.expect_close().return_once(|| ());
+                mock.expect_is_closed().return_once(|| true);
+                mock
+            });
+        let test_tmp_root = test_env.tmp_root.to_path_buf();
+        pal.expect_create_node_connection()
+            .with(predicate::eq(missing_job_runner_node_data.id))
+            .once()
+            .returning(move |_| {
+                let mut mock = MockTestNodeConnection::new();
+                mock.expect_open().return_once(|_| Ok(()));
+                let tmp_root = test_tmp_root.clone();
+                mock.expect_babelsup_client()
+                    .once()
+                    .returning(move || Ok(test_babel_sup_client(&tmp_root)));
+                mock.expect_close().return_once(|| ());
+                mock.expect_is_closed().return_once(|| true);
                 mock
             });
         pal.expect_attach_vm()
-            .with(predicate::eq(node_data.clone()))
-            .return_once(|_| {
+            .with(predicate::eq(failed_vm_node_data.clone()))
+            .once()
+            .returning(|_| bail!("attach VM failed"));
+        let missing_job_runner_node_data_id = missing_job_runner_node_data.id;
+        let missing_babel_node_data_id = missing_babel_node_data.id;
+        let node_data_id = node_data.id;
+        pal.expect_attach_vm()
+            .withf(move |data| {
+                data.id == node_data_id
+                    || data.id == missing_babel_node_data_id
+                    || data.id == missing_job_runner_node_data_id
+            })
+            .times(3)
+            .returning(|_| {
                 let mut mock = MockTestVM::new();
                 mock.expect_state().return_const(VmState::RUNNING);
                 Ok(mock)
@@ -1009,9 +1077,77 @@ pub mod tests {
         babel_mock
             .expect_upload_job_runner()
             .returning(|_| Ok(Response::new(())));
-
-        let server = test_env.start_server(babel_sup_mock, babel_mock).await;
         let pal = Arc::new(pal);
+
+        assert_eq!(
+            "No such file or directory (os error 2)",
+            Node::attach(pal.clone(), config.clone(), node_data.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
+        let registry_dir = build_registry_dir(&test_env.tmp_root);
+        fs::create_dir_all(&registry_dir).await?;
+        fs::write(
+            registry_dir.join(format!("{}.rhai", node_data.id)),
+            "invalid rhai script",
+        )
+        .await?;
+        assert_eq!(
+            "Expecting ';' to terminate this statement (line 1, position 9)",
+            Node::attach(pal.clone(), config.clone(), node_data.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
+        fs::copy(
+            testing_babel_path_absolute(),
+            registry_dir.join(format!("{}.rhai", node_data.id)),
+        )
+        .await?;
+        fs::copy(
+            testing_babel_path_absolute(),
+            registry_dir.join(format!("{}.rhai", failed_vm_node_data.id)),
+        )
+        .await?;
+        fs::copy(
+            testing_babel_path_absolute(),
+            registry_dir.join(format!("{}.rhai", missing_babel_node_data.id)),
+        )
+        .await?;
+        fs::copy(
+            testing_babel_path_absolute(),
+            registry_dir.join(format!("{}.rhai", missing_job_runner_node_data.id)),
+        )
+        .await?;
+        assert_eq!(
+            "attach VM failed",
+            Node::attach(pal.clone(), config.clone(), failed_vm_node_data)
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
+        let node = Node::attach(pal.clone(), config.clone(), missing_babel_node_data).await?;
+        assert_eq!(NodeStatus::Failed, node.status());
+
+        fs::write(&test_env.tmp_root.join("babel"), "dummy babel")
+            .await
+            .unwrap();
+        let node = Node::attach(
+            pal.clone(),
+            config.clone(),
+            missing_job_runner_node_data.clone(),
+        )
+        .await?;
+        assert_eq!(NodeStatus::Failed, node.status());
+
+        fs::write(&test_env.tmp_root.join("job_runner"), "dummy job_runner")
+            .await
+            .unwrap();
+        let server = test_env.start_server(babel_sup_mock, babel_mock).await;
         let node = Node::attach(pal, config, node_data).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
         server.assert().await;
