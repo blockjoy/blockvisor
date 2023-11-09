@@ -33,7 +33,11 @@ impl<E: Engine + Sync + Send + 'static> Clone for RhaiPlugin<E> {
 }
 
 pub fn read_metadata(script: &str) -> Result<BlockchainMetadata> {
-    find_metadata_in_ast(&new_rhai_engine().compile(script)?)
+    find_metadata_in_ast(
+        &new_rhai_engine()
+            .compile(script)
+            .with_context(|| "Rhai syntax error")?,
+    )
 }
 
 fn new_rhai_engine() -> rhai::Engine {
@@ -58,7 +62,9 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
     pub fn new(script: &str, babel_engine: E) -> Result<Self> {
         let rhai_engine = new_rhai_engine();
         // compile script to AST
-        let ast = rhai_engine.compile(script)?;
+        let ast = rhai_engine
+            .compile(script)
+            .with_context(|| "Rhai syntax error")?;
         let mut plugin = RhaiPlugin {
             babel_engine: Arc::new(babel_engine),
             rhai_engine,
@@ -207,9 +213,9 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         args: P,
     ) -> Result<R> {
         let mut scope = rhai::Scope::new();
-        Ok(self
-            .rhai_engine
-            .call_fn::<R>(&mut scope, &self.ast, name, args)?)
+        self.rhai_engine
+            .call_fn::<R>(&mut scope, &self.ast, name, args)
+            .with_context(|| "Rhai call_fn error")
     }
 }
 
@@ -746,21 +752,27 @@ mod tests {
             .expect_load_data()
             .return_once(|| bail!("some Rust error"));
         let plugin = RhaiPlugin::new(script, babel)?;
-        assert!(plugin
-            .call_custom_method("custom_method_with_exception", "")
-            .unwrap_err()
-            .to_string()
-            .contains("some Rhai exception"));
-        assert!(plugin
-            .call_custom_method("custom_failing_method", "")
-            .unwrap_err()
-            .to_string()
-            .contains("some Rust error"));
-        assert!(plugin
-            .call_custom_method("no_method", "")
-            .unwrap_err()
-            .to_string()
-            .contains("Function not found: no_method"));
+        assert_eq!(
+            "Rhai call_fn error",
+            plugin
+                .call_custom_method("custom_method_with_exception", "")
+                .unwrap_err()
+                .to_string()
+        );
+        assert!(format!(
+            "{:#}",
+            plugin
+                .call_custom_method("custom_failing_method", "")
+                .unwrap_err()
+        )
+        .starts_with("Rhai call_fn error: Runtime error: some Rust error"));
+        assert_eq!(
+            "Rhai call_fn error: Function not found: no_method",
+            format!(
+                "{:#}",
+                plugin.call_custom_method("no_method", "").unwrap_err()
+            )
+        );
         assert!(plugin
             .metadata()
             .unwrap_err()
