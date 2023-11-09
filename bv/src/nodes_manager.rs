@@ -1688,18 +1688,49 @@ mod tests {
             });
         pal.expect_create_vm().return_once(|_| {
             let mut mock = MockTestVM::new();
-            mock.expect_state().times(7).return_const(VmState::SHUTOFF);
-            mock.expect_state().times(3).return_const(VmState::RUNNING);
+            let mut seq = Sequence::new();
+            mock.expect_state()
+                .times(6)
+                .in_sequence(&mut seq)
+                .return_const(VmState::SHUTOFF);
+            mock.expect_state()
+                .times(4)
+                .in_sequence(&mut seq)
+                .return_const(VmState::RUNNING);
             Ok(mock)
         });
         pal.expect_create_node_connection().return_once(|_| {
             let mut mock = MockTestNodeConnection::new();
             mock.expect_babel_client()
-                .times(1)
+                .once()
                 .returning(|| bail!("no babel client"));
-            mock.expect_is_broken().times(1).returning(|| true);
-            mock.expect_test().times(1).returning(|| Ok(()));
-            mock.expect_is_closed().times(2).returning(|| false);
+            let mut seq = Sequence::new();
+            // broken connection
+            mock.expect_is_closed()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| false);
+            mock.expect_is_broken()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| true);
+            mock.expect_test()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| Ok(()));
+            mock.expect_is_closed()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| false);
+            // just running node
+            mock.expect_is_closed()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| false);
+            mock.expect_is_broken()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| false);
             mock
         });
 
@@ -1715,20 +1746,30 @@ mod tests {
             )])
             .await;
         sut.nodes.create(node_id, node_config.clone()).await?;
+        // no recovery needed - node is expected to be stopped
         sut.nodes.recover().await;
 
+        // no recovery for permanently failed node
         sut.on_node(|node| node.data.expected_status = NodeStatus::Failed)
             .await;
         sut.nodes.recover().await;
 
+        // recovery of node that is expected to be running but it is not
         sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
             .await;
         sut.nodes.recover().await;
 
+        // recovery of node that is expected to be stopped but it is not
         sut.on_node(|node| node.data.expected_status = NodeStatus::Stopped)
             .await;
         sut.nodes.recover().await;
 
+        // node connection recovery
+        sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
+            .await;
+        sut.nodes.recover().await;
+
+        // no recovery needed - node is expected to be running
         sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
             .await;
         sut.nodes.recover().await;
