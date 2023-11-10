@@ -1,10 +1,10 @@
 /// This module implements supervisor for node entry points. It spawn child processes as defined in
 /// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
 /// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
-use crate::utils::{kill_process_by_name, Backoff};
-use babel_api::babelsup::SupervisorConfig;
+use crate::utils::{kill_all_processes, Backoff};
+use babel_api::{babelsup::SupervisorConfig, engine::PosixSignal};
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::{
     process::Command,
     sync::{oneshot, watch},
@@ -34,7 +34,12 @@ pub async fn run<T: AsyncTimer>(
     if let Some(supervisor) = wait_for_setup(timer, run.clone(), babel_path, sup_config_rx).await {
         // Check if there are no babel after previous run.
         // If so, just kill it.
-        kill_process_by_name(&supervisor.babel_path.to_string_lossy(), &[]);
+        kill_all_processes(
+            &supervisor.babel_path.to_string_lossy(),
+            &[],
+            None,
+            PosixSignal::SIGTERM,
+        );
 
         supervisor.run_babel(run, babel_change_rx).await;
     }
@@ -59,6 +64,10 @@ async fn wait_for_setup<T: AsyncTimer>(
     } else {
         None
     }
+}
+
+fn kill_babel(path: &Path) {
+    kill_all_processes(&path.to_string_lossy(), &[], None, PosixSignal::SIGTERM);
 }
 
 struct Supervisor<T> {
@@ -96,11 +105,11 @@ impl<T: AsyncTimer> Supervisor<T> {
                         },
                         _ = babel_change_rx.changed() => {
                             info!("Babel changed - restart service");
-                            let _ = child.kill().await;
+                            kill_babel(&self.babel_path);
                         },
                         _ = run.wait() => {
                             info!("Supervisor stopped, killing babel");
-                            let _ = child.kill().await;
+                            kill_babel(&self.babel_path);
                         },
                     );
                 }
@@ -116,14 +125,13 @@ impl<T: AsyncTimer> Supervisor<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils;
     use assert_fs::TempDir;
     use bv_utils::timer::MockAsyncTimer;
     use eyre::Result;
     use mockall::*;
     use std::fs;
-    use std::io::Write;
     use std::ops::Add;
-    use std::os::unix::fs::OpenOptionsExt;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Instant;
@@ -154,18 +162,7 @@ mod tests {
 
         // create dummy babel that will touch control file and sleep
         fs::create_dir_all(&tmp_root)?;
-        let _ = fs::remove_file(&babel_path);
-        let mut babel = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .mode(0o770)
-            .open(&babel_path)?;
-        writeln!(babel, "#!/bin/sh")?;
-        writeln!(babel, "echo \"babel log\"")?;
-        writeln!(babel, "touch {}", ctrl_file.to_string_lossy())?;
-        if !failing_babel {
-            writeln!(babel, "sleep infinity")?;
-        }
+        utils::tests::create_dummy_bin(&babel_path, &ctrl_file, !failing_babel);
         let (babel_change_tx, babel_change_rx) = watch::channel(Some(0));
         let (sup_config_tx, sup_config_rx) = oneshot::channel();
         Ok(TestEnv {

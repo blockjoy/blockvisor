@@ -574,11 +574,10 @@ fn deps_finished(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::kill_process_by_name;
+    use crate::utils::{self, kill_all_processes};
     use assert_fs::TempDir;
-    use babel_api::engine::{JobType, RestartConfig};
+    use babel_api::engine::{JobType, PosixSignal, RestartConfig};
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     use std::path::PathBuf;
     use std::time::Duration;
     use tokio::process::Command;
@@ -627,16 +626,8 @@ mod tests {
             tokio::spawn(self.manager.take().unwrap().run(self.run.clone()))
         }
 
-        fn create_infinite_job_runner(&self) -> Result<()> {
-            let mut job_runner = fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .mode(0o770)
-                .open(&self.test_job_runner_path)?;
-            writeln!(job_runner, "#!/bin/sh")?;
-            writeln!(job_runner, "touch {}", self.ctrl_file.to_string_lossy())?;
-            writeln!(job_runner, "sleep infinity")?;
-            Ok(())
+        fn create_infinite_job_runner(&self) {
+            utils::tests::create_dummy_bin(&self.test_job_runner_path, &self.ctrl_file, true);
         }
 
         async fn wait_for_job_runner(&self) -> Result<()> {
@@ -651,9 +642,11 @@ mod tests {
         }
 
         fn kill_job(&self, name: &str) {
-            kill_process_by_name(
+            kill_all_processes(
                 &self.test_job_runner_path.to_owned().to_string_lossy(),
                 &[name],
+                None,
+                PosixSignal::SIGTERM,
             )
         }
     }
@@ -829,7 +822,7 @@ mod tests {
             "finished_job",
         )?;
         jobs_data.save_config(&config, "active_job")?;
-        test_env.create_infinite_job_runner()?;
+        test_env.create_infinite_job_runner();
         let mut job = Command::new(&test_env.test_job_runner_path)
             .args(["active_job"])
             .spawn()?;
@@ -884,7 +877,7 @@ mod tests {
             .create("test_job", dummy_job_config())
             .await?;
         test_env.client.start("test_job").await?;
-        test_env.create_infinite_job_runner()?;
+        test_env.create_infinite_job_runner();
 
         test_env
             .client
@@ -967,7 +960,7 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_dependencies() -> Result<()> {
         let mut test_env = TestEnv::setup()?;
-        test_env.create_infinite_job_runner()?;
+        test_env.create_infinite_job_runner();
         test_env
             .client
             .create(
@@ -1058,7 +1051,7 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_failed_dependency() -> Result<()> {
         let mut test_env = TestEnv::setup()?;
-        test_env.create_infinite_job_runner()?;
+        test_env.create_infinite_job_runner();
         test_env
             .client
             .create("test_job", dummy_job_config())
@@ -1119,7 +1112,7 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_restart_crashed_job() -> Result<()> {
         let mut test_env = TestEnv::setup()?;
-        test_env.create_infinite_job_runner()?;
+        test_env.create_infinite_job_runner();
         let monitor_handle = test_env.spawn_monitor();
 
         test_env

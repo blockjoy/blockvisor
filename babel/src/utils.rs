@@ -56,7 +56,7 @@ pub fn kill_all_processes(
 }
 
 /// Kill process and all its descendents.
-pub fn kill_process_tree(
+fn kill_process_tree(
     proc: &Process,
     ps: &HashMap<Pid, Process>,
     now: Instant,
@@ -80,16 +80,6 @@ pub fn kill_process_tree(
     for (_, child) in children {
         kill_process_tree(child, ps, now, timeout, signal);
     }
-}
-
-/// Kill process by name and args.
-pub fn kill_process_by_name(cmd: &str, args: &[&str]) {
-    let mut sys = System::new();
-    sys.refresh_processes();
-    let ps = sys.processes();
-    if let Some((_, proc)) = find_processes(cmd, args, ps).next() {
-        proc.kill();
-    };
 }
 
 pub fn gracefully_terminate_process(pid: &Pid, timeout: Duration) -> bool {
@@ -323,7 +313,7 @@ fn into_sysinfo_signal(posix: PosixSignal) -> Signal {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use assert_fs::TempDir;
     use eyre::Result;
@@ -341,22 +331,39 @@ mod tests {
         .unwrap();
     }
 
+    pub fn create_dummy_bin(path: &Path, ctrl_file: &Path, wait_for_sigterm: bool) {
+        let _ = fs::remove_file(path);
+        let mut babel = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .mode(0o770)
+            .open(path)
+            .unwrap();
+        writeln!(babel, "#!/bin/bash").unwrap();
+        writeln!(babel, "touch {}", ctrl_file.to_string_lossy()).unwrap();
+        if wait_for_sigterm {
+            writeln!(
+                babel,
+                "{}",
+                r#"
+                trap "exit" SIGINT SIGTERM SIGKILL
+                while true
+                do
+                    sleep 0.1
+                done
+                "#
+            )
+            .unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn test_kill_all_processes() -> Result<()> {
         let tmp_root = TempDir::new()?.to_path_buf();
         fs::create_dir_all(&tmp_root)?;
         let ctrl_file = tmp_root.join("cmd_started");
         let cmd_path = tmp_root.join("test_cmd");
-        {
-            let mut cmd_file = fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .mode(0o770)
-                .open(&cmd_path)?;
-            writeln!(cmd_file, "#!/bin/sh")?;
-            writeln!(cmd_file, "touch {}", ctrl_file.to_string_lossy())?;
-            writeln!(cmd_file, "sleep infinity")?;
-        }
+        create_dummy_bin(&cmd_path, &ctrl_file, true);
 
         let mut cmd = Command::new("sh");
         cmd.arg("-c").arg(format!("{} a b c", cmd_path.display()));
