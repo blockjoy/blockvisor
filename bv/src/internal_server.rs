@@ -639,9 +639,24 @@ where
         let net = utils::discover_net_params(&self.config.read().await.iface)
             .await
             .unwrap_or_default();
+        let gateway = match &req.gateway {
+            None => {
+                let gateway = net
+                    .gateway
+                    .clone()
+                    .ok_or(anyhow!("can't auto discover gateway - provide it manually",))?;
+                info!("Auto-discovered gateway `{gateway} for node '{id}'");
+                gateway
+            }
+            Some(gateway) => gateway.clone(),
+        };
         let ip = match &req.ip {
             None => {
                 let mut used_ips = vec![];
+                used_ips.push(gateway.clone());
+                if let Some(host_ip) = &net.ip {
+                    used_ips.push(host_ip.clone());
+                }
                 for (_, node) in self.nodes_manager.nodes_list().await.iter() {
                     used_ips.push(node.read().await.data.network_interface.ip().to_string());
                 }
@@ -652,16 +667,6 @@ where
                 ip
             }
             Some(ip) => ip.clone(),
-        };
-        let gateway = match &req.gateway {
-            None => {
-                let gateway = net
-                    .gateway
-                    .ok_or(anyhow!("can't auto discover gateway - provide it manually",))?;
-                info!("Auto-discovered gateway `{gateway} for node '{id}'");
-                gateway
-            }
-            Some(gateway) => gateway.clone(),
         };
         Ok((ip, gateway))
     }
