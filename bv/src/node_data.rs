@@ -58,6 +58,8 @@ pub struct NodeData<N> {
     pub started_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub initialized: bool,
+    #[serde(default)]
+    pub has_pending_update: bool,
     pub image: NodeImage,
     pub kernel: String,
     pub network_interface: N,
@@ -94,14 +96,12 @@ impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
         Ok(())
     }
 
-    pub async fn delete(self, registry_config_dir: &Path) -> Result<()> {
+    pub async fn delete_config(&self, registry_config_dir: &Path) -> Result<()> {
         let path = self.file_path(registry_config_dir);
         info!("Deleting node config: {}", path.display());
         fs::remove_file(&path)
             .await
-            .with_context(|| format!("Failed to delete node file `{}`", path.display()))?;
-
-        self.network_interface.delete().await
+            .with_context(|| format!("Failed to delete node file `{}`", path.display()))
     }
 
     fn file_path(&self, registry_config_dir: &Path) -> PathBuf {

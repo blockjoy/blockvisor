@@ -224,22 +224,18 @@ impl<P: Pal + Debug> Node<P> {
 
         // setup babel
         let babel_client = self.babel_engine.node_connection.babel_client().await?;
-        babel_client
-            .setup_babel((id.to_string(), self.metadata.babel_config.clone()))
-            .await?;
+        with_retry!(babel_client.setup_babel((id.to_string(), self.metadata.babel_config.clone())))?;
 
         if !self.data.initialized {
             // setup firewall, but only once
-            let mut firewall_config = self.metadata.firewall.clone();
-            firewall_config
-                .rules
-                .append(&mut self.data.firewall_rules.clone());
-            with_retry!(babel_client.setup_firewall(with_timeout(
-                firewall_config.clone(),
-                fw_setup_timeout(&firewall_config)
-            )))?;
+            self.setup_firewall_rules().await?;
             self.babel_engine.init(Default::default()).await?;
             self.data.initialized = true;
+            self.data.save(self.pal.bv_root()).await?;
+        } else if self.data.has_pending_update {
+            // setup firewall, but only once
+            self.setup_firewall_rules().await?;
+            self.data.has_pending_update = false;
             self.data.save(self.pal.bv_root()).await?;
         }
         // We save the `running` status only after all of the previous steps have succeeded.
@@ -297,23 +293,34 @@ impl<P: Pal + Debug> Node<P> {
         Ok(())
     }
 
+    /// Deletes node associated files.
+    #[instrument(skip(self))]
+    pub async fn delete_node_data(&self) -> Result<()> {
+        self.data.delete_config(&self.context.registry).await?;
+        let _ = fs::remove_file(&self.context.plugin_script).await;
+        let _ = fs::remove_file(&self.context.plugin_data).await;
+        Ok(())
+    }
+
     /// Deletes the node.
     #[instrument(skip(self))]
     pub async fn delete(self) -> Result<()> {
         self.machine.delete().await?;
-        let _ = fs::remove_file(&self.context.plugin_script).await;
-        let _ = fs::remove_file(&self.context.plugin_data).await;
-        self.data.delete(&self.context.registry).await
+        self.data.network_interface.delete().await
     }
 
     pub async fn update(&mut self, rules: Vec<firewall::Rule>) -> Result<()> {
-        let mut firewall = self.metadata.firewall.clone();
-        firewall.rules.append(&mut rules.clone());
-        let babel_client = self.babel_engine.node_connection.babel_client().await?;
-        with_retry!(babel_client
-            .setup_firewall(with_timeout(firewall.clone(), fw_setup_timeout(&firewall))))?;
         self.data.firewall_rules = rules;
-        self.data.save(&self.context.registry).await
+        let result = if self.status() == NodeStatus::Running {
+            let result = self.setup_firewall_rules().await;
+            self.data.has_pending_update = result.is_err();
+            result
+        } else {
+            self.data.has_pending_update = true;
+            Ok(())
+        };
+        self.data.save(&self.context.registry).await?;
+        result
     }
 
     /// Updates OS image for VM.
@@ -381,6 +388,19 @@ impl<P: Pal + Debug> Node<P> {
             }
             NodeStatus::Busy => unreachable!(),
         }
+        Ok(())
+    }
+
+    async fn setup_firewall_rules(&mut self) -> Result<()> {
+        let babel_client = self.babel_engine.node_connection.babel_client().await?;
+        let mut firewall_config = self.metadata.firewall.clone();
+        firewall_config
+            .rules
+            .append(&mut self.data.firewall_rules.clone());
+        with_retry!(babel_client.setup_firewall(with_timeout(
+            firewall_config.clone(),
+            fw_setup_timeout(&firewall_config)
+        )))?;
         Ok(())
     }
 
@@ -859,6 +879,7 @@ pub mod tests {
                 expected_status: NodeStatus::Running,
                 started_at: None,
                 initialized: false,
+                has_pending_update: false,
                 image: NodeImage {
                     protocol: "testing".to_string(),
                     node_type: "validator".to_string(),
@@ -1308,7 +1329,6 @@ pub mod tests {
             })
             .times(3)
             .returning(|_| Ok(Response::new(())));
-        // expect setup firewall only 2 times - second start after first successful should skip it
         babel_mock
             .expect_setup_firewall()
             .withf(move |req| {
@@ -1318,7 +1338,7 @@ pub mod tests {
                     && config.default_out == firewall::Action::Allow
                     && config.rules.len() == 2
             })
-            .times(2)
+            .times(3)
             .returning(|_| Ok(Response::new(())));
         let mut seq = Sequence::new();
         babel_mock
@@ -1365,8 +1385,9 @@ pub mod tests {
         assert!(node.data.initialized);
         assert!(node.data.started_at.is_some());
 
-        // successfully started again, but without init
+        // successfully started again, without init, but with pending update
         node.data.expected_status = NodeStatus::Stopped;
+        node.data.has_pending_update = true;
         node.start().await?;
 
         server.assert().await;
@@ -1476,6 +1497,98 @@ pub mod tests {
         node.stop(true).await?;
         assert_eq!(NodeStatus::Stopped, node.data.expected_status);
         assert_eq!(None, node.data.started_at);
+
+        server.assert().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_update_node() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let mut pal = test_env.default_pal();
+        let config = default_config(test_env.tmp_root.clone());
+        let node_data = test_env.default_node_data();
+
+        let images_dir =
+            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+        fs::create_dir_all(&images_dir).await?;
+        fs::copy(
+            testing_babel_path_absolute(),
+            images_dir.join(BABEL_PLUGIN_NAME),
+        )
+        .await?;
+
+        let test_tmp_root = test_env.tmp_root.to_path_buf();
+        pal.expect_create_node_connection().return_once(move |_| {
+            let mut mock = MockTestNodeConnection::new();
+            mock.expect_is_closed().returning(|| false);
+            mock.expect_is_broken().returning(|| false);
+            let tmp_root = test_tmp_root.clone();
+            mock.expect_babel_client()
+                .returning(move || Ok(test_babel_client(&tmp_root)));
+            mock.expect_mark_broken().return_once(|| ());
+            mock
+        });
+        pal.expect_create_vm().return_once(|_| {
+            let mut mock = MockTestVM::new();
+            mock.expect_state().times(2).returning(|| VmState::RUNNING);
+            Ok(mock)
+        });
+
+        let mut node = Node::create(Arc::new(pal), config, node_data).await?;
+        assert_eq!(NodeStatus::Running, node.expected_status());
+
+        let mut babel_mock = MockTestBabelService::new();
+        let mut seq = Sequence::new();
+        // failed to gracefully shutdown babel
+        babel_mock
+            .expect_setup_firewall()
+            .times(4)
+            .in_sequence(&mut seq)
+            .returning(|_| Err(Status::internal("setup FW rules failed")));
+        babel_mock
+            .expect_setup_firewall()
+            .once()
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(Response::new(())));
+
+        let server = test_env
+            .start_server(MockTestBabelSupService::new(), babel_mock)
+            .await;
+
+        assert!(node.data.firewall_rules.is_empty());
+        assert!(node
+            .update(vec![firewall::Rule {
+                name: "test rule".to_string(),
+                action: firewall::Action::Allow,
+                direction: firewall::Direction::Out,
+                protocol: None,
+                ips: None,
+                ports: vec![],
+            }])
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("setup FW rules failed"));
+        assert_eq!(1, node.data.firewall_rules.len());
+        assert_eq!("test rule", node.data.firewall_rules.first().unwrap().name);
+        assert!(node.data.has_pending_update);
+
+        node.update(vec![firewall::Rule {
+            name: "new test rule".to_string(),
+            action: firewall::Action::Allow,
+            direction: firewall::Direction::Out,
+            protocol: None,
+            ips: None,
+            ports: vec![],
+        }])
+        .await?;
+        assert_eq!(1, node.data.firewall_rules.len());
+        assert_eq!(
+            "new test rule",
+            node.data.firewall_rules.first().unwrap().name
+        );
+        assert!(!node.data.has_pending_update);
 
         server.assert().await;
         Ok(())

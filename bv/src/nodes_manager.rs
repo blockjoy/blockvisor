@@ -53,6 +53,7 @@ pub struct NodesManager<P: Pal + Debug> {
     node_data_cache: RwLock<HashMap<Uuid, NodeDataCache>>,
     node_ids: RwLock<HashMap<String, Uuid>>,
     state: RwLock<State>,
+    registry_path: PathBuf,
     pal: Arc<P>,
 }
 
@@ -118,6 +119,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                 nodes: RwLock::new(nodes),
                 node_ids: RwLock::new(node_ids),
                 node_data_cache: RwLock::new(node_data_cache),
+                registry_path,
                 pal,
             }
         } else {
@@ -127,6 +129,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                 nodes: Default::default(),
                 node_ids: Default::default(),
                 node_data_cache: Default::default(),
+                registry_path,
                 pal,
             };
             nodes.save_state().await?;
@@ -219,6 +222,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             firewall_rules: config.rules,
             initialized: false,
             standalone: config.standalone,
+            has_pending_update: false,
         };
         self.save_state().await?;
 
@@ -283,6 +287,7 @@ impl<P: Pal + Debug> NodesManager<P> {
     pub async fn delete(&self, id: Uuid) -> Result<()> {
         if let Some(node_lock) = self.nodes.write().await.remove(&id) {
             let node = node_lock.into_inner();
+            node.delete_node_data().await?;
             self.node_ids.write().await.remove(&node.data.name);
             self.node_data_cache.write().await.remove(&id);
             node.delete().await?;
@@ -709,14 +714,13 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     async fn save_state(&self) -> Result<()> {
-        let registry_path = build_registry_filename(self.pal.bv_root());
         // We only save the common data file. The individual node data files save themselves.
         info!(
             "Writing nodes common config file: {}",
-            registry_path.display()
+            self.registry_path.display()
         );
         let config = serde_json::to_string(&*self.state.read().await)?;
-        fs::write(&*registry_path, &*config).await?;
+        fs::write(&self.registry_path, &*config).await?;
 
         Ok(())
     }
@@ -983,6 +987,7 @@ mod tests {
         expected_index: u32,
         id: Uuid,
         config: NodeConfig,
+        vm_mock: MockTestVM,
     ) {
         let expected_ip = config.ip.clone();
         let expected_gateway = config.gateway.clone();
@@ -998,7 +1003,7 @@ mod tests {
                     ip,
                     gateway,
                     remaster_error: None,
-                    delete_error: None,
+                    delete_error: Some("net delete error".to_string()),
                 })
             });
         pal.expect_create_vm()
@@ -1008,11 +1013,7 @@ mod tests {
                 config,
                 None,
             )))
-            .return_once(|_| {
-                let mut mock = MockTestVM::new();
-                mock.expect_state().once().return_const(VmState::SHUTOFF);
-                Ok(mock)
-            });
+            .return_once(move |_| Ok(vm_mock));
         pal.expect_create_node_connection()
             .with(predicate::eq(id))
             .return_once(|_| MockTestNodeConnection::new());
@@ -1038,7 +1039,7 @@ mod tests {
                     ip,
                     gateway,
                     remaster_error: None,
-                    delete_error: None,
+                    delete_error: Some("net delete error".to_string()),
                 })
             });
         pal.expect_create_vm()
@@ -1063,6 +1064,7 @@ mod tests {
             expected_status: NodeStatus::Stopped,
             started_at: None,
             initialized: false,
+            has_pending_update: false,
             image: image.unwrap_or(config.image),
             kernel: TEST_KERNEL.to_string(),
             network_interface: DummyNet {
@@ -1070,7 +1072,7 @@ mod tests {
                 ip: IpAddr::from_str(&config.ip).unwrap(),
                 gateway: IpAddr::from_str(&config.gateway).unwrap(),
                 remaster_error: None,
-                delete_error: None,
+                delete_error: Some("net delete error".to_string()),
             },
             requirements: Requirements {
                 vcpu_count: 1,
@@ -1085,7 +1087,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_node() -> Result<()> {
+    async fn test_create_node_and_delete() -> Result<()> {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
@@ -1101,7 +1103,19 @@ mod tests {
             network: "test".to_string(),
             standalone: true,
         };
-        add_create_node_expectations(&mut pal, 1, first_node_id, first_node_config.clone());
+        let mut vm_mock = MockTestVM::new();
+        vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
+        vm_mock
+            .expect_delete()
+            .once()
+            .returning(|| bail!("delete VM failed"));
+        add_create_node_expectations(
+            &mut pal,
+            1,
+            first_node_id,
+            first_node_config.clone(),
+            vm_mock,
+        );
 
         let second_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
         let second_node_config = NodeConfig {
@@ -1114,7 +1128,16 @@ mod tests {
             network: "test".to_string(),
             standalone: false,
         };
-        add_create_node_expectations(&mut pal, 2, second_node_id, second_node_config.clone());
+        let mut vm_mock = MockTestVM::new();
+        vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
+        vm_mock.expect_delete().once().returning(|| Ok(()));
+        add_create_node_expectations(
+            &mut pal,
+            2,
+            second_node_id,
+            second_node_config.clone(),
+            vm_mock,
+        );
 
         let failed_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047532").unwrap();
         let failed_node_config = NodeConfig {
@@ -1359,6 +1382,16 @@ mod tests {
             nodes.node_data_cache(first_node_id).await?
         );
 
+        assert_eq!(
+            "delete VM failed",
+            nodes.delete(first_node_id).await.unwrap_err().to_string()
+        );
+
+        assert_eq!(
+            "net delete error",
+            nodes.delete(second_node_id).await.unwrap_err().to_string()
+        );
+
         for mock in http_mocks {
             mock.assert();
         }
@@ -1381,6 +1414,7 @@ mod tests {
             expected_status: NodeStatus::Stopped,
             started_at: None,
             initialized: false,
+            has_pending_update: false,
             image: test_env.test_image.clone(),
             kernel: TEST_KERNEL.to_string(),
             network_interface: DummyNet {
@@ -1494,7 +1528,9 @@ mod tests {
             node_type: "validator".to_string(),
             node_version: "3.4.7".to_string(),
         };
-        add_create_node_expectations(&mut pal, 1, node_id, node_config.clone());
+        let mut vm_mock = MockTestVM::new();
+        vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
+        add_create_node_expectations(&mut pal, 1, node_id, node_config.clone(), vm_mock);
         pal.expect_attach_vm()
             .with(predicate::eq(expected_node_data(
                 1,
