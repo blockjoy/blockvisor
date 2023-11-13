@@ -331,6 +331,7 @@ pub mod tests {
         .unwrap();
     }
 
+    #[allow(clippy::write_literal)]
     pub fn create_dummy_bin(path: &Path, ctrl_file: &Path, wait_for_sigterm: bool) {
         let _ = fs::remove_file(path);
         let mut babel = fs::OpenOptions::new()

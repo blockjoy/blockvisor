@@ -320,9 +320,6 @@ impl<P: Pal + Debug> NodesManager<P> {
             .await;
         if NodeStatus::Stopped != node.expected_status() || force {
             node.stop(force).await?;
-            debug!("Node stopped");
-            node.set_expected_status(NodeStatus::Stopped).await?;
-            node.set_started_at(None).await?;
         }
         Ok(())
     }
@@ -1679,20 +1676,17 @@ mod tests {
             let mut mock = MockTestVM::new();
             let mut seq = Sequence::new();
             mock.expect_state()
-                .times(6)
+                .times(7)
                 .in_sequence(&mut seq)
                 .return_const(VmState::SHUTOFF);
             mock.expect_state()
-                .times(4)
+                .times(3)
                 .in_sequence(&mut seq)
                 .return_const(VmState::RUNNING);
             Ok(mock)
         });
         pal.expect_create_node_connection().return_once(|_| {
             let mut mock = MockTestNodeConnection::new();
-            mock.expect_babel_client()
-                .once()
-                .returning(|| bail!("no babel client"));
             let mut seq = Sequence::new();
             // broken connection
             mock.expect_is_closed()

@@ -192,16 +192,6 @@ impl<P: Pal + Debug> Node<P> {
         self.data.expected_status
     }
 
-    pub async fn set_expected_status(&mut self, status: NodeStatus) -> Result<()> {
-        self.data.expected_status = status;
-        self.data.save(&self.context.registry).await
-    }
-
-    pub async fn set_started_at(&mut self, started_at: Option<DateTime<Utc>>) -> Result<()> {
-        self.data.started_at = started_at;
-        self.data.save(&self.context.registry).await
-    }
-
     /// Starts the node.
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
@@ -262,6 +252,9 @@ impl<P: Pal + Debug> Node<P> {
     /// Stops the running node.
     #[instrument(skip(self))]
     pub async fn stop(&mut self, force: bool) -> Result<()> {
+        if self.status() == NodeStatus::Stopped {
+            return Ok(());
+        }
         if !force {
             let babel_client = self.babel_engine.node_connection.babel_client().await?;
             let timeout = with_retry!(babel_client.get_babel_shutdown_timeout(()))?.into_inner();
@@ -281,24 +274,26 @@ impl<P: Pal + Debug> Node<P> {
                         bail!("Forced shutdown failed: {err}");
                     }
                 }
+                let start = Instant::now();
+                loop {
+                    match self.machine.state() {
+                        pal::VmState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
+                            debug!("VM not shutdown yet, will retry");
+                            tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
+                        }
+                        pal::VmState::RUNNING => {
+                            bail!("VM shutdown timeout");
+                        }
+                        pal::VmState::SHUTOFF => break,
+                    }
+                }
             }
         }
 
-        let start = Instant::now();
-        loop {
-            match self.machine.state() {
-                pal::VmState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
-                    debug!("VM not shutdown yet, will retry");
-                    tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
-                }
-                pal::VmState::RUNNING => {
-                    bail!("VM shutdown timeout");
-                }
-                pal::VmState::SHUTOFF => break,
-            }
-        }
         self.babel_engine.node_connection.close();
-
+        self.set_expected_status(NodeStatus::Stopped).await?;
+        self.set_started_at(None).await?;
+        debug!("Node stopped");
         Ok(())
     }
 
@@ -387,6 +382,16 @@ impl<P: Pal + Debug> Node<P> {
             NodeStatus::Busy => unreachable!(),
         }
         Ok(())
+    }
+
+    async fn set_expected_status(&mut self, status: NodeStatus) -> Result<()> {
+        self.data.expected_status = status;
+        self.data.save(&self.context.registry).await
+    }
+
+    async fn set_started_at(&mut self, started_at: Option<DateTime<Utc>>) -> Result<()> {
+        self.data.started_at = started_at;
+        self.data.save(&self.context.registry).await
     }
 
     async fn started_node_recovery(&mut self) -> Result<()> {
@@ -1363,6 +1368,114 @@ pub mod tests {
         // successfully started again, but without init
         node.data.expected_status = NodeStatus::Stopped;
         node.start().await?;
+
+        server.assert().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stop_node() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let mut pal = test_env.default_pal();
+        let config = default_config(test_env.tmp_root.clone());
+        let node_data = test_env.default_node_data();
+
+        let images_dir =
+            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+        fs::create_dir_all(&images_dir).await?;
+        fs::copy(
+            testing_babel_path_absolute(),
+            images_dir.join(BABEL_PLUGIN_NAME),
+        )
+        .await?;
+
+        let test_tmp_root = test_env.tmp_root.to_path_buf();
+        pal.expect_create_node_connection().return_once(move |_| {
+            let mut mock = MockTestNodeConnection::new();
+            mock.expect_is_closed().return_once(|| false);
+            mock.expect_is_broken().return_once(|| false);
+            let tmp_root = test_tmp_root.clone();
+            mock.expect_babel_client()
+                .returning(move || Ok(test_babel_client(&tmp_root)));
+            mock.expect_mark_broken().return_once(|| ());
+            // force stop node in failed state
+            mock.expect_close().return_once(|| ());
+            mock
+        });
+        pal.expect_create_vm().return_once(|_| {
+            let mut mock = MockTestVM::new();
+            let mut seq = Sequence::new();
+            // already stopped
+            mock.expect_state()
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(VmState::SHUTOFF);
+            // failed to gracefully shutdown babel
+            mock.expect_state()
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(VmState::RUNNING);
+            // force stop node in failed state
+            mock.expect_state()
+                .times(2)
+                .in_sequence(&mut seq)
+                .return_const(VmState::RUNNING);
+            mock.expect_shutdown()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| bail!("graceful VM shutdown failed"));
+            mock.expect_force_shutdown()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| Ok(()));
+            mock.expect_state()
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(VmState::SHUTOFF);
+            Ok(mock)
+        });
+
+        let mut node = Node::create(Arc::new(pal), config, node_data).await?;
+        assert_eq!(NodeStatus::Running, node.expected_status());
+
+        node.data.expected_status = NodeStatus::Stopped;
+        // already stopped
+        node.stop(false).await?;
+
+        let now = Utc::now();
+        node.data.expected_status = NodeStatus::Running;
+        node.data.started_at = Some(now);
+        let mut babel_mock = MockTestBabelService::new();
+        let mut seq = Sequence::new();
+        // failed to gracefully shutdown babel
+        babel_mock
+            .expect_get_babel_shutdown_timeout()
+            .once()
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(Response::new(Duration::from_secs(1))));
+        babel_mock
+            .expect_shutdown_babel()
+            .times(4)
+            .in_sequence(&mut seq)
+            .returning(|_| Err(Status::internal("can't stop babel")));
+
+        let server = test_env
+            .start_server(MockTestBabelSupService::new(), babel_mock)
+            .await;
+        assert!(node
+            .stop(false)
+            .await
+            .unwrap_err()
+            .to_string()
+            .starts_with("Failed to gracefully shutdown babel and background jobs"));
+        assert_eq!(NodeStatus::Running, node.data.expected_status);
+        assert_eq!(Some(now), node.data.started_at);
+
+        // force stop node in failed state
+        node.data.expected_status = NodeStatus::Stopped;
+        node.stop(true).await?;
+        assert_eq!(NodeStatus::Stopped, node.data.expected_status);
+        assert_eq!(None, node.data.started_at);
 
         server.assert().await;
         Ok(())
