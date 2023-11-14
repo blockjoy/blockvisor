@@ -19,7 +19,7 @@ use babel_api::{
     rhai_plugin::RhaiPlugin,
 };
 use bv_utils::{cmd::run_cmd, with_retry};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use eyre::{bail, Context, Result};
 use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
 use tokio::{
@@ -231,16 +231,15 @@ impl<P: Pal + Debug> Node<P> {
             self.setup_firewall_rules().await?;
             self.babel_engine.init(Default::default()).await?;
             self.data.initialized = true;
-            self.data.save(self.pal.bv_root()).await?;
         } else if self.data.has_pending_update {
             // setup firewall, but only once
             self.setup_firewall_rules().await?;
             self.data.has_pending_update = false;
-            self.data.save(self.pal.bv_root()).await?;
         }
         // We save the `running` status only after all of the previous steps have succeeded.
-        self.set_expected_status(NodeStatus::Running).await?;
-        self.set_started_at(Some(Utc::now())).await?;
+        self.data.expected_status = NodeStatus::Running;
+        self.data.started_at = Some(Utc::now());
+        self.data.save(&self.context.registry).await?;
         debug!("Node started");
         Ok(())
     }
@@ -287,8 +286,9 @@ impl<P: Pal + Debug> Node<P> {
         }
 
         self.babel_engine.node_connection.close();
-        self.set_expected_status(NodeStatus::Stopped).await?;
-        self.set_started_at(None).await?;
+        self.data.expected_status = NodeStatus::Stopped;
+        self.data.started_at = None;
+        self.data.save(&self.context.registry).await?;
         debug!("Node stopped");
         Ok(())
     }
@@ -377,7 +377,7 @@ impl<P: Pal + Debug> Node<P> {
                     warn!("Recovery: stopping node with ID `{id}` failed: {e}");
                     if self.recovery_counters.stop >= MAX_STOP_TRIES {
                         error!("Recovery: retries count exceeded, mark as failed");
-                        self.set_expected_status(NodeStatus::Failed).await?;
+                        self.save_expected_status(NodeStatus::Failed).await?;
                     }
                 } else {
                     self.post_recovery();
@@ -404,13 +404,8 @@ impl<P: Pal + Debug> Node<P> {
         Ok(())
     }
 
-    async fn set_expected_status(&mut self, status: NodeStatus) -> Result<()> {
+    async fn save_expected_status(&mut self, status: NodeStatus) -> Result<()> {
         self.data.expected_status = status;
-        self.data.save(&self.context.registry).await
-    }
-
-    async fn set_started_at(&mut self, started_at: Option<DateTime<Utc>>) -> Result<()> {
-        self.data.started_at = started_at;
         self.data.save(&self.context.registry).await
     }
 
@@ -422,7 +417,7 @@ impl<P: Pal + Debug> Node<P> {
             warn!("Recovery: starting node with ID `{id}` failed: {e}");
             if self.recovery_counters.start >= MAX_START_TRIES {
                 error!("Recovery: retries count exceeded, mark as failed");
-                self.set_expected_status(NodeStatus::Failed).await?;
+                self.save_expected_status(NodeStatus::Failed).await?;
             }
         } else {
             self.post_recovery();
@@ -444,7 +439,7 @@ impl<P: Pal + Debug> Node<P> {
                     warn!("Recovery: stopping node with ID `{id}` failed: {e}");
                     if self.recovery_counters.stop >= MAX_STOP_TRIES {
                         error!("Recovery: retries count exceeded, mark as failed");
-                        self.set_expected_status(NodeStatus::Failed).await?;
+                        self.save_expected_status(NodeStatus::Failed).await?;
                     }
                 } else {
                     self.started_node_recovery().await?;
@@ -559,6 +554,7 @@ pub mod tests {
         engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
         metadata::{BabelConfig, Requirements},
     };
+    use chrono::SubsecRound;
     use mockall::*;
     use serde::{Deserialize, Serialize};
     use std::{
@@ -837,17 +833,19 @@ pub mod tests {
 
     struct TestEnv {
         tmp_root: PathBuf,
+        registry_dir: PathBuf,
         _async_panic_checker: utils::tests::AsyncPanicChecker,
     }
 
     impl TestEnv {
         async fn new() -> Result<Self> {
             let tmp_root = TempDir::new()?.to_path_buf();
-
-            fs::create_dir_all(build_registry_dir(&tmp_root)).await?;
+            let registry_dir = build_registry_dir(&tmp_root);
+            fs::create_dir_all(&registry_dir).await?;
 
             Ok(Self {
                 tmp_root,
+                registry_dir,
                 _async_panic_checker: Default::default(),
             })
         }
@@ -915,6 +913,18 @@ pub mod tests {
                 babel_api::babelsup::babel_sup_server::BabelSupServer::new(babel_sup_mock),
                 babel_api::babel::babel_server::BabelServer::new(babel_mock)
             )
+        }
+        async fn assert_node_data_saved(&self, node_data: &NodeData<DummyNet>) {
+            let mut node_data = node_data.clone();
+            if let Some(time) = &mut node_data.started_at {
+                *time = time.trunc_subsecs(0);
+            }
+            let saved_data = NodeData::<DummyNet>::load(
+                &self.registry_dir.join(format!("{}.json", node_data.id)),
+            )
+            .await
+            .unwrap();
+            assert_eq!(saved_data, node_data);
         }
     }
 
@@ -999,6 +1009,7 @@ pub mod tests {
 
         let node = Node::create(pal, config, node_data).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
+        test_env.assert_node_data_saved(&node.data).await;
         Ok(())
     }
 
@@ -1111,10 +1122,8 @@ pub mod tests {
                 .to_string()
         );
 
-        let registry_dir = build_registry_dir(&test_env.tmp_root);
-        fs::create_dir_all(&registry_dir).await?;
         fs::write(
-            registry_dir.join(format!("{}.rhai", node_data.id)),
+            test_env.registry_dir.join(format!("{}.rhai", node_data.id)),
             "invalid rhai script",
         )
         .await?;
@@ -1128,22 +1137,28 @@ pub mod tests {
 
         fs::copy(
             testing_babel_path_absolute(),
-            registry_dir.join(format!("{}.rhai", node_data.id)),
+            test_env.registry_dir.join(format!("{}.rhai", node_data.id)),
         )
         .await?;
         fs::copy(
             testing_babel_path_absolute(),
-            registry_dir.join(format!("{}.rhai", failed_vm_node_data.id)),
+            test_env
+                .registry_dir
+                .join(format!("{}.rhai", failed_vm_node_data.id)),
         )
         .await?;
         fs::copy(
             testing_babel_path_absolute(),
-            registry_dir.join(format!("{}.rhai", missing_babel_node_data.id)),
+            test_env
+                .registry_dir
+                .join(format!("{}.rhai", missing_babel_node_data.id)),
         )
         .await?;
         fs::copy(
             testing_babel_path_absolute(),
-            registry_dir.join(format!("{}.rhai", missing_job_runner_node_data.id)),
+            test_env
+                .registry_dir
+                .join(format!("{}.rhai", missing_job_runner_node_data.id)),
         )
         .await?;
         assert_eq!(
@@ -1384,11 +1399,13 @@ pub mod tests {
         assert_eq!(NodeStatus::Running, node.data.expected_status);
         assert!(node.data.initialized);
         assert!(node.data.started_at.is_some());
+        test_env.assert_node_data_saved(&node.data).await;
 
         // successfully started again, without init, but with pending update
         node.data.expected_status = NodeStatus::Stopped;
         node.data.has_pending_update = true;
         node.start().await?;
+        test_env.assert_node_data_saved(&node.data).await;
 
         server.assert().await;
         Ok(())
@@ -1497,6 +1514,7 @@ pub mod tests {
         node.stop(true).await?;
         assert_eq!(NodeStatus::Stopped, node.data.expected_status);
         assert_eq!(None, node.data.started_at);
+        test_env.assert_node_data_saved(&node.data).await;
 
         server.assert().await;
         Ok(())
@@ -1573,6 +1591,7 @@ pub mod tests {
         assert_eq!(1, node.data.firewall_rules.len());
         assert_eq!("test rule", node.data.firewall_rules.first().unwrap().name);
         assert!(node.data.has_pending_update);
+        test_env.assert_node_data_saved(&node.data).await;
 
         node.update(vec![firewall::Rule {
             name: "new test rule".to_string(),
@@ -1589,6 +1608,7 @@ pub mod tests {
             node.data.firewall_rules.first().unwrap().name
         );
         assert!(!node.data.has_pending_update);
+        test_env.assert_node_data_saved(&node.data).await;
 
         server.assert().await;
         Ok(())
