@@ -48,10 +48,10 @@ services:
       UI_BASE_URL: https://localhost:3000
       RUST_LOG: info,blockvisor=debug
       # cookbook service
-      AWS_ACCESS_KEY_ID: 0ad80055714f2804ae72b2c89011e882
-      AWS_SECRET_ACCESS_KEY: 6ee068ea418987668f5ccee147551966af5764e732a7b0ceb9de63d1b20d2bdc
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: us-east-1
-      R2_URL: https://19afdffb308beea3e9c1ef3a95085d3b.r2.cloudflarestorage.com
+      R2_URL: https://${AWS_ACCOUNT_ID}.r2.cloudflarestorage.com
       R2_BUNDLE_BUCKET: bundle-dev
       R2_KERNEL_BUCKET: kernel-dev
       R2_BUCKET: cookbook-dev

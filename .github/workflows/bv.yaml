@@ -35,16 +35,16 @@ jobs:
         run: |
           make ci-clean
           make reinstall
-          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
-            aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
+          export AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}
+          export AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}
+          export AWS_REGION=us-east-1
+          aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
             babel_api/protocols/testing/babel.rhai \
             s3://cookbook-dev/chains/testing/validator/0.0.1/babel.rhai --metadata '{"status":"development"}'
-          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
-            aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
+          aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
             babel_api/protocols/testing/babel.rhai \
             s3://cookbook-dev/chains/testing/validator/0.0.2/babel.rhai --metadata '{"status":"development"}'
-          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} AWS_REGION=us-east-1 \
-            aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
+          aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
             babel_api/protocols/testing/babel.rhai \
             s3://cookbook-dev/chains/testing/validator/0.0.3/babel.rhai --metadata '{"status":"development"}'
 
@@ -61,7 +61,12 @@ jobs:
           username: 'oauth2accesstoken'
           password: '${{ steps.auth.outputs.access_token }}'
 
-      - run: |-
+      - name: Authenticate to docker registry
+        run: |
+          export AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}
+          export AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}
+          export AWS_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}
+          envsubst < docker-compose.yml.template > docker-compose.yml
           echo '${{ steps.auth.outputs.access_token }}' | docker login -u oauth2accesstoken --password-stdin https://us-docker.pkg.dev
 
       - name: Pull images
@@ -74,7 +79,9 @@ jobs:
       - name: Test
         run: |
           cargo build -p upload_manifest_generator
-          AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }} \
+          export AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}
+          export AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}
+          export AWS_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}
           cargo test -p blockvisord -- --test-threads=9
       - name: Shutdown test env
         if: always()
