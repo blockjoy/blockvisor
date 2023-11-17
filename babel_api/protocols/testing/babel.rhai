@@ -66,7 +66,7 @@ fn init(keys) {
     let param = sanitize_sh_param(node_params().TESTING_PARAM);
     start_job("upload", #{
         job_type: #{
-            run_sh: "echo dummu_upload",
+            run_sh: "echo dummy_upload",
         },
         restart: "never",
         shutdown_signal: "SIGINT",

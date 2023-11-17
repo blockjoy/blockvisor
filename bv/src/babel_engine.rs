@@ -444,7 +444,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             JobType::Upload { manifest, .. } => {
                 if manifest.is_none() {
                     // TODO get source data size from babel, then ask the API for UploadManifest
-                    unimplemented!()
+                    bail!("retrieving manifest from API is not implemented yet - specify manifest explicitly")
                 } // if already set it mean that plugin use some custom manifest source - other than the API
                 if let Some(manifest) = manifest {
                     manifest.validate()?
