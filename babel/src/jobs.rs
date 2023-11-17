@@ -29,7 +29,7 @@ pub type Jobs = (HashMap<String, Job>, JobsData);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct JobsData {
-    jobs_config_dir: PathBuf,
+    pub jobs_config_dir: PathBuf,
     jobs_status_dir: PathBuf,
 }
 

@@ -7,7 +7,7 @@ use crate::{
     async_pid_watch::AsyncPidWatch,
     babel_service::JobRunnerLock,
     jobs,
-    jobs::{Job, JobState, Jobs, JobsData, JobsRegistry, CONFIG_SUBDIR, STATUS_SUBDIR},
+    jobs::{Job, JobState, JobsData, JobsRegistry, CONFIG_SUBDIR, STATUS_SUBDIR},
     utils::{find_processes, gracefully_terminate_process},
 };
 use async_trait::async_trait;
@@ -49,13 +49,14 @@ pub fn create(
     if !jobs_status_dir.exists() {
         fs::create_dir_all(jobs_status_dir)?;
     }
-    let jobs_registry = Arc::new(Mutex::new(load_jobs(jobs_dir, job_runner_bin_path)?));
+    let jobs_registry = Arc::new(Mutex::new((HashMap::new(), JobsData::new(jobs_dir))));
     let (job_added_tx, job_added_rx) = watch::channel(());
     let (jobs_manager_state_tx, jobs_manager_state_rx) = watch::channel(state);
 
     Ok((
         Client {
             jobs_registry: jobs_registry.clone(),
+            job_runner_bin_path: job_runner_bin_path.to_string_lossy().to_string(),
             job_added_tx,
             jobs_manager_state_tx,
         },
@@ -72,13 +73,21 @@ pub fn create(
     ))
 }
 
-fn load_jobs(jobs_dir: &Path, job_runner_bin_path: &Path) -> Result<Jobs> {
-    info!("Loading jobs list from {} ...", jobs_dir.display());
-    let mut jobs = HashMap::new();
-    let jobs_data = JobsData::new(jobs_dir);
-    let jobs_config_dir = jobs_dir.join(CONFIG_SUBDIR);
-    let dir = read_dir(&jobs_config_dir)
-        .with_context(|| format!("failed to read jobs from dir {}", jobs_config_dir.display()))?;
+fn load_jobs(
+    jobs: &mut HashMap<String, Job>,
+    jobs_data: &JobsData,
+    job_runner_bin_path: &str,
+) -> Result<()> {
+    info!(
+        "Loading jobs list from {} ...",
+        jobs_data.jobs_config_dir.display()
+    );
+    let dir = read_dir(&jobs_data.jobs_config_dir).with_context(|| {
+        format!(
+            "failed to read jobs from dir {}",
+            jobs_data.jobs_config_dir.display()
+        )
+    })?;
     let mut sys = System::new();
     sys.refresh_processes();
     let ps = sys.processes();
@@ -91,7 +100,7 @@ fn load_jobs(jobs_dir: &Path, job_runner_bin_path: &Path) -> Result<Jobs> {
             match jobs::load_config(&path) {
                 Ok(config) => {
                     let state = if let Some((pid, _)) =
-                        find_processes(&job_runner_bin_path.to_string_lossy(), &[&name], ps).next()
+                        find_processes(job_runner_bin_path, &[&name], ps).next()
                     {
                         info!("{name} - Active(PID: {pid})");
                         JobState::Active(*pid)
@@ -115,7 +124,7 @@ fn load_jobs(jobs_dir: &Path, job_runner_bin_path: &Path) -> Result<Jobs> {
             }
         }
     }
-    Ok((jobs, jobs_data))
+    Ok(())
 }
 
 #[async_trait]
@@ -133,6 +142,7 @@ pub trait JobsManagerClient {
 
 pub struct Client {
     jobs_registry: JobsRegistry,
+    job_runner_bin_path: String,
     job_added_tx: watch::Sender<()>,
     jobs_manager_state_tx: watch::Sender<JobsManagerState>,
 }
@@ -140,7 +150,9 @@ pub struct Client {
 #[async_trait]
 impl JobsManagerClient for Client {
     async fn startup(&self) -> Result<()> {
-        info!("Startup jobs manager - set state to 'Ready'");
+        info!("Startup jobs manager - load jobs and set state to 'Ready'");
+        let (jobs, jobs_data) = &mut *self.jobs_registry.lock().await;
+        load_jobs(jobs, jobs_data, &self.job_runner_bin_path)?;
         self.jobs_manager_state_tx.send(JobsManagerState::Ready)?;
         Ok(())
     }
@@ -805,9 +817,14 @@ mod tests {
     #[tokio::test]
     async fn test_load_jobs() -> Result<()> {
         let test_env = TestEnv::setup()?;
-
+        let mut jobs = HashMap::new();
+        let jobs_data = JobsData::new(&test_env.jobs_dir);
         // no jobs
-        let (jobs, jobs_data) = load_jobs(&test_env.jobs_dir, &test_env.test_job_runner_path)?;
+        load_jobs(
+            &mut jobs,
+            &jobs_data,
+            &test_env.test_job_runner_path.to_string_lossy(),
+        )?;
         assert!(jobs.is_empty());
 
         // load active and inactive jobs
@@ -837,7 +854,11 @@ mod tests {
             writeln!(invalid_config, "gibberish")?;
         }
 
-        let (jobs, _) = load_jobs(&test_env.jobs_dir, &test_env.test_job_runner_path)?;
+        load_jobs(
+            &mut jobs,
+            &jobs_data,
+            &test_env.test_job_runner_path.to_string_lossy(),
+        )?;
 
         assert_eq!(
             Job::new(JobState::Inactive(JobStatus::Pending), config.clone()),
@@ -865,7 +886,12 @@ mod tests {
 
         // invalid dir
         fs::remove_dir_all(&test_env.jobs_dir)?;
-        let _ = load_jobs(&test_env.jobs_dir, &test_env.test_job_runner_path).unwrap_err();
+        let _ = load_jobs(
+            &mut jobs,
+            &jobs_data,
+            &test_env.test_job_runner_path.to_string_lossy(),
+        )
+        .unwrap_err();
         Ok(())
     }
 
