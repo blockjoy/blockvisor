@@ -75,11 +75,10 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         apply_babel_config(&self.pal, &config)
             .await
             .map_err(|err| Status::internal(eyre!("{err}").to_string()))?;
+        self.save_babel_conf(&config).await?;
 
         let mut state = self.state.lock().await;
         if let BabelServiceState::NotReady(_) = state.deref() {
-            self.save_babel_conf(&config).await?;
-
             // setup logs_server
             let (logs_broadcast_tx, logs_rx) = broadcast::channel(config.log_buffer_capacity_ln);
             if let BabelServiceState::NotReady(logs_tx) =
