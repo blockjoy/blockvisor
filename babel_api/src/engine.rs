@@ -308,6 +308,8 @@ pub struct JobInfo {
     pub restart_count: usize,
     /// Job related logs from last 24h (max. 1024 entries).
     pub logs: Vec<String>,
+    /// Node can't be upgraded while `upgrade_blocking` job is running.
+    pub upgrade_blocking: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Hash)]

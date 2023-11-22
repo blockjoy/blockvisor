@@ -1028,6 +1028,7 @@ mod tests {
                     progress: Default::default(),
                     restart_count: 0,
                     logs: vec![],
+                    upgrade_blocking: true,
                 }))
             });
         babel_mock

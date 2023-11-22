@@ -12,6 +12,7 @@ use crate::{
     services::cookbook::{CookbookService, ROOT_FS_FILE},
     utils::with_timeout,
 };
+use babel_api::engine::JobStatus;
 use babel_api::{
     babelsup::SupervisorConfig,
     metadata::{firewall, BlockchainMetadata},
@@ -328,6 +329,15 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn upgrade(&mut self, image: &NodeImage) -> Result<()> {
         let need_to_restart = self.status() == NodeStatus::Running;
         if need_to_restart {
+            if self
+                .babel_engine
+                .get_jobs()
+                .await?
+                .iter()
+                .any(|(_, job)| job.status == JobStatus::Running && job.upgrade_blocking)
+            {
+                bail!("Can't upgrade node while 'upgrade_blocking' job is running.")
+            }
             self.stop(false).await?;
         }
 
