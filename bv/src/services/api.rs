@@ -1,6 +1,7 @@
 use crate::{
-    config::SharedConfig, get_bv_status, node_data::NodeImage, nodes_manager,
-    nodes_manager::NodesManager, pal::Pal, services, services::AuthenticatedService, ServiceStatus,
+    command_failed, commands, commands::Error, config::SharedConfig, get_bv_status,
+    node_data::NodeImage, nodes_manager, nodes_manager::NodesManager, pal::Pal, services,
+    services::AuthenticatedService, ServiceStatus,
 };
 use babel_api::{
     engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation},
@@ -37,9 +38,6 @@ pub mod common {
         pub use super::*;
     }
 }
-
-const STATUS_OK: i32 = 0;
-const STATUS_ERROR: i32 = 1;
 
 lazy_static::lazy_static! {
     pub static ref API_CREATE_COUNTER: Counter = register_counter!("api.commands.create.calls");
@@ -153,29 +151,19 @@ impl CommandsService {
                             .await
                             .with_context(|| "cannot ack command")?;
                         // process the command
-                        match process_node_command(nodes_manager.clone(), node_command).await {
-                            Err(error) => {
-                                error!("Error processing command: {error:?}");
-                                self.send_command_update(
-                                    command_id,
-                                    Some(STATUS_ERROR),
-                                    Some(format!("{error:?}")),
-                                )
-                                .await?;
-                            }
-                            Ok(()) => {
-                                self.send_command_update(command_id, Some(STATUS_OK), None)
-                                    .await?;
-                            }
+                        let command_result =
+                            process_node_command(nodes_manager.clone(), node_command).await;
+                        if let Err(error) = &command_result {
+                            error!("Error processing command: {error:?}");
                         }
+                        self.send_command_update(command_id, command_result).await?;
                     }
                 }
                 Some(pb::command::Command::Host(_)) => {
-                    let msg = "Command type `Host` not supported".to_string();
-                    error!("Error processing command: {msg}");
+                    error!("Error processing command: Command type `Host` not supported");
                     let command_id = command.id;
                     self.send_command_ack(command_id.clone()).await?;
-                    self.send_command_update(command_id, Some(STATUS_ERROR), Some(msg))
+                    self.send_command_update(command_id, Err(Error::NotSupported))
                         .await?;
                 }
                 None => {
@@ -193,13 +181,36 @@ impl CommandsService {
     async fn send_command_update(
         &mut self,
         command_id: String,
-        exit_code: Option<i32>,
-        response: Option<String>,
+        command_result: commands::Result<()>,
     ) -> Result<()> {
-        let req = pb::CommandServiceUpdateRequest {
-            id: command_id,
-            response,
-            exit_code,
+        let req = match command_result {
+            Ok(()) => pb::CommandServiceUpdateRequest {
+                id: command_id,
+                exit_code: Some(pb::CommandExitCode::Ok.into()),
+                exit_message: None,
+                retry_hint_seconds: None,
+            },
+            Err(err) => {
+                let mut req = pb::CommandServiceUpdateRequest {
+                    id: command_id,
+                    exit_code: Some(match &err {
+                        Error::Internal(_) => pb::CommandExitCode::InternalError.into(),
+                        Error::ServiceNotReady => pb::CommandExitCode::ServiceNotReady.into(),
+                        Error::ServiceBroken => pb::CommandExitCode::ServiceBroken.into(),
+                        Error::NotSupported => pb::CommandExitCode::NotSupported.into(),
+                        Error::NodeNotFound(_) => pb::CommandExitCode::NodeNotFound.into(),
+                        Error::BlockingJobRunning { .. } => {
+                            pb::CommandExitCode::BlockingJobRunning.into()
+                        }
+                    }),
+                    exit_message: Some(format!("{err:#}")),
+                    retry_hint_seconds: None,
+                };
+                if let Error::BlockingJobRunning { retry_hint } = err {
+                    req.retry_hint_seconds = Some(retry_hint.as_secs())
+                }
+                req
+            }
         };
         with_retry!(self.client.update(req.clone()))?;
         Ok(())
@@ -219,28 +230,16 @@ impl CommandsService {
     ) -> Result<()> {
         match status {
             ServiceStatus::Undefined => {
-                self.send_command_update(
-                    command_id,
-                    Some(STATUS_ERROR),
-                    Some("service not ready, try again later".to_string()),
-                )
-                .await
+                self.send_command_update(command_id, Err(commands::Error::ServiceNotReady))
+                    .await
             }
             ServiceStatus::Updating => {
-                self.send_command_update(
-                    command_id,
-                    Some(STATUS_ERROR),
-                    Some("pending update, try again later".to_string()),
-                )
-                .await
+                self.send_command_update(command_id, Err(commands::Error::ServiceNotReady))
+                    .await
             }
             ServiceStatus::Broken => {
-                self.send_command_update(
-                    command_id,
-                    Some(STATUS_ERROR),
-                    Some("service is broken, call support".to_string()),
-                )
-                .await
+                self.send_command_update(command_id, Err(commands::Error::ServiceBroken))
+                    .await
             }
             ServiceStatus::Ok => Ok(()),
         }
@@ -250,8 +249,8 @@ impl CommandsService {
 async fn process_node_command<P: Pal + Debug>(
     nodes_manager: Arc<NodesManager<P>>,
     node_command: pb::NodeCommand,
-) -> Result<()> {
-    let node_id = Uuid::from_str(&node_command.node_id)?;
+) -> commands::Result<()> {
+    let node_id = Uuid::from_str(&node_command.node_id).map_err(|err| anyhow!(err))?;
     let now = Instant::now();
     match node_command.command {
         Some(cmd) => match cmd {
@@ -334,7 +333,7 @@ async fn process_node_command<P: Pal + Debug>(
             }
             Command::InfoGet(_) => unimplemented!(),
         },
-        None => bail!("Node command is `None`"),
+        None => command_failed!(Error::Internal(anyhow!("Node command is `None`"))),
     };
 
     Ok(())

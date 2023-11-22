@@ -170,8 +170,8 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         self.on_plugin(|plugin| plugin.staking_status()).await
     }
 
-    pub async fn init(&mut self, keys: HashMap<String, String>) -> Result<()> {
-        self.on_plugin(move |plugin| plugin.init(&keys)).await
+    pub async fn init(&mut self, params: HashMap<String, String>) -> Result<()> {
+        self.on_plugin(move |plugin| plugin.init(&params)).await
     }
 
     /// This function calls babel by sending a blockchain command using the specified method name.
@@ -787,11 +787,11 @@ mod tests {
             self.engine.run_sh("has_capability", None).unwrap();
             true
         }
-        fn init(&self, keys: &HashMap<String, String>) -> Result<()> {
+        fn init(&self, params: &HashMap<String, String>) -> Result<()> {
             self.engine.render_template(
                 Path::new("template"),
                 Path::new("config"),
-                &serde_json::to_string(keys)?,
+                &serde_json::to_string(params)?,
             )?;
             Ok(())
         }

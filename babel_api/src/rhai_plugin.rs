@@ -235,9 +235,9 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
         self.ast.iter_functions().any(|meta| meta.name == name)
     }
 
-    fn init(&self, keys: &HashMap<String, String>) -> Result<()> {
-        let keys = Map::from_iter(keys.iter().map(|(k, v)| (k.into(), v.into())));
-        self.call_fn("init", (keys,))
+    fn init(&self, params: &HashMap<String, String>) -> Result<()> {
+        let params = Map::from_iter(params.iter().map(|(k, v)| (k.into(), v.into())));
+        self.call_fn("init", (params,))
     }
 
     fn height(&self) -> Result<u64> {

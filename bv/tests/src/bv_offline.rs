@@ -330,10 +330,11 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
 
     let cmd = |cmd| pb::Command {
         id: command_id.clone(),
-        response: None,
+        exit_message: None,
         exit_code: None,
         acked_at: None,
         command: Some(cmd),
+        retry_hint_seconds: None,
     };
     let commands = vec![
         // create
@@ -616,52 +617,52 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     println!("check received updates");
     println!("got commands updates: {:?}", commands_updates.lock().await);
     let expected_updates = [
-        (&command_id, None, Some(0)),
-        (&command_id, None, Some(0)),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
         (
             &command_id,
-            Some("Node with name `beautiful-node-name` exists"),
-            Some(1),
+            Some("BV internal error: Node with name `beautiful-node-name` exists"),
+            Some(pb::CommandExitCode::InternalError.into()),
         ),
         (
             &command_id,
-            Some("Node with ip address `216.18.214.195` exists"),
-            Some(1),
+            Some("BV internal error: Node with ip address `216.18.214.195` exists"),
+            Some(pb::CommandExitCode::InternalError.into()),
         ),
         (
             &command_id,
-            Some("invalid ip `invalid_ip`\n\nCaused by:\n    invalid IP address syntax"),
-            Some(1),
+            Some("BV internal error: invalid ip `invalid_ip`: invalid IP address syntax"),
+            Some(pb::CommandExitCode::InternalError.into()),
         ),
         (
             &command_id,
-            Some("invalid gateway `invalid_ip`\n\nCaused by:\n    invalid IP address syntax"),
-            Some(1),
+            Some("BV internal error: invalid gateway `invalid_ip`: invalid IP address syntax"),
+            Some(pb::CommandExitCode::InternalError.into()),
         ),
-        (&command_id, None, Some(0)),
-        (&command_id, None, Some(0)),
-        (&command_id, None, Some(0)),
-        (&command_id, None, Some(0)),
-        (&command_id, None, Some(0)),
-        (&command_id, None, Some(0)),
-        (&command_id, None, Some(0)),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
         (
             &command_id,
-            Some("invalid ip address `invalid_ip` in firewall rule `Rule B`"),
-            Some(1),
+            Some("BV internal error: invalid ip address `invalid_ip` in firewall rule `Rule B`"),
+            Some(pb::CommandExitCode::InternalError.into()),
         ),
         (
             &command_id,
-            Some("Can't configure more than 128 rules!"),
-            Some(1),
+            Some("BV internal error: Can't configure more than 128 rules!"),
+            Some(pb::CommandExitCode::InternalError.into()),
         ),
-        (&command_id, None, Some(0)),
-        (&command_id, None, Some(0)),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
+        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
     ];
     for (idx, expected) in expected_updates.iter().enumerate() {
         let actual = &commands_updates.lock().await[idx];
         assert_eq!(&actual.id, expected.0);
-        let is_response_ok = match (actual.response.as_deref(), expected.1) {
+        let is_response_ok = match (actual.exit_message.as_deref(), expected.1) {
             (None, None) => true,
             (Some(a), Some(e)) => a.contains(e),
             _ => false,

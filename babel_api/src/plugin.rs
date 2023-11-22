@@ -16,7 +16,7 @@ pub trait Plugin {
     fn has_capability(&self, name: &str) -> bool;
 
     /// Init method is called by engine on node start.
-    fn init(&self, keys: &HashMap<String, String>) -> Result<()>;
+    fn init(&self, params: &HashMap<String, String>) -> Result<()>;
 
     /// Returns the height of the blockchain (in blocks).
     fn height(&self) -> Result<u64>;

@@ -3,6 +3,7 @@ pub mod blockvisord;
 pub mod bv;
 pub mod cli;
 pub mod cluster;
+pub mod commands;
 pub mod config;
 pub mod firecracker_machine;
 pub mod hosts;

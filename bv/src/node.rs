@@ -1,6 +1,8 @@
+use crate::commands::into_internal;
 use crate::{
     babel_engine,
     babel_engine::NodeInfo,
+    command_failed, commands,
     config::SharedConfig,
     node_connection::RPC_REQUEST_TIMEOUT,
     node_context::NodeContext,
@@ -31,6 +33,7 @@ use tokio::{
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+const DEFAULT_UPGRADE_RETRY_HINT: Duration = Duration::from_secs(3600);
 const NODE_START_TIMEOUT: Duration = Duration::from_secs(120);
 const NODE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
@@ -310,10 +313,10 @@ impl<P: Pal + Debug> Node<P> {
         self.data.network_interface.delete().await
     }
 
-    pub async fn update(&mut self, rules: Vec<firewall::Rule>) -> Result<()> {
+    pub async fn update(&mut self, rules: Vec<firewall::Rule>) -> commands::Result<()> {
         self.data.firewall_rules = rules;
         let result = if self.status() == NodeStatus::Running {
-            let result = self.setup_firewall_rules().await;
+            let result = self.setup_firewall_rules().await.map_err(into_internal);
             self.data.has_pending_update = result.is_err();
             result
         } else {
@@ -326,7 +329,7 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Updates OS image for VM.
     #[instrument(skip(self))]
-    pub async fn upgrade(&mut self, image: &NodeImage) -> Result<()> {
+    pub async fn upgrade(&mut self, image: &NodeImage) -> commands::Result<()> {
         let need_to_restart = self.status() == NodeStatus::Running;
         if need_to_restart {
             if self
@@ -336,7 +339,9 @@ impl<P: Pal + Debug> Node<P> {
                 .iter()
                 .any(|(_, job)| job.status == JobStatus::Running && job.upgrade_blocking)
             {
-                bail!("Can't upgrade node while 'upgrade_blocking' job is running.")
+                command_failed!(commands::Error::BlockingJobRunning {
+                    retry_hint: DEFAULT_UPGRADE_RETRY_HINT,
+                });
             }
             self.stop(false).await?;
         }
@@ -1619,6 +1624,72 @@ pub mod tests {
         );
         assert!(!node.data.has_pending_update);
         test_env.assert_node_data_saved(&node.data).await;
+
+        server.assert().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_upgrade_node_rejected() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let mut pal = test_env.default_pal();
+        let config = default_config(test_env.tmp_root.clone());
+        let node_data = test_env.default_node_data();
+        let test_image = node_data.image.clone();
+
+        let images_dir =
+            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+        fs::create_dir_all(&images_dir).await?;
+        fs::copy(
+            testing_babel_path_absolute(),
+            images_dir.join(BABEL_PLUGIN_NAME),
+        )
+        .await?;
+
+        let test_tmp_root = test_env.tmp_root.to_path_buf();
+        pal.expect_create_node_connection().return_once(move |_| {
+            let mut mock = MockTestNodeConnection::new();
+            mock.expect_is_closed().returning(|| false);
+            mock.expect_is_broken().returning(|| false);
+            let tmp_root = test_tmp_root.clone();
+            mock.expect_babel_client()
+                .returning(move || Ok(test_babel_client(&tmp_root)));
+            mock.expect_mark_broken().return_once(|| ());
+            mock
+        });
+        pal.expect_create_vm().return_once(|_| {
+            let mut mock = MockTestVM::new();
+            mock.expect_state().once().returning(|| VmState::RUNNING);
+            Ok(mock)
+        });
+
+        let mut node = Node::create(Arc::new(pal), config, node_data).await?;
+        assert_eq!(NodeStatus::Running, node.expected_status());
+
+        let mut babel_mock = MockTestBabelService::new();
+        // failed to gracefully shutdown babel
+        babel_mock.expect_get_jobs().once().returning(|_| {
+            Ok(Response::new(vec![(
+                "upgrade_blocking_job_name".to_string(),
+                JobInfo {
+                    status: JobStatus::Running,
+                    progress: None,
+                    restart_count: 0,
+                    logs: vec![],
+                    upgrade_blocking: true,
+                },
+            )]))
+        });
+
+        let server = test_env
+            .start_server(MockTestBabelSupService::new(), babel_mock)
+            .await;
+
+        assert!(node.data.firewall_rules.is_empty());
+        assert_eq!(
+            "Can't proceed while 'upgrade_blocking' job is running. Try again after 3600 seconds.",
+            node.upgrade(&test_image).await.unwrap_err().to_string()
+        );
 
         server.assert().await;
         Ok(())

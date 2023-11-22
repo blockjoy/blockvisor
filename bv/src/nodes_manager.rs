@@ -1,10 +1,27 @@
+use crate::{
+    command_failed,
+    commands::{self, into_internal, Error},
+    config::SharedConfig,
+    firecracker_machine::FC_BIN_NAME,
+    hosts::HostInfo,
+    node::Node,
+    node_context::build_registry_dir,
+    node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
+    node_metrics,
+    pal::{NetInterface, Pal},
+    services::{
+        cookbook::{CookbookService, BABEL_PLUGIN_NAME},
+        kernel::KernelService,
+    },
+    utils, BV_VAR_PATH,
+};
 use babel_api::{
     engine::JobInfo,
     metadata::{firewall, BlockchainMetadata, Requirements},
     rhai_plugin,
 };
 use chrono::{DateTime, Utc};
-use eyre::{anyhow, bail, Context, Result};
+use eyre::{anyhow, Context, Result};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,22 +39,6 @@ use tokio::{
 };
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
-
-use crate::{
-    config::SharedConfig,
-    firecracker_machine::FC_BIN_NAME,
-    hosts::HostInfo,
-    node::Node,
-    node_context::build_registry_dir,
-    node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
-    node_metrics,
-    pal::{NetInterface, Pal},
-    services::{
-        cookbook::{CookbookService, BABEL_PLUGIN_NAME},
-        kernel::KernelService,
-    },
-    utils, BV_VAR_PATH,
-};
 
 pub const REGISTRY_CONFIG_FILENAME: &str = "nodes.json";
 const MAX_SUPPORTED_RULES: usize = 128;
@@ -104,7 +105,9 @@ impl<P: Pal + Debug> NodesManager<P> {
         let bv_root = pal.bv_root();
         let registry_dir = build_registry_dir(bv_root);
         if !registry_dir.exists() {
-            fs::create_dir_all(&registry_dir).await?;
+            fs::create_dir_all(&registry_dir)
+                .await
+                .map_err(into_internal)?;
         }
         let registry_path = build_registry_filename(bv_root);
         let pal = Arc::new(pal);
@@ -154,7 +157,7 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn create(&self, id: Uuid, config: NodeConfig) -> Result<()> {
+    pub async fn create(&self, id: Uuid, config: NodeConfig) -> commands::Result<()> {
         let mut node_ids = self.node_ids.write().await;
         if self.nodes.read().await.contains_key(&id) {
             warn!("Node with id `{id}` exists");
@@ -162,7 +165,10 @@ impl<P: Pal + Debug> NodesManager<P> {
         }
 
         if node_ids.contains_key(&config.name) {
-            bail!("Node with name `{}` exists", config.name);
+            command_failed!(Error::Internal(anyhow!(
+                "Node with name `{}` exists",
+                config.name
+            )));
         }
 
         check_user_firewall_rules(&config.rules)?;
@@ -185,7 +191,9 @@ impl<P: Pal + Debug> NodesManager<P> {
         for n in self.nodes.read().await.values() {
             let node = n.read().await;
             if node.data.network_interface.ip() == &ip {
-                bail!("Node with ip address `{ip}` exists");
+                command_failed!(Error::Internal(anyhow!(
+                    "Node with ip address `{ip}` exists"
+                )));
             }
         }
 
@@ -239,29 +247,35 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn upgrade(&self, id: Uuid, image: NodeImage) -> Result<()> {
+    pub async fn upgrade(&self, id: Uuid, image: NodeImage) -> commands::Result<()> {
         if image != self.image(id).await? {
             let nodes_lock = self.nodes.read().await;
             let data = nodes_lock
                 .get(&id)
-                .ok_or_else(|| id_not_found(id))?
+                .ok_or_else(|| Error::NodeNotFound(id))?
                 .read()
                 .await
                 .data
                 .clone();
 
             if image.protocol != data.image.protocol {
-                bail!("Cannot upgrade protocol to `{}`", image.protocol);
+                command_failed!(Error::Internal(anyhow!(
+                    "Cannot upgrade protocol to `{}`",
+                    image.protocol
+                )));
             }
             if image.node_type != data.image.node_type {
-                bail!("Cannot upgrade node type to `{}`", image.node_type);
+                command_failed!(Error::Internal(anyhow!(
+                    "Cannot upgrade node type to `{}`",
+                    image.node_type
+                )));
             }
             let new_meta = self.fetch_image_data(&image).await?;
             if data.kernel != new_meta.kernel {
-                bail!("Cannot upgrade kernel");
+                command_failed!(Error::Internal(anyhow!("Cannot upgrade kernel")));
             }
             if data.requirements.disk_size_gb != new_meta.requirements.disk_size_gb {
-                bail!("Cannot upgrade disk requirements");
+                command_failed!(Error::Internal(anyhow!("Cannot upgrade disk requirements")));
             }
 
             self.check_node_requirements(&new_meta.requirements, Some(&data.requirements))
@@ -269,7 +283,7 @@ impl<P: Pal + Debug> NodesManager<P> {
 
             let mut node = nodes_lock
                 .get(&id)
-                .ok_or_else(|| id_not_found(id))?
+                .ok_or_else(|| Error::NodeNotFound(id))?
                 .write()
                 .await;
 
@@ -284,7 +298,7 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn delete(&self, id: Uuid) -> Result<()> {
+    pub async fn delete(&self, id: Uuid) -> commands::Result<()> {
         if let Some(node_lock) = self.nodes.write().await.remove(&id) {
             let node = node_lock.into_inner();
             node.delete_node_data().await?;
@@ -297,17 +311,18 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn start(&self, id: Uuid, reload_plugin: bool) -> Result<()> {
+    pub async fn start(&self, id: Uuid, reload_plugin: bool) -> commands::Result<()> {
         let nodes_lock = self.nodes.read().await;
         let mut node = nodes_lock
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         if reload_plugin {
             node.reload_plugin()
                 .await
-                .map_err(|err| BabelError::Internal { err })?;
+                .map_err(|err| BabelError::Internal { err })
+                .map_err(into_internal)?;
         }
         if NodeStatus::Running != node.expected_status() {
             node.start().await?;
@@ -316,11 +331,11 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn stop(&self, id: Uuid, force: bool) -> Result<()> {
+    pub async fn stop(&self, id: Uuid, force: bool) -> commands::Result<()> {
         let nodes_lock = self.nodes.read().await;
         let mut node = nodes_lock
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         if NodeStatus::Stopped != node.expected_status() || force {
@@ -330,12 +345,12 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn update(&self, id: Uuid, rules: Vec<firewall::Rule>) -> Result<()> {
+    pub async fn update(&self, id: Uuid, rules: Vec<firewall::Rule>) -> commands::Result<()> {
         check_user_firewall_rules(&rules)?;
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.update(rules).await
@@ -344,14 +359,22 @@ impl<P: Pal + Debug> NodesManager<P> {
     #[instrument(skip(self))]
     pub async fn status(&self, id: Uuid) -> Result<NodeStatus> {
         let nodes = self.nodes.read().await;
-        let node = nodes.get(&id).ok_or_else(|| id_not_found(id))?.read().await;
+        let node = nodes
+            .get(&id)
+            .ok_or_else(|| Error::NodeNotFound(id))?
+            .read()
+            .await;
         Ok(node.status())
     }
 
     #[instrument(skip(self))]
     async fn expected_status(&self, id: Uuid) -> Result<NodeStatus> {
         let nodes = self.nodes.read().await;
-        let node = nodes.get(&id).ok_or_else(|| id_not_found(id))?.read().await;
+        let node = nodes
+            .get(&id)
+            .ok_or_else(|| Error::NodeNotFound(id))?
+            .read()
+            .await;
         Ok(node.expected_status())
     }
 
@@ -383,7 +406,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.babel_engine.get_jobs().await
@@ -394,7 +417,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.babel_engine.job_info(job_name).await
@@ -405,7 +428,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.babel_engine.start_job(job_name).await
@@ -416,7 +439,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.babel_engine.stop_job(job_name).await
@@ -427,7 +450,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.babel_engine.cleanup_job(job_name).await
@@ -438,7 +461,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.babel_engine.get_logs().await
@@ -449,7 +472,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.babel_engine.get_babel_logs(max_lines).await
@@ -460,7 +483,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
 
@@ -473,7 +496,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))?
+            .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
         node.babel_engine.capabilities().await
@@ -486,12 +509,12 @@ impl<P: Pal + Debug> NodesManager<P> {
         method: &str,
         param: &str,
         reload_plugin: bool,
-    ) -> Result<String, BabelError> {
+    ) -> eyre::Result<String, BabelError> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)
-            .ok_or_else(|| id_not_found(id))
-            .map_err(|err| BabelError::Internal { err })?
+            .ok_or_else(|| Error::NodeNotFound(id))
+            .map_err(|err| BabelError::Internal { err: err.into() })?
             .write()
             .await;
 
@@ -524,7 +547,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         &self,
         requirements: &Requirements,
         tolerance: Option<&Requirements>,
-    ) -> Result<()> {
+    ) -> commands::Result<()> {
         let host_info = HostInfo::collect()?;
 
         let mut allocated_disk_size_gb = 0;
@@ -547,13 +570,19 @@ impl<P: Pal + Debug> NodesManager<P> {
         }
 
         if (allocated_disk_size_gb + requirements.disk_size_gb) > total_disk_size_gb {
-            bail!("Not enough disk space to allocate for the node");
+            command_failed!(Error::Internal(anyhow!(
+                "Not enough disk space to allocate for the node"
+            )));
         }
         if (allocated_mem_size_mb + requirements.mem_size_mb) > total_mem_size_mb {
-            bail!("Not enough memory to allocate for the node");
+            command_failed!(Error::Internal(anyhow!(
+                "Not enough memory to allocate for the node"
+            )));
         }
         if (allocated_vcpu_count + requirements.vcpu_count) > total_vcpu_count {
-            bail!("Not enough vcpu to allocate for the node");
+            command_failed!(Error::Internal(anyhow!(
+                "Not enough vcpu to allocate for the node"
+            )));
         }
 
         Ok(())
@@ -583,9 +612,9 @@ impl<P: Pal + Debug> NodesManager<P> {
                 .download_image(image)
                 .await
                 .with_context(|| "cannot download image")?;
-            fs::read_to_string(rhai_path).await?
+            fs::read_to_string(rhai_path).await.map_err(into_internal)?
         } else {
-            fs::read_to_string(rhai_path).await?
+            fs::read_to_string(rhai_path).await.map_err(into_internal)?
         };
         let meta = rhai_plugin::read_metadata(&script)?;
         if !KernelService::is_kernel_cache_valid(bv_root, &meta.kernel)
@@ -609,20 +638,24 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    async fn image(&self, id: Uuid) -> Result<NodeImage> {
+    async fn image(&self, id: Uuid) -> commands::Result<NodeImage> {
         let nodes = self.nodes.read().await;
-        let node = nodes.get(&id).ok_or_else(|| id_not_found(id))?.read().await;
+        let node = nodes
+            .get(&id)
+            .ok_or_else(|| Error::NodeNotFound(id))?
+            .read()
+            .await;
         Ok(node.data.image.clone())
     }
 
-    pub async fn node_data_cache(&self, id: Uuid) -> Result<NodeDataCache> {
+    pub async fn node_data_cache(&self, id: Uuid) -> commands::Result<NodeDataCache> {
         let cache = self
             .node_data_cache
             .read()
             .await
             .get(&id)
             .cloned()
-            .ok_or_else(|| id_not_found(id))?;
+            .ok_or_else(|| Error::NodeNotFound(id))?;
 
         Ok(cache)
     }
@@ -719,8 +752,10 @@ impl<P: Pal + Debug> NodesManager<P> {
             "Writing nodes common config file: {}",
             self.registry_path.display()
         );
-        let config = serde_json::to_string(&*self.state.read().await)?;
-        fs::write(&self.registry_path, &*config).await?;
+        let config = serde_json::to_string(&*self.state.read().await).map_err(into_internal)?;
+        fs::write(&self.registry_path, &*config)
+            .await
+            .map_err(into_internal)?;
 
         Ok(())
     }
@@ -746,16 +781,14 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 }
 
-fn check_user_firewall_rules(rules: &[firewall::Rule]) -> Result<()> {
+fn check_user_firewall_rules(rules: &[firewall::Rule]) -> commands::Result<()> {
     if rules.len() > MAX_SUPPORTED_RULES {
-        bail!("Can't configure more than {MAX_SUPPORTED_RULES} rules!");
+        command_failed!(Error::Internal(anyhow!(
+            "Can't configure more than {MAX_SUPPORTED_RULES} rules!"
+        )));
     }
     babel_api::metadata::check_firewall_rules(rules)?;
     Ok(())
-}
-
-fn id_not_found(id: Uuid) -> eyre::Error {
-    anyhow!("Node with id `{}` not found", id)
 }
 
 fn name_not_found(name: &str) -> eyre::Error {
@@ -775,6 +808,7 @@ mod tests {
     };
     use assert_fs::TempDir;
     use bv_utils::cmd::run_cmd;
+    use eyre::bail;
     use mockall::*;
     use std::ffi::OsStr;
     use std::str::FromStr;
@@ -1197,7 +1231,7 @@ mod tests {
             .create(second_node_id, second_node_config.clone())
             .await?;
         assert_eq!(
-            "Not enough disk space to allocate for the node",
+            "BV internal error: Not enough disk space to allocate for the node",
             nodes
                 .create(
                     failed_node_id,
@@ -1221,7 +1255,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "failed to create vm",
+            "BV internal error: failed to create vm",
             nodes
                 .create(failed_node_id, failed_node_config.clone())
                 .await
@@ -1229,7 +1263,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "failed to create VM bridge bv4",
+            "BV internal error: failed to create VM bridge bv4: failed to create net iface",
             nodes
                 .create(failed_node_id, failed_node_config)
                 .await
@@ -1237,7 +1271,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "Node with name `first node name` exists",
+            "BV internal error: Node with name `first node name` exists",
             nodes
                 .create(failed_node_id, first_node_config.clone())
                 .await
@@ -1245,7 +1279,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "Node with ip address `192.168.0.7` exists",
+            "BV internal error: Node with ip address `192.168.0.7` exists",
             nodes
                 .create(
                     failed_node_id,
@@ -1265,7 +1299,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "invalid ip `invalid`",
+            "BV internal error: invalid ip `invalid`: invalid IP address syntax",
             nodes
                 .create(
                     failed_node_id,
@@ -1285,7 +1319,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "invalid gateway `invalid`",
+            "BV internal error: invalid gateway `invalid`: invalid IP address syntax",
             nodes
                 .create(
                     failed_node_id,
@@ -1315,7 +1349,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(
-            "Can't configure more than 128 rules!",
+            "BV internal error: Can't configure more than 128 rules!",
             nodes
                 .create(
                     failed_node_id,
@@ -1335,7 +1369,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "fetch image data failed",
+            "BV internal error: fetch image data failed: cannot download babel plugin: Invalid NodeType invalid",
             nodes
                 .create(
                     failed_node_id,
@@ -1383,12 +1417,12 @@ mod tests {
         );
 
         assert_eq!(
-            "delete VM failed",
+            "BV internal error: delete VM failed",
             nodes.delete(first_node_id).await.unwrap_err().to_string()
         );
 
         assert_eq!(
-            "net delete error",
+            "BV internal error: net delete error",
             nodes.delete(second_node_id).await.unwrap_err().to_string()
         );
 
@@ -1589,6 +1623,15 @@ mod tests {
             assert!(node.babel_engine.has_capability("info").await?);
         }
         nodes.upgrade(node_id, new_image.clone()).await?;
+        let not_found_id = Uuid::new_v4();
+        assert_eq!(
+            format!("Node with {not_found_id} not found"),
+            nodes
+                .upgrade(not_found_id, new_image.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
         assert_eq!(
             NodeDataCache {
                 name: node_config.name,
@@ -1620,7 +1663,7 @@ mod tests {
         )
         .await?;
         assert_eq!(
-            "Cannot upgrade kernel",
+            "BV internal error: Cannot upgrade kernel",
             nodes
                 .upgrade(node_id, invalid_kernel_image.clone())
                 .await
@@ -1628,7 +1671,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "Cannot upgrade disk requirements",
+            "BV internal error: Cannot upgrade disk requirements",
             nodes
                 .upgrade(node_id, invalid_disk_size_image.clone())
                 .await
@@ -1636,7 +1679,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "Not enough vcpu to allocate for the node",
+            "BV internal error: Not enough vcpu to allocate for the node",
             nodes
                 .upgrade(node_id, cpu_devourer_image.clone())
                 .await
@@ -1644,7 +1687,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "Cannot upgrade protocol to `differen_chain`",
+            "BV internal error: Cannot upgrade protocol to `differen_chain`",
             nodes
                 .upgrade(
                     node_id,
@@ -1659,7 +1702,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "Cannot upgrade node type to `node`",
+            "BV internal error: Cannot upgrade node type to `node`",
             nodes
                 .upgrade(
                     node_id,
