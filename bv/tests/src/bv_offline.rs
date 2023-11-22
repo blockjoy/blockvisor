@@ -661,7 +661,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     for (idx, expected) in expected_updates.iter().enumerate() {
         let actual = &commands_updates.lock().await[idx];
         assert_eq!(&actual.id, expected.0);
-        let is_response_ok = match (actual.response.as_deref(), expected.1) {
+        let is_response_ok = match (actual.exit_message.as_deref(), expected.1) {
             (None, None) => true,
             (Some(a), Some(e)) => a.contains(e),
             _ => false,

@@ -67,6 +67,7 @@ impl pb::host_service_server::HostService for StubHostsServer {
                 region: Some("europe-bosnia-number-1".to_string()),
                 billing_amount: None,
                 vmm_mountpoint: Some("/var/lib/blockvisor".to_string()),
+                ip_addresses: vec![],
             }),
             token: "awesome-token".to_string(),
             refresh: "even-more-awesomer-token".to_string(),
