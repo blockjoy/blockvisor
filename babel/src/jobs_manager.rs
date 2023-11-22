@@ -319,6 +319,11 @@ fn build_job_info(job: &Job, progress: Option<JobProgress>) -> JobInfo {
         progress,
         restart_count,
         logs,
+        upgrade_blocking: match &job.config.restart {
+            RestartPolicy::Always(_) => false,
+            RestartPolicy::OnFailure(config) if config.max_retries.is_none() => false,
+            _ => true,
+        },
     }
 }
 
@@ -742,6 +747,7 @@ mod tests {
                 progress: Default::default(),
                 restart_count: 0,
                 logs: vec![],
+                upgrade_blocking: true,
             },
             test_env.client.info("test_job").await?
         );
@@ -1194,6 +1200,7 @@ mod tests {
                 progress: Default::default(),
                 restart_count: 0,
                 logs: vec![],
+                upgrade_blocking: false,
             },
             test_env.client.info("test_restarting_job").await?
         );
