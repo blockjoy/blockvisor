@@ -1,4 +1,9 @@
-use crate::{services, services::api::pb, services::AuthenticatedService, utils, BV_VAR_PATH};
+use crate::{
+    services,
+    services::api::{common, pb},
+    services::AuthenticatedService,
+    utils, BV_VAR_PATH,
+};
 use bv_utils::with_retry;
 use eyre::{anyhow, Result};
 use std::path::{Path, PathBuf};
@@ -42,13 +47,13 @@ impl KernelService {
     #[instrument(skip(self))]
     pub async fn download_kernel(&mut self, version: &str) -> Result<()> {
         info!("Downloading kernel...");
-        let archive: pb::ArchiveLocation = with_retry!(self.client.retrieve(tonic::Request::new(
-            pb::KernelServiceRetrieveRequest {
+        let archive: common::ArchiveLocation = with_retry!(self.client.retrieve(
+            tonic::Request::new(pb::KernelServiceRetrieveRequest {
                 id: Some(pb::KernelIdentifier {
                     version: version.to_string()
                 }),
-            }
-        )))?
+            })
+        ))?
         .into_inner()
         .location
         .ok_or_else(|| anyhow!("missing location"))?;

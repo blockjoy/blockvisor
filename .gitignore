@@ -2,5 +2,6 @@ target
 **/.env
 .vscode
 .idea
+.ignore
 .repl.rhai.swp
 .rhai-repl-history

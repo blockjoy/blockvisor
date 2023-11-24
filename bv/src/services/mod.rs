@@ -10,7 +10,7 @@ use tonic::{
 };
 
 pub mod api;
-pub mod cookbook;
+pub mod blockchain;
 pub mod kernel;
 pub mod mqtt;
 

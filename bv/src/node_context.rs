@@ -1,7 +1,7 @@
 use crate::{
     node_data::{NodeData, NodeImage},
     pal::Pal,
-    services::cookbook::{CookbookService, BABEL_PLUGIN_NAME, DATA_FILE},
+    services::blockchain::{BlockchainService, BABEL_PLUGIN_NAME, DATA_FILE},
     BV_VAR_PATH,
 };
 use babel_api::{metadata::BlockchainMetadata, rhai_plugin};
@@ -70,7 +70,7 @@ impl NodeContext {
             } else {
                 // clean up expired cache data
                 fs::remove_file(data_cache_path).await?;
-                // TODO: use cookbook to download new image
+                // TODO: use blockchain service to download new image
             }
         }
 
@@ -94,7 +94,7 @@ impl NodeContext {
         image: &NodeImage,
     ) -> Result<(String, BlockchainMetadata)> {
         fs::copy(
-            CookbookService::get_image_download_folder_path(&self.bv_root, image)
+            BlockchainService::get_image_download_folder_path(&self.bv_root, image)
                 .join(BABEL_PLUGIN_NAME),
             &self.plugin_script,
         )

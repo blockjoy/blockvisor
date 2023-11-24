@@ -11,9 +11,9 @@ use bv_utils::with_retry;
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
-    blockchain_service_client, command_service_client::CommandServiceClient,
-    discovery_service_client, host_service_client, manifest_service_client, node_command::Command,
-    node_service_client, Action, ChecksumType, Direction, Protocol, Rule,
+    blockchain_archive_service_client, blockchain_service_client,
+    command_service_client::CommandServiceClient, discovery_service_client, host_service_client,
+    node_command::Command, node_service_client,
 };
 use std::{
     fmt::Debug,
@@ -29,6 +29,7 @@ pub mod pb {
     tonic::include_proto!("blockjoy.v1");
 }
 
+#[allow(clippy::large_enum_variant)]
 pub mod common {
     tonic::include_proto!("blockjoy.common.v1");
 
@@ -54,14 +55,14 @@ lazy_static::lazy_static! {
     pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
 }
 
-pub type NodesServiceClient = node_service_client::NodeServiceClient<AuthenticatedService>;
+pub type BlockchainServiceClient =
+    blockchain_service_client::BlockchainServiceClient<AuthenticatedService>;
+pub type BlockchainArchiveServiceClient =
+    blockchain_archive_service_client::BlockchainArchiveServiceClient<AuthenticatedService>;
 pub type DiscoveryServiceClient =
     discovery_service_client::DiscoveryServiceClient<AuthenticatedService>;
 pub type HostsServiceClient = host_service_client::HostServiceClient<AuthenticatedService>;
-pub type ManifestServiceClient =
-    manifest_service_client::ManifestServiceClient<AuthenticatedService>;
-pub type BlockchainServiceClient =
-    blockchain_service_client::BlockchainServiceClient<AuthenticatedService>;
+pub type NodesServiceClient = node_service_client::NodeServiceClient<AuthenticatedService>;
 
 pub struct CommandsService {
     client: CommandServiceClient<AuthenticatedService>,
@@ -317,8 +318,8 @@ async fn process_node_command<P: Pal + Debug>(
     Ok(())
 }
 
-impl From<pb::ContainerImage> for NodeImage {
-    fn from(image: pb::ContainerImage) -> Self {
+impl From<common::ImageIdentifier> for NodeImage {
+    fn from(image: common::ImageIdentifier) -> Self {
         Self {
             protocol: image.protocol.to_lowercase(),
             node_type: image.node_type().to_string(),
@@ -327,7 +328,19 @@ impl From<pb::ContainerImage> for NodeImage {
     }
 }
 
-impl std::fmt::Display for pb::NodeType {
+impl TryFrom<NodeImage> for common::ImageIdentifier {
+    type Error = eyre::Error;
+
+    fn try_from(image: NodeImage) -> Result<Self, Self::Error> {
+        Ok(Self {
+            protocol: image.protocol,
+            node_type: common::NodeType::from_str(&image.node_type)?.into(),
+            node_version: image.node_version,
+        })
+    }
+}
+
+impl std::fmt::Display for common::NodeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = self.as_str_name();
         let s = s.strip_prefix("NODE_TYPE_").unwrap_or(s).to_lowercase();
@@ -335,7 +348,7 @@ impl std::fmt::Display for pb::NodeType {
     }
 }
 
-impl FromStr for pb::NodeType {
+impl FromStr for common::NodeType {
     type Err = eyre::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -344,78 +357,59 @@ impl FromStr for pb::NodeType {
     }
 }
 
-impl TryFrom<Action> for firewall::Action {
+impl TryFrom<common::FirewallAction> for firewall::Action {
     type Error = eyre::Error;
-    fn try_from(value: Action) -> Result<Self, Self::Error> {
+    fn try_from(value: common::FirewallAction) -> Result<Self, Self::Error> {
         Ok(match value {
-            Action::Unspecified => {
+            common::FirewallAction::Unspecified => {
                 bail!("Invalid Action")
             }
-            Action::Allow => firewall::Action::Allow,
-            Action::Deny => firewall::Action::Deny,
-            Action::Reject => firewall::Action::Reject,
+            common::FirewallAction::Allow => firewall::Action::Allow,
+            common::FirewallAction::Deny => firewall::Action::Deny,
+            common::FirewallAction::Reject => firewall::Action::Reject,
         })
     }
 }
 
-fn try_action(value: i32) -> Result<firewall::Action> {
-    Action::from_i32(value)
-        .unwrap_or(Action::Unspecified)
-        .try_into()
-}
-
-impl TryFrom<Direction> for firewall::Direction {
+impl TryFrom<common::FirewallDirection> for firewall::Direction {
     type Error = eyre::Error;
-    fn try_from(value: Direction) -> Result<Self, Self::Error> {
+    fn try_from(value: common::FirewallDirection) -> Result<Self, Self::Error> {
         Ok(match value {
-            Direction::Unspecified => {
+            common::FirewallDirection::Unspecified => {
                 bail!("Invalid Direction")
             }
-            Direction::In => firewall::Direction::In,
-            Direction::Out => firewall::Direction::Out,
+            common::FirewallDirection::Inbound => firewall::Direction::In,
+            common::FirewallDirection::Outbound => firewall::Direction::Out,
         })
     }
 }
 
-impl TryFrom<Protocol> for firewall::Protocol {
+impl TryFrom<common::FirewallProtocol> for firewall::Protocol {
     type Error = eyre::Error;
-    fn try_from(value: Protocol) -> Result<Self, Self::Error> {
+    fn try_from(value: common::FirewallProtocol) -> Result<Self, Self::Error> {
         Ok(match value {
-            Protocol::Unspecified => bail!("Invalid Protocol"),
-            Protocol::Tcp => firewall::Protocol::Tcp,
-            Protocol::Udp => firewall::Protocol::Udp,
-            Protocol::Both => firewall::Protocol::Both,
+            common::FirewallProtocol::Unspecified => bail!("Invalid Protocol"),
+            common::FirewallProtocol::Tcp => firewall::Protocol::Tcp,
+            common::FirewallProtocol::Udp => firewall::Protocol::Udp,
+            common::FirewallProtocol::Both => firewall::Protocol::Both,
         })
     }
 }
 
-impl TryFrom<Rule> for firewall::Rule {
+impl TryFrom<common::FirewallRule> for firewall::Rule {
     type Error = eyre::Error;
-    fn try_from(rule: Rule) -> Result<Self, Self::Error> {
+    fn try_from(rule: common::FirewallRule) -> Result<Self, Self::Error> {
+        let action = rule.action().try_into()?;
         let direction = rule.direction().try_into()?;
         let protocol = Some(rule.protocol().try_into()?);
         Ok(Self {
             name: rule.name,
-            action: try_action(rule.action)?,
+            action,
             direction,
             protocol,
             ips: rule.ips,
             ports: rule.ports.into_iter().map(|p| p as u16).collect(),
         })
-    }
-}
-
-impl TryFrom<NodeImage> for pb::ConfigIdentifier {
-    type Error = eyre::Error;
-
-    fn try_from(image: NodeImage) -> Result<Self, Self::Error> {
-        let mut res = Self {
-            protocol: image.protocol,
-            node_type: 0,
-            node_version: image.node_version,
-        };
-        res.set_node_type(image.node_type.parse()?);
-        Ok(res)
     }
 }
 
@@ -442,13 +436,18 @@ impl TryFrom<pb::DownloadManifest> for DownloadManifest {
             .chunks
             .into_iter()
             .map(|value| {
-                let checksum = match value.checksum_type() {
-                    ChecksumType::Unspecified => {
+                let checksum = value.checksum.ok_or_else(|| anyhow!("Missing checksum"))?;
+                let checksum = match checksum.checksum_type() {
+                    pb::ChecksumType::Unspecified => {
                         bail!("Invalid checksum type")
                     }
-                    ChecksumType::Sha1 => Checksum::Sha1(try_into_array(value.checksum)?),
-                    ChecksumType::Sha256 => Checksum::Sha256(try_into_array(value.checksum)?),
-                    ChecksumType::Blake3 => Checksum::Blake3(try_into_array(value.checksum)?),
+                    pb::ChecksumType::Sha1 => Checksum::Sha1(try_into_array(checksum.checksum)?),
+                    pb::ChecksumType::Sha256 => {
+                        Checksum::Sha256(try_into_array(checksum.checksum)?)
+                    }
+                    pb::ChecksumType::Blake3 => {
+                        Checksum::Blake3(try_into_array(checksum.checksum)?)
+                    }
                 };
                 let destinations = value
                     .destinations

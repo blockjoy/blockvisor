@@ -149,6 +149,7 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::api::common;
     use crate::services::AuthToken;
     use crate::start_test_server;
     use crate::utils::tests::test_channel;
@@ -365,7 +366,7 @@ mod tests {
         let mut bundles_mock = MockTestBundleService::new();
         bundles_mock.expect_retrieve().once().returning(|_| {
             let reply = pb::BundleServiceRetrieveResponse {
-                location: Some(pb::ArchiveLocation {
+                location: Some(common::ArchiveLocation {
                     url: "invalid_url".to_string(),
                 }),
             };
@@ -374,7 +375,7 @@ mod tests {
         let url = server.url();
         bundles_mock.expect_retrieve().once().returning(move |_| {
             let reply = pb::BundleServiceRetrieveResponse {
-                location: Some(pb::ArchiveLocation { url: url.clone() }),
+                location: Some(common::ArchiveLocation { url: url.clone() }),
             };
             Ok(Response::new(reply))
         });
@@ -411,7 +412,7 @@ mod tests {
         let url = server.url();
         bundles_mock.expect_retrieve().once().returning(move |_| {
             let reply = pb::BundleServiceRetrieveResponse {
-                location: Some(pb::ArchiveLocation { url: url.clone() }),
+                location: Some(common::ArchiveLocation { url: url.clone() }),
             };
             Ok(Response::new(reply))
         });
@@ -477,7 +478,7 @@ mod tests {
             )
             .returning(move |_| {
                 let reply = pb::BundleServiceRetrieveResponse {
-                    location: Some(pb::ArchiveLocation { url: url.clone() }),
+                    location: Some(common::ArchiveLocation { url: url.clone() }),
                 };
                 Ok(Response::new(reply))
             });

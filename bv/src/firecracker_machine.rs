@@ -2,7 +2,7 @@ use crate::services::kernel::KernelService;
 use crate::{
     node_data::NodeData,
     pal,
-    services::cookbook::{CookbookService, DATA_FILE, ROOT_FS_FILE},
+    services::blockchain::{BlockchainService, DATA_FILE, ROOT_FS_FILE},
     utils::{get_process_pid, ip_to_mac},
     BV_VAR_PATH,
 };
@@ -108,7 +108,7 @@ async fn create_config(
         Some(mac),
     );
     let root_fs_path =
-        CookbookService::get_image_download_folder_path(bv_root, &data.image).join(ROOT_FS_FILE);
+        BlockchainService::get_image_download_folder_path(bv_root, &data.image).join(ROOT_FS_FILE);
     let kernel_path = KernelService::get_kernel_path(bv_root, &data.kernel);
     let data_fs_path = build_vm_data_path(bv_root, data.id).join(DATA_FILE);
 

@@ -1,6 +1,6 @@
 use crate::{
     linux_platform::bv_root, node_context::REGISTRY_CONFIG_DIR, node_data::NodeImage,
-    services::cookbook::BABEL_PLUGIN_NAME, BV_VAR_PATH,
+    services::blockchain::BABEL_PLUGIN_NAME, BV_VAR_PATH,
 };
 use eyre::Result;
 use serde::{Deserialize, Serialize};

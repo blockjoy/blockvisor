@@ -470,14 +470,14 @@ async fn retrieve_download_manifest(
     image: NodeImage,
     network: String,
 ) -> Result<DownloadManifest> {
-    let mut manifest_service = services::connect_to_api_service(
+    let mut archive_service = services::connect_to_api_service(
         config,
-        pb::manifest_service_client::ManifestServiceClient::with_interceptor,
+        pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
     )
     .await
     .with_context(|| "cannot connect to manifest service")?;
-    manifest_service
-        .retrieve_download_manifest(pb::ManifestServiceRetrieveDownloadManifestRequest {
+    archive_service
+        .get_download_manifest(pb::BlockchainArchiveServiceGetDownloadManifestRequest {
             id: Some(image.clone().try_into()?),
             network: network.clone(),
         })

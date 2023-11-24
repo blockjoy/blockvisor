@@ -4,7 +4,7 @@ use crate::node::BabelEngine;
 use crate::node_data::NodeStatus;
 use crate::nodes_manager::NodesManager;
 use crate::pal::{NodeConnection, Pal};
-use crate::services::api::pb;
+use crate::services::api::{common, pb};
 use babel_api::engine::JobStatus;
 use babel_api::{
     engine::JobInfo,
@@ -228,48 +228,48 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
     }
 }
 
-impl From<StakingStatus> for pb::StakingStatus {
+impl From<StakingStatus> for common::StakingStatus {
     fn from(value: StakingStatus) -> Self {
         match value {
-            StakingStatus::Follower => pb::StakingStatus::Follower,
-            StakingStatus::Staked => pb::StakingStatus::Staked,
-            StakingStatus::Staking => pb::StakingStatus::Staking,
-            StakingStatus::Validating => pb::StakingStatus::Validating,
-            StakingStatus::Consensus => pb::StakingStatus::Consensus,
-            StakingStatus::Unstaked => pb::StakingStatus::Unstaked,
+            StakingStatus::Follower => common::StakingStatus::Follower,
+            StakingStatus::Staked => common::StakingStatus::Staked,
+            StakingStatus::Staking => common::StakingStatus::Staking,
+            StakingStatus::Validating => common::StakingStatus::Validating,
+            StakingStatus::Consensus => common::StakingStatus::Consensus,
+            StakingStatus::Unstaked => common::StakingStatus::Unstaked,
         }
     }
 }
 
-impl From<ApplicationStatus> for pb::NodeStatus {
+impl From<ApplicationStatus> for common::NodeStatus {
     fn from(value: ApplicationStatus) -> Self {
         match value {
-            ApplicationStatus::Provisioning => pb::NodeStatus::Provisioning,
-            ApplicationStatus::Broadcasting => pb::NodeStatus::Broadcasting,
-            ApplicationStatus::Cancelled => pb::NodeStatus::Cancelled,
-            ApplicationStatus::Delegating => pb::NodeStatus::Delegating,
-            ApplicationStatus::Delinquent => pb::NodeStatus::Delinquent,
-            ApplicationStatus::Disabled => pb::NodeStatus::Disabled,
-            ApplicationStatus::Earning => pb::NodeStatus::Earning,
-            ApplicationStatus::Electing => pb::NodeStatus::Electing,
-            ApplicationStatus::Elected => pb::NodeStatus::Elected,
-            ApplicationStatus::Exported => pb::NodeStatus::Exported,
-            ApplicationStatus::Ingesting => pb::NodeStatus::Ingesting,
-            ApplicationStatus::Mining => pb::NodeStatus::Mining,
-            ApplicationStatus::Minting => pb::NodeStatus::Minting,
-            ApplicationStatus::Processing => pb::NodeStatus::Processing,
-            ApplicationStatus::Relaying => pb::NodeStatus::Relaying,
-            ApplicationStatus::Deleting => pb::NodeStatus::Deleting,
-            ApplicationStatus::Updating => pb::NodeStatus::Updating,
+            ApplicationStatus::Provisioning => common::NodeStatus::Provisioning,
+            ApplicationStatus::Broadcasting => common::NodeStatus::Broadcasting,
+            ApplicationStatus::Cancelled => common::NodeStatus::Cancelled,
+            ApplicationStatus::Delegating => common::NodeStatus::Delegating,
+            ApplicationStatus::Delinquent => common::NodeStatus::Delinquent,
+            ApplicationStatus::Disabled => common::NodeStatus::Disabled,
+            ApplicationStatus::Earning => common::NodeStatus::Earning,
+            ApplicationStatus::Electing => common::NodeStatus::Electing,
+            ApplicationStatus::Elected => common::NodeStatus::Elected,
+            ApplicationStatus::Exported => common::NodeStatus::Exported,
+            ApplicationStatus::Ingesting => common::NodeStatus::Ingesting,
+            ApplicationStatus::Mining => common::NodeStatus::Mining,
+            ApplicationStatus::Minting => common::NodeStatus::Minting,
+            ApplicationStatus::Processing => common::NodeStatus::Processing,
+            ApplicationStatus::Relaying => common::NodeStatus::Relaying,
+            ApplicationStatus::Deleting => common::NodeStatus::Deleting,
+            ApplicationStatus::Updating => common::NodeStatus::Updating,
         }
     }
 }
 
-impl From<SyncStatus> for pb::SyncStatus {
+impl From<SyncStatus> for common::SyncStatus {
     fn from(value: SyncStatus) -> Self {
         match value {
-            SyncStatus::Syncing => pb::SyncStatus::Syncing,
-            SyncStatus::Synced => pb::SyncStatus::Synced,
+            SyncStatus::Syncing => common::SyncStatus::Syncing,
+            SyncStatus::Synced => common::SyncStatus::Synced,
         }
     }
 }

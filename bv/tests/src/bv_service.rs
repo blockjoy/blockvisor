@@ -6,7 +6,10 @@ use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::node_data::NodeData;
 use blockvisord::{
-    config::Config, node_data::NodeImage, services::api::pb, services::cookbook::CookbookService,
+    config::Config,
+    node_data::NodeImage,
+    services::api::{common, pb},
+    services::blockchain::BlockchainService,
 };
 use predicates::prelude::*;
 use serial_test::serial;
@@ -245,7 +248,7 @@ async fn test_bv_service_e2e() {
     println!("got blockchain: {:?}", blockchain);
 
     println!("removing {NEW_IMAGE_VERSION} image from cache to download it again");
-    let folder = CookbookService::get_image_download_folder_path(
+    let folder = BlockchainService::get_image_download_folder_path(
         Path::new("/"),
         &NodeImage {
             protocol: "testing".to_string(),
@@ -306,7 +309,7 @@ async fn test_bv_service_e2e() {
                 id: blockchain.id.clone(),
                 version: NEW_IMAGE_VERSION.to_string(),
                 description: None,
-                node_type: pb::NodeType::Validator.into(),
+                node_type: common::NodeType::Validator.into(),
                 properties: vec![],
             },
             &auth_token,

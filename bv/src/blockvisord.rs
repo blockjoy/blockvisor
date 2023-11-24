@@ -8,7 +8,11 @@ use crate::{
     nodes_manager::NodesManager,
     pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
-    services::{self, api, api::pb, mqtt},
+    services::{
+        self,
+        api::{self, common, pb},
+        mqtt,
+    },
     try_set_bv_status,
     utils::with_jitter,
     ServiceStatus,
@@ -358,10 +362,10 @@ where
 
             for (node_id, status, address) in updates {
                 let container_status = match status {
-                    NodeStatus::Running => pb::ContainerStatus::Running,
-                    NodeStatus::Stopped => pb::ContainerStatus::Stopped,
-                    NodeStatus::Failed => pb::ContainerStatus::Failed,
-                    NodeStatus::Busy => pb::ContainerStatus::Busy,
+                    NodeStatus::Running => common::ContainerStatus::Running,
+                    NodeStatus::Stopped => common::ContainerStatus::Stopped,
+                    NodeStatus::Failed => common::ContainerStatus::Failed,
+                    NodeStatus::Busy => common::ContainerStatus::Busy,
                 };
                 let mut update = pb::NodeServiceUpdateStatusRequest {
                     id: node_id.to_string(),

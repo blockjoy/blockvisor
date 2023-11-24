@@ -1,6 +1,9 @@
 use crate::{
-    node_data::NodeImage, services, services::api::pb, services::AuthenticatedService, utils,
-    BV_VAR_PATH,
+    node_data::NodeImage,
+    services,
+    services::api::{common, pb},
+    services::AuthenticatedService,
+    utils, BV_VAR_PATH,
 };
 use bv_utils::with_retry;
 use eyre::{anyhow, Result};
@@ -18,34 +21,38 @@ pub const BABEL_PLUGIN_NAME: &str = "babel.rhai";
 pub const ROOT_FS_FILE: &str = "os.img";
 pub const DATA_FILE: &str = "data.img";
 
-pub struct CookbookService {
-    client: pb::cookbook_service_client::CookbookServiceClient<AuthenticatedService>,
+pub struct BlockchainService {
+    client: pb::blockchain_service_client::BlockchainServiceClient<AuthenticatedService>,
     bv_root: PathBuf,
 }
 
-impl CookbookService {
+impl BlockchainService {
     pub async fn connect(
         connector: impl services::ApiServiceConnector,
         bv_root: PathBuf,
     ) -> Result<Self> {
         Ok(Self {
             client: connector
-                .connect(pb::cookbook_service_client::CookbookServiceClient::with_interceptor)
+                .connect(pb::blockchain_service_client::BlockchainServiceClient::with_interceptor)
                 .await?,
             bv_root,
         })
     }
 
     #[instrument(skip(self))]
-    pub async fn list_versions(&mut self, protocol: &str, node_type: &str) -> Result<Vec<String>> {
+    pub async fn list_image_versions(
+        &mut self,
+        protocol: &str,
+        node_type: &str,
+    ) -> Result<Vec<String>> {
         info!("Listing versions...");
-        let mut req = pb::CookbookServiceListBabelVersionsRequest {
+        let mut req = pb::BlockchainServiceListImageVersionsRequest {
             protocol: protocol.to_string(),
             node_type: 0,
         };
         req.set_node_type(node_type.parse()?);
 
-        let resp = with_retry!(self.client.list_babel_versions(req.clone()))?.into_inner();
+        let resp = with_retry!(self.client.list_image_versions(req.clone()))?.into_inner();
 
         let mut versions: Vec<String> = resp
             .identifiers
@@ -61,8 +68,8 @@ impl CookbookService {
     #[instrument(skip(self))]
     pub async fn download_babel_plugin(&mut self, image: &NodeImage) -> Result<()> {
         info!("Downloading plugin...");
-        let rhai_content = with_retry!(self.client.retrieve_plugin(tonic::Request::new(
-            pb::CookbookServiceRetrievePluginRequest {
+        let rhai_content = with_retry!(self.client.get_plugin(tonic::Request::new(
+            pb::BlockchainServiceGetPluginRequest {
                 id: Some(image.clone().try_into()?),
             }
         )))?
@@ -84,8 +91,8 @@ impl CookbookService {
     #[instrument(skip(self))]
     pub async fn download_image(&mut self, image: &NodeImage) -> Result<()> {
         info!("Downloading image...");
-        let archive: pb::ArchiveLocation = with_retry!(self.client.retrieve_image(
-            tonic::Request::new(pb::CookbookServiceRetrieveImageRequest {
+        let archive: common::ArchiveLocation = with_retry!(self.client.get_image(
+            tonic::Request::new(pb::BlockchainServiceGetImageRequest {
                 id: Some(image.clone().try_into()?),
             })
         ))?

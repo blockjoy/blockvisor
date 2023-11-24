@@ -44,17 +44,16 @@ services:
       INVITATION_MINS: 10080
       JWT_SECRET: 1245456
       REFRESH_SECRET: 23942390
-      REQUEST_CONCURRENCY_LIMIT: 128
       UI_BASE_URL: https://localhost:3000
       RUST_LOG: info,blockvisor=debug
       # cookbook service
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: us-east-1
-      R2_URL: https://${AWS_ACCOUNT_ID}.r2.cloudflarestorage.com
-      R2_BUNDLE_BUCKET: bundle-dev
-      R2_KERNEL_BUCKET: kernel-dev
-      R2_BUCKET: cookbook-dev
+      STORAGE_URL: https://${AWS_ACCOUNT_ID}.r2.cloudflarestorage.com
+      COOKBOOK_BUCKET: cookbook-dev
+      BUNDLE_BUCKET: bundle-dev
+      KERNEL_BUCKET: kernel-dev
       ARCHIVE_BUCKET: archive-dev
       DIR_CHAINS_PREFIX: chains
       PRESIGNED_URL_EXPIRATION: 1h

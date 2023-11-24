@@ -10,7 +10,7 @@ use blockvisord::{
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
     services,
-    services::{cookbook::IMAGES_DIR, kernel::KERNELS_DIR},
+    services::{blockchain::IMAGES_DIR, kernel::KERNELS_DIR},
     BV_VAR_PATH,
 };
 use bv_utils::{cmd::run_cmd, run_flag::RunFlag};

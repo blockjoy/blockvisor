@@ -1,27 +1,35 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const PROTO_DIRS: &[&str] = &["./proto"];
+
 fn main() {
-    if let Err(e) = tonic_build::configure()
+    tonic_build::configure()
         .build_server(true)
         .build_client(true)
-        .compile(
-            &[
-                // Blockjoy API
-                "blockjoy/common/v1/currency.proto",
-                "blockjoy/v1/auth.proto",
-                "blockjoy/v1/blockchain.proto",
-                "blockjoy/v1/cookbook.proto",
-                "blockjoy/v1/command.proto",
-                "blockjoy/v1/discovery.proto",
-                "blockjoy/v1/host.proto",
-                "blockjoy/v1/key_file.proto",
-                "blockjoy/v1/metrics.proto",
-                "blockjoy/v1/mqtt.proto",
-                "blockjoy/v1/user.proto",
-                "blockjoy/v1/org.proto",
-            ],
-            &["proto/"],
-        )
-    {
-        eprintln!("Building protos failed with:\n{e}");
-        std::process::exit(1);
+        .compile(&proto_files(), PROTO_DIRS)
+        .expect("Failed to compile protos")
+}
+
+fn proto_files() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for dir in PROTO_DIRS {
+        find_recursive(Path::new(dir), &mut files);
+    }
+    files
+}
+
+fn find_recursive(path: &Path, files: &mut Vec<PathBuf>) {
+    if !path.is_dir() {
+        return;
+    }
+
+    for entry in fs::read_dir(path).expect("read_dir") {
+        let path = entry.expect("entry").path();
+        if path.is_dir() {
+            find_recursive(&path, files);
+        } else if path.extension().map_or(false, |ext| ext == "proto") {
+            files.push(path.to_path_buf());
+        }
     }
 }

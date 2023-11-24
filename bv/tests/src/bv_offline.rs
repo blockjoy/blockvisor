@@ -10,7 +10,7 @@ use blockvisord::{
     firecracker_machine::FC_BIN_NAME,
     nodes_manager::NodesManager,
     services,
-    services::{api, api::pb},
+    services::api::{self, common, pb},
     set_bv_status, utils, ServiceStatus,
 };
 use bv_utils::{cmd::run_cmd, run_flag::RunFlag, system::is_process_running};
@@ -303,11 +303,11 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     let node_id = Uuid::new_v4().to_string();
     let id = node_id.clone();
     let command_id = Uuid::new_v4().to_string();
-    let rules = vec![pb::Rule {
+    let rules = vec![common::FirewallRule {
         name: "Rule X".to_string(),
-        action: pb::Action::Allow as i32,
-        direction: pb::Direction::In as i32,
-        protocol: pb::Protocol::Tcp as i32,
+        action: common::FirewallAction::Allow.into(),
+        direction: common::FirewallDirection::Inbound.into(),
+        protocol: Some(common::FirewallProtocol::Tcp.into()),
         ips: Some("192.167.0.1/24".to_string()),
         ports: vec![8080, 8000],
     }];
@@ -315,14 +315,14 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         name: "TESTING_PARAM".to_string(),
         value: "anything".to_string(),
     }];
-    let image = Some(pb::ContainerImage {
+    let image = Some(common::ImageIdentifier {
         protocol: "testing".to_string(),
-        node_type: pb::NodeType::Validator.into(),
+        node_type: common::NodeType::Validator.into(),
         node_version: "0.0.1".to_string(),
     });
-    let image_v2 = Some(pb::ContainerImage {
+    let image_v2 = Some(common::ImageIdentifier {
         protocol: "testing".to_string(),
-        node_type: pb::NodeType::Validator.into(),
+        node_type: common::NodeType::Validator.into(),
         node_version: "0.0.2".to_string(),
     });
 
@@ -347,7 +347,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: node_name.clone(),
                 image: image.clone(),
                 blockchain: "testing".to_string(),
-                node_type: pb::NodeType::Validator.into(),
+                node_type: common::NodeType::Validator.into(),
                 ip: "216.18.214.195".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 rules: rules.clone(),
@@ -365,7 +365,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: "some-new-name".to_string(),
                 image: image.clone(),
                 blockchain: "testing".to_string(),
-                node_type: pb::NodeType::Validator.into(),
+                node_type: common::NodeType::Validator.into(),
                 ip: "216.18.214.196".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 rules: rules.clone(),
@@ -383,7 +383,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: node_name.clone(),
                 image: image.clone(),
                 blockchain: "testing".to_string(),
-                node_type: pb::NodeType::Validator.into(),
+                node_type: common::NodeType::Validator.into(),
                 ip: "216.18.214.197".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 rules: rules.clone(),
@@ -401,7 +401,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: "some-new-name".to_string(),
                 image: image.clone(),
                 blockchain: "testing".to_string(),
-                node_type: pb::NodeType::Validator.into(),
+                node_type: common::NodeType::Validator.into(),
                 ip: "216.18.214.195".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 rules: rules.clone(),
@@ -419,7 +419,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: "some-new-name".to_string(),
                 image: image.clone(),
                 blockchain: "testing".to_string(),
-                node_type: pb::NodeType::Validator.into(),
+                node_type: common::NodeType::Validator.into(),
                 ip: "invalid_ip".to_string(),
                 gateway: "216.18.214.193".to_string(),
                 rules: rules.clone(),
@@ -437,7 +437,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 name: "some-new-name".to_string(),
                 image: image.clone(),
                 blockchain: "testing".to_string(),
-                node_type: pb::NodeType::Validator.into(),
+                node_type: common::NodeType::Validator.into(),
                 ip: "216.18.214.195".to_string(),
                 gateway: "invalid_ip".to_string(),
                 rules: rules.clone(),
@@ -510,11 +510,11 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             created_at: None,
             host_id: host_id.clone(),
             command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
-                rules: vec![pb::Rule {
+                rules: vec![common::FirewallRule {
                     name: "Rule B".to_string(),
-                    action: pb::Action::Allow as i32,
-                    direction: pb::Direction::In as i32,
-                    protocol: pb::Protocol::Both as i32,
+                    action: common::FirewallAction::Allow.into(),
+                    direction: common::FirewallDirection::Inbound.into(),
+                    protocol: Some(common::FirewallProtocol::Both.into()),
                     ips: Some("invalid_ip".to_string()),
                     ports: vec![8080],
                 }],
@@ -537,11 +537,11 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             created_at: None,
             host_id: host_id.clone(),
             command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
-                rules: vec![pb::Rule {
+                rules: vec![common::FirewallRule {
                     name: "Rule A".to_string(),
-                    action: pb::Action::Allow as i32,
-                    direction: pb::Direction::In as i32,
-                    protocol: pb::Protocol::Tcp as i32,
+                    action: common::FirewallAction::Allow.into(),
+                    direction: common::FirewallDirection::Inbound.into(),
+                    protocol: Some(common::FirewallProtocol::Tcp.into()),
                     ips: Some("192.168.0.1/24".to_string()),
                     ports: vec![8080, 8000],
                 }],

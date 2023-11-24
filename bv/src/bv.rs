@@ -12,8 +12,8 @@ use crate::{
     node_data::{NodeImage, NodeStatus},
     pretty_table::{PrettyTable, PrettyTableRow},
     services,
-    services::cookbook::{
-        CookbookService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOT_FS_FILE,
+    services::blockchain::{
+        BlockchainService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOT_FS_FILE,
     },
     workspace, BV_VAR_PATH,
 };
@@ -501,9 +501,11 @@ pub async fn process_chain_command(command: ChainCommand) -> Result<()> {
             r#type,
             number,
         } => {
-            let mut cookbook_service =
-                CookbookService::connect(services::DefaultConnector { config }, bv_root).await?;
-            let mut versions = cookbook_service.list_versions(&protocol, &r#type).await?;
+            let mut blockchain_service =
+                BlockchainService::connect(services::DefaultConnector { config }, bv_root).await?;
+            let mut versions = blockchain_service
+                .list_image_versions(&protocol, &r#type)
+                .await?;
 
             versions.truncate(number);
 

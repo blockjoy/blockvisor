@@ -10,7 +10,7 @@ use crate::{
     node_metrics,
     pal::{NetInterface, Pal},
     services::{
-        cookbook::{CookbookService, BABEL_PLUGIN_NAME},
+        blockchain::{BlockchainService, BABEL_PLUGIN_NAME},
         kernel::KernelService,
     },
     utils, BV_VAR_PATH,
@@ -591,24 +591,24 @@ impl<P: Pal + Debug> NodesManager<P> {
     #[instrument(skip(self))]
     async fn fetch_image_data(&self, image: &NodeImage) -> Result<BlockchainMetadata> {
         let bv_root = self.pal.bv_root();
-        let folder = CookbookService::get_image_download_folder_path(bv_root, image);
+        let folder = BlockchainService::get_image_download_folder_path(bv_root, image);
         let rhai_path = folder.join(BABEL_PLUGIN_NAME);
 
-        let script = if !CookbookService::is_image_cache_valid(bv_root, image)
+        let script = if !BlockchainService::is_image_cache_valid(bv_root, image)
             .await
             .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
         {
-            let mut cookbook_service = CookbookService::connect(
+            let mut blockchain_service = BlockchainService::connect(
                 self.pal.create_api_service_connector(&self.api_config),
                 bv_root.to_path_buf(),
             )
             .await
-            .with_context(|| "cannot connect to cookbook service")?;
-            cookbook_service
+            .with_context(|| "cannot connect to blockchain service")?;
+            blockchain_service
                 .download_babel_plugin(image)
                 .await
                 .with_context(|| "cannot download babel plugin")?;
-            cookbook_service
+            blockchain_service
                 .download_image(image)
                 .await
                 .with_context(|| "cannot download image")?;
@@ -802,7 +802,9 @@ mod tests {
         node::tests::*,
         pal::VmState,
         services::{
-            api::pb, api::pb::ArchiveLocation, cookbook::ROOT_FS_FILE, kernel::KERNELS_DIR,
+            api::{common, pb},
+            blockchain::ROOT_FS_FILE,
+            kernel::KERNELS_DIR,
         },
         start_test_server,
     };
@@ -827,45 +829,42 @@ mod tests {
     }
 
     mock! {
-        pub TestCookbookService {}
+        pub TestBlockchainService {}
 
         #[tonic::async_trait]
-        impl pb::cookbook_service_server::CookbookService for TestCookbookService {
-            async fn retrieve_plugin(
+        impl pb::blockchain_service_server::BlockchainService for TestBlockchainService {
+            async fn get(
                 &self,
-                request: tonic::Request<pb::CookbookServiceRetrievePluginRequest>,
-            ) -> Result<
-                tonic::Response<pb::CookbookServiceRetrievePluginResponse>,
-                tonic::Status,
-            >;
-            async fn retrieve_image(
+                request: tonic::Request<pb::BlockchainServiceGetRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServiceGetResponse>, tonic::Status>;
+            async fn get_image(
                 &self,
-                request: tonic::Request<pb::CookbookServiceRetrieveImageRequest>,
-            ) -> Result<
-                tonic::Response<pb::CookbookServiceRetrieveImageResponse>,
-                tonic::Status,
-            >;
-            async fn requirements(
+                request: tonic::Request<pb::BlockchainServiceGetImageRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServiceGetImageResponse>, tonic::Status>;
+            async fn get_plugin(
                 &self,
-                request: tonic::Request<pb::CookbookServiceRequirementsRequest>,
-            ) -> Result<
-                tonic::Response<pb::CookbookServiceRequirementsResponse>,
-                tonic::Status,
-            >;
-            async fn net_configurations(
+                request: tonic::Request<pb::BlockchainServiceGetPluginRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServiceGetPluginResponse>, tonic::Status>;
+            async fn get_requirements(
                 &self,
-                request: tonic::Request<pb::CookbookServiceNetConfigurationsRequest>,
-            ) -> Result<
-                tonic::Response<pb::CookbookServiceNetConfigurationsResponse>,
-                tonic::Status,
-            >;
-            async fn list_babel_versions(
+                request: tonic::Request<pb::BlockchainServiceGetRequirementsRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServiceGetRequirementsResponse>, tonic::Status>;
+            async fn list(
                 &self,
-                request: tonic::Request<pb::CookbookServiceListBabelVersionsRequest>,
-            ) -> Result<
-                tonic::Response<pb::CookbookServiceListBabelVersionsResponse>,
-                tonic::Status,
-            >;
+                request: tonic::Request<pb::BlockchainServiceListRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServiceListResponse>, tonic::Status>;
+            async fn list_image_versions(
+                &self,
+                request: tonic::Request<pb::BlockchainServiceListImageVersionsRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServiceListImageVersionsResponse>, tonic::Status>;
+            async fn add_node_type(
+                &self,
+                request: tonic::Request<pb::BlockchainServiceAddNodeTypeRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServiceAddNodeTypeResponse>, tonic::Status>;
+            async fn add_version(
+                &self,
+                request: tonic::Request<pb::BlockchainServiceAddVersionRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServiceAddVersionResponse>, tonic::Status>;
         }
     }
 
@@ -937,35 +936,35 @@ mod tests {
             let mut http_mocks = vec![];
 
             // expect image retrieve and download for all images, but only once
-            let mut cookbook = MockTestCookbookService::new();
+            let mut blockchain = MockTestBlockchainService::new();
             for (test_image, rhai_content) in images {
-                let node_image = Some(pb::ConfigIdentifier {
+                let node_image = Some(common::ImageIdentifier {
                     protocol: test_image.protocol.clone(),
-                    node_type: pb::NodeType::from_str(&test_image.node_type)
+                    node_type: common::NodeType::from_str(&test_image.node_type)
                         .unwrap()
                         .into(),
                     node_version: test_image.node_version.clone(),
                 });
                 let expected_image = node_image.clone();
-                let resp = tonic::Response::new(pb::CookbookServiceRetrievePluginResponse {
-                    plugin: Some(pb::Plugin {
+                let resp = tonic::Response::new(pb::BlockchainServiceGetPluginResponse {
+                    plugin: Some(common::RhaiPlugin {
                         identifier: expected_image.clone(),
                         rhai_content,
                     }),
                 });
-                cookbook
-                    .expect_retrieve_plugin()
+                blockchain
+                    .expect_get_plugin()
                     .withf(move |req| req.get_ref().id == expected_image)
                     .return_once(move |_| Ok(resp));
                 let url = http_server.url();
                 let expected_image = node_image.clone();
-                cookbook
-                    .expect_retrieve_image()
+                blockchain
+                    .expect_get_image()
                     .withf(move |req| req.get_ref().id == expected_image)
                     .return_once(move |_| {
                         Ok(tonic::Response::new(
-                            pb::CookbookServiceRetrieveImageResponse {
-                                location: Some(ArchiveLocation {
+                            pb::BlockchainServiceGetImageResponse {
+                                location: Some(common::ArchiveLocation {
                                     url: format!("{url}/image"),
                                 }),
                             },
@@ -992,7 +991,7 @@ mod tests {
                 })
                 .return_once(move |_| {
                     Ok(tonic::Response::new(pb::KernelServiceRetrieveResponse {
-                        location: Some(ArchiveLocation {
+                        location: Some(common::ArchiveLocation {
                             url: format!("{url}/kernel"),
                         }),
                     }))
@@ -1008,7 +1007,7 @@ mod tests {
                 start_test_server!(
                     &self.tmp_root,
                     pb::kernel_service_server::KernelServiceServer::new(kernels),
-                    pb::cookbook_service_server::CookbookServiceServer::new(cookbook)
+                    pb::blockchain_service_server::BlockchainServiceServer::new(blockchain)
                 ),
                 http_server,
                 http_mocks,

@@ -159,7 +159,6 @@ impl pb::discovery_service_server::DiscoveryService for StubDiscoveryService {
         _: Request<pb::DiscoveryServiceServicesRequest>,
     ) -> Result<pb::DiscoveryServiceServicesResponse> {
         Ok(Response::new(pb::DiscoveryServiceServicesResponse {
-            key_service_url: "key_service_url".to_string(),
             notification_url: "notification_url".to_string(),
         }))
     }

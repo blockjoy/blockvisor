@@ -11,7 +11,7 @@ use crate::{
     pal::NodeConnection,
     pal::VirtualMachine,
     pal::{NetInterface, Pal},
-    services::cookbook::{CookbookService, ROOT_FS_FILE},
+    services::blockchain::{BlockchainService, ROOT_FS_FILE},
     utils::with_timeout,
 };
 use babel_api::engine::JobStatus;
@@ -477,7 +477,7 @@ impl<P: Pal + Debug> Node<P> {
     /// Copy OS drive into chroot location.
     async fn copy_os_image(&self, image: &NodeImage) -> Result<()> {
         let root_fs_path =
-            CookbookService::get_image_download_folder_path(&self.context.bv_root, image)
+            BlockchainService::get_image_download_folder_path(&self.context.bv_root, image)
                 .join(ROOT_FS_FILE);
 
         let data_dir = &self.context.data_dir;
@@ -558,7 +558,7 @@ pub mod tests {
             BabelClient, BabelSupClient, CommandsStream, NodeConnection, ServiceConnector,
             VirtualMachine, VmState,
         },
-        services::{self, cookbook::BABEL_PLUGIN_NAME, AuthToken},
+        services::{self, blockchain::BABEL_PLUGIN_NAME, AuthToken},
         start_test_server, utils,
         utils::tests::test_channel,
     };
@@ -997,7 +997,7 @@ pub mod tests {
         );
 
         let images_dir =
-            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            BlockchainService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
         fs::create_dir_all(&images_dir).await?;
 
         fs::write(images_dir.join(BABEL_PLUGIN_NAME), "malformed rhai script").await?;
@@ -1219,7 +1219,7 @@ pub mod tests {
             .insert("TESTING_PARAM".to_string(), "any".to_string());
 
         let images_dir =
-            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            BlockchainService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
         fs::create_dir_all(&images_dir).await?;
         fs::copy(
             testing_babel_path_absolute(),
@@ -1434,7 +1434,7 @@ pub mod tests {
         let node_data = test_env.default_node_data();
 
         let images_dir =
-            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            BlockchainService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
         fs::create_dir_all(&images_dir).await?;
         fs::copy(
             testing_babel_path_absolute(),
@@ -1543,7 +1543,7 @@ pub mod tests {
         let node_data = test_env.default_node_data();
 
         let images_dir =
-            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            BlockchainService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
         fs::create_dir_all(&images_dir).await?;
         fs::copy(
             testing_babel_path_absolute(),
@@ -1638,7 +1638,7 @@ pub mod tests {
         let test_image = node_data.image.clone();
 
         let images_dir =
-            CookbookService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            BlockchainService::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
         fs::create_dir_all(&images_dir).await?;
         fs::copy(
             testing_babel_path_absolute(),

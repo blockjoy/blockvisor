@@ -8,7 +8,7 @@ use crate::{
     nodes_manager::{self, NodeConfig, NodesManager},
     pal::{NetInterface, Pal},
     services,
-    services::{api, api::pb},
+    services::api::{self, common, pb},
     {get_bv_status, set_bv_status, utils, ServiceStatus}, {node_metrics, BV_VAR_PATH},
 };
 use chrono::Utc;
@@ -586,7 +586,7 @@ where
             .map(|(key, value)| pb::NodeProperty {
                 name: key.clone(),
                 display_name: format!("BV CLI {key}"),
-                ui_type: pb::UiType::Text.into(),
+                ui_type: common::UiType::Text.into(),
                 disabled: false,
                 required: false,
                 value,
@@ -601,7 +601,7 @@ where
                 org_id,
                 blockchain_id,
                 version: req.image.node_version.clone(),
-                node_type: pb::NodeType::from_str(&req.image.node_type)?.into(),
+                node_type: common::NodeType::from_str(&req.image.node_type)?.into(),
                 properties,
                 network: req.network,
                 placement: Some(pb::NodePlacement {
