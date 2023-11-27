@@ -11,10 +11,9 @@ use bv_utils::with_retry;
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
-    auth_service_client, blockchain_service_client, command_service_client::CommandServiceClient,
+    blockchain_service_client, command_service_client::CommandServiceClient,
     discovery_service_client, host_service_client, manifest_service_client, node_command::Command,
-    node_service_client, Action, AuthServiceRefreshResponse, ChecksumType, Direction, Protocol,
-    Rule,
+    node_service_client, Action, ChecksumType, Direction, Protocol, Rule,
 };
 use std::{
     fmt::Debug,
@@ -22,7 +21,6 @@ use std::{
     {str::FromStr, sync::Arc},
 };
 use tokio::time::Instant;
-use tonic::{transport::Channel, transport::Endpoint};
 use tracing::{error, info, instrument};
 use uuid::Uuid;
 
@@ -54,26 +52,6 @@ lazy_static::lazy_static! {
     pub static ref API_UPGRADE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.upgrade.ms");
     pub static ref API_UPDATE_COUNTER: Counter = register_counter!("api.commands.update.calls");
     pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
-}
-
-pub struct AuthClient {
-    client: auth_service_client::AuthServiceClient<Channel>,
-}
-
-impl AuthClient {
-    pub async fn connect(url: &str) -> Result<Self> {
-        let endpoint = Endpoint::from_str(url)?;
-        let client = auth_service_client::AuthServiceClient::connect(endpoint).await?;
-        Ok(Self { client })
-    }
-
-    pub async fn refresh(
-        &mut self,
-        req: pb::AuthServiceRefreshRequest,
-    ) -> Result<AuthServiceRefreshResponse> {
-        let resp = self.client.refresh(req).await?;
-        Ok(resp.into_inner())
-    }
 }
 
 pub type NodesServiceClient = node_service_client::NodeServiceClient<AuthenticatedService>;

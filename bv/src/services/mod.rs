@@ -17,6 +17,24 @@ pub mod mqtt;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+pub async fn request_refresh_token(
+    url: &str,
+    token: &str,
+    refresh: &str,
+) -> Result<pb::AuthServiceRefreshResponse> {
+    let channel = Endpoint::from_str(url)?
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .timeout(DEFAULT_REQUEST_TIMEOUT)
+        .connect_lazy();
+    let req = pb::AuthServiceRefreshRequest {
+        token: token.to_string(),
+        refresh: Some(refresh.to_string()),
+    };
+    let mut client = pb::auth_service_client::AuthServiceClient::new(channel);
+
+    Ok(with_retry!(client.refresh(req.clone()))?.into_inner())
+}
+
 pub async fn connect_to_api_service<T, I>(config: &SharedConfig, with_interceptor: I) -> Result<T>
 where
     I: Fn(Channel, AuthToken) -> T,
@@ -25,10 +43,10 @@ where
     let endpoint = Endpoint::from_str(&url)?
         .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
         .timeout(DEFAULT_REQUEST_TIMEOUT);
-    let endpoint = Endpoint::connect(&endpoint)
+    let channel = Endpoint::connect(&endpoint)
         .await
         .with_context(|| format!("Failed to connect to api service at {url}"))?;
-    Ok(with_interceptor(endpoint, config.token().await?))
+    Ok(with_interceptor(channel, config.token().await?))
 }
 
 /// Tries to use `connector` to create service connection. If this fails then asks the backend for
@@ -52,10 +70,7 @@ where
                 .with_context(|| "get service urls failed")?
         }
         .into_inner();
-        {
-            let mut w_lock = config.write().await;
-            w_lock.blockjoy_mqtt_url = Some(services.notification_url);
-        }
+        config.set_mqtt_url(Some(services.notification_url)).await;
         connector(config).await
     }
 }

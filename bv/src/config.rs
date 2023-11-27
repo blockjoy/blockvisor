@@ -1,15 +1,15 @@
-use crate::services::{
-    api::{pb, AuthClient},
-    AuthToken,
-};
+use crate::services::{request_refresh_token, AuthToken};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tokio::{fs, sync::RwLockWriteGuard};
+use std::time::Duration;
+use tokio::fs;
+use tokio::time::timeout;
 use tracing::{debug, info};
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.json";
 pub const DEFAULT_BRIDGE_IFACE: &str = "bvbr0";
+const REFRESH_TOKEN_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn default_blockvisor_port() -> u16 {
     9001
@@ -37,38 +37,46 @@ impl SharedConfig {
         self.config.read().await.clone()
     }
 
-    pub async fn write(&self) -> RwLockWriteGuard<'_, Config> {
-        self.config.write().await
+    pub async fn set_mqtt_url(&self, mqtt_url: Option<String>) {
+        self.config.write().await.blockjoy_mqtt_url = mqtt_url;
     }
 
     pub async fn token(&self) -> Result<AuthToken> {
-        let token = self.refreshed_token().await?;
-        Ok(AuthToken(token))
-    }
-
-    async fn refreshed_token(&self) -> Result<String> {
         let token = &self.read().await.token;
-        if AuthToken::expired(token)? {
-            let mut write_lock = self.write().await;
-            // A concurrent update may have written to the jwt field, check if the token has become
-            // unexpired while we have unique access.
-            if !AuthToken::expired(&write_lock.token)? {
-                return Ok(write_lock.token.clone());
-            }
+        Ok(AuthToken(if AuthToken::expired(token)? {
+            let token = {
+                let mut write_lock = self.config.write().await;
+                // A concurrent update may have written to the jwt field, check if the token has become
+                // unexpired while we have unique access.
+                if !AuthToken::expired(&write_lock.token)? {
+                    return Ok(AuthToken(write_lock.token.clone()));
+                }
 
-            let req = pb::AuthServiceRefreshRequest {
-                token: write_lock.token.clone(),
-                refresh: Some(write_lock.refresh_token.clone()),
+                let resp = timeout(
+                    REFRESH_TOKEN_TIMEOUT,
+                    request_refresh_token(
+                        &write_lock.blockjoy_api_url,
+                        &write_lock.token,
+                        &write_lock.refresh_token,
+                    ),
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "refresh token request has sucked for more than {}s",
+                        REFRESH_TOKEN_TIMEOUT.as_secs()
+                    )
+                })??;
+
+                write_lock.token = resp.token.clone();
+                write_lock.refresh_token = resp.refresh;
+                resp.token
             };
-            let mut service = AuthClient::connect(&write_lock.blockjoy_api_url).await?;
-            let resp = service.refresh(req).await?;
-            write_lock.token = resp.token.clone();
-            write_lock.refresh_token = resp.refresh;
-            write_lock.save(&self.bv_root).await?;
-            Ok(resp.token)
+            self.read().await.save(&self.bv_root).await?;
+            token
         } else {
-            Ok(token.clone())
-        }
+            token.clone()
+        }))
     }
 }
 

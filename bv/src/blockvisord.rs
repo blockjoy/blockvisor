@@ -172,7 +172,7 @@ where
             self_updater_future
         );
         info!("Stopping...");
-        self.config.write().await.save(&self.config.bv_root).await?;
+        self.config.read().await.save(&self.config.bv_root).await?;
         Ok(())
     }
 
