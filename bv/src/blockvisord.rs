@@ -422,14 +422,14 @@ where
                 let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
                     Some(channel) => channel,
                     None => {
-                        error!("Node metrics could not establish channel");
+                        warn!("Node metrics could not establish channel");
                         continue;
                     }
                 };
                 let token = match config.token().await {
                     Ok(channel) => channel,
                     Err(e) => {
-                        error!("Node metrics could not refresh tokens: {e}");
+                        warn!("Node metrics could not refresh tokens: {e}");
                         continue;
                     }
                 };
@@ -485,14 +485,14 @@ where
                     let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
                         Some(channel) => channel,
                         None => {
-                            error!("Host metrics could not establish channel");
+                            warn!("Host metrics could not establish channel");
                             continue;
                         }
                     };
                     let token = match config.token().await {
                         Ok(channel) => channel,
                         Err(e) => {
-                            error!("Host metrics could not refresh tokens: {e}");
+                            warn!("Host metrics could not refresh tokens: {e}");
                             continue;
                         }
                     };
@@ -503,7 +503,7 @@ where
                     metrics.set_all_gauges();
                     let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
                     if let Err(e) = client.host(metrics).await {
-                        error!("Could not send host metrics! `{e}`");
+                        warn!("Could not send host metrics! `{e}`");
                     }
                 }
                 Err(e) => {
