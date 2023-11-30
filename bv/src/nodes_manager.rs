@@ -140,6 +140,15 @@ impl<P: Pal + Debug> NodesManager<P> {
         })
     }
 
+    pub async fn detach(&self) {
+        let nodes_lock = self.nodes.read().await;
+        for (id, node) in nodes_lock.iter() {
+            if let Err(err) = node.write().await.babel_engine.stop_server().await {
+                warn!("error while stopping babel engine server for node {id}: {err}")
+            }
+        }
+    }
+
     pub async fn nodes_list(&self) -> RwLockReadGuard<'_, HashMap<Uuid, RwLock<Node<P>>>> {
         self.nodes.read().await
     }
@@ -1442,9 +1451,6 @@ mod tests {
         let pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
 
-        let nodes = NodesManager::load(pal, config).await?;
-        assert!(nodes.nodes_list().await.is_empty());
-
         let node_data = NodeData {
             id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
             name: "first node".to_string(),
@@ -1471,6 +1477,11 @@ mod tests {
             network: "test".to_string(),
             standalone: false,
         };
+        fs::create_dir_all(pal.build_vm_data_path(node_data.id)).await?;
+
+        let nodes = NodesManager::load(pal, config).await?;
+        assert!(nodes.nodes_list().await.is_empty());
+
         let mut invalid_node_data = node_data.clone();
         invalid_node_data.id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
         let registry_dir = build_registry_dir(&test_env.tmp_root);

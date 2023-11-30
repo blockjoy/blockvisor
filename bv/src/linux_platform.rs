@@ -5,7 +5,7 @@ use crate::{
     firecracker_machine, node_connection,
     node_data::NodeData,
     pal::{NetInterface, Pal},
-    services, BV_VAR_PATH,
+    services,
 };
 use async_trait::async_trait;
 use bv_utils::cmd::run_cmd;
@@ -122,7 +122,7 @@ impl Pal for LinuxPlatform {
 
     type NodeConnection = node_connection::NodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        node_connection::new(&self.bv_root.join(BV_VAR_PATH), node_id)
+        node_connection::new(&self.build_vm_data_path(node_id))
     }
 
     type VirtualMachine = firecracker_machine::FirecrackerMachine;

@@ -1,4 +1,5 @@
 pub mod babel_engine;
+pub mod babel_engine_service;
 pub mod blockvisord;
 pub mod bv;
 pub mod cli;

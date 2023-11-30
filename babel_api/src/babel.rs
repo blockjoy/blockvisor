@@ -1,5 +1,7 @@
 use crate::{
-    engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
+    engine::{
+        DownloadManifest, HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse,
+    },
     metadata::{firewall, BabelConfig},
     utils::{Binary, BinaryStatus},
 };
@@ -79,4 +81,14 @@ pub trait LogsCollector {
 pub trait JobsMonitor {
     fn push_log(name: String, log: String);
     fn register_restart(name: String);
+}
+
+#[tonic_rpc::tonic_rpc(bincode)]
+pub trait BabelEngine {
+    /// Send `DownloadManifest` blueprint to API.
+    fn put_download_manifest(manifest: DownloadManifest);
+    /// Notify about finished job, so upgrade can be retried.
+    fn upgrade_blocking_jobs_finished();
+    /// Sent error message to blockvisord so alert can be triggered.
+    fn bv_error(message: String);
 }

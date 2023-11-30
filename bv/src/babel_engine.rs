@@ -1,3 +1,4 @@
+use crate::babel_engine_service::BabelEngineServer;
 /// This module wraps all Babel related functionality. In particular it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
@@ -9,6 +10,7 @@
 /// Engine methods that implementation needs to interact with node via BV are sent as `NodeRequest`.
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{
+    babel_engine_service,
     config::SharedConfig,
     node_connection::RPC_REQUEST_TIMEOUT,
     node_data::{NodeImage, NodeProperties},
@@ -86,15 +88,17 @@ pub struct BabelEngine<N, P> {
     plugin_data_path: PathBuf,
     node_rx: tokio::sync::mpsc::Receiver<NodeRequest>,
     node_tx: tokio::sync::mpsc::Sender<NodeRequest>,
+    server: Option<BabelEngineServer>,
 }
 
 impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
-    pub fn new<F: FnOnce(Engine) -> Result<P>>(
+    pub async fn new<F: FnOnce(Engine) -> Result<P>>(
         node_info: NodeInfo,
         node_connection: N,
         api_config: SharedConfig,
         plugin_builder: F,
         plugin_data_path: PathBuf,
+        vm_data_path: PathBuf,
     ) -> Result<Self> {
         let (node_tx, node_rx) = tokio::sync::mpsc::channel(16);
         let engine = Engine {
@@ -103,6 +107,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             params: node_info.properties.clone(),
             plugin_data_path: plugin_data_path.clone(),
         };
+        let server = Some(babel_engine_service::start_server(vm_data_path).await?);
         Ok(Self {
             node_info,
             node_connection,
@@ -111,7 +116,19 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             plugin_data_path,
             node_rx,
             node_tx,
+            server,
         })
+    }
+
+    pub async fn stop_server(&mut self) -> Result<()> {
+        self.server
+            .take()
+            .ok_or(anyhow!(
+            "internal BV error - trying to stop babel engine server, while it is already stopped"
+        ))?
+            .stop()
+            .await?;
+        Ok(())
     }
 
     pub fn update_plugin<F: FnOnce(Engine) -> Result<P>>(
@@ -912,9 +929,11 @@ mod tests {
     }
 
     impl TestEnv {
-        fn new() -> Result<Self> {
+        async fn new() -> Result<Self> {
             let tmp_root = TempDir::new()?.to_path_buf();
             fs::create_dir_all(&tmp_root)?;
+            let vm_data_path = tmp_root.join("vm");
+            fs::create_dir_all(&vm_data_path)?;
             let data_path = tmp_root.join("data");
             let connection = TestConnection {
                 client: babel_api::babel::babel_client::BabelClient::with_interceptor(
@@ -954,7 +973,9 @@ mod tests {
                 ),
                 |engine| Ok(DummyPlugin { engine }),
                 data_path.clone(),
-            )?;
+                vm_data_path,
+            )
+            .await?;
 
             Ok(Self {
                 tmp_root,
@@ -975,7 +996,7 @@ mod tests {
     #[allow(clippy::cmp_owned)]
     #[tokio::test]
     async fn test_async_bridge_to_babel() -> Result<()> {
-        let mut test_env = TestEnv::new()?;
+        let mut test_env = TestEnv::new().await?;
         let mut babel_mock = MockBabelService::new();
         // from init
         babel_mock

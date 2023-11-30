@@ -13,7 +13,6 @@ use tokio::{
 };
 use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::{debug, info};
-use uuid::Uuid;
 
 pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
@@ -38,9 +37,9 @@ pub struct NodeConnection {
 }
 
 /// Creates new closed connection instance.
-pub fn new(chroot_path: &Path, node_id: Uuid) -> NodeConnection {
+pub fn new(vm_data_path: &Path) -> NodeConnection {
     NodeConnection {
-        socket_path: build_socket_path(chroot_path, node_id),
+        socket_path: vm_data_path.join(VSOCK_PATH),
         state: NodeConnectionState::Closed,
     }
 }
@@ -132,13 +131,6 @@ impl pal::NodeConnection for NodeConnection {
     }
 }
 
-fn build_socket_path(chroot_path: &Path, node_id: Uuid) -> PathBuf {
-    chroot_path
-        .join("firecracker")
-        .join(node_id.to_string())
-        .join("root")
-        .join(VSOCK_PATH)
-}
 async fn connect_babelsup(socket_path: &Path, max_delay: Duration) -> Result<pal::BabelSupClient> {
     Ok(
         babel_api::babelsup::babel_sup_client::BabelSupClient::with_interceptor(

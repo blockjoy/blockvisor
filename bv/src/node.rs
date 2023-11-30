@@ -99,7 +99,9 @@ impl<P: Pal + Debug> Node<P> {
             api_config,
             |engine| RhaiPlugin::new(&script, engine),
             context.plugin_data.clone(),
-        )?;
+            context.data_dir.clone(),
+        )
+        .await?;
         Ok(Self {
             data,
             babel_engine,
@@ -153,7 +155,9 @@ impl<P: Pal + Debug> Node<P> {
             api_config,
             |engine| RhaiPlugin::new(&script, engine),
             context.plugin_data.clone(),
-        )?;
+            context.data_dir.clone(),
+        )
+        .await?;
         Ok(Self {
             data,
             babel_engine,
@@ -1184,9 +1188,11 @@ pub mod tests {
                 .to_string()
         );
 
+        fs::create_dir_all(pal.build_vm_data_path(missing_babel_node_data_id)).await?;
         let node = Node::attach(pal.clone(), config.clone(), missing_babel_node_data).await?;
         assert_eq!(NodeStatus::Failed, node.status());
 
+        fs::create_dir_all(pal.build_vm_data_path(missing_job_runner_node_data_id)).await?;
         fs::write(&test_env.tmp_root.join("babel"), "dummy babel")
             .await
             .unwrap();
@@ -1198,6 +1204,7 @@ pub mod tests {
         .await?;
         assert_eq!(NodeStatus::Failed, node.status());
 
+        fs::create_dir_all(pal.build_vm_data_path(node_data_id)).await?;
         fs::write(&test_env.tmp_root.join("job_runner"), "dummy job_runner")
             .await
             .unwrap();

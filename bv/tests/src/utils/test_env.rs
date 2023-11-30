@@ -309,7 +309,7 @@ impl Pal for DummyPlatform {
     type NodeConnection = blockvisord::node_connection::NodeConnection;
 
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        blockvisord::node_connection::new(&self.bv_root.join(BV_VAR_PATH), node_id)
+        blockvisord::node_connection::new(&self.build_vm_data_path(node_id))
     }
 
     type VirtualMachine = firecracker_machine::FirecrackerMachine;

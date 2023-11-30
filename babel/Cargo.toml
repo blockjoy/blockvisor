@@ -34,7 +34,7 @@ futures = "0.3.25"
 futures-util = "0.3.28"
 gjson = "0.8"
 lazy_static = "1.4.0"
-nu-glob = "0.83.1"
+nu-glob = "0.87.1"
 pathdiff = "0.2.1"
 reqwest = {version = "0.11.18", features = ["json", "rustls-tls", "stream"], default-features = false}
 serde = {version = "1.0.152", features = ["derive"]}
@@ -51,14 +51,14 @@ tracing = "0.1.37"
 walkdir = "2.4.0"
 sha1_smol = "1.0.0"
 sha2 = "0.10.7"
-zstd = "0.12.4"
+zstd = "0.13.0"
 url = "2.5.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-vsock = {version = "0.4.0", features = ["tonic-conn"]}
 libc = "0.2.78"
-nix = "0.26.2"
-rlimit = "0.9.1"
+nix = "0.27.1"
+rlimit = "0.10.1"
 
 [dev-dependencies]
 assert_fs = "1"
