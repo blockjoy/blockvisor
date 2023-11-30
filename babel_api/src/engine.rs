@@ -166,12 +166,10 @@ pub struct Slot {
 
 /// Upload manifest is a list of slots, which consists
 /// of pre-signed upload urls for each chunk to be uploaded.
-/// And extra slot for manifest file.
 /// This is just placeholder that MAY be used to upload data represented then by `DownloadManifest`.
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct UploadManifest {
     pub slots: Vec<Slot>,
-    pub manifest_slot: Slot,
 }
 
 /// Type of long running job.
@@ -211,6 +209,11 @@ pub enum JobType {
         max_connections: Option<usize>,
         /// Maximum number of parallel workers.
         max_runners: Option<usize>,
+        /// Number of chunks that blockchain data should be split into.
+        /// Recommended chunk size is about 1GB.
+        number_of_chunks: Option<u32>,
+        /// Seconds after which presigned urls in generated `UploadManifest` may expire.
+        url_expires_secs: Option<u32>,
     },
 }
 
@@ -465,11 +468,6 @@ impl fmt::Debug for DownloadManifest {
 
 impl fmt::Debug for UploadManifest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "UploadManifest(manifest_slot: {:?}, slots: [{:?}, ...])",
-            self.manifest_slot,
-            self.slots.first()
-        )
+        write!(f, "UploadManifest(slots: [{:?}, ...])", self.slots.first())
     }
 }

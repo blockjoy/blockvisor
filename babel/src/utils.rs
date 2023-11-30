@@ -1,7 +1,8 @@
-use babel_api::engine::PosixSignal;
+use babel_api::engine::{FileLocation, PosixSignal};
 use bv_utils::{run_flag::RunFlag, system::is_process_running, timer::AsyncTimer};
 use eyre::{bail, Context, ContextCompat};
 use futures::StreamExt;
+use nu_glob::Pattern;
 use std::{
     collections::HashMap,
     path::Path,
@@ -303,6 +304,38 @@ fn into_sysinfo_signal(posix: PosixSignal) -> Signal {
         PosixSignal::SIGXFSZ => Signal::XFSZ,
         PosixSignal::SIGWINCH => Signal::Winch,
     }
+}
+
+/// Prepare list of all source files, recursively walking down the source directory.
+pub fn sources_list(
+    source_path: &Path,
+    exclude: &[Pattern],
+) -> eyre::Result<(u64, Vec<FileLocation>)> {
+    let mut sources: Vec<_> = Default::default();
+    let mut total_size = 0;
+    'sources: for entry in walkdir::WalkDir::new(source_path) {
+        let entry = entry?;
+        let path = entry.path();
+
+        if let Some(relative_path) = pathdiff::diff_paths(path, source_path) {
+            for pattern in exclude {
+                if pattern.matches(&relative_path.to_string_lossy()) {
+                    continue 'sources;
+                }
+            }
+        }
+
+        if path.is_file() {
+            let size = entry.metadata()?.len();
+            sources.push(FileLocation {
+                path: path.to_path_buf(),
+                pos: 0,
+                size,
+            });
+            total_size += size
+        }
+    }
+    Ok((total_size, sources))
 }
 
 #[cfg(test)]

@@ -3,8 +3,9 @@ use crate::{
     node_data::NodeImage, nodes_manager, nodes_manager::NodesManager, pal::Pal, services,
     services::AuthenticatedService, ServiceStatus,
 };
+use babel_api::engine::Slot;
 use babel_api::{
-    engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation},
+    engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation, UploadManifest},
     metadata::firewall,
 };
 use bv_utils::with_retry;
@@ -474,6 +475,87 @@ impl TryFrom<pb::DownloadManifest> for DownloadManifest {
             total_size: manifest.total_size,
             compression,
             chunks,
+        })
+    }
+}
+
+impl From<Compression> for pb::compression::Compression {
+    fn from(value: Compression) -> Self {
+        match value {
+            Compression::ZSTD(level) => pb::compression::Compression::Zstd(level),
+        }
+    }
+}
+
+impl From<DownloadManifest> for pb::DownloadManifest {
+    fn from(manifest: DownloadManifest) -> Self {
+        let compression = manifest.compression.map(|v| pb::Compression {
+            compression: Some(v.into()),
+        });
+        let chunks = manifest
+            .chunks
+            .into_iter()
+            .map(|value| {
+                let checksum = value.checksum;
+                let checksum = match checksum {
+                    Checksum::Sha1(bytes) => pb::Checksum {
+                        checksum_type: pb::ChecksumType::Sha1.into(),
+                        checksum: bytes.to_vec(),
+                    },
+                    Checksum::Sha256(bytes) => pb::Checksum {
+                        checksum_type: pb::ChecksumType::Sha256.into(),
+                        checksum: bytes.to_vec(),
+                    },
+                    Checksum::Blake3(bytes) => pb::Checksum {
+                        checksum_type: pb::ChecksumType::Blake3.into(),
+                        checksum: bytes.to_vec(),
+                    },
+                };
+                let destinations = value
+                    .destinations
+                    .into_iter()
+                    .map(|value| pb::ChunkTarget {
+                        path: value.path.to_string_lossy().to_string(),
+                        position_bytes: value.pos,
+                        size_bytes: value.size,
+                    })
+                    .collect();
+                pb::ArchiveChunk {
+                    key: value.key,
+                    url: value.url.map(|url| url.to_string()),
+                    checksum: Some(checksum),
+                    size: value.size,
+                    destinations,
+                }
+            })
+            .collect();
+        Self {
+            total_size: manifest.total_size,
+            compression,
+            chunks,
+        }
+    }
+}
+
+impl TryFrom<pb::UploadSlot> for Slot {
+    type Error = eyre::Report;
+    fn try_from(value: pb::UploadSlot) -> Result<Self> {
+        Ok(Self {
+            key: value.key,
+            url: Url::parse(&value.url)?,
+        })
+    }
+}
+
+impl TryFrom<pb::UploadManifest> for UploadManifest {
+    type Error = eyre::Report;
+    fn try_from(manifest: pb::UploadManifest) -> Result<Self> {
+        Ok(Self {
+            slots: manifest
+                .slots
+                .into_iter()
+                .map(|slot| slot.try_into())
+                .collect::<Result<Vec<_>>>()?,
         })
     }
 }

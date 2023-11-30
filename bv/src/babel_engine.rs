@@ -19,10 +19,10 @@ use crate::{
     services::api::pb,
     utils::with_timeout,
 };
-use babel_api::engine::DownloadManifest;
 use babel_api::{
     engine::{
-        HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, RestRequest, ShResponse,
+        DownloadManifest, HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest,
+        RestRequest, ShResponse, UploadManifest,
     },
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
@@ -71,7 +71,7 @@ macro_rules! with_selective_retry {
     }};
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NodeInfo {
     pub node_id: Uuid,
     pub image: NodeImage,
@@ -107,7 +107,10 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             params: node_info.properties.clone(),
             plugin_data_path: plugin_data_path.clone(),
         };
-        let server = Some(babel_engine_service::start_server(vm_data_path).await?);
+        let server = Some(
+            babel_engine_service::start_server(vm_data_path, node_info.clone(), api_config.clone())
+                .await?,
+        );
         Ok(Self {
             node_info,
             node_connection,
@@ -458,10 +461,31 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     manifest.validate()?
                 }
             }
-            JobType::Upload { manifest, .. } => {
+            JobType::Upload {
+                manifest,
+                number_of_chunks,
+                url_expires_secs,
+                source,
+                exclude,
+                ..
+            } => {
                 if manifest.is_none() {
-                    // TODO get source data size from babel, then ask the API for UploadManifest
-                    bail!("retrieving manifest from API is not implemented yet - specify manifest explicitly")
+                    let slots = match number_of_chunks {
+                        None => with_retry!(babel_client
+                            .recommended_number_of_chunks((source.clone(), exclude.clone())))?
+                        .into_inner(),
+                        Some(slots) => *slots,
+                    };
+                    manifest.replace(
+                        retrieve_upload_manifest(
+                            &self.api_config,
+                            self.node_info.image.clone(),
+                            self.node_info.network.clone(),
+                            slots,
+                            *url_expires_secs,
+                        )
+                        .await?,
+                    );
                 } // if already set it mean that plugin use some custom manifest source - other than the API
                 if let Some(manifest) = manifest {
                     manifest.validate()?
@@ -502,6 +526,40 @@ async fn retrieve_download_manifest(
         .with_context(|| {
             format!(
                 "cannot retrieve download manifest for {:?}-{}",
+                image, network
+            )
+        })?
+        .into_inner()
+        .manifest
+        .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
+        .try_into()
+}
+
+async fn retrieve_upload_manifest(
+    config: &SharedConfig,
+    image: NodeImage,
+    network: String,
+    slots: u32,
+    url_expires: Option<u32>,
+) -> Result<UploadManifest> {
+    let mut archive_service = services::connect_to_api_service(
+        config,
+        pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
+    )
+    .await
+    .with_context(|| "cannot connect to manifest service")?;
+    archive_service
+        .get_upload_manifest(pb::BlockchainArchiveServiceGetUploadManifestRequest {
+            id: Some(image.clone().try_into()?),
+            network: network.clone(),
+            data_version: None,
+            slots,
+            url_expires,
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "cannot retrieve upload manifest for {:?}-{}",
                 image, network
             )
         })?
@@ -774,6 +832,10 @@ mod tests {
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
+            async fn recommended_number_of_chunks(
+                &self,
+                request: Request<(PathBuf, Option<Vec<String>>)>,
+            ) -> Result<Response<u32>, Status>;
             type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
             async fn get_logs(
                 &self,

@@ -1,6 +1,6 @@
 use crate::{
     apply_babel_config, jobs_manager::JobsManagerClient, load_config,
-    ufw_wrapper::apply_firewall_config, utils, BabelPal,
+    ufw_wrapper::apply_firewall_config, utils, utils::sources_list, BabelPal,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -8,6 +8,7 @@ use babel_api::{
     metadata::{firewall, BabelConfig},
 };
 use eyre::{eyre, ContextCompat, Result};
+use nu_glob::{Pattern, PatternError};
 use reqwest::RequestBuilder;
 use serde_json::json;
 use std::{
@@ -266,6 +267,23 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(()))
     }
 
+    async fn recommended_number_of_chunks(
+        &self,
+        request: Request<(PathBuf, Option<Vec<String>>)>,
+    ) -> Result<Response<u32>, Status> {
+        let (source, exclude) = request.into_inner();
+        let exclude = exclude
+            .unwrap_or_default()
+            .iter()
+            .map(|pattern_str| Pattern::new(pattern_str))
+            .collect::<Result<Vec<Pattern>, PatternError>>()
+            .map_err(|err| Status::invalid_argument(format!("invalid exclude pattern: {err}")))?;
+        Ok(Response::new(
+            estimate_nb_of_chunks(source, exclude)
+                .map_err(|err| Status::internal(format!("failed to calculate data size: {err}")))?,
+        ))
+    }
+
     type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
 
     async fn get_logs(
@@ -393,6 +411,11 @@ impl<J, P> BabelService<J, P> {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         })
     }
+}
+
+fn estimate_nb_of_chunks(source: PathBuf, exclude: Vec<Pattern>) -> Result<u32> {
+    let (total_size, _) = sources_list(&source, &exclude)?;
+    Ok(1 + u32::try_from(total_size / (1024 * 1024 * 1024))?)
 }
 
 /// Takes RequestBuilder and add common http things (timeout, headers).

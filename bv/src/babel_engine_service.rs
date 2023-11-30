@@ -1,16 +1,27 @@
-use crate::firecracker_machine::VSOCK_PATH;
+use crate::babel_engine::NodeInfo;
+use crate::{
+    config::SharedConfig,
+    firecracker_machine::VSOCK_PATH,
+    services::{self, api::pb},
+};
 use async_trait::async_trait;
 use babel_api::engine::DownloadManifest;
+use bv_utils::with_retry;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
-use tonic::transport::Server;
-use tonic::{Request, Response, Status};
+use tonic::{
+    transport::Server,
+    {Request, Response, Status},
+};
 use tracing::error;
 
 const BABEL_ENGINE_PORT: u32 = 40;
 
-struct BabelEngineService;
+struct BabelEngineService {
+    node_info: NodeInfo,
+    config: SharedConfig,
+}
 
 #[async_trait]
 impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
@@ -18,15 +29,34 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         &self,
         request: Request<DownloadManifest>,
     ) -> eyre::Result<Response<()>, Status> {
-        let _manifest = request.into_inner();
+        let manifest = request.into_inner();
+        let mut archive_service = services::connect_to_api_service(
+            &self.config,
+            pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
+        )
+        .await
+        .map_err(|err| Status::internal(format!("can not connect archives service: {err}")))?;
+        with_retry!(archive_service.put_download_manifest(
+            pb::BlockchainArchiveServicePutDownloadManifestRequest {
+                id: Some(self.node_info.image.clone().try_into().map_err(|err| {
+                    Status::invalid_argument(format!("invalid node image id: {err}"))
+                })?),
+                network: self.node_info.network.clone(),
+                manifest: Some(manifest.clone().try_into().map_err(|err| {
+                    Status::invalid_argument(format!("invalid manifest blueprint: {err}"))
+                })?),
+            }
+        ))?;
         Ok(Response::new(()))
     }
+
     async fn upgrade_blocking_jobs_finished(
         &self,
         _request: Request<()>,
     ) -> eyre::Result<Response<()>, Status> {
         Ok(Response::new(()))
     }
+
     async fn bv_error(&self, request: Request<String>) -> eyre::Result<Response<()>, Status> {
         let message = request.into_inner();
         error!("Babel: {message}");
@@ -40,9 +70,13 @@ pub struct BabelEngineServer {
     tx: tokio::sync::oneshot::Sender<()>,
 }
 
-pub async fn start_server(vm_data_path: PathBuf) -> eyre::Result<BabelEngineServer> {
+pub async fn start_server(
+    vm_data_path: PathBuf,
+    node_info: NodeInfo,
+    config: SharedConfig,
+) -> eyre::Result<BabelEngineServer> {
     let socket_path = vm_data_path.join(format!("{VSOCK_PATH}_{BABEL_ENGINE_PORT}"));
-    let engine_service = BabelEngineService {};
+    let engine_service = BabelEngineService { node_info, config };
     let _ = fs::remove_file(&socket_path).await;
     let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(socket_path)?);
     let (tx, rx) = tokio::sync::oneshot::channel();

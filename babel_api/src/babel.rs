@@ -63,6 +63,15 @@ pub trait Babel {
         params: String,
     );
 
+    /// Estimate recommended number of chunks for given blockchain data.
+    fn recommended_number_of_chunks(
+        /// Source directory with files to be uploaded.
+        source: PathBuf,
+        /// List of exclude patterns. Files in `source` directory that match any of pattern,
+        /// won't be taken into account.
+        exclude: Option<Vec<String>>,
+    ) -> u32;
+
     /// Get logs gathered from jobs.
     #[server_streaming]
     fn get_logs() -> String;

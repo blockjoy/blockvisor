@@ -99,6 +99,7 @@ async fn main() -> eyre::Result<()> {
             compression,
             max_connections,
             max_runners,
+            ..
         } => {
             UploadJob::new(
                 bv_utils::timer::SysTimer,

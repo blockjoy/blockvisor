@@ -724,6 +724,7 @@ dependencies = [
  "tonic-rpc",
  "tower",
  "tracing",
+ "url",
  "uuid",
 ]
 

@@ -820,6 +820,10 @@ pub mod tests {
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
+            async fn recommended_number_of_chunks(
+                &self,
+                request: Request<(PathBuf, Option<Vec<String>>)>,
+            ) -> Result<Response<u32>, Status>;
             type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
             async fn get_logs(
                 &self,

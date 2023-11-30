@@ -7,6 +7,7 @@ use crate::{
     connect_babel_engine,
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
     jobs::{cleanup_job_data, load_job_data, save_job_data},
+    utils::sources_list,
 };
 use async_trait::async_trait;
 use babel_api::engine::{
@@ -193,20 +194,9 @@ impl Uploader {
                     .to_path_buf();
             }
         }
-        // finally upload manifest file as json
-        let manifest_body = serde_json::to_string(&manifest)?;
-        let resp = reqwest::Client::new()
-            .put(self.manifest.manifest_slot.url.clone())
-            .body(manifest_body)
-            .send()
-            .await?;
-        ensure!(
-            resp.status().is_success(),
-            anyhow!(
-                "failed to upload manifest file - server responded with {}",
-                resp.status()
-            )
-        );
+        let mut client = connect_babel_engine().await;
+        with_retry!(client.put_download_manifest(manifest.clone()))
+            .with_context(|| "failed to send DownloadManifest blueprint back to API")?;
 
         cleanup_job_data(&self.config.parts_file_path);
         Ok(())
@@ -249,35 +239,6 @@ impl Uploader {
             chunks,
         })
     }
-}
-
-/// Prepare list of all source files, recursively walking down the source directory.
-fn sources_list(source_path: &Path, exclude: &[Pattern]) -> Result<(u64, Vec<FileLocation>)> {
-    let mut sources: Vec<_> = Default::default();
-    let mut total_size = 0;
-    'sources: for entry in walkdir::WalkDir::new(source_path) {
-        let entry = entry?;
-        let path = entry.path();
-
-        if let Some(relative_path) = pathdiff::diff_paths(path, source_path) {
-            for pattern in exclude {
-                if pattern.matches(&relative_path.to_string_lossy()) {
-                    continue 'sources;
-                }
-            }
-        }
-
-        if path.is_file() {
-            let size = entry.metadata()?.len();
-            sources.push(FileLocation {
-                path: path.to_path_buf(),
-                pos: 0,
-                size,
-            });
-            total_size += size
-        }
-    }
-    Ok((total_size, sources))
 }
 
 /// Consumes `sources` and put them into chunk destinations list, until chunk is full
@@ -694,10 +655,6 @@ mod tests {
                         url: self.url("url.c"),
                     },
                 ],
-                manifest_slot: Slot {
-                    key: "KeyM".to_string(),
-                    url: self.url("url.m"),
-                },
             })
         }
 
@@ -1116,13 +1073,7 @@ mod tests {
     #[tokio::test]
     async fn test_cleanup_after_fail() -> Result<()> {
         let test_env = setup_test_env()?;
-        let manifest = UploadManifest {
-            slots: vec![],
-            manifest_slot: Slot {
-                key: "KeyM".to_string(),
-                url: Url::parse("http://url.m")?,
-            },
-        };
+        let manifest = UploadManifest { slots: vec![] };
         fs::write(&test_env.upload_parts_path, r#"["key"]"#)?;
         assert_eq!(
             JobStatus::Finished {
@@ -1154,10 +1105,6 @@ mod tests {
                     url: Url::parse("http://url.b")?,
                 },
             ],
-            manifest_slot: Slot {
-                key: "KeyM".to_string(),
-                url: Url::parse("http://url.m")?,
-            },
         };
         let job = test_env.upload_job(manifest);
         let mut blueprint = job.uploader.prepare_blueprint()?;
