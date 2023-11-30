@@ -8,8 +8,6 @@ build-release:
 	strip target/x86_64-unknown-linux-musl/release/bvup
 	strip target/x86_64-unknown-linux-musl/release/blockvisord
 	strip target/x86_64-unknown-linux-musl/release/blockvisord-dev
-	cargo build -p upload_manifest_generator --target x86_64-unknown-linux-musl --release
-	strip target/x86_64-unknown-linux-musl/release/upload_manifest_generator
 	cargo build -p babel --target x86_64-unknown-linux-musl --release
 	strip target/x86_64-unknown-linux-musl/release/babel
 	strip target/x86_64-unknown-linux-musl/release/babel_job_runner
@@ -54,9 +52,6 @@ bundle-dev: bundle-base
 	cp target/x86_64-unknown-linux-musl/release/blockvisord-dev /tmp/bundle/blockvisor/bin/blockvisord
 	rm -rf /tmp/bundle-dev.tar.gz
 	tar -C /tmp -czvf /tmp/bundle-dev.tar.gz bundle
-
-upload_manifest_generator: build-release
-	cp target/x86_64-unknown-linux-musl/release/upload_manifest_generator /tmp/upload_manifest_generator
 
 install: bundle
 	rm -rf /opt/blockvisor

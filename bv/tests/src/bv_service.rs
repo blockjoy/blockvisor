@@ -378,18 +378,6 @@ fn parse_out_node_id(image: &str, std_out: String) -> String {
 }
 
 fn check_upload_and_download(node_id: &str) {
-    println!("generate upload manifest");
-    Command::cargo_bin("upload_manifest_generator")
-        .unwrap()
-        .args([
-            "--s3-bucket=archive-dev",
-            "testing/validator/0.0.1/test/1",
-            "9",
-            "/tmp/upload_manifest.json",
-        ])
-        .assert()
-        .success();
-
     println!("create dummy blockchain data");
     sh_inside(node_id,"mkdir -p /blockjoy/miner/data/sub /blockjoy/miner/data/some_subdir && touch /blockjoy/miner/data/.gitignore /blockjoy/miner/data/some_subdir/something_to_ignore.txt /blockjoy/miner/data/empty_file");
     sh_inside(node_id,"head -c 43210 < /dev/urandom > /blockjoy/miner/data/file_a && head -c 654321 < /dev/urandom > /blockjoy/miner/data/file_b && head -c 432 < /dev/urandom > /blockjoy/miner/data/file_c && head -c 257 < /dev/urandom > /blockjoy/miner/data/sub/file_d && head -c 128 < /dev/urandom > /blockjoy/miner/data/sub/file_e && head -c 43210 < /dev/urandom > /blockjoy/miner/data/some_subdir/any.bak");
@@ -400,17 +388,7 @@ fn check_upload_and_download(node_id: &str) {
     let sha_e = sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_e");
 
     println!("start upload job");
-    test_env::bv_run(
-        &[
-            "node",
-            "run",
-            "--param-file=/tmp/upload_manifest.json",
-            "upload",
-            node_id,
-        ],
-        "Upload started!",
-        None,
-    );
+    test_env::bv_run(&["node", "run", "upload", node_id], "Upload started!", None);
 
     println!("wait for upload finished");
     let start = std::time::Instant::now();

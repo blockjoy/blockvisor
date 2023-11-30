@@ -5,7 +5,6 @@ members = [
     "bv",
     "bv_utils",
     "bv_tests_utils",
-    "upload_manifest_generator",
 ]
 resolver = "2"
 
