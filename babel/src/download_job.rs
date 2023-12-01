@@ -398,7 +398,13 @@ impl ChunkDownloader {
         let connection_permit = self.connection_pool.acquire().await?;
         let mut resp = self
             .client
-            .get(&self.chunk.url)
+            .get(
+                self.chunk
+                    .url
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("missing chunk {} url", self.chunk.key))?
+                    .clone(),
+            )
             .header(RANGE, format!("bytes={}-{}", pos, pos + buffer_size - 1))
             .send()
             .await?;
@@ -651,8 +657,8 @@ mod tests {
             }
         }
 
-        fn url(&self, path: &str) -> String {
-            format!("{}/{}", self.server.url(), path)
+        fn url(&self, path: &str) -> Option<url::Url> {
+            Some(url::Url::parse(&format!("{}/{}", self.server.url(), path)).unwrap())
         }
     }
 

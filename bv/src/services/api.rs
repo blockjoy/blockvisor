@@ -15,6 +15,7 @@ use pb::{
     command_service_client::CommandServiceClient, discovery_service_client, host_service_client,
     node_command::Command, node_service_client,
 };
+use reqwest::Url;
 use std::{
     fmt::Debug,
     path::PathBuf,
@@ -462,7 +463,7 @@ impl TryFrom<pb::DownloadManifest> for DownloadManifest {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Chunk {
                     key: value.key,
-                    url: value.url,
+                    url: value.url.map(|url| Url::parse(&url)).transpose()?,
                     checksum,
                     size: value.size,
                     destinations,

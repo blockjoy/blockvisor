@@ -190,7 +190,7 @@ impl Uploader {
         // finally upload manifest file as json
         let manifest_body = serde_json::to_string(&manifest)?;
         let resp = reqwest::Client::new()
-            .put(&self.manifest.manifest_slot.url)
+            .put(self.manifest.manifest_slot.url.clone())
             .body(manifest_body)
             .send()
             .await?;
@@ -231,7 +231,7 @@ impl Uploader {
             }
             chunks.push(Chunk {
                 key: slot.key.clone(),
-                url: slot.url.clone(),
+                url: Some(slot.url.clone()),
                 checksum: Checksum::Sha1(Default::default()), // unknown yet
                 size: 0,                                      // unknown yet
                 destinations,
@@ -411,7 +411,13 @@ impl ChunkUploader {
             if let Some(resp) = run
                 .select(
                     self.client
-                        .put(&self.chunk.url)
+                        .put(
+                            self.chunk
+                                .url
+                                .as_ref()
+                                .ok_or_else(|| anyhow!("missing chunk {} url", self.chunk.key))?
+                                .clone(),
+                        )
                         .header("Content-Length", format!("{}", self.chunk.size))
                         .body(body)
                         .send(),
@@ -429,7 +435,7 @@ impl ChunkUploader {
             drop(connection_permit);
         }
         self.chunk.checksum = checksum_rx.borrow().clone();
-        self.chunk.url.clear();
+        self.chunk.url = None;
         Ok(self.chunk)
     }
 }
@@ -593,6 +599,7 @@ mod tests {
     use bv_utils::timer::SysTimer;
     use mockito::{Matcher, Server, ServerGuard};
     use std::fs;
+    use url::Url;
 
     struct TestEnv {
         tmp_dir: PathBuf,
@@ -655,8 +662,8 @@ mod tests {
             }
         }
 
-        fn url(&self, path: &str) -> String {
-            format!("{}/{}", self.server.url(), path)
+        fn url(&self, path: &str) -> url::Url {
+            url::Url::parse(&format!("{}/{}", self.server.url(), path)).unwrap()
         }
 
         fn dummy_upload_manifest(&self) -> Result<UploadManifest> {
@@ -1035,7 +1042,7 @@ mod tests {
             119, 175, 9, 4, 145, 218, 117, 139, 245, 72, 66, 12, 252, 244, 95, 29, 198, 151, 102,
             4, 20, 229, 205, 55, 90, 194, 137, 167, 103, 54, 187, 43,
         ]);
-        chunk_a.url.clear();
+        chunk_a.url = None;
         let chunk_b = progress
             .chunks
             .iter_mut()
@@ -1046,7 +1053,7 @@ mod tests {
             119, 175, 9, 4, 145, 218, 117, 139, 245, 72, 66, 12, 252, 244, 95, 29, 198, 151, 102,
             4, 20, 229, 205, 55, 90, 194, 137, 167, 103, 54, 187, 43,
         ]);
-        chunk_b.url.clear();
+        chunk_b.url = None;
         save_job_data(&job.uploader.config.parts_file_path, &Some(&progress))?;
 
         assert_eq!(
@@ -1101,7 +1108,7 @@ mod tests {
             slots: vec![],
             manifest_slot: Slot {
                 key: "KeyM".to_string(),
-                url: "url.m".to_string(),
+                url: Url::parse("http://url.m")?,
             },
         };
         fs::write(&test_env.upload_parts_path, r#"["key"]"#)?;
@@ -1128,16 +1135,16 @@ mod tests {
             slots: vec![
                 Slot {
                     key: "KeyA".to_string(),
-                    url: "url.a".to_string(),
+                    url: Url::parse("http://url.a")?,
                 },
                 Slot {
                     key: "KeyB".to_string(),
-                    url: "url.b".to_string(),
+                    url: Url::parse("http://url.b")?,
                 },
             ],
             manifest_slot: Slot {
                 key: "KeyM".to_string(),
-                url: "url.m".to_string(),
+                url: Url::parse("http://url.m")?,
             },
         };
         let job = test_env.upload_job(manifest);
@@ -1150,7 +1157,7 @@ mod tests {
                 chunks: vec![
                     Chunk {
                         key: "KeyA".to_string(),
-                        url: "url.a".to_string(),
+                        url: Some(Url::parse("http://url.a")?),
                         checksum: Checksum::Sha1([0u8; 20]),
                         size: 0,
                         destinations: vec![FileLocation {
@@ -1161,7 +1168,7 @@ mod tests {
                     },
                     Chunk {
                         key: "KeyB".to_string(),
-                        url: "url.b".to_string(),
+                        url: Some(Url::parse("http://url.b")?),
                         checksum: Checksum::Sha1([0u8; 20]),
                         size: 0,
                         destinations: vec![

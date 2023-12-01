@@ -69,16 +69,24 @@ async fn main() -> Result<()> {
         slots: vec![],
         manifest_slot: babel_api::engine::Slot {
             key: format!("{}/manifest.json", client.cmd_args.s3_prefix),
-            url: client.generate_presigned_url("manifest.json").await?,
+            url: url::Url::parse(
+                client
+                    .generate_presigned_url("manifest.json")
+                    .await?
+                    .as_str(),
+            )?,
         },
     };
     let mut n = 0;
     while n < client.cmd_args.slots {
         manifest.slots.push(babel_api::engine::Slot {
             key: format!("{}/data.part_{}", client.cmd_args.s3_prefix, n),
-            url: client
-                .generate_presigned_url(&format!("data.part_{}", n))
-                .await?,
+            url: url::Url::parse(
+                client
+                    .generate_presigned_url(&format!("data.part_{}", n))
+                    .await?
+                    .as_str(),
+            )?,
         });
         n += 1;
     }

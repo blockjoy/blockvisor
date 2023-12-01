@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 use tracing::Level;
+use url::Url;
 
 pub const DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_JOB_SHUTDOWN_SIGNAL: PosixSignal = PosixSignal::SIGTERM;
@@ -124,8 +125,8 @@ pub struct Chunk {
     /// Persistent chunk key
     pub key: String,
     /// Pre-signed download url (may be temporary),
-    /// May be empty when uploading manifest blueprint
-    pub url: String,
+    /// May be `None` when uploading manifest blueprint
+    pub url: Option<Url>,
     /// Chunk data checksum
     pub checksum: Checksum,
     /// Chunk size in bytes
@@ -160,7 +161,7 @@ pub struct Slot {
     /// Persistent slot/chunk key
     pub key: String,
     /// Pre-signed upload url (may be temporary)
-    pub url: String,
+    pub url: Url,
 }
 
 /// Upload manifest is a list of slots, which consists

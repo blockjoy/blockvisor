@@ -563,6 +563,7 @@ dependencies = [
  "tonic",
  "tower",
  "tracing",
+ "url",
  "walkdir",
  "zstd",
 ]
@@ -3926,6 +3927,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "url",
 ]
 
 [[package]]
