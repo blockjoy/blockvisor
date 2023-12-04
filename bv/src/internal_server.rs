@@ -109,9 +109,14 @@ where
             .map_err(|e| Status::internal(format!("{e:#}")))?;
         config.token = "***".to_string();
         config.refresh_token = "***".to_string();
+        let service_name = if self.dev_mode {
+            format!("{}-dev", env!("CARGO_PKG_NAME"))
+        } else {
+            env!("CARGO_PKG_NAME").to_owned()
+        };
         Ok(Response::new(format!(
             "{} {} - {:?}\n BV_PATH: {}\n BABEL_PATH: {}\n JOB_RUNNER_PATH: {}\n CONFIG: {:#?}",
-            env!("CARGO_PKG_NAME"),
+            service_name,
             env!("CARGO_PKG_VERSION"),
             get_bv_status().await,
             pal.bv_root().join(BV_VAR_PATH).to_string_lossy(),

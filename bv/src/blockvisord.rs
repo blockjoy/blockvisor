@@ -92,12 +92,6 @@ where
     }
 
     pub async fn run(self, mut run: RunFlag) -> Result<()> {
-        info!(
-            "Starting {} {} ...",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION")
-        );
-
         let bv_root = self.pal.bv_root().to_path_buf();
         let config = self.config.read().await;
 

@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     setup_logging();
     info!(
         "Starting {} {} ...",
-        env!("CARGO_PKG_NAME"),
+        env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
     );
     set_bv_status(ServiceStatus::Ok).await;
