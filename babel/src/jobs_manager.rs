@@ -49,7 +49,16 @@ pub fn create(
     if !jobs_status_dir.exists() {
         fs::create_dir_all(jobs_status_dir)?;
     }
-    let jobs_registry = Arc::new(Mutex::new((HashMap::new(), JobsData::new(jobs_dir))));
+    let mut jobs = HashMap::new();
+    let jobs_data = JobsData::new(jobs_dir);
+    if state == JobsManagerState::Ready {
+        load_jobs(
+            &mut jobs,
+            &jobs_data,
+            &job_runner_bin_path.to_string_lossy(),
+        )?;
+    }
+    let jobs_registry = Arc::new(Mutex::new((jobs, jobs_data)));
     let (job_added_tx, job_added_rx) = watch::channel(());
     let (jobs_manager_state_tx, jobs_manager_state_rx) = watch::channel(state);
 
