@@ -819,9 +819,9 @@ mod tests {
             blockchain::ROOT_FS_FILE,
             kernel::KERNELS_DIR,
         },
-        start_test_server,
     };
     use assert_fs::TempDir;
+    use bv_tests_utils::start_test_server;
     use bv_utils::cmd::run_cmd;
     use eyre::bail;
     use mockall::*;
@@ -940,7 +940,7 @@ mod tests {
             &self,
             images: Vec<(NodeImage, Vec<u8>)>,
         ) -> (
-            utils::tests::TestServer,
+            bv_tests_utils::rpc::TestServer,
             mockito::ServerGuard,
             Vec<mockito::Mock>,
         ) {

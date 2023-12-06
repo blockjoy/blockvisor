@@ -122,43 +122,16 @@ mod tests {
     use babel_api::babelsup::{
         babel_sup_client::BabelSupClient, babel_sup_server::BabelSup, SupervisorConfig,
     };
+    use bv_tests_utils::start_test_server;
     use eyre::Result;
     use std::fs;
     use std::path::Path;
-    use std::time::Duration;
-    use tokio::net::UnixStream;
     use tokio::sync::{oneshot, watch};
     use tokio_stream::wrappers::UnixListenerStream;
-    use tonic::transport::{Channel, Endpoint, Server, Uri};
-
-    async fn sup_server(
-        babel_path: PathBuf,
-        babelsup_cfg_path: PathBuf,
-        sup_status: SupervisorStatus,
-        babel_change_tx: supervisor::BabelChangeTx,
-        uds_stream: UnixListenerStream,
-    ) -> Result<()> {
-        let sup_service =
-            BabelSupService::new(sup_status, babel_change_tx, babel_path, babelsup_cfg_path);
-        Server::builder()
-            .max_concurrent_streams(1)
-            .add_service(babel_api::babelsup::babel_sup_server::BabelSupServer::new(
-                sup_service,
-            ))
-            .serve_with_incoming(uds_stream)
-            .await?;
-        Ok(())
-    }
+    use tonic::transport::Channel;
 
     fn test_client(tmp_root: &Path) -> BabelSupClient<Channel> {
-        let socket_path = tmp_root.join("test_socket");
-        let channel = Endpoint::from_static("http://[::]:50052")
-            .timeout(Duration::from_secs(1))
-            .connect_timeout(Duration::from_secs(1))
-            .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                UnixStream::connect(socket_path.clone())
-            }));
-        BabelSupClient::new(channel)
+        BabelSupClient::new(bv_tests_utils::rpc::test_channel(tmp_root))
     }
 
     struct TestEnv {
@@ -167,6 +140,7 @@ mod tests {
         sup_config_rx: supervisor::SupervisorConfigRx,
         babel_change_rx: BabelChangeRx,
         client: BabelSupClient<Channel>,
+        server: bv_tests_utils::rpc::TestServer,
     }
 
     fn setup_test_env() -> Result<TestEnv> {
@@ -175,23 +149,18 @@ mod tests {
         let babel_path = tmp_root.join("babel");
         let babelsup_cfg_path = tmp_root.join("babelsup.conf");
         let client = test_client(&tmp_root);
-        let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(
-            tmp_root.join("test_socket"),
-        )?);
         let (babel_change_tx, babel_change_rx) = watch::channel(None);
         let (sup_config_tx, sup_config_rx) = oneshot::channel();
-        let babel_bin_path = babel_path.clone();
-        let babelsup_config_path = babelsup_cfg_path.clone();
-        tokio::spawn(async move {
-            sup_server(
-                babel_bin_path,
-                babelsup_config_path,
-                SupervisorStatus::Uninitialized(sup_config_tx),
-                babel_change_tx,
-                uds_stream,
-            )
-            .await
-        });
+        let sup_service = BabelSupService::new(
+            SupervisorStatus::Uninitialized(sup_config_tx),
+            babel_change_tx,
+            babel_path.clone(),
+            babelsup_cfg_path.clone(),
+        );
+        let server = start_test_server!(
+            &tmp_root,
+            babel_api::babelsup::babel_sup_server::BabelSupServer::new(sup_service)
+        );
 
         Ok(TestEnv {
             babel_path,
@@ -199,6 +168,7 @@ mod tests {
             sup_config_rx,
             babel_change_rx,
             client,
+            server,
         })
     }
 
@@ -240,6 +210,7 @@ mod tests {
             4135829304,
             utils::file_checksum(&test_env.babel_path).await.unwrap()
         );
+        test_env.server.assert().await;
         Ok(())
     }
 
@@ -304,6 +275,7 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(test_env.babelsup_cfg_path)?)?
         );
         assert_eq!(config, test_env.sup_config_rx.try_recv()?);
+        test_env.server.assert().await;
         Ok(())
     }
 }

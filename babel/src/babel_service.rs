@@ -313,7 +313,7 @@ fn to_blockchain_err(err: eyre::Error) -> Status {
 }
 
 impl<J, P> BabelService<J, P> {
-    pub async fn new(
+    pub fn new(
         job_runner_lock: JobRunnerLock,
         job_runner_bin_path: PathBuf,
         jobs_manager: J,
@@ -354,7 +354,7 @@ impl<J, P> BabelService<J, P> {
     }
 
     async fn handle_jrpc(&self, request: Request<JrpcRequest>) -> Result<HttpResponse> {
-        let timeout = bv_utils::grpc::extract_timeout(&request);
+        let timeout = bv_utils::rpc::extract_grpc_timeout(&request);
         let req = request.into_inner();
         let data = match req.params {
             None => json!({ "jsonrpc": "2.0", "id": 0, "method": req.method }),
@@ -367,13 +367,13 @@ impl<J, P> BabelService<J, P> {
     }
 
     async fn handle_rest(&self, request: Request<RestRequest>) -> Result<HttpResponse> {
-        let timeout = bv_utils::grpc::extract_timeout(&request);
+        let timeout = bv_utils::rpc::extract_grpc_timeout(&request);
         let req = request.into_inner();
         send_http_request(self.get(req.url), req.headers, timeout).await
     }
 
     async fn handle_sh(&self, request: Request<String>) -> Result<ShResponse> {
-        let timeout = bv_utils::grpc::extract_timeout(&request);
+        let timeout = bv_utils::rpc::extract_grpc_timeout(&request);
         let body = request.into_inner();
         let (cmd, args) = utils::bv_shell(&body);
         let cmd_future = tokio::process::Command::new(cmd)
@@ -421,15 +421,15 @@ mod tests {
     use assert_fs::TempDir;
     use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
     use babel_api::metadata::RamdiskConfiguration;
+    use bv_tests_utils::start_test_server;
     use futures::StreamExt;
     use mockall::*;
     use serde_json::json;
     use std::collections::HashMap;
     use std::env::temp_dir;
     use std::path::Path;
-    use tokio::net::UnixStream;
     use tokio_stream::wrappers::UnixListenerStream;
-    use tonic::transport::{Channel, Endpoint, Server, Uri};
+    use tonic::transport::Channel;
 
     mock! {
         pub JobsManager {}
@@ -499,50 +499,18 @@ mod tests {
         }
     }
 
-    async fn babel_server(
-        job_runner_lock: JobRunnerLock,
-        job_runner_bin_path: PathBuf,
-        uds_stream: UnixListenerStream,
-        babel_cfg_path: PathBuf,
-        setup: BabelServiceState,
-    ) -> Result<()> {
-        let mut jobs_manager_mock = MockJobsManager::new();
-        jobs_manager_mock.expect_startup().returning(|| Ok(()));
-        let babel_service = BabelService::new(
-            job_runner_lock,
-            job_runner_bin_path,
-            jobs_manager_mock,
-            babel_cfg_path,
-            DummyPal,
-            setup,
-        )
-        .await?;
-        Server::builder()
-            .max_concurrent_streams(1)
-            .add_service(babel_api::babel::babel_server::BabelServer::new(
-                babel_service,
-            ))
-            .serve_with_incoming(uds_stream)
-            .await?;
-        Ok(())
-    }
-
     fn test_client(tmp_root: &Path) -> Result<BabelClient<Channel>> {
-        let socket_path = tmp_root.join("test_socket");
-        let channel = Endpoint::from_static("http://[::]:50052")
-            .timeout(Duration::from_secs(1))
-            .connect_timeout(Duration::from_secs(1))
-            .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                UnixStream::connect(socket_path.clone())
-            }));
-        Ok(BabelClient::new(channel))
+        Ok(BabelClient::new(bv_tests_utils::rpc::test_channel(
+            tmp_root,
+        )))
     }
 
     struct TestEnv {
-        job_runner_bin_path: PathBuf,
+        job_runner_path: PathBuf,
         job_runner_lock: JobRunnerLock,
         client: BabelClient<Channel>,
         logs_rx: oneshot::Receiver<broadcast::Sender<String>>,
+        server: bv_tests_utils::rpc::TestServer,
     }
 
     fn setup_test_env() -> Result<TestEnv> {
@@ -550,35 +518,34 @@ mod tests {
         std::fs::create_dir_all(&tmp_root)?;
         let job_runner_path = tmp_root.join("job_runner");
         let babel_cfg_path = tmp_root.join("babel.cfg");
-        let lock = Arc::new(RwLock::new(None));
+        let job_runner_lock = Arc::new(RwLock::new(None));
         let client = test_client(&tmp_root)?;
-        let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(
-            tmp_root.join("test_socket"),
-        )?);
-        let job_runner_lock = lock.clone();
-        let job_runner_bin_path = job_runner_path.clone();
         let (logs_tx, logs_rx) = oneshot::channel();
-        tokio::spawn(async move {
-            babel_server(
-                lock,
-                job_runner_path,
-                uds_stream,
-                babel_cfg_path,
-                BabelServiceState::NotReady(logs_tx),
-            )
-            .await
-        });
+        let mut jobs_manager_mock = MockJobsManager::new();
+        jobs_manager_mock.expect_startup().returning(|| Ok(()));
+        let babel_service = BabelService::new(
+            job_runner_lock.clone(),
+            job_runner_path.clone(),
+            jobs_manager_mock,
+            babel_cfg_path,
+            DummyPal,
+            BabelServiceState::NotReady(logs_tx),
+        )?;
+        let server = start_test_server!(
+            &tmp_root,
+            babel_api::babel::babel_server::BabelServer::new(babel_service)
+        );
 
         Ok(TestEnv {
-            job_runner_bin_path,
+            job_runner_path,
             job_runner_lock,
             client,
             logs_rx,
+            server,
         })
     }
 
-    async fn build_babel_service_with_defaults() -> Result<BabelService<MockJobsManager, DummyPal>>
-    {
+    fn build_babel_service_with_defaults() -> Result<BabelService<MockJobsManager, DummyPal>> {
         let (_tx, rx) = broadcast::channel(1);
         BabelService::new(
             Arc::new(Default::default()),
@@ -588,7 +555,6 @@ mod tests {
             DummyPal,
             BabelServiceState::Ready(rx),
         )
-        .await
     }
 
     #[tokio::test]
@@ -617,7 +583,7 @@ mod tests {
             )
             .create();
 
-        let service = build_babel_service_with_defaults().await?;
+        let service = build_babel_service_with_defaults()?;
         let output = service
             .run_jrpc(Request::new(JrpcRequest {
                 host: server.url(),
@@ -651,7 +617,7 @@ mod tests {
             .with_body(json!({"result": [1, 2, 3]}).to_string())
             .create();
 
-        let service = build_babel_service_with_defaults().await?;
+        let service = build_babel_service_with_defaults()?;
         let output = service
             .run_rest(Request::new(RestRequest {
                 url: format!("{}/items", server.url()),
@@ -671,7 +637,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sh() -> Result<()> {
-        let service = build_babel_service_with_defaults().await?;
+        let service = build_babel_service_with_defaults()?;
 
         let output = service
             .run_sh(Request::new(
@@ -720,10 +686,11 @@ mod tests {
         assert_eq!(4135829304, test_env.job_runner_lock.read().await.unwrap());
         assert_eq!(
             4135829304,
-            utils::file_checksum(&test_env.job_runner_bin_path)
+            utils::file_checksum(&test_env.job_runner_path)
                 .await
                 .unwrap()
         );
+        test_env.server.assert().await;
         Ok(())
     }
 
@@ -740,8 +707,7 @@ mod tests {
             Default::default(),
             DummyPal,
             BabelServiceState::Ready(rx),
-        )
-        .await?;
+        )?;
 
         assert_eq!(
             babel_api::utils::BinaryStatus::Missing,
@@ -781,7 +747,7 @@ mod tests {
         .await?;
         let out_path = temp_dir().join("out.txt");
 
-        let service = build_babel_service_with_defaults().await?;
+        let service = build_babel_service_with_defaults()?;
 
         service
             .render_template(Request::new((
@@ -882,6 +848,7 @@ mod tests {
         }
 
         assert_eq!(vec!["log1", "log2", "log3"], logs);
+        test_env.server.assert().await;
         Ok(())
     }
 }

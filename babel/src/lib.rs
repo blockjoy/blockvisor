@@ -18,15 +18,13 @@ pub mod utils;
 use async_trait::async_trait;
 use babel_api::babel::babel_engine_client::BabelEngineClient;
 use babel_api::metadata::{BabelConfig, RamdiskConfiguration};
+use bv_utils::rpc::{RPC_CONNECT_TIMEOUT, RPC_REQUEST_TIMEOUT};
 use eyre::{Context, Result};
 use std::path::Path;
-use std::time::Duration;
 use tokio::fs;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::info;
 
-pub const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
-pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 pub const BABEL_LOGS_UDS_PATH: &str = "/var/lib/babel/logs.socket";
 pub const JOBS_MONITOR_UDS_PATH: &str = "/var/lib/babel/jobs_monitor.socket";
 const VSOCK_HOST_CID: u32 = 2;

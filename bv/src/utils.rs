@@ -241,14 +241,9 @@ pub async fn discover_net_params(ifa_name: &str) -> Result<NetParams> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::{atomic, Arc};
     use std::thread::panicking;
-    use std::time::Duration;
-    use tokio::net::UnixStream;
-    use tokio::task::JoinHandle;
-    use tonic::transport::{Channel, Endpoint, Uri};
 
     #[test]
     pub fn test_ip_to_mac() {
@@ -311,16 +306,6 @@ pub mod tests {
         );
     }
 
-    pub fn test_channel(tmp_root: &Path) -> Channel {
-        let socket_path = tmp_root.join("test_socket");
-        Endpoint::from_static("http://[::]:50052")
-            .timeout(Duration::from_secs(1))
-            .connect_timeout(Duration::from_secs(1))
-            .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                UnixStream::connect(socket_path.clone())
-            }))
-    }
-
     /// Helper struct that adds a panic hook and checks if it was called on `Drop`.
     /// It is needed when a mock object is moved to another (e.g. server) thread.
     /// By default panics from threads different from main test thread are suppressed,
@@ -349,43 +334,6 @@ pub mod tests {
             }));
             Self { flag }
         }
-    }
-
-    /// Helper struct to gracefully shutdown and join the test server,
-    /// to make sure all mock asserts are checked.
-    pub struct TestServer {
-        pub handle: JoinHandle<()>,
-        pub tx: tokio::sync::oneshot::Sender<()>,
-    }
-
-    impl TestServer {
-        pub async fn assert(self) {
-            let _ = self.tx.send(());
-            let _ = self.handle.await;
-        }
-    }
-
-    #[macro_export]
-    macro_rules! start_test_server {
-        ($tmp_root:expr, $($mock:expr), +) => {{
-            let socket_path = $tmp_root.join("test_socket");
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            $crate::utils::tests::TestServer {
-                tx,
-                handle: tokio::spawn(async move {
-                    let uds_stream =
-                        UnixListenerStream::new(tokio::net::UnixListener::bind(socket_path).unwrap());
-                    tonic::transport::server::Server::builder()
-                        .max_concurrent_streams(1)
-                        .$(add_service($mock)). +
-                        .serve_with_incoming_shutdown(uds_stream, async {
-                            rx.await.ok();
-                        })
-                        .await
-                        .unwrap();
-                }),
-            }
-        }};
     }
 
     #[test]

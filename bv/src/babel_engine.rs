@@ -702,8 +702,7 @@ mod tests {
     use crate::{
         config::Config,
         pal::{BabelClient, BabelSupClient, DefaultTimeout},
-        start_test_server,
-        utils::{self, tests::test_channel},
+        utils::{self},
     };
     use assert_fs::TempDir;
     use async_trait::async_trait;
@@ -711,6 +710,8 @@ mod tests {
         engine::{Engine, JobInfo, JobType, RestartPolicy},
         metadata::BabelConfig,
     };
+    use bv_tests_utils::rpc::test_channel;
+    use bv_tests_utils::start_test_server;
     use mockall::*;
     use tokio_stream::wrappers::UnixListenerStream;
     use tonic::{Request, Response, Streaming};
@@ -985,7 +986,10 @@ mod tests {
             })
         }
 
-        fn start_test_server(&self, babel_mock: MockBabelService) -> utils::tests::TestServer {
+        fn start_test_server(
+            &self,
+            babel_mock: MockBabelService,
+        ) -> bv_tests_utils::rpc::TestServer {
             start_test_server!(
                 &self.tmp_root,
                 babel_api::babel::babel_server::BabelServer::new(babel_mock)

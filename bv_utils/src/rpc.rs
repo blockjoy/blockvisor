@@ -1,10 +1,16 @@
 use eyre::{bail, Context, ContextCompat};
+use std::path::Path;
 use std::time::Duration;
+use tokio::net::UnixStream;
+use tonic::transport::{Channel, Endpoint, Uri};
 use tonic::Request;
 
-/// Extract request timeout value from "grpc-timeout" header. See [tonic::Request::set_timeout](https://docs.rs/tonic/latest/tonic/struct.Request.html#method.set_timeout).
+pub const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Extract grpc request timeout value from "grpc-timeout" header. See [tonic::Request::set_timeout](https://docs.rs/tonic/latest/tonic/struct.Request.html#method.set_timeout).
 /// Units are translated according to [gRPC Spec](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests).
-pub fn extract_timeout<T>(req: &Request<T>) -> eyre::Result<Duration> {
+pub fn extract_grpc_timeout<T>(req: &Request<T>) -> eyre::Result<Duration> {
     let timeout = req
         .metadata()
         .get("grpc-timeout")
@@ -29,6 +35,16 @@ pub fn extract_timeout<T>(req: &Request<T>) -> eyre::Result<Duration> {
     }
 }
 
+pub fn build_socket_channel(socket_path: impl AsRef<Path>) -> Channel {
+    let socket_path = socket_path.as_ref().to_path_buf();
+    Endpoint::from_static("http://[::]:50052")
+        .timeout(RPC_REQUEST_TIMEOUT)
+        .connect_timeout(RPC_CONNECT_TIMEOUT)
+        .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+            UnixStream::connect(socket_path.clone())
+        }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,12 +54,12 @@ mod tests {
         let mut req = Request::new("text".to_string());
         assert_eq!(
             "grpc-timeout header not set",
-            extract_timeout(&req).unwrap_err().to_string()
+            extract_grpc_timeout(&req).unwrap_err().to_string()
         );
         req.set_timeout(Duration::from_secs(7));
-        assert_eq!(Duration::from_secs(7), extract_timeout(&req)?);
+        assert_eq!(Duration::from_secs(7), extract_grpc_timeout(&req)?);
         req.set_timeout(Duration::from_nanos(77));
-        assert_eq!(Duration::from_nanos(77), extract_timeout(&req)?);
+        assert_eq!(Duration::from_nanos(77), extract_grpc_timeout(&req)?);
         Ok(())
     }
 }

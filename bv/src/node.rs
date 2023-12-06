@@ -563,8 +563,7 @@ pub mod tests {
             VirtualMachine, VmState,
         },
         services::{self, blockchain::BABEL_PLUGIN_NAME, AuthToken},
-        start_test_server, utils,
-        utils::tests::test_channel,
+        utils,
     };
     use assert_fs::TempDir;
     use async_trait::async_trait;
@@ -573,6 +572,8 @@ pub mod tests {
         engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
         metadata::{BabelConfig, Requirements},
     };
+    use bv_tests_utils::rpc::test_channel;
+    use bv_tests_utils::start_test_server;
     use chrono::SubsecRound;
     use mockall::*;
     use serde::{Deserialize, Serialize};
@@ -926,7 +927,7 @@ pub mod tests {
             &self,
             babel_sup_mock: MockTestBabelSupService,
             babel_mock: MockTestBabelService,
-        ) -> utils::tests::TestServer {
+        ) -> bv_tests_utils::rpc::TestServer {
             start_test_server!(
                 &self.tmp_root,
                 babel_api::babelsup::babel_sup_server::BabelSupServer::new(babel_sup_mock),

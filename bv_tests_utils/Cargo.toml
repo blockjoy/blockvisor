@@ -1,0 +1,10 @@
+[package]
+name = "bv_tests_utils"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bv_utils = {version = "*", path = "../bv_utils"}
+tonic = "0.8.3"
+tokio = {version = "1.0", features = ["full"]}

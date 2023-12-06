@@ -76,8 +76,7 @@ async fn main() -> eyre::Result<()> {
         BABEL_CONFIG_PATH.to_path_buf(),
         pal,
         service_state,
-    )
-    .await?;
+    )?;
 
     let mut run = RunFlag::run_until_ctrlc();
     let manager_handle = tokio::spawn(manager.run(run.clone()));

@@ -521,6 +521,7 @@ dependencies = [
  "async-trait",
  "babel_api",
  "blake3",
+ "bv_tests_utils",
  "bv_utils",
  "chrono",
  "crc",
@@ -678,6 +679,7 @@ dependencies = [
  "aws-sdk-s3",
  "babel_api",
  "base64 0.21.5",
+ "bv_tests_utils",
  "bv_utils",
  "chitchat",
  "chrono",
@@ -743,6 +745,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f30e7476521f6f8af1a1c4c0b8cc94f0bee37d91763d0ca2665f299b6cd8aec"
 
 [[package]]
+name = "bv_tests_utils"
+version = "0.46.1"
+dependencies = [
+ "bv_utils",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "bv_utils"
 version = "0.46.1"
 dependencies = [
@@ -754,6 +765,7 @@ dependencies = [
  "sysinfo 0.29.11",
  "tokio",
  "tonic",
+ "tower",
  "tracing",
  "tracing-journald",
  "tracing-subscriber",

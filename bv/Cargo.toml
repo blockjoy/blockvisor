@@ -79,6 +79,7 @@ tonic-build = {version = "0.8.4", features = ["prost"]}
 [dev-dependencies]
 assert_cmd = "2"
 assert_fs = "1"
+bv_tests_utils = {version = "*", path = "../bv_tests_utils"}
 mockito = "1.2.0"
 jsonwebtoken = "9.1.0"
 local-ip-address = "0.5.1"

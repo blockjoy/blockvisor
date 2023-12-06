@@ -1,7 +1,7 @@
 use crate::{
     connect_babel_engine, jobs,
     utils::{Backoff, LimitStatus},
-    JOBS_MONITOR_UDS_PATH, RPC_CONNECT_TIMEOUT, RPC_REQUEST_TIMEOUT,
+    JOBS_MONITOR_UDS_PATH,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -14,8 +14,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::{net::UnixStream, sync::Semaphore};
-use tonic::transport::{Endpoint, Uri};
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
 const MAX_OPENED_FILES: u64 = 1024;
@@ -154,14 +153,8 @@ impl<T: AsyncTimer> JobBackoff<T> {
                     message: message.clone(),
                 }
             };
-            let mut client = JobsMonitorClient::new(
-                Endpoint::from_static("http://[::]:50052")
-                    .timeout(RPC_REQUEST_TIMEOUT)
-                    .connect_timeout(RPC_CONNECT_TIMEOUT)
-                    .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                        UnixStream::connect(JOBS_MONITOR_UDS_PATH)
-                    })),
-            );
+            let mut client =
+                JobsMonitorClient::new(bv_utils::rpc::build_socket_channel(JOBS_MONITOR_UDS_PATH));
             let _ = with_retry!(client.push_log((self.job_name.clone(), message.clone())));
             if let Some(backoff) = &mut self.backoff {
                 if let Some(max_retries) = self.max_retries {

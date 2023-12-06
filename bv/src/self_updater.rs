@@ -151,10 +151,10 @@ mod tests {
     use super::*;
     use crate::services::api::common;
     use crate::services::AuthToken;
-    use crate::start_test_server;
-    use crate::utils::tests::test_channel;
     use assert_fs::TempDir;
     use async_trait::async_trait;
+    use bv_tests_utils::rpc::test_channel;
+    use bv_tests_utils::start_test_server;
     use bv_utils::{cmd::run_cmd, timer::MockAsyncTimer};
     use mockall::*;
     use std::ffi::OsStr;
@@ -241,7 +241,7 @@ mod tests {
         fn start_test_server(
             &self,
             bundles_mock: MockTestBundleService,
-        ) -> utils::tests::TestServer {
+        ) -> bv_tests_utils::rpc::TestServer {
             start_test_server!(
                 &self.tmp_root,
                 pb::bundle_service_server::BundleServiceServer::new(bundles_mock)

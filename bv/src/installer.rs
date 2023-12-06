@@ -506,12 +506,13 @@ fn check_kernel_requirements() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal_server;
     use crate::node_data::{NodeImage, NodeStatus};
     use crate::node_metrics;
     use crate::utils;
-    use crate::utils::tests::test_channel;
-    use crate::{internal_server, start_test_server};
     use assert_fs::TempDir;
+    use bv_tests_utils::rpc::test_channel;
+    use bv_tests_utils::start_test_server;
     use bv_utils::timer::MockTimer;
     use eyre::anyhow;
     use mockall::*;
@@ -649,7 +650,7 @@ mod tests {
             })
         }
 
-        fn start_test_server(&self, bv_mock: MockTestBV) -> utils::tests::TestServer {
+        fn start_test_server(&self, bv_mock: MockTestBV) -> bv_tests_utils::rpc::TestServer {
             start_test_server!(
                 &self.tmp_root,
                 internal_server::service_server::ServiceServer::new(bv_mock)
