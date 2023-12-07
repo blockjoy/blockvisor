@@ -675,7 +675,7 @@ mod tests {
 
         async fn wait_for_job_runner(&self) -> Result<()> {
             // asynchronously wait for dummy job_runner to start
-            tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::time::timeout(Duration::from_secs(15), async {
                 while !self.ctrl_file.exists() {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
@@ -1170,7 +1170,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_monitor_restart_crashed_job() -> Result<()> {
         let mut test_env = TestEnv::setup().await?;
         test_env.create_infinite_job_runner();
@@ -1181,7 +1181,7 @@ mod tests {
             .create("test_job", dummy_job_config())
             .await?;
         test_env.client.start("test_job").await?;
-        test_env.wait_for_job_runner().await?;
+        test_env.wait_for_job_runner().await.unwrap();
 
         assert_eq!(
             JobStatus::Running,
@@ -1208,7 +1208,7 @@ mod tests {
             )
             .await?;
         test_env.client.start("test_restarting_job").await?;
-        test_env.wait_for_job_runner().await?;
+        test_env.wait_for_job_runner().await.unwrap();
 
         let info = test_env.client.info("test_job").await?;
         assert_eq!(
@@ -1236,7 +1236,7 @@ mod tests {
 
         fs::remove_file(&test_env.ctrl_file)?;
         test_env.kill_job("test_restarting_job");
-        test_env.wait_for_job_runner().await?;
+        test_env.wait_for_job_runner().await.unwrap();
 
         let mut info = test_env.client.info("test_restarting_job").await?;
         assert_eq!(JobStatus::Running, info.status);

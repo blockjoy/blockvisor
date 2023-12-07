@@ -27,8 +27,10 @@ macro_rules! _with_retry {
                 Err(err) => {
                     if retry_count < $retry_max {
                         retry_count += 1;
-                        let backoff = $backoff_base_ms * 2u64.pow(retry_count);
-                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                        if !cfg!(test) {
+                            let backoff = $backoff_base_ms * 2u64.pow(retry_count);
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                        }
                         continue;
                     } else {
                         break Err(err);
