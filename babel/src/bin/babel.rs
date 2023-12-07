@@ -21,7 +21,7 @@ lazy_static::lazy_static! {
     static ref BABEL_CONFIG_PATH: &'static Path = Path::new("/etc/babel.conf");
 }
 const DATA_DRIVE_PATH: &str = "/dev/vdb";
-const VSOCK_HOST_CID: u32 = 3;
+const VSOCK_GUEST_CID: u32 = 3;
 const VSOCK_BABEL_PORT: u32 = 42;
 
 #[tokio::main]
@@ -32,7 +32,7 @@ async fn main() -> eyre::Result<()> {
         env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
     );
-    let vsock_listener = tokio_vsock::VsockListener::bind(VSOCK_HOST_CID, VSOCK_BABEL_PORT)
+    let vsock_listener = tokio_vsock::VsockListener::bind(VSOCK_GUEST_CID, VSOCK_BABEL_PORT)
         .with_context(|| "failed to bind to vsock")?;
 
     let job_runner_lock = Arc::new(RwLock::new(
@@ -67,7 +67,8 @@ async fn main() -> eyre::Result<()> {
         job_runner_lock.clone(),
         &JOB_RUNNER_BIN_PATH,
         jobs_manager_state,
-    )?;
+    )
+    .await?;
     let babel_service = babel_service::BabelService::new(
         job_runner_lock,
         JOB_RUNNER_BIN_PATH.to_path_buf(),
@@ -259,8 +260,8 @@ impl BabelPal for Pal {
 }
 
 async fn serve_logs(mut run: RunFlag, logs_service: LogsService) -> eyre::Result<()> {
-    let _ = fs::remove_file(*BABEL_LOGS_UDS_PATH).await;
-    let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(*BABEL_LOGS_UDS_PATH)?);
+    let _ = fs::remove_file(BABEL_LOGS_UDS_PATH).await;
+    let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(BABEL_LOGS_UDS_PATH)?);
 
     Server::builder()
         .add_service(
@@ -275,9 +276,9 @@ async fn serve_jobs_monitor(
     mut run: RunFlag,
     jobs_monitor_service: jobs_manager::Monitor,
 ) -> eyre::Result<()> {
-    let _ = fs::remove_file(*JOBS_MONITOR_UDS_PATH).await;
+    let _ = fs::remove_file(JOBS_MONITOR_UDS_PATH).await;
     let uds_stream =
-        UnixListenerStream::new(tokio::net::UnixListener::bind(*JOBS_MONITOR_UDS_PATH)?);
+        UnixListenerStream::new(tokio::net::UnixListener::bind(JOBS_MONITOR_UDS_PATH)?);
 
     Server::builder()
         .add_service(

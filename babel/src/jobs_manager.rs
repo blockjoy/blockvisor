@@ -6,7 +6,7 @@
 use crate::{
     async_pid_watch::AsyncPidWatch,
     babel_service::JobRunnerLock,
-    jobs,
+    connect_babel_engine, jobs,
     jobs::{Job, JobState, JobsData, JobsRegistry, CONFIG_SUBDIR, STATUS_SUBDIR},
     utils::{find_processes, gracefully_terminate_process},
 };
@@ -15,6 +15,7 @@ use babel_api::engine::{
     JobConfig, JobInfo, JobProgress, JobStatus, RestartPolicy, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
 use bv_utils::run_flag::RunFlag;
+use bv_utils::with_retry;
 use eyre::{bail, Context, ContextCompat, Report, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
 use std::{collections::HashMap, fs, fs::read_dir, path::Path, sync::Arc, time::Duration};
@@ -35,7 +36,7 @@ pub enum JobsManagerState {
     Shutdown,
 }
 
-pub fn create(
+pub async fn create(
     jobs_dir: &Path,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: &Path,
@@ -56,7 +57,8 @@ pub fn create(
             &mut jobs,
             &jobs_data,
             &job_runner_bin_path.to_string_lossy(),
-        )?;
+        )
+        .await?;
     }
     let jobs_registry = Arc::new(Mutex::new((jobs, jobs_data)));
     let (job_added_tx, job_added_rx) = watch::channel(());
@@ -82,7 +84,7 @@ pub fn create(
     ))
 }
 
-fn load_jobs(
+async fn load_jobs(
     jobs: &mut HashMap<String, Job>,
     jobs_data: &JobsData,
     job_runner_bin_path: &str,
@@ -122,12 +124,16 @@ fn load_jobs(
                 }
                 Err(err) => {
                     // invalid job config file log error, remove invalid file and go to next one
-                    error!(
+                    let err_msg = format!(
                         "invalid job '{}' config file {}, load failed with: {}",
                         name,
                         path.display(),
                         err
                     );
+                    error!(err_msg);
+                    let mut client = connect_babel_engine().await;
+                    let _ = with_retry!(client.bv_error(err_msg.clone()));
+
                     let _ = fs::remove_file(path);
                 }
             }
@@ -161,7 +167,7 @@ impl JobsManagerClient for Client {
     async fn startup(&self) -> Result<()> {
         info!("Startup jobs manager - load jobs and set state to 'Ready'");
         let (jobs, jobs_data) = &mut *self.jobs_registry.lock().await;
-        load_jobs(jobs, jobs_data, &self.job_runner_bin_path)?;
+        load_jobs(jobs, jobs_data, &self.job_runner_bin_path).await?;
         self.jobs_manager_state_tx.send(JobsManagerState::Ready)?;
         Ok(())
     }
@@ -491,6 +497,8 @@ impl Manager {
                                         format!("failed to save failed job '{name}' status: {err}");
                                     job.push_log(&message);
                                     error!(message);
+                                    let mut client = connect_babel_engine().await;
+                                    let _ = with_retry!(client.bv_error(message.clone()));
                                 }
                             }
                         }
@@ -503,19 +511,25 @@ impl Manager {
     }
 
     async fn handle_stopped_job(&self, name: &str, job: &mut Job, jobs_data: &JobsData) {
-        let status = jobs_data.load_status(name).unwrap_or_else(|err| {
-            let message =
-                format!("can't load job '{name}' status from file after it stopped, with: {err}");
-            job.push_log(&message);
-            error!(message);
-            match &job.config.restart {
-                RestartPolicy::Never => JobStatus::Finished {
-                    exit_code: None,
-                    message,
-                },
-                _ => JobStatus::Running,
+        let status = match jobs_data.load_status(name) {
+            Err(err) => {
+                let message = format!(
+                    "can't load job '{name}' status from file after it stopped, with: {err}"
+                );
+                job.push_log(&message);
+                error!(message);
+                let mut client = connect_babel_engine().await;
+                let _ = with_retry!(client.bv_error(message.clone()));
+                match &job.config.restart {
+                    RestartPolicy::Never => JobStatus::Finished {
+                        exit_code: None,
+                        message,
+                    },
+                    _ => JobStatus::Running,
+                }
             }
-        });
+            Ok(status) => status,
+        };
         if let JobStatus::Finished { .. } = status {
             info!("job '{name}' finished with {status:?}");
             job.state = JobState::Inactive(status)
@@ -548,6 +562,8 @@ impl Manager {
                         let message = format!("failed to save failed job '{name}' status: {err}");
                         job.push_log(&message);
                         error!(message);
+                        let mut client = connect_babel_engine().await;
+                        let _ = with_retry!(client.bv_error(message.clone()));
                         JobState::Inactive(JobStatus::Pending)
                     }
                 }
@@ -622,7 +638,7 @@ mod tests {
     }
 
     impl TestEnv {
-        fn setup() -> Result<Self> {
+        async fn setup() -> Result<Self> {
             let tmp_root = TempDir::new()?.to_path_buf();
             let ctrl_file = tmp_root.join("job_runner_started");
             let jobs_dir = tmp_root.join("jobs");
@@ -635,7 +651,8 @@ mod tests {
                 Arc::new(RwLock::new(Some(0))),
                 &test_job_runner_path,
                 JobsManagerState::Ready,
-            )?;
+            )
+            .await?;
             Ok(Self {
                 ctrl_file,
                 jobs_dir,
@@ -658,7 +675,7 @@ mod tests {
 
         async fn wait_for_job_runner(&self) -> Result<()> {
             // asynchronously wait for dummy job_runner to start
-            tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::time::timeout(Duration::from_secs(10), async {
                 while !self.ctrl_file.exists() {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
@@ -689,7 +706,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_create_max_jobs() -> Result<()> {
-        let test_env = TestEnv::setup()?;
+        let test_env = TestEnv::setup().await?;
         let _ = test_env.client.info("missing_job").await.unwrap_err();
 
         // start OK
@@ -721,7 +738,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_create_and_start() -> Result<()> {
-        let test_env = TestEnv::setup()?;
+        let test_env = TestEnv::setup().await?;
         let _ = test_env.client.info("missing_job").await.unwrap_err();
 
         // start OK
@@ -794,7 +811,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_stop() -> Result<()> {
-        let test_env = TestEnv::setup()?;
+        let test_env = TestEnv::setup().await?;
 
         // stop missing
         let _ = test_env.client.stop("missing_job").await.unwrap_err();
@@ -831,7 +848,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_jobs() -> Result<()> {
-        let test_env = TestEnv::setup()?;
+        let test_env = TestEnv::setup().await?;
         let mut jobs = HashMap::new();
         let jobs_data = JobsData::new(&test_env.jobs_dir);
         // no jobs
@@ -839,7 +856,8 @@ mod tests {
             &mut jobs,
             &jobs_data,
             &test_env.test_job_runner_path.to_string_lossy(),
-        )?;
+        )
+        .await?;
         assert!(jobs.is_empty());
 
         // load active and inactive jobs
@@ -873,7 +891,8 @@ mod tests {
             &mut jobs,
             &jobs_data,
             &test_env.test_job_runner_path.to_string_lossy(),
-        )?;
+        )
+        .await?;
 
         assert_eq!(
             Job::new(JobState::Inactive(JobStatus::Pending), config.clone()),
@@ -906,13 +925,14 @@ mod tests {
             &jobs_data,
             &test_env.test_job_runner_path.to_string_lossy(),
         )
+        .await
         .unwrap_err();
         Ok(())
     }
 
     #[tokio::test]
     async fn test_monitor_job_shutdown() -> Result<()> {
-        let mut test_env = TestEnv::setup()?;
+        let mut test_env = TestEnv::setup().await?;
         test_env
             .client
             .create("test_job", dummy_job_config())
@@ -963,7 +983,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_missing_job_runner() -> Result<()> {
-        let mut test_env = TestEnv::setup()?;
+        let mut test_env = TestEnv::setup().await?;
         test_env
             .client
             .create("test_job", dummy_job_config())
@@ -1000,7 +1020,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_dependencies() -> Result<()> {
-        let mut test_env = TestEnv::setup()?;
+        let mut test_env = TestEnv::setup().await?;
         test_env.create_infinite_job_runner();
         test_env
             .client
@@ -1091,7 +1111,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_failed_dependency() -> Result<()> {
-        let mut test_env = TestEnv::setup()?;
+        let mut test_env = TestEnv::setup().await?;
         test_env.create_infinite_job_runner();
         test_env
             .client
@@ -1152,7 +1172,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_restart_crashed_job() -> Result<()> {
-        let mut test_env = TestEnv::setup()?;
+        let mut test_env = TestEnv::setup().await?;
         test_env.create_infinite_job_runner();
         let monitor_handle = test_env.spawn_monitor();
 

@@ -5,6 +5,7 @@
 use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
+    connect_babel_engine,
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
     jobs::{cleanup_job_data, load_job_data, save_job_data},
 };
@@ -377,7 +378,7 @@ impl ChunkDownloader {
     ) -> Result<()> {
         let chunk_size = usize::try_from(self.chunk.size)?;
         let mut pos = 0;
-        let mut destination = DestinationsIter::new(self.chunk.destinations.clone())?;
+        let mut destination = DestinationsIter::new(self.chunk.destinations.clone()).await?;
         while pos < chunk_size {
             if let Some(res) = run
                 .select(self.download_part_with_retry(pos, chunk_size))
@@ -480,9 +481,12 @@ impl ChunkDownloader {
 struct DestinationsIter(Vec<FileLocation>);
 
 impl DestinationsIter {
-    fn new(mut iter: Vec<FileLocation>) -> Result<Self> {
+    async fn new(mut iter: Vec<FileLocation>) -> Result<Self> {
         if iter.is_empty() {
-            error!("corrupted manifest - this is internal BV error, manifest shall be already validated");
+            let err_msg = "corrupted manifest - this is internal BV error, manifest shall be already validated";
+            error!(err_msg);
+            let mut client = connect_babel_engine().await;
+            let _ = with_retry!(client.bv_error(err_msg.to_string()));
             bail!("corrupted manifest - expected at least one destination file in chunk");
         }
         iter.reverse();

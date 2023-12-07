@@ -16,15 +16,31 @@ pub mod upload_job;
 pub mod utils;
 
 use async_trait::async_trait;
+use babel_api::babel::babel_engine_client::BabelEngineClient;
 use babel_api::metadata::{BabelConfig, RamdiskConfiguration};
 use eyre::{Context, Result};
 use std::path::Path;
+use std::time::Duration;
 use tokio::fs;
+use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::info;
 
-lazy_static::lazy_static! {
-    pub static ref BABEL_LOGS_UDS_PATH: &'static Path = Path::new("/var/lib/babel/logs.socket");
-    pub static ref JOBS_MONITOR_UDS_PATH: &'static Path = Path::new("/var/lib/babel/jobs_monitor.socket");
+pub const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+pub const BABEL_LOGS_UDS_PATH: &str = "/var/lib/babel/logs.socket";
+pub const JOBS_MONITOR_UDS_PATH: &str = "/var/lib/babel/jobs_monitor.socket";
+const VSOCK_HOST_CID: u32 = 2;
+const VSOCK_ENGINE_PORT: u32 = 40;
+
+pub async fn connect_babel_engine() -> BabelEngineClient<Channel> {
+    BabelEngineClient::new(
+        Endpoint::from_static("http://[::]:50052")
+            .timeout(RPC_REQUEST_TIMEOUT)
+            .connect_timeout(RPC_CONNECT_TIMEOUT)
+            .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+                tokio_vsock::VsockStream::connect(VSOCK_HOST_CID, VSOCK_ENGINE_PORT)
+            })),
+    )
 }
 
 /// Trait that allows to inject custom PAL implementation.

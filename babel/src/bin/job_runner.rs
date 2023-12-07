@@ -1,6 +1,7 @@
 use babel::{
     download_job::DownloadJob, job_runner::TransferConfig, jobs, log_buffer::LogBuffer,
-    run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH,
+    run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH, RPC_CONNECT_TIMEOUT,
+    RPC_REQUEST_TIMEOUT,
 };
 use babel_api::engine::{
     Compression, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
@@ -142,10 +143,10 @@ async fn run_log_handler(
 ) {
     let mut client = LogsCollectorClient::new(
         Endpoint::from_static("http://[::]:50052")
-            .timeout(Duration::from_secs(3))
-            .connect_timeout(Duration::from_secs(3))
+            .timeout(RPC_REQUEST_TIMEOUT)
+            .connect_timeout(RPC_CONNECT_TIMEOUT)
             .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                UnixStream::connect(BABEL_LOGS_UDS_PATH.to_path_buf())
+                UnixStream::connect(BABEL_LOGS_UDS_PATH)
             })),
     );
 

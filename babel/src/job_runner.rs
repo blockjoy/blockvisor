@@ -1,21 +1,21 @@
 use crate::{
-    jobs,
+    connect_babel_engine, jobs,
     utils::{Backoff, LimitStatus},
-    JOBS_MONITOR_UDS_PATH,
+    JOBS_MONITOR_UDS_PATH, RPC_CONNECT_TIMEOUT, RPC_REQUEST_TIMEOUT,
 };
 use async_trait::async_trait;
 use babel_api::{
     babel::jobs_monitor_client::JobsMonitorClient,
     engine::{Compression, JobStatus, RestartConfig, RestartPolicy},
 };
-use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
+use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 use tokio::{net::UnixStream, sync::Semaphore};
-use tonic::transport::{Channel, Endpoint, Uri};
+use tonic::transport::{Endpoint, Uri};
 use tracing::{debug, error, info, warn};
 
 const MAX_OPENED_FILES: u64 = 1024;
@@ -41,7 +41,11 @@ impl<T: JobRunnerImpl + Send> JobRunner for T {
         if let Err(status) = self.try_run_job(run.clone(), name).await {
             if let Err(err) = jobs::save_status(&status, name, &jobs_dir.join(jobs::STATUS_SUBDIR))
             {
-                error!("job status changed to {status:?}, but failed to save job data: {err}")
+                let err_msg =
+                    format!("job status changed to {status:?}, but failed to save job data: {err}");
+                error!(err_msg);
+                let mut client = connect_babel_engine().await;
+                let _ = with_retry!(client.bv_error(err_msg.clone()));
             }
             run.stop();
             status
@@ -92,7 +96,6 @@ pub struct JobBackoff<T> {
     backoff: Option<Backoff<T>>,
     max_retries: Option<u32>,
     restart_always: bool,
-    job_monitor_client: JobsMonitorClient<Channel>,
 }
 
 impl<T: AsyncTimer> JobBackoff<T> {
@@ -106,35 +109,24 @@ impl<T: AsyncTimer> JobBackoff<T> {
                 Duration::from_millis(cfg.backoff_timeout_ms),
             ))
         };
-        let job_monitor_client = JobsMonitorClient::new(
-            Endpoint::from_static("http://[::]:50052")
-                .timeout(Duration::from_secs(3))
-                .connect_timeout(Duration::from_secs(3))
-                .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                    UnixStream::connect(JOBS_MONITOR_UDS_PATH.to_path_buf())
-                })),
-        );
         match policy {
             RestartPolicy::Never => Self {
                 job_name,
                 backoff: None,
                 max_retries: None,
                 restart_always: false,
-                job_monitor_client,
             },
             RestartPolicy::Always(cfg) => Self {
                 job_name,
                 backoff: build_backoff(cfg),
                 max_retries: cfg.max_retries,
                 restart_always: true,
-                job_monitor_client,
             },
             RestartPolicy::OnFailure(cfg) => Self {
                 job_name,
                 backoff: build_backoff(cfg),
                 max_retries: cfg.max_retries,
                 restart_always: false,
-                job_monitor_client,
             },
         }
     }
@@ -162,29 +154,28 @@ impl<T: AsyncTimer> JobBackoff<T> {
                     message: message.clone(),
                 }
             };
-            let _ = self
-                .job_monitor_client
-                .push_log((self.job_name.clone(), message.clone()))
-                .await;
+            let mut client = JobsMonitorClient::new(
+                Endpoint::from_static("http://[::]:50052")
+                    .timeout(RPC_REQUEST_TIMEOUT)
+                    .connect_timeout(RPC_CONNECT_TIMEOUT)
+                    .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+                        UnixStream::connect(JOBS_MONITOR_UDS_PATH)
+                    })),
+            );
+            let _ = with_retry!(client.push_log((self.job_name.clone(), message.clone())));
             if let Some(backoff) = &mut self.backoff {
                 if let Some(max_retries) = self.max_retries {
                     if backoff.wait_with_limit(max_retries).await == LimitStatus::Exceeded {
                         Err(job_failed())
                     } else {
                         debug!("{message}  - retry");
-                        let _ = self
-                            .job_monitor_client
-                            .register_restart(self.job_name.clone())
-                            .await;
+                        let _ = with_retry!(client.register_restart(self.job_name.clone()));
                         Ok(())
                     }
                 } else {
                     backoff.wait().await;
                     debug!("{message}  - retry");
-                    let _ = self
-                        .job_monitor_client
-                        .register_restart(self.job_name.clone())
-                        .await;
+                    let _ = with_retry!(client.register_restart(self.job_name.clone()));
                     Ok(())
                 }
             } else {

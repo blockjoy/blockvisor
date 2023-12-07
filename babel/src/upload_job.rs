@@ -4,6 +4,7 @@
 /// Backoff timeout and retry count are reset if upload continue without errors for at least `backoff_timeout_ms`.
 use crate::{
     compression::{Coder, NoCoder, ZstdEncoder},
+    connect_babel_engine,
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
     jobs::{cleanup_job_data, load_job_data, save_job_data},
 };
@@ -12,7 +13,7 @@ use babel_api::engine::{
     Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, JobStatus,
     RestartPolicy, UploadManifest,
 };
-use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
+use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use nu_glob::{Pattern, PatternError};
@@ -389,14 +390,15 @@ impl ChunkUploader {
             tokio::sync::watch::channel(Checksum::Blake3(blake3::Hasher::new().finalize().into()));
         if self.chunk.size > 0 {
             let body = match self.config.compression {
-                None => {
-                    reqwest::Body::wrap_stream(futures_util::stream::iter(DestinationsReader::new(
+                None => reqwest::Body::wrap_stream(futures_util::stream::iter(
+                    DestinationsReader::new(
                         self.chunk.destinations.clone(),
                         self.config.clone(),
                         NoCoder::default(),
                         checksum_tx,
-                    )?))
-                }
+                    )
+                    .await?,
+                )),
                 Some(Compression::ZSTD(level)) => {
                     let (parts, compressed_size) = consume_reader(
                         run.clone(),
@@ -405,7 +407,8 @@ impl ChunkUploader {
                             self.config.clone(),
                             ZstdEncoder::new(level)?,
                             checksum_tx,
-                        )?,
+                        )
+                        .await?,
                     )
                     .await?;
                     self.chunk.size = compressed_size; // update chunk size after compression
@@ -484,7 +487,7 @@ struct DestinationsReader<E> {
 }
 
 impl<E: Coder> DestinationsReader<E> {
-    fn new(
+    async fn new(
         mut iter: Vec<FileLocation>,
         config: TransferConfig,
         encoder: E,
@@ -493,7 +496,10 @@ impl<E: Coder> DestinationsReader<E> {
         iter.reverse();
         let last = match iter.pop() {
             None => {
-                error!("corrupted manifest - this is internal BV error, manifest shall be already validated");
+                let err_msg = "corrupted manifest - this is internal BV error, manifest shall be already validated";
+                error!(err_msg);
+                let mut client = connect_babel_engine().await;
+                let _ = with_retry!(client.bv_error(err_msg.to_string()));
                 Err(anyhow!(
                     "corrupted manifest - expected at least one destination file in chunk"
                 ))
