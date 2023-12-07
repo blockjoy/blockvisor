@@ -189,17 +189,12 @@ impl Downloader {
         let available_space = bv_utils::system::find_disk_by_path(&sys, &self.destination_dir)
             .map(|disk| disk.available_space())
             .ok_or_else(|| anyhow!("Cannot get available disk space"))?;
-        let downloaded_bytes = self.manifest.chunks.iter().fold(0, |acc, item| {
-            if downloaded_chunks.contains(&item.key) {
-                acc + item.size
-            } else {
-                acc
-            }
-        });
-        if self.manifest.total_size - downloaded_bytes > available_space {
+
+        let required_space = required_disk_space(downloaded_chunks, &self.manifest)?;
+        if required_space > available_space {
             bail!(
                 "Can't download {} bytes of data while only {} available",
-                self.manifest.total_size,
+                required_space,
                 available_space
             )
         }
@@ -223,6 +218,30 @@ impl Downloader {
         );
         tokio::spawn(writer.run(run.clone()))
     }
+}
+
+fn required_disk_space(
+    downloaded_chunks: &HashSet<String>,
+    manifest: &DownloadManifest,
+) -> Result<u64> {
+    let downloaded_bytes = manifest.chunks.iter().fold(0, |acc, item| {
+        if downloaded_chunks.contains(&item.key) {
+            acc + item
+                .destinations
+                .iter()
+                .fold(0, |acc, destination| acc + destination.size)
+        } else {
+            acc
+        }
+    });
+    if manifest.total_size < downloaded_bytes {
+        bail!(
+            "invalid download manifest - total_size {} is smaller than already downloaded data {}",
+            manifest.total_size,
+            downloaded_bytes
+        )
+    }
+    Ok(manifest.total_size - downloaded_bytes)
 }
 
 struct ParallelChunkDownloaders<'a> {
@@ -1432,5 +1451,85 @@ mod tests {
         let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
         assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
         Ok(())
+    }
+
+    #[test]
+    fn test_required_disk_space() {
+        let manifest = DownloadManifest {
+            total_size: 978,
+            compression: Some(Compression::ZSTD(3)),
+            chunks: vec![
+                Chunk {
+                    key: "first_chunk".to_string(),
+                    url: None,
+                    checksum: Checksum::Sha1([0; 20]),
+                    size: 300,
+                    destinations: vec![
+                        FileLocation {
+                            path: PathBuf::from("zero.file"),
+                            pos: 0,
+                            size: 128,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("first.file"),
+                            pos: 0,
+                            size: 201,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("second.file"),
+                            pos: 0,
+                            size: 301,
+                        },
+                        FileLocation {
+                            path: PathBuf::from("empty.file"),
+                            pos: 0,
+                            size: 0,
+                        },
+                    ],
+                },
+                Chunk {
+                    key: "second_chunk".to_string(),
+                    url: None,
+                    checksum: Checksum::Sha1([0; 20]),
+                    size: 200,
+                    destinations: vec![FileLocation {
+                        path: PathBuf::from("second.file"),
+                        pos: 300,
+                        size: 324,
+                    }],
+                },
+                Chunk {
+                    key: "third_chunk".to_string(),
+                    url: None,
+                    checksum: Checksum::Sha1([0; 20]),
+                    size: 19,
+                    destinations: vec![FileLocation {
+                        path: PathBuf::from("third.file"),
+                        pos: 0,
+                        size: 24,
+                    }],
+                },
+            ],
+        };
+        assert_eq!(
+            24,
+            required_disk_space(
+                &HashSet::from(["first_chunk".to_string(), "second_chunk".to_string()]),
+                &manifest
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            324,
+            required_disk_space(
+                &HashSet::from(["first_chunk".to_string(), "third_chunk".to_string()]),
+                &manifest
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            654,
+            required_disk_space(&HashSet::from(["second_chunk".to_string()]), &manifest).unwrap()
+        );
     }
 }

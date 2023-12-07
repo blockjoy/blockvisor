@@ -351,6 +351,15 @@ impl DownloadManifest {
                 bail!("corrupted manifest - expected at least one destination file in chunk");
             }
         }
+        let destinations_total_size = self.chunks.iter().fold(0, |acc, item| {
+            acc + item
+                .destinations
+                .iter()
+                .fold(0, |acc, destination| acc + destination.size)
+        });
+        if self.total_size != destinations_total_size {
+            bail!("corrupted manifest - total size {} is different than sum of all destinations sizes {destinations_total_size}", self.total_size);
+        }
         Ok(())
     }
 }
