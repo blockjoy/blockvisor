@@ -16,6 +16,7 @@ use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use nu_glob::{Pattern, PatternError};
+use std::time::Duration;
 use std::{
     cmp::min,
     fs::File,
@@ -27,6 +28,10 @@ use std::{
 use tokio::sync::Semaphore;
 use tokio::task::JoinError;
 use tracing::{error, info};
+
+// if uploading single chunk (about 1Gb) takes more than 100min, it mean that something
+// is not ok
+const UPLOAD_SINGLE_CHUNK_TIMEOUT: Duration = Duration::from_secs(100 * 60);
 
 pub struct UploadJob<T> {
     uploader: Uploader,
@@ -419,6 +424,7 @@ impl ChunkUploader {
                                 .clone(),
                         )
                         .header("Content-Length", format!("{}", self.chunk.size))
+                        .timeout(UPLOAD_SINGLE_CHUNK_TIMEOUT)
                         .body(body)
                         .send(),
                 )

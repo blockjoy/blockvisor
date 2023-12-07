@@ -18,6 +18,7 @@ use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{
     cmp::min,
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -34,6 +35,10 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinError;
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
 use tracing::{error, info};
+
+// if downloading single part (about 100Mb) takes more than 10min, it mean that something
+// is not ok
+const DOWNLOAD_SINGLE_PART_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub fn cleanup_job(parts_file_path: &Path, chunks: Option<(&Path, &Vec<Chunk>)>) {
     cleanup_job_data(parts_file_path);
@@ -406,6 +411,7 @@ impl ChunkDownloader {
                     .clone(),
             )
             .header(RANGE, format!("bytes={}-{}", pos, pos + buffer_size - 1))
+            .timeout(DOWNLOAD_SINGLE_PART_TIMEOUT)
             .send()
             .await?;
         drop(connection_permit);

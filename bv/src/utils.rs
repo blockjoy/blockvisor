@@ -10,6 +10,9 @@ use tokio::{fs, io::AsyncWriteExt, time::sleep};
 use tonic::Request;
 use tracing::{debug, warn};
 
+// image download should never take more than 15min
+const ARCHIVE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
 /// Get the pid of the running VM process knowing its process name and part of command line.
 pub fn get_process_pid(process_name: &str, cmd: &str) -> Result<u32> {
     let mut sys = System::new();
@@ -108,7 +111,10 @@ async fn download_file(url: &str, path: &PathBuf) -> Result<()> {
     let _ = fs::remove_file(path).await;
     let mut file = fs::File::create(path).await?;
 
-    let mut resp = reqwest::get(url).await?;
+    let client = reqwest::Client::builder()
+        .timeout(ARCHIVE_DOWNLOAD_TIMEOUT)
+        .build()?;
+    let mut resp = client.get(url).send().await?;
 
     while let Some(chunk) = resp.chunk().await? {
         file.write_all(&chunk).await?;
