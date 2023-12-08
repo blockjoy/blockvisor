@@ -1,10 +1,13 @@
 /// This module implements supervisor for node entry points. It spawn child processes as defined in
 /// given config and watch them. Stopped child (whatever reason) is respawned with exponential backoff
 /// timeout. Backoff timeout is reset after child stays alive for at least `backoff_timeout_ms`.
-use crate::utils::{kill_all_processes, Backoff};
-use babel_api::{babelsup::SupervisorConfig, engine::PosixSignal};
+use crate::utils::{find_processes, Backoff};
+use babel_api::babelsup::SupervisorConfig;
+use bv_utils::system::is_process_running;
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+use sysinfo::{PidExt, ProcessExt, Signal, System, SystemExt};
 use tokio::{
     process::Command,
     sync::{oneshot, watch},
@@ -34,12 +37,7 @@ pub async fn run<T: AsyncTimer>(
     if let Some(supervisor) = wait_for_setup(timer, run.clone(), babel_path, sup_config_rx).await {
         // Check if there are no babel after previous run.
         // If so, just kill it.
-        kill_all_processes(
-            &supervisor.babel_path.to_string_lossy(),
-            &[],
-            None,
-            PosixSignal::SIGTERM,
-        );
+        kill_babel(&supervisor.babel_path);
 
         supervisor.run_babel(run, babel_change_rx).await;
     }
@@ -67,7 +65,21 @@ async fn wait_for_setup<T: AsyncTimer>(
 }
 
 fn kill_babel(path: &Path) {
-    kill_all_processes(&path.to_string_lossy(), &[], None, PosixSignal::SIGTERM);
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let ps = sys.processes();
+    if let Some((_, proc)) = find_processes(&path.to_string_lossy(), &[], ps).next() {
+        let now = Instant::now();
+        proc.kill_with(Signal::Kill);
+        while is_process_running(proc.pid().as_u32()) {
+            if now.elapsed() > Duration::from_secs(5) {
+                proc.kill();
+                proc.wait();
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(1))
+        }
+    };
 }
 
 struct Supervisor<T> {

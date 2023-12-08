@@ -671,7 +671,7 @@ mod tests {
             kill_all_processes(
                 &self.test_job_runner_path.to_owned().to_string_lossy(),
                 &[name],
-                None,
+                Duration::from_secs(60),
                 PosixSignal::SIGTERM,
             )
         }

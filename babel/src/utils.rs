@@ -38,12 +38,7 @@ pub fn bv_shell(body: &str) -> (&str, Vec<String>) {
 }
 
 /// Kill all processes that match `cmd` and passed `args`.
-pub fn kill_all_processes(
-    cmd: &str,
-    args: &[&str],
-    timeout: Option<Duration>,
-    signal: PosixSignal,
-) {
+pub fn kill_all_processes(cmd: &str, args: &[&str], timeout: Duration, signal: PosixSignal) {
     let mut sys = System::new();
     sys.refresh_processes();
     let ps = sys.processes();
@@ -60,19 +55,17 @@ fn kill_process_tree(
     proc: &Process,
     ps: &HashMap<Pid, Process>,
     now: Instant,
-    timeout: Option<Duration>,
+    timeout: Duration,
     signal: Signal,
 ) {
     // Better to kill parent first, since it may implement some child restart mechanism.
     // Try to interrupt the process, and kill it after timeout in case it has not finished.
     proc.kill_with(signal);
     while is_process_running(proc.pid().as_u32()) {
-        if let Some(timeout) = timeout {
-            if now.elapsed() > timeout {
-                proc.kill();
-                proc.wait();
-                break;
-            }
+        if now.elapsed() > timeout {
+            proc.kill();
+            proc.wait();
+            break;
         }
         std::thread::sleep(PROCESS_CHECK_INTERVAL)
     }
@@ -374,7 +367,7 @@ pub mod tests {
         kill_all_processes(
             &cmd_path.to_string_lossy(),
             &["a", "b", "c"],
-            Some(Duration::from_secs(3)),
+            Duration::from_secs(3),
             PosixSignal::SIGTERM,
         );
         tokio::time::timeout(Duration::from_secs(60), async {

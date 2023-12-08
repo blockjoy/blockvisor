@@ -55,7 +55,7 @@ impl<T: AsyncTimer + Send> RunShJob<T> {
                 .map(|item| item.as_str())
                 .collect::<Vec<_>>()
                 .as_slice(),
-            Some(self.shutdown_timeout),
+            self.shutdown_timeout,
             self.shutdown_signal,
         );
         <Self as JobRunner>::run(self, run, name, jobs_dir).await;
@@ -91,7 +91,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
                         utils::kill_all_processes(
                             cmd_name,
                             args.as_slice(),
-                            None,
+                            self.shutdown_timeout,
                             self.shutdown_signal,
                         );
                     }
