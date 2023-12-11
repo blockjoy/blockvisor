@@ -183,10 +183,8 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             into_rhai_result(babel_engine.load_data())
         });
         let babel_engine = self.babel_engine.clone();
-        self.rhai_engine.register_fn("debug", move |msg: &str| {
+        self.rhai_engine.on_debug(move |msg, _, _| {
             babel_engine.log(Level::DEBUG, msg);
-            // debug is built-in function, so to override it, we need to return the same type
-            Result::<_, Box<rhai::EvalAltResult>>::Ok("")
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("info", move |msg: &str| {
@@ -511,7 +509,10 @@ mod tests {
         let mut babel = MockBabelEngine::new();
         babel
             .expect_log()
-            .with(predicate::eq(Level::DEBUG), predicate::eq("debug message"))
+            .with(
+                predicate::eq(Level::DEBUG),
+                predicate::eq("\"debug message\""),
+            )
             .return_once(|_, _| ());
         babel
             .expect_log()
