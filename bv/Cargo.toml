@@ -32,7 +32,7 @@ name = "blockvisord-dev"
 path = "src/bin/blockvisord-dev.rs"
 
 [dependencies]
-aws-sdk-s3 = {version = "0.39.1", features = ["behavior-version-latest"]}
+aws-sdk-s3 = {version = "1.5.0", features = ["behavior-version-latest"]}
 bv_utils = {version = "*", path = "../bv_utils"}
 async-trait = "0.1.60"
 babel_api = {version = "*", path = "../babel_api"}
