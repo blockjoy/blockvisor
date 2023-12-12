@@ -4,12 +4,13 @@
 /// Backoff timeout and retry count are reset if upload continue without errors for at least `backoff_timeout_ms`.
 use crate::{
     compression::{Coder, NoCoder, ZstdEncoder},
-    connect_babel_engine,
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
     jobs::{cleanup_job_data, load_job_data, save_job_data},
     utils::sources_list,
+    BabelEngineConnector,
 };
 use async_trait::async_trait;
+use babel_api::babel::babel_engine_client::BabelEngineClient;
 use babel_api::engine::{
     Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, JobStatus,
     RestartPolicy, UploadManifest,
@@ -29,28 +30,31 @@ use std::{
 };
 use tokio::sync::Semaphore;
 use tokio::task::JoinError;
+use tonic::transport::Channel;
 use tracing::{error, info};
 
 // if uploading single chunk (about 1Gb) takes more than 100min, it mean that something
 // is not ok
 const UPLOAD_SINGLE_CHUNK_TIMEOUT: Duration = Duration::from_secs(100 * 60);
 
-pub struct UploadJob<T> {
-    uploader: Uploader,
+pub struct UploadJob<T, C> {
+    uploader: Uploader<C>,
     restart_policy: RestartPolicy,
     timer: T,
 }
 
-struct Uploader {
+struct Uploader<C> {
+    connector: C,
     manifest: UploadManifest,
     source_dir: PathBuf,
     exclude: Vec<Pattern>,
     config: TransferConfig,
 }
 
-impl<T: AsyncTimer + Send> UploadJob<T> {
+impl<T: AsyncTimer + Send, C: BabelEngineConnector + Send> UploadJob<T, C> {
     pub fn new(
         timer: T,
+        connector: C,
         manifest: UploadManifest,
         source_dir: PathBuf,
         exclude: Vec<String>,
@@ -59,6 +63,7 @@ impl<T: AsyncTimer + Send> UploadJob<T> {
     ) -> Result<Self> {
         Ok(Self {
             uploader: Uploader {
+                connector,
                 manifest,
                 source_dir,
                 exclude: exclude
@@ -94,7 +99,7 @@ impl<T: AsyncTimer + Send> UploadJob<T> {
 }
 
 #[async_trait]
-impl<T: AsyncTimer + Send> JobRunnerImpl for UploadJob<T> {
+impl<T: AsyncTimer + Send, C: BabelEngineConnector + Send> JobRunnerImpl for UploadJob<T, C> {
     /// Run and restart uploader until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
@@ -125,7 +130,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for UploadJob<T> {
     }
 }
 
-impl Uploader {
+impl<C: BabelEngineConnector> Uploader<C> {
     async fn upload(&mut self, mut run: RunFlag) -> Result<()> {
         let mut manifest = if let Some(manifest) = load_job_data(&self.config.parts_file_path) {
             manifest
@@ -149,7 +154,7 @@ impl Uploader {
         let mut uploaders_result = Ok(());
         loop {
             if parallel_uploaders_run.load() {
-                uploaders.launch_more();
+                uploaders.launch_more(&self.connector);
             }
             match uploaders.wait_for_next().await {
                 Some(Ok(chunk)) => {
@@ -194,7 +199,7 @@ impl Uploader {
                     .to_path_buf();
             }
         }
-        let mut client = connect_babel_engine().await;
+        let mut client = self.connector.connect();
         with_retry!(client.put_download_manifest(manifest.clone()))
             .with_context(|| "failed to send DownloadManifest blueprint back to API")?;
 
@@ -293,7 +298,7 @@ impl<'a> ParallelChunkUploaders<'a> {
         }
     }
 
-    fn launch_more(&mut self) {
+    fn launch_more(&mut self, connector: &impl BabelEngineConnector) {
         while self.futures.len() < self.config.max_runners {
             let Some(chunk) = self.chunks.pop() else {
                 break;
@@ -304,8 +309,10 @@ impl<'a> ParallelChunkUploaders<'a> {
             }
             let uploader =
                 ChunkUploader::new(chunk, self.config.clone(), self.connection_pool.clone());
-            self.futures
-                .push(Box::pin(tokio::spawn(uploader.run(self.run.clone()))));
+            let client = connector.connect();
+            self.futures.push(Box::pin(tokio::spawn(
+                uploader.run(self.run.clone(), client),
+            )));
         }
     }
 
@@ -334,14 +341,18 @@ impl ChunkUploader {
         }
     }
 
-    async fn run(self, run: RunFlag) -> Result<Chunk> {
+    async fn run(self, run: RunFlag, client: BabelEngineClient<Channel>) -> Result<Chunk> {
         let key = self.chunk.key.clone();
-        self.upload_chunk(run)
+        self.upload_chunk(run, client)
             .await
             .with_context(|| format!("chunk '{key}' upload failed"))
     }
 
-    async fn upload_chunk(mut self, mut run: RunFlag) -> Result<Chunk> {
+    async fn upload_chunk(
+        mut self,
+        mut run: RunFlag,
+        client: BabelEngineClient<Channel>,
+    ) -> Result<Chunk> {
         self.chunk.size = self
             .chunk
             .destinations
@@ -353,6 +364,7 @@ impl ChunkUploader {
             let body = match self.config.compression {
                 None => reqwest::Body::wrap_stream(futures_util::stream::iter(
                     DestinationsReader::new(
+                        client,
                         self.chunk.destinations.clone(),
                         self.config.clone(),
                         NoCoder::default(),
@@ -364,6 +376,7 @@ impl ChunkUploader {
                     let (parts, compressed_size) = consume_reader(
                         run.clone(),
                         DestinationsReader::new(
+                            client,
                             self.chunk.destinations.clone(),
                             self.config.clone(),
                             ZstdEncoder::new(level)?,
@@ -449,6 +462,7 @@ struct DestinationsReader<E> {
 
 impl<E: Coder> DestinationsReader<E> {
     async fn new(
+        mut client: BabelEngineClient<Channel>,
         mut iter: Vec<FileLocation>,
         config: TransferConfig,
         encoder: E,
@@ -459,7 +473,6 @@ impl<E: Coder> DestinationsReader<E> {
             None => {
                 let err_msg = "corrupted manifest - this is internal BV error, manifest shall be already validated";
                 error!(err_msg);
-                let mut client = connect_babel_engine().await;
                 let _ = with_retry!(client.bv_error(err_msg.to_string()));
                 Err(anyhow!(
                     "corrupted manifest - expected at least one destination file in chunk"
@@ -567,11 +580,17 @@ impl<E: Coder> Iterator for DestinationsReader<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils;
+    use crate::utils::tests::MockBabelEngine;
     use assert_fs::TempDir;
     use babel_api::engine::{RestartConfig, Slot};
+    use bv_tests_utils::rpc::TestServer;
+    use bv_tests_utils::start_test_server;
     use bv_utils::timer::SysTimer;
     use mockito::{Matcher, Server, ServerGuard};
     use std::fs;
+    use tokio_stream::wrappers::UnixListenerStream;
+    use tonic::Response;
     use url::Url;
 
     struct TestEnv {
@@ -612,9 +631,15 @@ mod tests {
     }
 
     impl TestEnv {
-        fn upload_job(&self, manifest: UploadManifest) -> UploadJob<SysTimer> {
+        fn upload_job(
+            &self,
+            manifest: UploadManifest,
+        ) -> UploadJob<SysTimer, utils::tests::DummyConnector> {
             UploadJob {
                 uploader: Uploader {
+                    connector: utils::tests::DummyConnector {
+                        tmp_dir: self.tmp_dir.clone(),
+                    },
                     manifest,
                     source_dir: self.tmp_dir.clone(),
                     exclude: vec![Pattern::new("**/ignored_*").unwrap()],
@@ -635,8 +660,15 @@ mod tests {
             }
         }
 
-        fn url(&self, path: &str) -> url::Url {
-            url::Url::parse(&format!("{}/{}", self.server.url(), path)).unwrap()
+        async fn start_engine_server(&self, mock: MockBabelEngine) -> TestServer {
+            start_test_server!(
+                &self.tmp_dir,
+                babel_api::babel::babel_engine_server::BabelEngineServer::new(mock)
+            )
+        }
+
+        fn url(&self, path: &str) -> Url {
+            Url::parse(&format!("{}/{}", self.server.url(), path)).unwrap()
         }
 
         fn dummy_upload_manifest(&self) -> Result<UploadManifest> {
@@ -658,8 +690,8 @@ mod tests {
             })
         }
 
-        fn expected_download_manifest(&self) -> Result<String> {
-            Ok(serde_json::to_string(&DownloadManifest {
+        fn expected_download_manifest(&self) -> Result<DownloadManifest> {
+            Ok(DownloadManifest {
                 total_size: 275,
                 compression: None,
                 chunks: vec![
@@ -731,7 +763,7 @@ mod tests {
                         ],
                     },
                 ],
-            })?)
+            })
         }
     }
 
@@ -769,13 +801,14 @@ mod tests {
             .mock("PUT", "/url.c")
             .match_body(Matcher::Exact(expected_body))
             .create();
-        let expected_manifest = test_env.expected_download_manifest()?;
-        test_env
-            .server
-            .mock("PUT", "/url.m")
-            .match_body(Matcher::Exact(expected_manifest))
-            .create();
 
+        let expected_manifest = test_env.expected_download_manifest()?;
+        let mut mock = MockBabelEngine::new();
+        mock.expect_put_download_manifest()
+            .once()
+            .withf(move |req| *req.get_ref() == expected_manifest)
+            .returning(|_| Ok(Response::new(())));
+        let server = test_env.start_engine_server(mock).await;
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(0),
@@ -791,6 +824,7 @@ mod tests {
         assert!(test_env.upload_progress_path.exists());
         let progress = fs::read_to_string(&test_env.upload_progress_path).unwrap();
         assert_eq!(&progress, r#"{"total":3,"current":3,"message":"chunks"}"#);
+        server.assert().await;
 
         Ok(())
     }
@@ -833,7 +867,7 @@ mod tests {
             .mock("PUT", "/url.c")
             .match_body(Matcher::from(encoder.finalize()?))
             .create();
-        let expected_manifest = serde_json::to_string(&DownloadManifest {
+        let expected_manifest = DownloadManifest {
             total_size: 275,
             compression: Some(Compression::ZSTD(5)),
             chunks: vec![
@@ -902,12 +936,13 @@ mod tests {
                     ],
                 },
             ],
-        })?;
-        test_env
-            .server
-            .mock("PUT", "/url.m")
-            .match_body(Matcher::Exact(expected_manifest))
-            .create();
+        };
+        let mut mock = MockBabelEngine::new();
+        mock.expect_put_download_manifest()
+            .once()
+            .withf(move |req| *req.get_ref() == expected_manifest)
+            .returning(|_| Ok(Response::new(())));
+        let server = test_env.start_engine_server(mock).await;
 
         let mut job = test_env.upload_job(test_env.dummy_upload_manifest()?);
         job.uploader.config.compression = Some(Compression::ZSTD(5));
@@ -923,18 +958,19 @@ mod tests {
             },
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );
+        server.assert().await;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_empty_upload_ok() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let test_env = setup_test_env()?;
         fs::remove_dir_all(&test_env.tmp_dir)?;
         fs::create_dir_all(&test_env.tmp_dir)?;
         File::create(test_env.tmp_dir.join("empty_file_1"))?;
         File::create(test_env.tmp_dir.join("empty_file_2"))?;
 
-        let expected_manifest = serde_json::to_string(&DownloadManifest {
+        let expected_manifest = DownloadManifest {
             total_size: 0,
             compression: None,
             chunks: vec![Chunk {
@@ -958,12 +994,13 @@ mod tests {
                     },
                 ],
             }],
-        })?;
-        test_env
-            .server
-            .mock("PUT", "/url.m")
-            .match_body(Matcher::Exact(expected_manifest))
-            .create();
+        };
+        let mut mock = MockBabelEngine::new();
+        mock.expect_put_download_manifest()
+            .once()
+            .withf(move |req| *req.get_ref() == expected_manifest)
+            .returning(|_| Ok(Response::new(())));
+        let server = test_env.start_engine_server(mock).await;
 
         assert_eq!(
             JobStatus::Finished {
@@ -975,6 +1012,7 @@ mod tests {
                 .run(RunFlag::default(), "name", &test_env.tmp_dir)
                 .await
         );
+        server.assert().await;
         Ok(())
     }
 
@@ -992,11 +1030,12 @@ mod tests {
             .match_body(Matcher::Exact(expected_body))
             .create();
         let expected_manifest = test_env.expected_download_manifest()?;
-        test_env
-            .server
-            .mock("PUT", "/url.m")
-            .match_body(Matcher::Exact(expected_manifest))
-            .create();
+        let mut mock = MockBabelEngine::new();
+        mock.expect_put_download_manifest()
+            .once()
+            .withf(move |req| *req.get_ref() == expected_manifest)
+            .returning(|_| Ok(Response::new(())));
+        let server = test_env.start_engine_server(mock).await;
 
         let job = test_env.upload_job(test_env.dummy_upload_manifest()?);
         // mark first two as uploaded
@@ -1033,6 +1072,7 @@ mod tests {
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );
         assert!(!test_env.upload_parts_path.exists());
+        server.assert().await;
         Ok(())
     }
 

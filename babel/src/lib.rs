@@ -30,15 +30,24 @@ pub const JOBS_MONITOR_UDS_PATH: &str = "/var/lib/babel/jobs_monitor.socket";
 const VSOCK_HOST_CID: u32 = 2;
 const VSOCK_ENGINE_PORT: u32 = 40;
 
-pub async fn connect_babel_engine() -> BabelEngineClient<Channel> {
-    BabelEngineClient::new(
-        Endpoint::from_static("http://[::]:50052")
-            .timeout(RPC_REQUEST_TIMEOUT)
-            .connect_timeout(RPC_CONNECT_TIMEOUT)
-            .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                tokio_vsock::VsockStream::connect(VSOCK_HOST_CID, VSOCK_ENGINE_PORT)
-            })),
-    )
+/// Trait that allows to inject custom babel_engine implementation.
+pub trait BabelEngineConnector {
+    fn connect(&self) -> BabelEngineClient<Channel>;
+}
+
+pub struct VSockConnector;
+
+impl BabelEngineConnector for VSockConnector {
+    fn connect(&self) -> BabelEngineClient<Channel> {
+        BabelEngineClient::new(
+            Endpoint::from_static("http://[::]:50052")
+                .timeout(RPC_REQUEST_TIMEOUT)
+                .connect_timeout(RPC_CONNECT_TIMEOUT)
+                .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
+                    tokio_vsock::VsockStream::connect(VSOCK_HOST_CID, VSOCK_ENGINE_PORT)
+                })),
+        )
+    }
 }
 
 /// Trait that allows to inject custom PAL implementation.

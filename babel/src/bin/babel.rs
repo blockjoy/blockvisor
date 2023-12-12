@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use babel::{
     babel_service, babel_service::BabelServiceState, is_babel_config_applied, jobs::JOBS_DIR,
     jobs_manager, jobs_manager::JobsManagerState, load_config, logs_service::LogsService, utils,
-    BabelPal, BABEL_LOGS_UDS_PATH, JOBS_MONITOR_UDS_PATH,
+    BabelPal, VSockConnector, BABEL_LOGS_UDS_PATH, JOBS_MONITOR_UDS_PATH,
 };
 use babel_api::metadata::RamdiskConfiguration;
 use bv_utils::{cmd::run_cmd, logging::setup_logging, run_flag::RunFlag};
@@ -63,6 +63,7 @@ async fn main() -> eyre::Result<()> {
         };
 
     let (client, monitor, manager) = jobs_manager::create(
+        babel::VSockConnector,
         &JOBS_DIR,
         job_runner_lock.clone(),
         &JOB_RUNNER_BIN_PATH,
@@ -273,7 +274,7 @@ async fn serve_logs(mut run: RunFlag, logs_service: LogsService) -> eyre::Result
 
 async fn serve_jobs_monitor(
     mut run: RunFlag,
-    jobs_monitor_service: jobs_manager::Monitor,
+    jobs_monitor_service: jobs_manager::Monitor<VSockConnector>,
 ) -> eyre::Result<()> {
     let _ = fs::remove_file(JOBS_MONITOR_UDS_PATH).await;
     let uds_stream =

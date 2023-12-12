@@ -1,7 +1,7 @@
 use crate::{
-    connect_babel_engine, jobs,
+    jobs,
     utils::{Backoff, LimitStatus},
-    JOBS_MONITOR_UDS_PATH,
+    BabelEngineConnector, VSockConnector, JOBS_MONITOR_UDS_PATH,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -43,7 +43,7 @@ impl<T: JobRunnerImpl + Send> JobRunner for T {
                 let err_msg =
                     format!("job status changed to {status:?}, but failed to save job data: {err}");
                 error!(err_msg);
-                let mut client = connect_babel_engine().await;
+                let mut client = VSockConnector.connect();
                 let _ = with_retry!(client.bv_error(err_msg.clone()));
             }
             run.stop();

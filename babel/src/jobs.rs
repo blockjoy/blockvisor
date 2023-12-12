@@ -23,9 +23,13 @@ pub const LOG_EXPIRE_DAYS: i64 = 1;
 pub const MAX_JOB_LOGS: usize = 1024;
 pub const MAX_LOG_ENTRY_LEN: usize = 1024;
 
-pub type JobsRegistry = Arc<Mutex<Jobs>>;
+pub type JobsRegistry<C> = Arc<Mutex<JobsContext<C>>>;
 
-pub type Jobs = (HashMap<String, Job>, JobsData);
+pub struct JobsContext<C> {
+    pub jobs: HashMap<String, Job>,
+    pub jobs_data: JobsData,
+    pub connector: C,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct JobsData {

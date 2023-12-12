@@ -1,4 +1,4 @@
-use eyre::{bail, Result};
+use eyre::{anyhow, ensure, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -350,9 +350,10 @@ impl DownloadManifest {
     /// Validate manifest internal consistency.
     pub fn validate(&self) -> Result<()> {
         for chunk in &self.chunks {
-            if chunk.destinations.is_empty() {
-                bail!("corrupted manifest - expected at least one destination file in chunk");
-            }
+            ensure!(
+                !chunk.destinations.is_empty(),
+                anyhow!("corrupted manifest - expected at least one destination file in chunk")
+            );
         }
         let destinations_total_size = self.chunks.iter().fold(0, |acc, item| {
             acc + item
@@ -360,9 +361,10 @@ impl DownloadManifest {
                 .iter()
                 .fold(0, |acc, destination| acc + destination.size)
         });
-        if self.total_size != destinations_total_size {
-            bail!("corrupted manifest - total size {} is different than sum of all destinations sizes {destinations_total_size}", self.total_size);
-        }
+        ensure!(
+            self.total_size == destinations_total_size,
+            anyhow!("corrupted manifest - total size {} is different than sum of all destinations sizes {destinations_total_size}", self.total_size)
+        );
         Ok(())
     }
 }
@@ -370,9 +372,10 @@ impl DownloadManifest {
 impl UploadManifest {
     /// Validate manifest internal consistency.
     pub fn validate(&self) -> Result<()> {
-        if self.slots.is_empty() {
-            bail!("corrupted manifest - expected at least one slot");
-        }
+        ensure!(
+            !self.slots.is_empty(),
+            anyhow!("corrupted manifest - expected at least one slot")
+        );
         Ok(())
     }
 }

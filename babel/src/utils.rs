@@ -341,10 +341,36 @@ pub fn sources_list(
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::BabelEngineConnector;
     use assert_fs::TempDir;
+    use babel_api::{babel::babel_engine_client::BabelEngineClient, engine::DownloadManifest};
     use eyre::Result;
+    use mockall::mock;
+    use std::path::PathBuf;
     use std::{fs, io::Write, os::unix::fs::OpenOptionsExt};
     use tokio::process::Command;
+    use tonic::{transport::Channel, Request, Response, Status};
+
+    mock! {
+        pub BabelEngine {}
+
+        #[tonic::async_trait]
+        impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngine {
+            async fn put_download_manifest(&self, request: Request<DownloadManifest>) -> Result<Response<()>, Status>;
+            async fn upgrade_blocking_jobs_finished(&self, request: Request<()>) -> Result<Response<()>, Status>;
+            async fn bv_error(&self, request: Request<String>) -> Result<Response<()>, Status>;
+        }
+    }
+
+    pub struct DummyConnector {
+        pub tmp_dir: PathBuf,
+    }
+
+    impl BabelEngineConnector for DummyConnector {
+        fn connect(&self) -> BabelEngineClient<Channel> {
+            BabelEngineClient::new(bv_tests_utils::rpc::test_channel(&self.tmp_dir))
+        }
+    }
 
     async fn wait_for_process(control_file: &Path) {
         // asynchronously wait for dummy babel to start

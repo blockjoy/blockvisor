@@ -1,6 +1,6 @@
 use babel::{
     download_job::DownloadJob, job_runner::TransferConfig, jobs, log_buffer::LogBuffer,
-    run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH,
+    run_sh_job::RunShJob, upload_job::UploadJob, VSockConnector, BABEL_LOGS_UDS_PATH,
 };
 use babel_api::engine::{
     Compression, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
@@ -103,6 +103,7 @@ async fn main() -> eyre::Result<()> {
         } => {
             UploadJob::new(
                 bv_utils::timer::SysTimer,
+                VSockConnector,
                 manifest.ok_or(anyhow!("missing UploadManifest"))?,
                 source,
                 exclude.unwrap_or_default(),
