@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use babel_api::engine::DownloadManifest;
 use bv_utils::with_retry;
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::{
@@ -30,23 +31,31 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         request: Request<DownloadManifest>,
     ) -> eyre::Result<Response<()>, Status> {
         let manifest = request.into_inner();
+        // DownloadManifest may be pretty big, so better set longer timeout that depends on number of chunks
+        let custom_timeout =
+            Duration::from_secs(5 + u64::try_from(manifest.chunks.len() / 1000).unwrap_or(10));
+        let manifest = pb::BlockchainArchiveServicePutDownloadManifestRequest {
+            id: Some(self.node_info.image.clone().try_into().map_err(|err| {
+                Status::invalid_argument(format!("invalid node image id: {err}"))
+            })?),
+            network: self.node_info.network.clone(),
+            manifest: Some(manifest.try_into().map_err(|err| {
+                Status::invalid_argument(format!("invalid manifest blueprint: {err}"))
+            })?),
+        };
+        let build_request = || {
+            let mut req = Request::new(manifest.clone());
+            req.set_timeout(custom_timeout);
+            req
+        };
         let mut archive_service = services::connect_to_api_service(
             &self.config,
             pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
         )
         .await
         .map_err(|err| Status::internal(format!("can not connect archives service: {err}")))?;
-        with_retry!(archive_service.put_download_manifest(
-            pb::BlockchainArchiveServicePutDownloadManifestRequest {
-                id: Some(self.node_info.image.clone().try_into().map_err(|err| {
-                    Status::invalid_argument(format!("invalid node image id: {err}"))
-                })?),
-                network: self.node_info.network.clone(),
-                manifest: Some(manifest.clone().try_into().map_err(|err| {
-                    Status::invalid_argument(format!("invalid manifest blueprint: {err}"))
-                })?),
-            }
-        ))?;
+        with_retry!(archive_service.put_download_manifest(build_request()))
+            .map_err(|err| Status::internal(format!("put_download_manifest failed with: {err}")))?;
         Ok(Response::new(()))
     }
 

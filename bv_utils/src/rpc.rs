@@ -5,8 +5,8 @@ use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tonic::Request;
 
-pub const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
-pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+pub const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Extract grpc request timeout value from "grpc-timeout" header. See [tonic::Request::set_timeout](https://docs.rs/tonic/latest/tonic/struct.Request.html#method.set_timeout).
 /// Units are translated according to [gRPC Spec](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests).

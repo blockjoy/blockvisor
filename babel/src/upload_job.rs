@@ -199,8 +199,16 @@ impl<C: BabelEngineConnector> Uploader<C> {
                     .to_path_buf();
             }
         }
+        // DownloadManifest may be pretty big, so better set longer timeout that depends on number of chunks
+        let custom_timeout =
+            Duration::from_secs(5 + u64::try_from(manifest.chunks.len() / 1000).unwrap_or(10));
+        let build_request = || {
+            let mut req = tonic::Request::new(manifest.clone());
+            req.set_timeout(custom_timeout);
+            req
+        };
         let mut client = self.connector.connect();
-        with_retry!(client.put_download_manifest(manifest.clone()))
+        with_retry!(client.put_download_manifest(build_request()))
             .with_context(|| "failed to send DownloadManifest blueprint back to API")?;
 
         cleanup_job_data(&self.config.parts_file_path);

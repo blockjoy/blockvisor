@@ -15,7 +15,7 @@ pub mod kernel;
 pub mod mqtt;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn request_refresh_token(
     url: &str,

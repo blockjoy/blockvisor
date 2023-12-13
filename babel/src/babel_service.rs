@@ -415,6 +415,7 @@ impl<J, P> BabelService<J, P> {
 
 fn estimate_nb_of_chunks(source: PathBuf, exclude: Vec<Pattern>) -> Result<u32> {
     let (total_size, _) = sources_list(&source, &exclude)?;
+    // recommended size of chunk is around 1Gb
     Ok(1 + u32::try_from(total_size / (1024 * 1024 * 1024))?)
 }
 

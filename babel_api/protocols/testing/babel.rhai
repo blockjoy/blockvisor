@@ -183,7 +183,6 @@ fn upload(param) {
         job_type: #{
             upload: #{
                 source: "/blockjoy/miner/data",
-                manifest: parse_json(param),
                 exclude: [
                     "**/something_to_ignore*",
                     ".gitignore",
@@ -192,6 +191,8 @@ fn upload(param) {
                 compression: #{
                     ZSTD: 5,
                 },
+                number_of_chunks: 9,
+                url_expires_secs: 900,
             }
         },
         restart: #{
