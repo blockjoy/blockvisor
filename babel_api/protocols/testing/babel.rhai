@@ -193,6 +193,7 @@ fn upload(param) {
                 },
                 number_of_chunks: 9,
                 url_expires_secs: 900,
+                data_version: 1,
             }
         },
         restart: #{

@@ -467,6 +467,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 url_expires_secs,
                 source,
                 exclude,
+                data_version,
                 ..
             } => {
                 if manifest.is_none() {
@@ -483,6 +484,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                             self.node_info.network.clone(),
                             slots,
                             *url_expires_secs,
+                            *data_version,
                         )
                         .await?,
                     );
@@ -541,6 +543,7 @@ async fn retrieve_upload_manifest(
     network: String,
     slots: u32,
     url_expires: Option<u32>,
+    data_version: Option<u64>,
 ) -> Result<UploadManifest> {
     let mut archive_service = services::connect_to_api_service(
         config,
@@ -552,7 +555,7 @@ async fn retrieve_upload_manifest(
         .get_upload_manifest(pb::BlockchainArchiveServiceGetUploadManifestRequest {
             id: Some(image.clone().try_into()?),
             network: network.clone(),
-            data_version: None,
+            data_version,
             slots,
             url_expires,
         })

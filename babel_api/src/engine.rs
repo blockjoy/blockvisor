@@ -214,6 +214,8 @@ pub enum JobType {
         number_of_chunks: Option<u32>,
         /// Seconds after which presigned urls in generated `UploadManifest` may expire.
         url_expires_secs: Option<u32>,
+        /// Version number for uploaded data. Auto-assigned if `None`.
+        data_version: Option<u64>,
     },
 }
 
