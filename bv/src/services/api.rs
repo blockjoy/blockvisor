@@ -423,6 +423,17 @@ impl From<pb::compression::Compression> for Compression {
     }
 }
 
+impl TryFrom<pb::checksum::Checksum> for Checksum {
+    type Error = eyre::Error;
+    fn try_from(value: pb::checksum::Checksum) -> Result<Self, Self::Error> {
+        Ok(match value {
+            pb::checksum::Checksum::Sha1(bytes) => Checksum::Sha1(try_into_array(bytes)?),
+            pb::checksum::Checksum::Sha256(bytes) => Checksum::Sha256(try_into_array(bytes)?),
+            pb::checksum::Checksum::Blake3(bytes) => Checksum::Blake3(try_into_array(bytes)?),
+        })
+    }
+}
+
 impl TryFrom<pb::DownloadManifest> for DownloadManifest {
     type Error = eyre::Error;
     fn try_from(manifest: pb::DownloadManifest) -> Result<Self, Self::Error> {
@@ -438,18 +449,13 @@ impl TryFrom<pb::DownloadManifest> for DownloadManifest {
             .chunks
             .into_iter()
             .map(|value| {
-                let checksum = value.checksum.ok_or_else(|| anyhow!("Missing checksum"))?;
-                let checksum = match checksum.checksum_type() {
-                    pb::ChecksumType::Unspecified => {
-                        bail!("Invalid checksum type")
-                    }
-                    pb::ChecksumType::Sha1 => Checksum::Sha1(try_into_array(checksum.checksum)?),
-                    pb::ChecksumType::Sha256 => {
-                        Checksum::Sha256(try_into_array(checksum.checksum)?)
-                    }
-                    pb::ChecksumType::Blake3 => {
-                        Checksum::Blake3(try_into_array(checksum.checksum)?)
-                    }
+                let checksum = if let Some(pb::Checksum {
+                    checksum: Some(checksum),
+                }) = value.checksum
+                {
+                    checksum.try_into()?
+                } else {
+                    bail!("Missing checksum")
                 };
                 let destinations = value
                     .destinations
@@ -479,38 +485,40 @@ impl TryFrom<pb::DownloadManifest> for DownloadManifest {
     }
 }
 
-impl From<Compression> for pb::compression::Compression {
+impl From<Compression> for pb::Compression {
     fn from(value: Compression) -> Self {
         match value {
-            Compression::ZSTD(level) => pb::compression::Compression::Zstd(level),
+            Compression::ZSTD(level) => pb::Compression {
+                compression: Some(pb::compression::Compression::Zstd(level)),
+            },
+        }
+    }
+}
+
+impl From<Checksum> for pb::Checksum {
+    fn from(value: Checksum) -> Self {
+        match value {
+            Checksum::Sha1(bytes) => pb::Checksum {
+                checksum: Some(pb::checksum::Checksum::Sha1(bytes.to_vec())),
+            },
+            Checksum::Sha256(bytes) => pb::Checksum {
+                checksum: Some(pb::checksum::Checksum::Sha256(bytes.to_vec())),
+            },
+            Checksum::Blake3(bytes) => pb::Checksum {
+                checksum: Some(pb::checksum::Checksum::Blake3(bytes.to_vec())),
+            },
         }
     }
 }
 
 impl From<DownloadManifest> for pb::DownloadManifest {
     fn from(manifest: DownloadManifest) -> Self {
-        let compression = manifest.compression.map(|v| pb::Compression {
-            compression: Some(v.into()),
-        });
+        let compression = manifest.compression.map(|v| v.into());
         let chunks = manifest
             .chunks
             .into_iter()
             .map(|value| {
-                let checksum = value.checksum;
-                let checksum = match checksum {
-                    Checksum::Sha1(bytes) => pb::Checksum {
-                        checksum_type: pb::ChecksumType::Sha1.into(),
-                        checksum: bytes.to_vec(),
-                    },
-                    Checksum::Sha256(bytes) => pb::Checksum {
-                        checksum_type: pb::ChecksumType::Sha256.into(),
-                        checksum: bytes.to_vec(),
-                    },
-                    Checksum::Blake3(bytes) => pb::Checksum {
-                        checksum_type: pb::ChecksumType::Blake3.into(),
-                        checksum: bytes.to_vec(),
-                    },
-                };
+                let checksum = value.checksum.into();
                 let destinations = value
                     .destinations
                     .into_iter()
