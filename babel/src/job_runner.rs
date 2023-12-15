@@ -8,7 +8,7 @@ use babel_api::{
     babel::jobs_monitor_client::JobsMonitorClient,
     engine::{Compression, JobStatus, RestartConfig, RestartPolicy},
 };
-use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
+use bv_utils::{rpc::RPC_REQUEST_TIMEOUT, run_flag::RunFlag, timer::AsyncTimer, with_retry};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -153,8 +153,10 @@ impl<T: AsyncTimer> JobBackoff<T> {
                     message: message.clone(),
                 }
             };
-            let mut client =
-                JobsMonitorClient::new(bv_utils::rpc::build_socket_channel(JOBS_MONITOR_UDS_PATH));
+            let mut client = JobsMonitorClient::with_interceptor(
+                bv_utils::rpc::build_socket_channel(JOBS_MONITOR_UDS_PATH),
+                bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+            );
             let _ = with_retry!(client.push_log((self.job_name.clone(), message.clone())));
             if let Some(backoff) = &mut self.backoff {
                 if let Some(max_retries) = self.max_retries {

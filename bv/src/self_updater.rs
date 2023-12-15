@@ -149,20 +149,19 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::api::common;
-    use crate::services::AuthToken;
+    use crate::services::{api::common, ApiInterceptor, AuthToken};
     use assert_fs::TempDir;
     use async_trait::async_trait;
-    use bv_tests_utils::rpc::test_channel;
-    use bv_tests_utils::start_test_server;
-    use bv_utils::{cmd::run_cmd, timer::MockAsyncTimer};
+    use bv_tests_utils::{rpc::test_channel, start_test_server};
+    use bv_utils::{
+        rpc::DefaultTimeout,
+        {cmd::run_cmd, timer::MockAsyncTimer},
+    };
     use mockall::*;
-    use std::ffi::OsStr;
-    use std::path::Path;
+    use std::{ffi::OsStr, path::Path};
     use tokio::io::AsyncWriteExt;
     use tokio_stream::wrappers::UnixListenerStream;
-    use tonic::transport::Channel;
-    use tonic::Response;
+    use tonic::{transport::Channel, Response};
 
     mock! {
         pub TestBundleService {}
@@ -195,11 +194,14 @@ mod tests {
     impl services::ApiServiceConnector for TestConnector {
         async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
         where
-            I: Send + Sync + Fn(Channel, AuthToken) -> T,
+            I: Send + Sync + Fn(Channel, ApiInterceptor) -> T,
         {
             Ok(with_interceptor(
                 test_channel(&self.tmp_root),
-                AuthToken("test_token".to_owned()),
+                ApiInterceptor(
+                    AuthToken("test_token".to_owned()),
+                    DefaultTimeout(Duration::from_secs(1)),
+                ),
             ))
         }
     }

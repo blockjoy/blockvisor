@@ -1,4 +1,3 @@
-use crate::babel_engine_service::BabelEngineServer;
 /// This module wraps all Babel related functionality. In particular it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
@@ -10,14 +9,13 @@ use crate::babel_engine_service::BabelEngineServer;
 /// Engine methods that implementation needs to interact with node via BV are sent as `NodeRequest`.
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{
-    babel_engine_service,
+    babel_engine_service::{self, BabelEngineServer},
     config::SharedConfig,
     node_connection::RPC_REQUEST_TIMEOUT,
     node_data::{NodeImage, NodeProperties},
     pal::NodeConnection,
     services,
     services::api::pb,
-    utils::with_timeout,
 };
 use babel_api::{
     engine::{
@@ -26,7 +24,10 @@ use babel_api::{
     },
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
-use bv_utils::{run_flag::RunFlag, with_retry};
+use bv_utils::{
+    rpc::with_timeout,
+    {run_flag::RunFlag, with_retry},
+};
 use eyre::{anyhow, bail, Context, Error, Result};
 use futures_util::StreamExt;
 use std::{
@@ -762,7 +763,7 @@ mod tests {
     use super::*;
     use crate::{
         config::Config,
-        pal::{BabelClient, BabelSupClient, DefaultTimeout},
+        pal::{BabelClient, BabelSupClient},
         utils::{self},
     };
     use assert_fs::TempDir;
@@ -771,8 +772,7 @@ mod tests {
         engine::{Engine, JobInfo, JobType, RestartPolicy},
         metadata::BabelConfig,
     };
-    use bv_tests_utils::rpc::test_channel;
-    use bv_tests_utils::start_test_server;
+    use bv_tests_utils::{rpc::test_channel, start_test_server};
     use mockall::*;
     use tokio_stream::wrappers::UnixListenerStream;
     use tonic::{Request, Response, Streaming};
@@ -1004,7 +1004,7 @@ mod tests {
             let connection = TestConnection {
                 client: babel_api::babel::babel_client::BabelClient::with_interceptor(
                     test_channel(&tmp_root),
-                    DefaultTimeout(RPC_REQUEST_TIMEOUT),
+                    bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
                 ),
             };
             let engine = BabelEngine::new(

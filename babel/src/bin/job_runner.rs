@@ -6,7 +6,7 @@ use babel_api::engine::{
     Compression, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
 use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobType};
-use bv_utils::{logging::setup_logging, run_flag::RunFlag};
+use bv_utils::{logging::setup_logging, rpc::RPC_REQUEST_TIMEOUT, run_flag::RunFlag};
 use eyre::{anyhow, bail};
 use std::{env, time::Duration};
 use tokio::join;
@@ -141,8 +141,10 @@ async fn run_log_handler(
     mut log_run: RunFlag,
     mut log_rx: tokio::sync::broadcast::Receiver<String>,
 ) {
-    let mut client =
-        LogsCollectorClient::new(bv_utils::rpc::build_socket_channel(BABEL_LOGS_UDS_PATH));
+    let mut client = LogsCollectorClient::with_interceptor(
+        bv_utils::rpc::build_socket_channel(BABEL_LOGS_UDS_PATH),
+        bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+    );
 
     while log_run.load() {
         if let Some(Ok(log)) = log_run.select(log_rx.recv()).await {

@@ -349,6 +349,7 @@ pub mod tests {
     use std::path::PathBuf;
     use std::{fs, io::Write, os::unix::fs::OpenOptionsExt};
     use tokio::process::Command;
+    use tonic::codegen::InterceptedService;
     use tonic::{transport::Channel, Request, Response, Status};
 
     mock! {
@@ -367,8 +368,13 @@ pub mod tests {
     }
 
     impl BabelEngineConnector for DummyConnector {
-        fn connect(&self) -> BabelEngineClient<Channel> {
-            BabelEngineClient::new(bv_tests_utils::rpc::test_channel(&self.tmp_dir))
+        fn connect(
+            &self,
+        ) -> BabelEngineClient<InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>> {
+            BabelEngineClient::with_interceptor(
+                bv_tests_utils::rpc::test_channel(&self.tmp_dir),
+                bv_utils::rpc::DefaultTimeout(Duration::from_secs(1)),
+            )
         }
     }
 

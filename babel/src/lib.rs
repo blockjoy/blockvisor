@@ -16,13 +16,15 @@ pub mod upload_job;
 pub mod utils;
 
 use async_trait::async_trait;
-use babel_api::babel::babel_engine_client::BabelEngineClient;
 use babel_api::metadata::{BabelConfig, RamdiskConfiguration};
 use bv_utils::rpc::{RPC_CONNECT_TIMEOUT, RPC_REQUEST_TIMEOUT};
 use eyre::{Context, Result};
 use std::path::Path;
 use tokio::fs;
-use tonic::transport::{Channel, Endpoint, Uri};
+use tonic::{
+    codegen::InterceptedService,
+    transport::{Channel, Endpoint, Uri},
+};
 use tracing::info;
 
 pub const BABEL_LOGS_UDS_PATH: &str = "/var/lib/babel/logs.socket";
@@ -30,22 +32,26 @@ pub const JOBS_MONITOR_UDS_PATH: &str = "/var/lib/babel/jobs_monitor.socket";
 const VSOCK_HOST_CID: u32 = 2;
 const VSOCK_ENGINE_PORT: u32 = 40;
 
+pub type BabelEngineClient = babel_api::babel::babel_engine_client::BabelEngineClient<
+    InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>,
+>;
+
 /// Trait that allows to inject custom babel_engine implementation.
 pub trait BabelEngineConnector {
-    fn connect(&self) -> BabelEngineClient<Channel>;
+    fn connect(&self) -> BabelEngineClient;
 }
 
 pub struct VSockConnector;
 
 impl BabelEngineConnector for VSockConnector {
-    fn connect(&self) -> BabelEngineClient<Channel> {
-        BabelEngineClient::new(
+    fn connect(&self) -> BabelEngineClient {
+        babel_api::babel::babel_engine_client::BabelEngineClient::with_interceptor(
             Endpoint::from_static("http://[::]:50052")
-                .timeout(RPC_REQUEST_TIMEOUT)
                 .connect_timeout(RPC_CONNECT_TIMEOUT)
                 .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
                     tokio_vsock::VsockStream::connect(VSOCK_HOST_CID, VSOCK_ENGINE_PORT)
                 })),
+            bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
         )
     }
 }

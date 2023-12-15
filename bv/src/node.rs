@@ -1,26 +1,23 @@
-use crate::commands::into_internal;
 use crate::{
     babel_engine,
     babel_engine::NodeInfo,
     command_failed, commands,
+    commands::into_internal,
     config::SharedConfig,
     node_connection::RPC_REQUEST_TIMEOUT,
     node_context::NodeContext,
     node_data::{NodeData, NodeImage, NodeStatus},
-    pal,
-    pal::NodeConnection,
-    pal::VirtualMachine,
-    pal::{NetInterface, Pal},
+    pal::{self, NetInterface, NodeConnection, Pal, VirtualMachine},
     services::blockchain::{BlockchainService, ROOT_FS_FILE},
-    utils::with_timeout,
 };
-use babel_api::engine::JobStatus;
 use babel_api::{
     babelsup::SupervisorConfig,
+    engine::JobStatus,
     metadata::{firewall, BlockchainMetadata},
     rhai_plugin,
     rhai_plugin::RhaiPlugin,
 };
+use bv_utils::rpc::with_timeout;
 use bv_utils::{cmd::run_cmd, with_retry};
 use chrono::Utc;
 use eyre::{bail, Context, Result};
@@ -562,18 +559,18 @@ pub mod tests {
             BabelClient, BabelSupClient, CommandsStream, NodeConnection, ServiceConnector,
             VirtualMachine, VmState,
         },
-        services::{self, blockchain::BABEL_PLUGIN_NAME, AuthToken},
+        services::{self, blockchain::BABEL_PLUGIN_NAME, ApiInterceptor, AuthToken},
         utils,
     };
     use assert_fs::TempDir;
     use async_trait::async_trait;
-    use babel_api::utils::BinaryStatus;
     use babel_api::{
         engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
         metadata::{BabelConfig, Requirements},
+        utils::BinaryStatus,
     };
-    use bv_tests_utils::rpc::test_channel;
-    use bv_tests_utils::start_test_server;
+    use bv_tests_utils::{rpc::test_channel, start_test_server};
+    use bv_utils::rpc::DefaultTimeout;
     use chrono::SubsecRound;
     use mockall::*;
     use serde::{Deserialize, Serialize};
@@ -657,11 +654,14 @@ pub mod tests {
     impl services::ApiServiceConnector for TestConnector {
         async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
         where
-            I: Send + Sync + Fn(Channel, AuthToken) -> T,
+            I: Send + Sync + Fn(Channel, ApiInterceptor) -> T,
         {
             Ok(with_interceptor(
                 test_channel(&self.tmp_root),
-                AuthToken("test_token".to_owned()),
+                ApiInterceptor(
+                    AuthToken("test_token".to_owned()),
+                    DefaultTimeout(Duration::from_secs(1)),
+                ),
             ))
         }
     }
@@ -958,7 +958,7 @@ pub mod tests {
         Box::leak(Box::new(
             babel_api::babelsup::babel_sup_client::BabelSupClient::with_interceptor(
                 test_channel(tmp_root),
-                pal::DefaultTimeout(Duration::from_secs(1)),
+                bv_utils::rpc::DefaultTimeout(Duration::from_secs(1)),
             ),
         ))
     }
@@ -969,7 +969,7 @@ pub mod tests {
         Box::leak(Box::new(
             babel_api::babel::babel_client::BabelClient::with_interceptor(
                 test_channel(tmp_root),
-                pal::DefaultTimeout(Duration::from_secs(1)),
+                bv_utils::rpc::DefaultTimeout(Duration::from_secs(1)),
             ),
         ))
     }

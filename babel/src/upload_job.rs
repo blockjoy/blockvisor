@@ -10,27 +10,31 @@ use crate::{
     BabelEngineConnector,
 };
 use async_trait::async_trait;
-use babel_api::babel::babel_engine_client::BabelEngineClient;
-use babel_api::engine::{
-    Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, JobStatus,
-    RestartPolicy, UploadManifest,
+use babel_api::{
+    babel::babel_engine_client::BabelEngineClient,
+    engine::{
+        Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, JobStatus,
+        RestartPolicy, UploadManifest,
+    },
 };
-use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
+use bv_utils::{
+    rpc::{with_timeout, RPC_REQUEST_TIMEOUT},
+    {run_flag::RunFlag, timer::AsyncTimer, with_retry},
+};
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use nu_glob::{Pattern, PatternError};
-use std::time::Duration;
 use std::{
     cmp::min,
     fs::File,
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
     usize,
 };
-use tokio::sync::Semaphore;
-use tokio::task::JoinError;
-use tonic::transport::Channel;
+use tokio::{sync::Semaphore, task::JoinError};
+use tonic::{codegen::InterceptedService, transport::Channel};
 use tracing::{error, info};
 
 // if uploading single chunk (about 1Gb) takes more than 100min, it mean that something
@@ -200,15 +204,10 @@ impl<C: BabelEngineConnector> Uploader<C> {
             }
         }
         // DownloadManifest may be pretty big, so better set longer timeout that depends on number of chunks
-        let custom_timeout =
-            Duration::from_secs(5 + u64::try_from(manifest.chunks.len() / 1000).unwrap_or(10));
-        let build_request = || {
-            let mut req = tonic::Request::new(manifest.clone());
-            req.set_timeout(custom_timeout);
-            req
-        };
+        let custom_timeout = RPC_REQUEST_TIMEOUT
+            + bv_utils::rpc::estimate_put_download_manifest_request_timeout(manifest.chunks.len());
         let mut client = self.connector.connect();
-        with_retry!(client.put_download_manifest(build_request()))
+        with_retry!(client.put_download_manifest(with_timeout(manifest.clone(), custom_timeout)))
             .with_context(|| "failed to send DownloadManifest blueprint back to API")?;
 
         cleanup_job_data(&self.config.parts_file_path);
@@ -349,7 +348,11 @@ impl ChunkUploader {
         }
     }
 
-    async fn run(self, run: RunFlag, client: BabelEngineClient<Channel>) -> Result<Chunk> {
+    async fn run(
+        self,
+        run: RunFlag,
+        client: BabelEngineClient<InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>>,
+    ) -> Result<Chunk> {
         let key = self.chunk.key.clone();
         self.upload_chunk(run, client)
             .await
@@ -359,7 +362,7 @@ impl ChunkUploader {
     async fn upload_chunk(
         mut self,
         mut run: RunFlag,
-        client: BabelEngineClient<Channel>,
+        client: BabelEngineClient<InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>>,
     ) -> Result<Chunk> {
         self.chunk.size = self
             .chunk
@@ -470,7 +473,7 @@ struct DestinationsReader<E> {
 
 impl<E: Coder> DestinationsReader<E> {
     async fn new(
-        mut client: BabelEngineClient<Channel>,
+        mut client: BabelEngineClient<InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>>,
         mut iter: Vec<FileLocation>,
         config: TransferConfig,
         encoder: E,

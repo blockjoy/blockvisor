@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, ffi::OsStr, net::Ipv4Addr, path::PathBuf, time::Duration};
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::{fs, io::AsyncWriteExt, time::sleep};
-use tonic::Request;
 use tracing::{debug, warn};
 
 // image download should never take more than 15min
@@ -133,12 +132,6 @@ pub fn semver_cmp(a: &str, b: &str) -> Ordering {
         (Err(_), Ok(_)) => Ordering::Less,
         (Err(_), Err(_)) => Ordering::Equal,
     }
-}
-
-pub fn with_timeout<T>(args: T, timeout: Duration) -> Request<T> {
-    let mut req = Request::new(args);
-    req.set_timeout(timeout);
-    req
 }
 
 /// Take base interval and add random amount of seconds to it

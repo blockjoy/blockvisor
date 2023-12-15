@@ -1,7 +1,7 @@
 use crate::{config::SharedConfig, services::api::pb};
 use async_trait::async_trait;
 use base64::Engine;
-use bv_utils::with_retry;
+use bv_utils::{rpc::DefaultTimeout, with_retry};
 use eyre::{Context, Result};
 use std::{future::Future, str::FromStr, time::Duration};
 use tonic::{
@@ -24,29 +24,35 @@ pub async fn request_refresh_token(
 ) -> Result<pb::AuthServiceRefreshResponse> {
     let channel = Endpoint::from_str(url)?
         .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-        .timeout(DEFAULT_REQUEST_TIMEOUT)
         .connect_lazy();
     let req = pb::AuthServiceRefreshRequest {
         token: token.to_string(),
         refresh: Some(refresh.to_string()),
     };
-    let mut client = pb::auth_service_client::AuthServiceClient::new(channel);
+    let mut client = pb::auth_service_client::AuthServiceClient::with_interceptor(
+        channel,
+        bv_utils::rpc::DefaultTimeout(DEFAULT_REQUEST_TIMEOUT),
+    );
 
     Ok(with_retry!(client.refresh(req.clone()))?.into_inner())
 }
 
 pub async fn connect_to_api_service<T, I>(config: &SharedConfig, with_interceptor: I) -> Result<T>
 where
-    I: Fn(Channel, AuthToken) -> T,
+    I: Fn(Channel, ApiInterceptor) -> T,
 {
     let url = config.read().await.blockjoy_api_url;
-    let endpoint = Endpoint::from_str(&url)?
-        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-        .timeout(DEFAULT_REQUEST_TIMEOUT);
+    let endpoint = Endpoint::from_str(&url)?.connect_timeout(DEFAULT_CONNECT_TIMEOUT);
     let channel = Endpoint::connect(&endpoint)
         .await
         .with_context(|| format!("Failed to connect to api service at {url}"))?;
-    Ok(with_interceptor(channel, config.token().await?))
+    Ok(with_interceptor(
+        channel,
+        ApiInterceptor(
+            config.token().await?,
+            DefaultTimeout(DEFAULT_REQUEST_TIMEOUT),
+        ),
+    ))
 }
 
 /// Tries to use `connector` to create service connection. If this fails then asks the backend for
@@ -75,14 +81,27 @@ where
     }
 }
 
+pub struct ApiInterceptor(pub AuthToken, pub DefaultTimeout);
+
+impl Interceptor for ApiInterceptor {
+    fn call(&mut self, request: Request<()>) -> Result<Request<()>, Status> {
+        self.0
+            .call(request)
+            .and_then(|request: Request<()>| self.1.call(request))
+    }
+}
+
 pub struct AuthToken(pub String);
 
 impl Interceptor for AuthToken {
     fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
         let token = &self.0;
-        request
-            .metadata_mut()
-            .insert("authorization", format!("Bearer {token}").parse().unwrap());
+        request.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {token}")
+                .parse()
+                .map_err(|_| Status::internal("Invalid authorization MetaData"))?,
+        );
         Ok(request)
     }
 }
@@ -126,13 +145,13 @@ impl AuthToken {
     }
 }
 
-pub type AuthenticatedService = InterceptedService<Channel, AuthToken>;
+pub type AuthenticatedService = InterceptedService<Channel, ApiInterceptor>;
 
 #[async_trait]
 pub trait ApiServiceConnector {
     async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
     where
-        I: Send + Sync + Fn(Channel, AuthToken) -> T;
+        I: Send + Sync + Fn(Channel, ApiInterceptor) -> T;
 }
 
 pub struct DefaultConnector {
@@ -143,7 +162,7 @@ pub struct DefaultConnector {
 impl ApiServiceConnector for DefaultConnector {
     async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
     where
-        I: Send + Sync + Fn(Channel, AuthToken) -> T,
+        I: Send + Sync + Fn(Channel, ApiInterceptor) -> T,
     {
         Ok(connect_to_api_service(&self.config, with_interceptor).await?)
     }

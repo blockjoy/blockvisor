@@ -14,7 +14,7 @@ use std::{
     {env, fs},
 };
 use sysinfo::{System, SystemExt};
-use tonic::transport::Channel;
+use tonic::{codegen::InterceptedService, transport::Channel};
 use tracing::{debug, info, warn};
 
 const SYSTEM_SERVICES: &str = "etc/systemd/system";
@@ -66,7 +66,9 @@ enum BackupStatus {
 pub struct Installer<T, S> {
     paths: InstallerPaths,
     config: Config,
-    bv_client: internal_server::service_client::ServiceClient<Channel>,
+    bv_client: internal_server::service_client::ServiceClient<
+        InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>,
+    >,
     backup_status: BackupStatus,
     timer: T,
     bv_service: S,
@@ -76,7 +78,6 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     pub async fn new(timer: T, bv_service: S, bv_root: &Path) -> Result<Self> {
         let config = Config::load(bv_root).await?;
         let channel = Channel::from_shared(format!("http://localhost:{}", config.blockvisor_port))?
-            .timeout(BV_REQ_TIMEOUT)
             .connect_timeout(BV_CONNECT_TIMEOUT)
             .connect_lazy();
         Ok(Self::internal_new(
@@ -129,7 +130,10 @@ impl<T: Timer, S: BvService> Installer<T, S> {
                 blacklist,
             },
             config,
-            bv_client: internal_server::service_client::ServiceClient::new(bv_channel),
+            bv_client: internal_server::service_client::ServiceClient::with_interceptor(
+                bv_channel,
+                bv_utils::rpc::DefaultTimeout(BV_REQ_TIMEOUT),
+            ),
             backup_status: BackupStatus::NothingToBackup,
             timer,
             bv_service,

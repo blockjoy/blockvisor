@@ -118,7 +118,7 @@ impl pal::NodeConnection for NodeConnection {
                             CONNECTION_SWITCH_TIMEOUT,
                         )
                         .await?,
-                        pal::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+                        bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
                     ),
                 );
             }
@@ -135,7 +135,7 @@ async fn connect_babelsup(socket_path: &Path, max_delay: Duration) -> Result<pal
     Ok(
         babel_api::babelsup::babel_sup_client::BabelSupClient::with_interceptor(
             create_channel(socket_path, BABEL_SUP_VSOCK_PORT, max_delay).await?,
-            pal::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+            bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
         ),
     )
 }

@@ -13,12 +13,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use tonic::{
-    codegen::InterceptedService,
-    service::Interceptor,
-    transport::Channel,
-    {Request, Status},
-};
+use tonic::{codegen::InterceptedService, transport::Channel};
 use uuid::Uuid;
 
 /// Platform Abstraction Layer - trait used to detach business logic form platform specifics, so it
@@ -107,22 +102,11 @@ pub trait CommandsStream {
     async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>>;
 }
 
-pub struct DefaultTimeout(pub Duration);
-
-impl Interceptor for DefaultTimeout {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        if request.metadata().get("grpc-timeout").is_none() {
-            // set default timeout if not set yet
-            request.set_timeout(self.0);
-        }
-        Ok(request)
-    }
-}
-
-pub type BabelClient =
-    babel_api::babel::babel_client::BabelClient<InterceptedService<Channel, DefaultTimeout>>;
+pub type BabelClient = babel_api::babel::babel_client::BabelClient<
+    InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>,
+>;
 pub type BabelSupClient = babel_api::babelsup::babel_sup_client::BabelSupClient<
-    InterceptedService<Channel, DefaultTimeout>,
+    InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>,
 >;
 
 #[async_trait]

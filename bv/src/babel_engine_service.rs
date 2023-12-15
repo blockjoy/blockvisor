@@ -1,21 +1,21 @@
-use crate::babel_engine::NodeInfo;
 use crate::{
+    babel_engine::NodeInfo,
     config::SharedConfig,
     firecracker_machine::VSOCK_PATH,
     services::{self, api::pb},
 };
 use async_trait::async_trait;
 use babel_api::engine::DownloadManifest;
+use bv_utils::rpc::with_timeout;
 use bv_utils::with_retry;
 use std::path::PathBuf;
-use std::time::Duration;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::{
     transport::Server,
     {Request, Response, Status},
 };
-use tracing::error;
+use tracing::{debug, error};
 
 const BABEL_ENGINE_PORT: u32 = 40;
 
@@ -30,10 +30,11 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         &self,
         request: Request<DownloadManifest>,
     ) -> eyre::Result<Response<()>, Status> {
+        debug!("putting DownloadManifest to API...");
         let manifest = request.into_inner();
         // DownloadManifest may be pretty big, so better set longer timeout that depends on number of chunks
         let custom_timeout =
-            Duration::from_secs(5 + u64::try_from(manifest.chunks.len() / 1000).unwrap_or(10));
+            bv_utils::rpc::estimate_put_download_manifest_request_timeout(manifest.chunks.len());
         let manifest = pb::BlockchainArchiveServicePutDownloadManifestRequest {
             id: Some(self.node_info.image.clone().try_into().map_err(|err| {
                 Status::invalid_argument(format!("invalid node image id: {err}"))
@@ -43,19 +44,16 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
                 Status::invalid_argument(format!("invalid manifest blueprint: {err}"))
             })?),
         };
-        let build_request = || {
-            let mut req = Request::new(manifest.clone());
-            req.set_timeout(custom_timeout);
-            req
-        };
         let mut archive_service = services::connect_to_api_service(
             &self.config,
             pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
         )
         .await
         .map_err(|err| Status::internal(format!("can not connect archives service: {err}")))?;
-        with_retry!(archive_service.put_download_manifest(build_request()))
-            .map_err(|err| Status::internal(format!("put_download_manifest failed with: {err}")))?;
+        with_retry!(
+            archive_service.put_download_manifest(with_timeout(manifest.clone(), custom_timeout))
+        )
+        .map_err(|err| Status::internal(format!("put_download_manifest failed with: {err}")))?;
         Ok(Response::new(()))
     }
 

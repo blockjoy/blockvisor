@@ -1,7 +1,5 @@
-use assert_cmd::assert::AssertResult;
-use assert_cmd::Command;
+use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
-use blockvisord::services::AuthToken;
 use blockvisord::{
     blockvisord::BlockvisorD,
     config::{Config, SharedConfig},
@@ -9,11 +7,10 @@ use blockvisord::{
     node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
-    services,
-    services::{blockchain::IMAGES_DIR, kernel::KERNELS_DIR},
+    services::{self, blockchain::IMAGES_DIR, kernel::KERNELS_DIR, ApiInterceptor, AuthToken},
     BV_VAR_PATH,
 };
-use bv_utils::{cmd::run_cmd, run_flag::RunFlag};
+use bv_utils::{cmd::run_cmd, rpc::DefaultTimeout, run_flag::RunFlag};
 use eyre::Result;
 use predicates::prelude::predicate;
 use serde::{Deserialize, Serialize};
@@ -339,11 +336,14 @@ pub struct DummyApiConnector;
 impl services::ApiServiceConnector for DummyApiConnector {
     async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
     where
-        I: Send + Sync + Fn(Channel, AuthToken) -> T,
+        I: Send + Sync + Fn(Channel, ApiInterceptor) -> T,
     {
         Ok(with_interceptor(
             Channel::from_static("http://dummy.url").connect_lazy(),
-            AuthToken("test_token".to_owned()),
+            ApiInterceptor(
+                AuthToken("test_token".to_owned()),
+                DefaultTimeout(Duration::from_secs(1)),
+            ),
         ))
     }
 }
