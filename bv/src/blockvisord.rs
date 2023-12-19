@@ -210,20 +210,7 @@ where
         while run.load() {
             run.select(cmd_watch_rx.changed()).await;
             debug!("MQTT watch triggerred");
-            match api::CommandsService::connect(config).await {
-                Ok(mut client) => {
-                    if let Err(e) = client
-                        .get_and_process_pending_commands(
-                            &config.read().await.id,
-                            nodes_manager.clone(),
-                        )
-                        .await
-                    {
-                        error!("Error processing pending commands: {:#}", e);
-                    }
-                }
-                Err(e) => warn!("Error connecting to api: {:?}", e),
-            }
+            api::get_and_process_pending_commands(config, nodes_manager.clone()).await;
         }
     }
 
@@ -454,7 +441,7 @@ where
                 }
                 let metrics: pb::MetricsServiceNodeRequest = metrics.into();
                 if let Err(e) = client.node(metrics).await {
-                    error!("Could not send node metrics! `{e}`");
+                    warn!("Could not send node metrics! `{e}`");
                 } else {
                     // update cache only if request succeed
                     job_info_cache.extend(job_info_cache_update.into_iter());

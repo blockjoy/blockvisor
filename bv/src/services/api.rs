@@ -12,9 +12,8 @@ use bv_utils::with_retry;
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
-    blockchain_archive_service_client, blockchain_service_client,
-    command_service_client::CommandServiceClient, discovery_service_client, host_service_client,
-    node_command::Command, node_service_client,
+    blockchain_archive_service_client, blockchain_service_client, command_service_client,
+    discovery_service_client, host_service_client, node_command::Command, node_service_client,
 };
 use reqwest::Url;
 use std::{
@@ -23,7 +22,7 @@ use std::{
     {str::FromStr, sync::Arc},
 };
 use tokio::time::Instant;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
 #[allow(clippy::large_enum_variant)]
@@ -65,115 +64,127 @@ pub type DiscoveryServiceClient =
     discovery_service_client::DiscoveryServiceClient<AuthenticatedService>;
 pub type HostsServiceClient = host_service_client::HostServiceClient<AuthenticatedService>;
 pub type NodesServiceClient = node_service_client::NodeServiceClient<AuthenticatedService>;
+pub type CommandServiceClient = command_service_client::CommandServiceClient<AuthenticatedService>;
 
-pub struct CommandsService {
-    client: CommandServiceClient<AuthenticatedService>,
+pub async fn connect(config: &SharedConfig) -> Result<CommandServiceClient> {
+    let client = with_retry!(services::connect_to_api_service(
+        config,
+        command_service_client::CommandServiceClient::with_interceptor,
+    ));
+    if let Err(err) = &client {
+        warn!("error connecting to api while processing commands: {err:?}");
+    }
+    client
 }
 
-impl CommandsService {
-    pub async fn connect(config: &SharedConfig) -> Result<Self> {
-        Ok(Self {
-            client: services::connect_to_api_service(
-                config,
-                CommandServiceClient::with_interceptor,
-            )
-            .await?,
-        })
-    }
-
-    pub async fn get_and_process_pending_commands<P: Pal + Debug>(
-        &mut self,
-        host_id: &str,
-        nodes_manager: Arc<NodesManager<P>>,
-    ) -> Result<()> {
-        let commands = self
-            .get_pending_commands(host_id)
+pub async fn get_and_process_pending_commands<P: Pal + Debug>(
+    config: &SharedConfig,
+    nodes_manager: Arc<NodesManager<P>>,
+) {
+    let service = CommandsService { config };
+    if let Some(commands) = service.get_pending_commands().await {
+        if let Err(err) = service
+            .process_commands(commands, nodes_manager.clone())
             .await
-            .with_context(|| "cannot get pending commands")?;
-        self.process_commands(commands, nodes_manager)
-            .await
-            .with_context(|| "cannot process commands")?;
-        Ok(())
+        {
+            error!("error processing commands: {err:#}");
+        }
     }
+}
 
-    pub async fn get_pending_commands(&mut self, host_id: &str) -> Result<Vec<pb::Command>> {
+struct CommandsService<'a> {
+    config: &'a SharedConfig,
+}
+
+impl<'a> CommandsService<'a> {
+    async fn get_pending_commands(&self) -> Option<Vec<pb::Command>> {
         info!("Get pending commands");
 
+        let mut client = connect(self.config).await.ok()?;
         let req = pb::CommandServicePendingRequest {
-            host_id: host_id.to_string(),
+            host_id: self.config.read().await.id.to_string(),
             filter_type: None,
         };
-        let resp = with_retry!(self.client.pending(req.clone()))?.into_inner();
-
-        Ok(resp.commands)
+        match with_retry!(client.pending(req.clone())) {
+            Ok(resp) => {
+                let commands = resp.into_inner().commands;
+                for command in &commands {
+                    let command_id = &command.id;
+                    let req = pb::CommandServiceAckRequest {
+                        id: command_id.clone(),
+                    };
+                    if let Err(err) = with_retry!(client.ack(req.clone())) {
+                        warn!("failed to send ACK for command {command_id}: {err:#}");
+                    }
+                }
+                Some(commands)
+            }
+            Err(err) => {
+                warn!("cannot get pending commands: {err:#}");
+                None
+            }
+        }
     }
 
-    pub async fn process_commands<P: Pal + Debug>(
-        &mut self,
+    async fn process_commands<P: Pal + Debug>(
+        &self,
         commands: Vec<pb::Command>,
         nodes_manager: Arc<NodesManager<P>>,
     ) -> Result<()> {
         info!("Processing {} commands", commands.len());
-
         for command in commands {
             info!("Processing command: {command:?}");
+            let command_id = &command.id;
 
             match command.command {
                 Some(pb::command::Command::Node(node_command)) => {
-                    let command_id = command.id.clone();
                     // check for bv health status
                     let service_status = get_bv_status().await;
-                    if service_status != ServiceStatus::Ok {
-                        self.send_service_status_update(command_id.clone(), service_status)
-                            .await
-                            .with_context(|| "cannot send system status update")?;
-                    } else {
-                        self.send_command_ack(command_id.clone())
-                            .await
-                            .with_context(|| "cannot ack command")?;
+                    if service_status == ServiceStatus::Ok {
                         // process the command
                         let command_result =
                             process_node_command(nodes_manager.clone(), node_command).await;
-                        if let Err(error) = &command_result {
-                            error!("Error processing command: {error:?}");
-                        }
-                        self.send_command_update(command_id, command_result).await?;
+                        self.send_command_update(command_id, &command_result)
+                            .await?;
+                        command_result
+                            .with_context(|| format!("node command '{command_id}' failed"))?;
+                    } else {
+                        self.send_service_status_update(command_id, service_status)
+                            .await?;
+                        bail!("can't process command '{command_id}' while BV status is '{service_status:?}'");
                     }
                 }
                 Some(pb::command::Command::Host(_)) => {
-                    error!("Error processing command: Command type `Host` not supported");
-                    let command_id = command.id;
-                    self.send_command_ack(command_id.clone()).await?;
-                    self.send_command_update(command_id, Err(Error::NotSupported))
+                    self.send_command_update(command_id, &Err(Error::NotSupported))
                         .await?;
+                    bail!("command '{command_id}' type `Host` not supported");
                 }
                 None => {
-                    let msg = "Command type is `None`".to_string();
-                    error!("Error processing command: {msg}");
+                    bail!("command '{command_id}' type is `None`");
                 }
             };
         }
-
         Ok(())
     }
 
     /// Informing API that we have finished with the command.
     #[instrument(skip(self))]
     async fn send_command_update(
-        &mut self,
-        command_id: String,
-        command_result: commands::Result<()>,
+        &self,
+        command_id: &str,
+        command_result: &commands::Result<()>,
     ) -> Result<()> {
+        let mut client = connect(self.config).await?;
         let req = match command_result {
             Ok(()) => pb::CommandServiceUpdateRequest {
-                id: command_id,
+                id: command_id.to_string(),
                 exit_code: Some(pb::CommandExitCode::Ok.into()),
                 exit_message: None,
                 retry_hint_seconds: None,
             },
             Err(err) => {
                 let mut req = pb::CommandServiceUpdateRequest {
-                    id: command_id,
+                    id: command_id.to_string(),
                     exit_code: Some(match &err {
                         Error::Internal(_) => pb::CommandExitCode::InternalError.into(),
                         Error::ServiceNotReady => pb::CommandExitCode::ServiceNotReady.into(),
@@ -193,33 +204,27 @@ impl CommandsService {
                 req
             }
         };
-        with_retry!(self.client.update(req.clone()))?;
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    async fn send_command_ack(&mut self, command_id: String) -> Result<()> {
-        let req = pb::CommandServiceAckRequest { id: command_id };
-        with_retry!(self.client.ack(req.clone()))?;
+        with_retry!(client.update(req.clone()))
+            .with_context(|| format!("failed to update command '{command_id}' status"))?;
         Ok(())
     }
 
     async fn send_service_status_update(
-        &mut self,
-        command_id: String,
+        &self,
+        command_id: &str,
         status: ServiceStatus,
     ) -> Result<()> {
         match status {
             ServiceStatus::Undefined => {
-                self.send_command_update(command_id, Err(commands::Error::ServiceNotReady))
+                self.send_command_update(command_id, &Err(commands::Error::ServiceNotReady))
                     .await
             }
             ServiceStatus::Updating => {
-                self.send_command_update(command_id, Err(commands::Error::ServiceNotReady))
+                self.send_command_update(command_id, &Err(commands::Error::ServiceNotReady))
                     .await
             }
             ServiceStatus::Broken => {
-                self.send_command_update(command_id, Err(commands::Error::ServiceBroken))
+                self.send_command_update(command_id, &Err(commands::Error::ServiceBroken))
                     .await
             }
             ServiceStatus::Ok => Ok(()),

@@ -594,17 +594,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         Arc::new(NodesManager::load(test_env.build_dummy_platform(), config).await?);
 
     let client_future = async {
-        match api::CommandsService::connect(&config_clone).await {
-            Ok(mut client) => {
-                if let Err(e) = client
-                    .get_and_process_pending_commands(&host_id, nodes_manager)
-                    .await
-                {
-                    println!("Error processing pending commands: {:?}", e);
-                }
-            }
-            Err(e) => println!("Error connecting to api: {:?}", e),
-        }
+        api::get_and_process_pending_commands(&config_clone, nodes_manager.clone()).await;
     };
 
     println!("run server");
