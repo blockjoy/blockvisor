@@ -115,7 +115,7 @@ impl pb::host_service_server::HostService for StubHostsServer {
 }
 
 pub struct StubCommandsServer {
-    pub commands: Arc<Mutex<Vec<pb::Command>>>,
+    pub commands: Arc<Mutex<Vec<Vec<pb::Command>>>>,
     pub updates: Arc<Mutex<Vec<pb::CommandServiceUpdateRequest>>>,
 }
 
@@ -143,7 +143,7 @@ impl pb::command_service_server::CommandService for StubCommandsServer {
         _: Request<pb::CommandServicePendingRequest>,
     ) -> Result<pb::CommandServicePendingResponse> {
         let reply = pb::CommandServicePendingResponse {
-            commands: std::mem::take(&mut *self.commands.lock().await),
+            commands: self.commands.lock().await.pop().unwrap_or_default(),
         };
 
         Ok(Response::new(reply))

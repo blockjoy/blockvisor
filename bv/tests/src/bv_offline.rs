@@ -300,8 +300,8 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     let test_env = TestEnv::new().await?;
     let host_id = Uuid::new_v4().to_string();
     let node_name = "beautiful-node-name".to_string();
-    let node_id = Uuid::new_v4().to_string();
-    let id = node_id.clone();
+    let id = Uuid::new_v4().to_string();
+    let failed_node_id = Uuid::new_v4().to_string();
     let command_id = Uuid::new_v4().to_string();
     let rules = vec![common::FirewallRule {
         name: "Rule X".to_string(),
@@ -336,230 +336,256 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         command: Some(cmd),
         retry_hint_seconds: None,
     };
-    let commands = vec![
-        // create
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Create(pb::NodeCreate {
-                name: node_name.clone(),
-                image: image.clone(),
-                blockchain: "testing".to_string(),
-                node_type: common::NodeType::Validator.into(),
-                ip: "216.18.214.195".to_string(),
-                gateway: "216.18.214.193".to_string(),
-                rules: rules.clone(),
-                properties: properties.clone(),
-                network: "test".to_string(),
+    let mut commands = vec![
+        vec![
+            // create
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Create(pb::NodeCreate {
+                    name: node_name.clone(),
+                    image: image.clone(),
+                    blockchain: "testing".to_string(),
+                    node_type: common::NodeType::Validator.into(),
+                    ip: "216.18.214.195".to_string(),
+                    gateway: "216.18.214.193".to_string(),
+                    rules: rules.clone(),
+                    properties: properties.clone(),
+                    network: "test".to_string(),
+                })),
             })),
-        })),
-        // create with same node id
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Create(pb::NodeCreate {
-                name: "some-new-name".to_string(),
-                image: image.clone(),
-                blockchain: "testing".to_string(),
-                node_type: common::NodeType::Validator.into(),
-                ip: "216.18.214.196".to_string(),
-                gateway: "216.18.214.193".to_string(),
-                rules: rules.clone(),
-                properties: properties.clone(),
-                network: "test".to_string(),
+            // create with same node id
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Create(pb::NodeCreate {
+                    name: "some-new-name".to_string(),
+                    image: image.clone(),
+                    blockchain: "testing".to_string(),
+                    node_type: common::NodeType::Validator.into(),
+                    ip: "216.18.214.196".to_string(),
+                    gateway: "216.18.214.193".to_string(),
+                    rules: rules.clone(),
+                    properties: properties.clone(),
+                    network: "test".to_string(),
+                })),
             })),
-        })),
-        // create with same node name
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: Uuid::new_v4().to_string(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Create(pb::NodeCreate {
-                name: node_name.clone(),
-                image: image.clone(),
-                blockchain: "testing".to_string(),
-                node_type: common::NodeType::Validator.into(),
-                ip: "216.18.214.197".to_string(),
-                gateway: "216.18.214.193".to_string(),
-                rules: rules.clone(),
-                properties: properties.clone(),
-                network: "test".to_string(),
+            // create with same node name
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: failed_node_id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Create(pb::NodeCreate {
+                    name: node_name.clone(),
+                    image: image.clone(),
+                    blockchain: "testing".to_string(),
+                    node_type: common::NodeType::Validator.into(),
+                    ip: "216.18.214.197".to_string(),
+                    gateway: "216.18.214.193".to_string(),
+                    rules: rules.clone(),
+                    properties: properties.clone(),
+                    network: "test".to_string(),
+                })),
             })),
-        })),
-        // create with same node ip address
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: Uuid::new_v4().to_string(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Create(pb::NodeCreate {
-                name: "some-new-name".to_string(),
-                image: image.clone(),
-                blockchain: "testing".to_string(),
-                node_type: common::NodeType::Validator.into(),
-                ip: "216.18.214.195".to_string(),
-                gateway: "216.18.214.193".to_string(),
-                rules: rules.clone(),
-                properties: properties.clone(),
-                network: "test".to_string(),
+            // delete - this one should not be executed since previous one is expected to fail
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: failed_node_id,
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Delete(pb::NodeDelete {})),
             })),
-        })),
-        // create with invalid node ip address
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: Uuid::new_v4().to_string(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Create(pb::NodeCreate {
-                name: "some-new-name".to_string(),
-                image: image.clone(),
-                blockchain: "testing".to_string(),
-                node_type: common::NodeType::Validator.into(),
-                ip: "invalid_ip".to_string(),
-                gateway: "216.18.214.193".to_string(),
-                rules: rules.clone(),
-                properties: properties.clone(),
-                network: "test".to_string(),
+        ],
+        vec![
+            // create with same node ip address
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: Uuid::new_v4().to_string(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Create(pb::NodeCreate {
+                    name: "some-new-name".to_string(),
+                    image: image.clone(),
+                    blockchain: "testing".to_string(),
+                    node_type: common::NodeType::Validator.into(),
+                    ip: "216.18.214.195".to_string(),
+                    gateway: "216.18.214.193".to_string(),
+                    rules: rules.clone(),
+                    properties: properties.clone(),
+                    network: "test".to_string(),
+                })),
             })),
-        })),
-        // create with invalid gateway ip address
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: Uuid::new_v4().to_string(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Create(pb::NodeCreate {
-                name: "some-new-name".to_string(),
-                image: image.clone(),
-                blockchain: "testing".to_string(),
-                node_type: common::NodeType::Validator.into(),
-                ip: "216.18.214.195".to_string(),
-                gateway: "invalid_ip".to_string(),
-                rules: rules.clone(),
-                properties: properties.clone(),
-                network: "test".to_string(),
+        ],
+        vec![
+            // create with invalid node ip address
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: Uuid::new_v4().to_string(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Create(pb::NodeCreate {
+                    name: "some-new-name".to_string(),
+                    image: image.clone(),
+                    blockchain: "testing".to_string(),
+                    node_type: common::NodeType::Validator.into(),
+                    ip: "invalid_ip".to_string(),
+                    gateway: "216.18.214.193".to_string(),
+                    rules: rules.clone(),
+                    properties: properties.clone(),
+                    network: "test".to_string(),
+                })),
             })),
-        })),
-        // stop stopped
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Stop(pb::NodeStop {})),
-        })),
-        // start
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Start(pb::NodeStart {})),
-        })),
-        // start running
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Start(pb::NodeStart {})),
-        })),
-        // stop
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Stop(pb::NodeStop {})),
-        })),
-        // restart stopped
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Restart(pb::NodeRestart {})),
-        })),
-        // restart running
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Restart(pb::NodeRestart {})),
-        })),
-        // upgrade running
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Upgrade(pb::NodeUpgrade {
-                image: image_v2,
+        ],
+        vec![
+            // create with invalid gateway ip address
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: Uuid::new_v4().to_string(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Create(pb::NodeCreate {
+                    name: "some-new-name".to_string(),
+                    image: image.clone(),
+                    blockchain: "testing".to_string(),
+                    node_type: common::NodeType::Validator.into(),
+                    ip: "216.18.214.195".to_string(),
+                    gateway: "invalid_ip".to_string(),
+                    rules: rules.clone(),
+                    properties: properties.clone(),
+                    network: "test".to_string(),
+                })),
             })),
-        })),
-        // update with invalid rules
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
-                rules: vec![common::FirewallRule {
-                    name: "Rule B".to_string(),
-                    action: common::FirewallAction::Allow.into(),
-                    direction: common::FirewallDirection::Inbound.into(),
-                    protocol: Some(common::FirewallProtocol::Both.into()),
-                    ips: Some("invalid_ip".to_string()),
-                    ports: vec![8080],
-                }],
+        ],
+        vec![
+            // stop stopped
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Stop(pb::NodeStop {})),
             })),
-        })),
-        // update with too many rules
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
-                rules: rules.into_iter().cycle().take(129).collect(),
+            // start
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Start(pb::NodeStart {})),
             })),
-        })),
-        // update firewall rules
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
-                rules: vec![common::FirewallRule {
-                    name: "Rule A".to_string(),
-                    action: common::FirewallAction::Allow.into(),
-                    direction: common::FirewallDirection::Inbound.into(),
-                    protocol: Some(common::FirewallProtocol::Tcp.into()),
-                    ips: Some("192.168.0.1/24".to_string()),
-                    ports: vec![8080, 8000],
-                }],
+            // start running
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Start(pb::NodeStart {})),
             })),
-        })),
-        // delete
-        cmd(pb::command::Command::Node(pb::NodeCommand {
-            node_id: id.clone(),
-            api_command_id: command_id.clone(),
-            created_at: None,
-            host_id: host_id.clone(),
-            command: Some(pb::node_command::Command::Delete(pb::NodeDelete {})),
-        })),
+            // stop
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Stop(pb::NodeStop {})),
+            })),
+            // restart stopped
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Restart(pb::NodeRestart {})),
+            })),
+            // restart running
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Restart(pb::NodeRestart {})),
+            })),
+            // upgrade running
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Upgrade(pb::NodeUpgrade {
+                    image: image_v2,
+                })),
+            })),
+        ],
+        vec![
+            // update with invalid rules
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
+                    rules: vec![common::FirewallRule {
+                        name: "Rule B".to_string(),
+                        action: common::FirewallAction::Allow.into(),
+                        direction: common::FirewallDirection::Inbound.into(),
+                        protocol: Some(common::FirewallProtocol::Both.into()),
+                        ips: Some("invalid_ip".to_string()),
+                        ports: vec![8080],
+                    }],
+                })),
+            })),
+        ],
+        vec![
+            // update with too many rules
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
+                    rules: rules.into_iter().cycle().take(129).collect(),
+                })),
+            })),
+        ],
+        vec![
+            // update firewall rules
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
+                    rules: vec![common::FirewallRule {
+                        name: "Rule A".to_string(),
+                        action: common::FirewallAction::Allow.into(),
+                        direction: common::FirewallDirection::Inbound.into(),
+                        protocol: Some(common::FirewallProtocol::Tcp.into()),
+                        ips: Some("192.168.0.1/24".to_string()),
+                        ports: vec![8080, 8000],
+                    }],
+                })),
+            })),
+            // delete
+            cmd(pb::command::Command::Node(pb::NodeCommand {
+                node_id: id.clone(),
+                api_command_id: command_id.clone(),
+                created_at: None,
+                host_id: host_id.clone(),
+                command: Some(pb::node_command::Command::Delete(pb::NodeDelete {})),
+            })),
+        ],
     ];
+    commands.reverse();
 
+    let pending_commands = Arc::new(Mutex::new(commands));
     let commands_updates = Arc::new(Mutex::new(vec![]));
     let commands_server = StubCommandsServer {
-        commands: Arc::new(Mutex::new(commands)),
+        commands: pending_commands.clone(),
         updates: commands_updates.clone(),
     };
 
@@ -594,7 +620,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         Arc::new(NodesManager::load(test_env.build_dummy_platform(), config).await?);
 
     let client_future = async {
-        api::get_and_process_pending_commands(&config_clone, nodes_manager.clone()).await;
+        while !pending_commands.lock().await.is_empty() {
+            api::get_and_process_pending_commands(&config_clone, nodes_manager.clone()).await;
+        }
     };
 
     println!("run server");
