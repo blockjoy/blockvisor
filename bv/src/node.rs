@@ -580,7 +580,6 @@ pub mod tests {
         str::FromStr,
         time::Duration,
     };
-    use tokio_stream::wrappers::UnixListenerStream;
     use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
     pub const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";

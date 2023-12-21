@@ -127,7 +127,6 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use tokio::sync::{oneshot, watch};
-    use tokio_stream::wrappers::UnixListenerStream;
     use tonic::transport::Channel;
 
     fn test_client(tmp_root: &Path) -> BabelSupClient<Channel> {

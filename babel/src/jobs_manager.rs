@@ -656,7 +656,6 @@ mod tests {
     use tokio::process::Command;
     use tokio::sync::RwLock;
     use tokio::task::JoinHandle;
-    use tokio_stream::wrappers::UnixListenerStream;
 
     struct TestEnv {
         tmp_dir: PathBuf,

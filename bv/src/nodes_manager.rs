@@ -827,7 +827,6 @@ mod tests {
     use mockall::*;
     use std::ffi::OsStr;
     use std::str::FromStr;
-    use tokio_stream::wrappers::UnixListenerStream;
 
     mock! {
         pub TestKernelService {}

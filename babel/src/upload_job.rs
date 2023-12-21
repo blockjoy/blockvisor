@@ -600,7 +600,6 @@ mod tests {
     use bv_utils::timer::SysTimer;
     use mockito::{Matcher, Server, ServerGuard};
     use std::fs;
-    use tokio_stream::wrappers::UnixListenerStream;
     use tonic::Response;
     use url::Url;
 

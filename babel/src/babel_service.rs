@@ -452,7 +452,6 @@ mod tests {
     use std::collections::HashMap;
     use std::env::temp_dir;
     use std::path::Path;
-    use tokio_stream::wrappers::UnixListenerStream;
     use tonic::transport::Channel;
 
     mock! {

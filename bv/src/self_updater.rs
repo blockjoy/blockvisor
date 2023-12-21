@@ -160,7 +160,6 @@ mod tests {
     use mockall::*;
     use std::{ffi::OsStr, path::Path};
     use tokio::io::AsyncWriteExt;
-    use tokio_stream::wrappers::UnixListenerStream;
     use tonic::{transport::Channel, Response};
 
     mock! {

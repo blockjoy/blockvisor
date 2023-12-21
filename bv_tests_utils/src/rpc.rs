@@ -21,7 +21,7 @@ macro_rules! start_test_server {
     ($tmp_root:expr, $($mock:expr), +) => {{
         let socket_path = $tmp_root.join("test_socket");
         let uds_stream =
-            UnixListenerStream::new(tokio::net::UnixListener::bind(socket_path).unwrap());
+            tokio_stream::wrappers::UnixListenerStream::new(tokio::net::UnixListener::bind(socket_path).unwrap());
         let (tx, rx) = tokio::sync::oneshot::channel();
         $crate::rpc::TestServer {
             tx,

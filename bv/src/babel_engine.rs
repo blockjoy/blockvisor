@@ -774,7 +774,6 @@ mod tests {
     };
     use bv_tests_utils::{rpc::test_channel, start_test_server};
     use mockall::*;
-    use tokio_stream::wrappers::UnixListenerStream;
     use tonic::{Request, Response, Streaming};
 
     mock! {
