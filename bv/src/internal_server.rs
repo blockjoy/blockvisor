@@ -550,12 +550,7 @@ where
     ) -> eyre::Result<NodeDisplayInfo> {
         let id = Uuid::new_v4();
         let name = Petnames::default().generate_one(3, "_");
-        let props = parse_props(&req)?;
-        let properties = props
-            .into_iter()
-            .chain([("network".to_string(), req.network.clone())])
-            .collect();
-
+        let properties = parse_props(&req)?.into_iter().collect();
         let (ip, gateway) = self.discover_ip_and_gateway(&req, id).await?;
         self.nodes_manager
             .create(

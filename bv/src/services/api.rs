@@ -244,7 +244,6 @@ async fn process_node_command<P: Pal + Debug>(
                     .properties
                     .into_iter()
                     .map(|p| (p.name, p.value))
-                    .chain([("network".to_string(), args.network.clone())])
                     .collect();
                 let rules = args
                     .rules

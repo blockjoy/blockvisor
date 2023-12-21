@@ -194,6 +194,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let properties = config
             .properties
             .into_iter()
+            .chain([("network".to_string(), config.network.clone())])
             .map(|(k, v)| (k.to_uppercase(), v))
             .collect();
 
@@ -209,6 +210,12 @@ impl<P: Pal + Debug> NodesManager<P> {
         let meta = Self::fetch_image_data(self.pal.clone(), self.api_config.clone(), &config.image)
             .await
             .with_context(|| "fetch image data failed")?;
+        if !meta.nets.contains_key(&config.network) {
+            command_failed!(Error::Internal(anyhow!(
+                "invalid network name '{}'",
+                config.network
+            )));
+        }
 
         self.check_node_requirements(&meta.requirements, None)
             .await?;
@@ -1126,7 +1133,11 @@ mod tests {
                 disk_size_gb: 1,
             },
             firewall_rules: config.rules,
-            properties: config.properties,
+            properties: config
+                .properties
+                .into_iter()
+                .chain([("NETWORK".to_string(), config.network.clone())])
+                .collect(),
             network: config.network,
             standalone: config.standalone,
         }
@@ -1397,6 +1408,26 @@ mod tests {
                         rules: vec![],
                         properties: Default::default(),
                         network: "test".to_string(),
+                        standalone: true,
+                    }
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "BV internal error: invalid network name 'invalid'",
+            nodes
+                .create(
+                    failed_node_id,
+                    NodeConfig {
+                        name: "node name".to_string(),
+                        image: test_env.test_image.clone(),
+                        ip: "192.168.0.9".to_string(),
+                        gateway: "192.168.0.1".to_string(),
+                        rules: vec![],
+                        properties: Default::default(),
+                        network: "invalid".to_string(),
                         standalone: true,
                     }
                 )
