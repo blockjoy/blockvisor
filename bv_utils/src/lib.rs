@@ -18,6 +18,33 @@ macro_rules! with_retry {
 }
 
 #[macro_export]
+macro_rules! with_selective_retry {
+    ($fun:expr, $non_retriable:expr) => {{
+        const RPC_RETRY_MAX: u32 = 3;
+        const RPC_BACKOFF_BASE_MS: u64 = 300;
+        let mut retry_count = 0;
+        loop {
+            match $fun.await {
+                Ok(res) => break Ok(res),
+                Err(err) if !$non_retriable.contains(&err.code()) => {
+                    if retry_count < RPC_RETRY_MAX {
+                        retry_count += 1;
+                        let backoff = RPC_BACKOFF_BASE_MS * 2u64.pow(retry_count);
+                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                        continue;
+                    } else {
+                        break Err(err);
+                    }
+                }
+                Err(err) => {
+                    break Err(err);
+                }
+            }
+        }
+    }};
+}
+
+#[macro_export]
 macro_rules! _with_retry {
     ($fun:expr, $retry_max:expr, $backoff_base_ms:expr) => {{
         let mut retry_count = 0;

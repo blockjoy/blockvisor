@@ -1,5 +1,5 @@
 use crate::{config::SharedConfig, installer, services, services::api::pb, utils, BV_VAR_PATH};
-use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
+use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
 use eyre::{anyhow, Context, Result};
 use std::{
     cmp::Ordering,
@@ -87,15 +87,15 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
     }
 
     pub async fn get_latest(&mut self) -> Result<Option<pb::BundleIdentifier>> {
-        let mut resp: pb::BundleServiceListBundleVersionsResponse = self
+        let mut client = self
             .bundles
             .connect(pb::bundle_service_client::BundleServiceClient::with_interceptor)
             .await
-            .with_context(|| "cannot connect to bundle service")?
-            .list_bundle_versions(pb::BundleServiceListBundleVersionsRequest {})
-            .await
-            .with_context(|| "cannot list bundle versions")?
-            .into_inner();
+            .with_context(|| "cannot connect to bundle service")?;
+        let mut resp: pb::BundleServiceListBundleVersionsResponse =
+            with_retry!(client.list_bundle_versions(pb::BundleServiceListBundleVersionsRequest {}))
+                .with_context(|| "cannot list bundle versions")?
+                .into_inner();
         resp.identifiers
             .sort_by(|a, b| utils::semver_cmp(&b.version, &a.version));
         Ok(resp.identifiers.first().cloned())
@@ -115,17 +115,18 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
     }
 
     pub async fn download_and_install(&mut self, bundle: pb::BundleIdentifier) -> Result<()> {
-        let archive = self
+        let mut client = self
             .bundles
             .connect(pb::bundle_service_client::BundleServiceClient::with_interceptor)
-            .await?
-            .retrieve(tonic::Request::new(pb::BundleServiceRetrieveRequest {
-                id: Some(bundle),
-            }))
-            .await?
-            .into_inner()
-            .location
-            .ok_or_else(|| anyhow!("missing location"))?;
+            .await?;
+        let archive = with_retry!(client.retrieve(tonic::Request::new(
+            pb::BundleServiceRetrieveRequest {
+                id: Some(bundle.clone()),
+            }
+        )))?
+        .into_inner()
+        .location
+        .ok_or_else(|| anyhow!("missing location"))?;
 
         let bundle_path = self.download_path.join(BUNDLE);
         let _ = fs::remove_dir_all(&bundle_path).await;

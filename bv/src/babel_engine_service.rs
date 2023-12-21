@@ -42,16 +42,14 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
             network: self.node_info.network.clone(),
             manifest: Some(manifest.into()),
         };
-        let mut archive_service = services::connect_to_api_service(
+        let mut client = services::connect_to_api_service(
             &self.config,
             pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
         )
         .await
         .map_err(|err| Status::internal(format!("can not connect archives service: {err}")))?;
-        with_retry!(
-            archive_service.put_download_manifest(with_timeout(manifest.clone(), custom_timeout))
-        )
-        .map_err(|err| Status::internal(format!("put_download_manifest failed with: {err}")))?;
+        with_retry!(client.put_download_manifest(with_timeout(manifest.clone(), custom_timeout)))
+            .map_err(|err| Status::internal(format!("put_download_manifest failed with: {err}")))?;
         Ok(Response::new(()))
     }
 

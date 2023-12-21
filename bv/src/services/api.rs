@@ -13,7 +13,8 @@ use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
     blockchain_archive_service_client, blockchain_service_client, command_service_client,
-    discovery_service_client, host_service_client, node_command::Command, node_service_client,
+    discovery_service_client, host_service_client, metrics_service_client, node_command::Command,
+    node_service_client,
 };
 use reqwest::Url;
 use std::{
@@ -65,12 +66,14 @@ pub type DiscoveryServiceClient =
 pub type HostsServiceClient = host_service_client::HostServiceClient<AuthenticatedService>;
 pub type NodesServiceClient = node_service_client::NodeServiceClient<AuthenticatedService>;
 pub type CommandServiceClient = command_service_client::CommandServiceClient<AuthenticatedService>;
+pub type MetricsServiceClient = metrics_service_client::MetricsServiceClient<AuthenticatedService>;
 
-pub async fn connect(config: &SharedConfig) -> Result<CommandServiceClient> {
-    let client = with_retry!(services::connect_to_api_service(
+async fn connect_command_service(config: &SharedConfig) -> Result<CommandServiceClient> {
+    let client = services::connect_to_api_service(
         config,
         command_service_client::CommandServiceClient::with_interceptor,
-    ));
+    )
+    .await;
     if let Err(err) = &client {
         warn!("error connecting to api while processing commands: {err:?}");
     }
@@ -100,11 +103,11 @@ impl<'a> CommandsService<'a> {
     async fn get_pending_commands(&self) -> Option<Vec<pb::Command>> {
         info!("Get pending commands");
 
-        let mut client = connect(self.config).await.ok()?;
         let req = pb::CommandServicePendingRequest {
             host_id: self.config.read().await.id.to_string(),
             filter_type: None,
         };
+        let mut client = connect_command_service(self.config).await.ok()?;
         match with_retry!(client.pending(req.clone())) {
             Ok(resp) => {
                 let commands = resp.into_inner().commands;
@@ -174,7 +177,6 @@ impl<'a> CommandsService<'a> {
         command_id: &str,
         command_result: &commands::Result<()>,
     ) -> Result<()> {
-        let mut client = connect(self.config).await?;
         let req = match command_result {
             Ok(()) => pb::CommandServiceUpdateRequest {
                 id: command_id.to_string(),
@@ -204,6 +206,7 @@ impl<'a> CommandsService<'a> {
                 req
             }
         };
+        let mut client = connect_command_service(self.config).await?;
         with_retry!(client.update(req.clone()))
             .with_context(|| format!("failed to update command '{command_id}' status"))?;
         Ok(())

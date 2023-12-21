@@ -18,6 +18,7 @@ use crate::{
     ServiceStatus,
 };
 use bv_utils::run_flag::RunFlag;
+use bv_utils::with_retry;
 use eyre::{Context, Result};
 use metrics::{register_counter, Counter};
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -26,7 +27,6 @@ use std::{
     fmt::Debug,
     hash::{Hash, Hasher},
     net::SocketAddr,
-    str::FromStr,
     sync::Arc,
     time::Instant,
 };
@@ -36,7 +36,7 @@ use tokio::{
     sync::{watch, watch::Receiver},
     time::{sleep, Duration},
 };
-use tonic::transport::{Channel, Endpoint, Server};
+use tonic::transport::Server;
 use tracing::{debug, error, info, warn};
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
@@ -144,15 +144,9 @@ where
         let node_updates_future =
             Self::node_updates(run.clone(), nodes_manager.clone(), self.config.clone());
 
-        let endpoint = Endpoint::from_str(&config.blockjoy_api_url)?;
-        let node_metrics_future = Self::node_metrics(
-            run.clone(),
-            nodes_manager.clone(),
-            &endpoint,
-            self.config.clone(),
-        );
-        let host_metrics_future =
-            Self::host_metrics(run.clone(), config.id, &endpoint, self.config.clone());
+        let node_metrics_future =
+            Self::node_metrics(run.clone(), nodes_manager.clone(), self.config.clone());
+        let host_metrics_future = Self::host_metrics(run.clone(), config.id, self.config.clone());
 
         // send up to date information about host software
         if let Err(e) = hosts::send_info_update(self.config.clone()).await {
@@ -375,25 +369,11 @@ where
         }
     }
 
-    async fn wait_for_channel(mut run: RunFlag, endpoint: &Endpoint) -> Option<Channel> {
-        while run.load() {
-            match Endpoint::connect(endpoint).await {
-                Ok(channel) => return Some(channel),
-                Err(e) => {
-                    warn!("Error connecting to endpoint: {:?}", e);
-                    run.select(sleep(RECONNECT_INTERVAL)).await;
-                }
-            }
-        }
-        None
-    }
-
     /// This task runs periodically to aggregate metrics from every node. It will call into the
     /// nodes, query their metrics, then send them to blockvisor-api.
     async fn node_metrics(
         mut run: RunFlag,
         nodes_manager: Arc<NodesManager<P>>,
-        endpoint: &Endpoint,
         config: SharedConfig,
     ) -> Option<()> {
         let mut job_info_cache: HashMap<(uuid::Uuid, String), u64> = HashMap::new();
@@ -405,49 +385,36 @@ where
             let mut job_info_cache_update: HashMap<(uuid::Uuid, String), u64> = HashMap::new();
             // do not bother api with empty updates
             if metrics.has_any() {
-                let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
-                    Some(channel) => channel,
-                    None => {
-                        warn!("Node metrics could not establish channel");
-                        continue;
+                if let Ok(mut client) = Self::connect_metrics_service(&config).await {
+                    for (id, metric) in metrics.iter_mut() {
+                        // go through all jobs info in metrics and leave only this that has changed
+                        // since last time
+                        metric.jobs.retain(|(name, info)| {
+                            let mut state = DefaultHasher::new();
+                            info.hash(&mut state);
+                            let new_hash = state.finish();
+                            let key = (*id, name.clone());
+                            if Some(&new_hash) != job_info_cache.get(&key) {
+                                job_info_cache_update.insert(key, new_hash);
+                                debug!(
+                                    "job info for '{name}' on {id} has changed - adding to metrics"
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        });
                     }
-                };
-                let token = match config.token().await {
-                    Ok(channel) => channel,
-                    Err(e) => {
-                        warn!("Node metrics could not refresh tokens: {e}");
-                        continue;
+                    let metrics: pb::MetricsServiceNodeRequest = metrics.into();
+                    if let Err(err) = with_retry!(client.node(metrics.clone())) {
+                        warn!("Could not send node metrics! `{err}`");
+                    } else {
+                        // update cache only if request succeed
+                        job_info_cache.extend(job_info_cache_update.into_iter());
                     }
-                };
-                let mut client = pb::metrics_service_client::MetricsServiceClient::with_interceptor(
-                    channel, token,
-                );
-                for (id, metric) in metrics.iter_mut() {
-                    // go through all jobs info in metrics and leave only this that has changed
-                    // since last time
-                    metric.jobs.retain(|(name, info)| {
-                        let mut state = DefaultHasher::new();
-                        info.hash(&mut state);
-                        let new_hash = state.finish();
-                        let key = (*id, name.clone());
-                        if Some(&new_hash) != job_info_cache.get(&key) {
-                            job_info_cache_update.insert(key, new_hash);
-                            debug!("job info for '{name}' on {id} has changed - adding to metrics");
-                            true
-                        } else {
-                            false
-                        }
-                    });
+                    BV_NODES_METRICS_COUNTER.increment(1);
+                    BV_NODES_METRICS_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
                 }
-                let metrics: pb::MetricsServiceNodeRequest = metrics.into();
-                if let Err(e) = client.node(metrics).await {
-                    warn!("Could not send node metrics! `{e}`");
-                } else {
-                    // update cache only if request succeed
-                    job_info_cache.extend(job_info_cache_update.into_iter());
-                }
-                BV_NODES_METRICS_COUNTER.increment(1);
-                BV_NODES_METRICS_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             } else {
                 info!("No metrics collected");
             }
@@ -455,12 +422,7 @@ where
         None
     }
 
-    async fn host_metrics(
-        mut run: RunFlag,
-        host_id: String,
-        endpoint: &Endpoint,
-        config: SharedConfig,
-    ) -> Option<()> {
+    async fn host_metrics(mut run: RunFlag, host_id: String, config: SharedConfig) -> Option<()> {
         while run.load() {
             run.select(sleep(with_jitter(hosts::COLLECT_INTERVAL)))
                 .await;
@@ -468,38 +430,34 @@ where
             let now = Instant::now();
             match HostMetrics::collect() {
                 Ok(metrics) => {
-                    let channel = match Self::wait_for_channel(run.clone(), endpoint).await {
-                        Some(channel) => channel,
-                        None => {
-                            warn!("Host metrics could not establish channel");
-                            continue;
+                    if let Ok(mut client) = Self::connect_metrics_service(&config).await {
+                        metrics.set_all_gauges();
+                        let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
+                        if let Err(err) = with_retry!(client.host(metrics.clone())) {
+                            warn!("Could not send host metrics! `{err}`");
                         }
-                    };
-                    let token = match config.token().await {
-                        Ok(channel) => channel,
-                        Err(e) => {
-                            warn!("Host metrics could not refresh tokens: {e}");
-                            continue;
-                        }
-                    };
-                    let mut client =
-                        pb::metrics_service_client::MetricsServiceClient::with_interceptor(
-                            channel, token,
-                        );
-                    metrics.set_all_gauges();
-                    let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
-                    if let Err(e) = client.host(metrics).await {
-                        warn!("Could not send host metrics! `{e}`");
                     }
                 }
-                Err(e) => {
-                    error!("Could not collect host metrics! `{e}`");
+                Err(err) => {
+                    error!("Could not collect host metrics! `{err}`");
                 }
             };
             BV_HOST_METRICS_COUNTER.increment(1);
             BV_HOST_METRICS_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
         }
         None
+    }
+
+    async fn connect_metrics_service(config: &SharedConfig) -> Result<api::MetricsServiceClient> {
+        let client = services::connect_to_api_service(
+            config,
+            pb::metrics_service_client::MetricsServiceClient::with_interceptor,
+        )
+        .await;
+        if let Err(err) = &client {
+            warn!("Metrics could not be sent: {err}");
+        };
+        client
     }
 
     // Send node info update to control plane

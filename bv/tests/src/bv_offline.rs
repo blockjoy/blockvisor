@@ -718,7 +718,7 @@ async fn test_discovery_on_connection_error() -> Result<()> {
         cluster_seed_urls: None,
     };
     let config = SharedConfig::new(config, "/some/dir/conf.json".into());
-    let connect_future = services::connect(&config, |config| async {
+    let connect_future = services::connect_with_discovery(&config, |config| async {
         let config = config.read().await;
         if config.blockjoy_mqtt_url.is_none() {
             bail!("first try without urls")

@@ -27,7 +27,7 @@ pub struct MqttStream {
 #[async_trait]
 impl pal::ServiceConnector<MqttStream> for MqttConnector {
     async fn connect(&self) -> Result<MqttStream> {
-        services::connect(&self.config, |config| async {
+        services::connect_with_discovery(&self.config, |config| async {
             let token = config.token().await?;
             let config = config.read().await;
             let url = config

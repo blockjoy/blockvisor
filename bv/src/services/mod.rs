@@ -43,9 +43,7 @@ where
 {
     let url = config.read().await.blockjoy_api_url;
     let endpoint = Endpoint::from_str(&url)?.connect_timeout(DEFAULT_CONNECT_TIMEOUT);
-    let channel = Endpoint::connect(&endpoint)
-        .await
-        .with_context(|| format!("Failed to connect to api service at {url}"))?;
+    let channel = Endpoint::connect_lazy(&endpoint);
     Ok(with_interceptor(
         channel,
         ApiInterceptor(
@@ -57,7 +55,10 @@ where
 
 /// Tries to use `connector` to create service connection. If this fails then asks the backend for
 /// new service urls, update `SharedConfig` with them, and tries again.
-pub async fn connect<'a, S, C, F>(config: &'a SharedConfig, mut connector: C) -> Result<S>
+pub async fn connect_with_discovery<'a, S, C, F>(
+    config: &'a SharedConfig,
+    mut connector: C,
+) -> Result<S>
 where
     C: FnMut(&'a SharedConfig) -> F,
     F: Future<Output = Result<S>> + 'a,

@@ -48,27 +48,7 @@ lazy_static::lazy_static! {
 #[macro_export]
 macro_rules! with_selective_retry {
     ($fun:expr) => {{
-        const RPC_RETRY_MAX: u32 = 3;
-        const RPC_BACKOFF_BASE_MS: u64 = 300;
-        let mut retry_count = 0;
-        loop {
-            match $fun.await {
-                Ok(res) => break Ok(res),
-                Err(err) if !NON_RETRIABLE.contains(&err.code()) => {
-                    if retry_count < RPC_RETRY_MAX {
-                        retry_count += 1;
-                        let backoff = RPC_BACKOFF_BASE_MS * 2u64.pow(retry_count);
-                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
-                        continue;
-                    } else {
-                        break Err(err);
-                    }
-                }
-                Err(err) => {
-                    break Err(err);
-                }
-            }
-        }
+        bv_utils::with_selective_retry!($fun, NON_RETRIABLE)
     }};
 }
 
@@ -528,28 +508,28 @@ async fn retrieve_download_manifest(
     image: NodeImage,
     network: String,
 ) -> Result<DownloadManifest> {
-    let mut archive_service = services::connect_to_api_service(
+    let mut client = services::connect_to_api_service(
         config,
         pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
     )
     .await
     .with_context(|| "cannot connect to manifest service")?;
-    archive_service
-        .get_download_manifest(pb::BlockchainArchiveServiceGetDownloadManifestRequest {
+    with_retry!(client.get_download_manifest(
+        pb::BlockchainArchiveServiceGetDownloadManifestRequest {
             id: Some(image.clone().try_into()?),
             network: network.clone(),
-        })
-        .await
-        .with_context(|| {
-            format!(
-                "cannot retrieve download manifest for {:?}-{}",
-                image, network
-            )
-        })?
-        .into_inner()
-        .manifest
-        .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
-        .try_into()
+        }
+    ))
+    .with_context(|| {
+        format!(
+            "cannot retrieve download manifest for {:?}-{}",
+            image, network
+        )
+    })?
+    .into_inner()
+    .manifest
+    .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
+    .try_into()
 }
 
 async fn retrieve_upload_manifest(
@@ -560,31 +540,31 @@ async fn retrieve_upload_manifest(
     url_expires: Option<u32>,
     data_version: Option<u64>,
 ) -> Result<UploadManifest> {
-    let mut archive_service = services::connect_to_api_service(
+    let mut client = services::connect_to_api_service(
         config,
         pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
     )
     .await
     .with_context(|| "cannot connect to manifest service")?;
-    archive_service
-        .get_upload_manifest(pb::BlockchainArchiveServiceGetUploadManifestRequest {
+    with_retry!(
+        client.get_upload_manifest(pb::BlockchainArchiveServiceGetUploadManifestRequest {
             id: Some(image.clone().try_into()?),
             network: network.clone(),
             data_version,
             slots,
             url_expires,
         })
-        .await
-        .with_context(|| {
-            format!(
-                "cannot retrieve upload manifest for {:?}-{}",
-                image, network
-            )
-        })?
-        .into_inner()
-        .manifest
-        .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
-        .try_into()
+    )
+    .with_context(|| {
+        format!(
+            "cannot retrieve upload manifest for {:?}-{}",
+            image, network
+        )
+    })?
+    .into_inner()
+    .manifest
+    .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
+    .try_into()
 }
 
 /// Engine trait implementation. For methods that require interaction with async BV code, it translate
