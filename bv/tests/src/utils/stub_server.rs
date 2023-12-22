@@ -77,6 +77,7 @@ impl pb::host_service_server::HostService for StubHostsServer {
                         assigned: false,
                     },
                 ],
+                managed_by: pb::ManagedBy::Automatic.into(),
             }),
             token: "awesome-token".to_string(),
             refresh: "even-more-awesomer-token".to_string(),

@@ -161,6 +161,7 @@ async fn main() -> Result<()> {
             region: cmd_args.region,
             billing_amount: None,
             vmm_mountpoint: Some(format!("{}", bv_root.join(BV_VAR_PATH).to_string_lossy())),
+            managed_by: Some(pb::ManagedBy::Automatic.into()),
         };
 
         let mut client =

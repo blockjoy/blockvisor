@@ -157,6 +157,7 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
         region: None,
         billing_amount: None,
         total_disk_space: Some(info.disk_space_bytes),
+        managed_by: None,
     };
     client.update(update).await?;
 
