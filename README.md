@@ -17,9 +17,13 @@ Published version of above guide with `bvup` tool can be found [here](https://gi
 
 ## Babel Plugins
 
-BV is blockchain agnostic system that uses plugin system to add support for specific blockchains. 
+BV is blockchain agnostic system that uses plugin system to add support for specific blockchains.
 
-See [Rhai Plugin Scripting Guide](babel_api/rhai_plugin_guide.md) for more details.
+So-called Babel Plugin, that translates BV blockchain agnostic interface (aka Babel API) into blockchain specific calls,
+always comes together with node image.
+
+See [Node Image Builder Guide](node_image_builder_guide.md) for more details on how to
+add new blockchain support to Blockvisor.
 
 ## API proto files
 

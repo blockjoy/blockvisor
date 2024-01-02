@@ -9,10 +9,6 @@ Integration tests for `blockvisord` with dummy platform abstraction.
 Tests are performed mostly via bv CLI and no online services are needed.
 Since each test run in isolated environment, they can run in parallel.
 
-## `bv_online`
-BV tests that require online services to be available.
-Since each test run in isolated environment, they can run in parallel.
-
 ## `bv_service`
 Tests that work on bv service run by systemd. 
 They require mutually exclusive environment (e.g. to restart systemd services),
