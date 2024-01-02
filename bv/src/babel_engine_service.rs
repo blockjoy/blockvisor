@@ -40,9 +40,7 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
                 Status::invalid_argument(format!("invalid node image id: {err}"))
             })?),
             network: self.node_info.network.clone(),
-            manifest: Some(manifest.try_into().map_err(|err| {
-                Status::invalid_argument(format!("invalid manifest blueprint: {err}"))
-            })?),
+            manifest: Some(manifest.into()),
         };
         let mut archive_service = services::connect_to_api_service(
             &self.config,
