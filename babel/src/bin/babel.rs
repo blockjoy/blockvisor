@@ -14,7 +14,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
-use tracing::info;
+use tracing::{info, warn};
 
 lazy_static::lazy_static! {
     static ref JOB_RUNNER_BIN_PATH: &'static Path = Path::new("/usr/bin/babel_job_runner");
@@ -134,11 +134,22 @@ impl BabelPal for Pal {
         Ok(())
     }
 
-    async fn umount_data_drive(&self, data_directory_mount_point: &str) -> eyre::Result<()> {
+    async fn umount_data_drive(
+        &self,
+        data_directory_mount_point: &str,
+        fuser_kill: bool,
+    ) -> eyre::Result<()> {
         if self
             .is_data_drive_mounted(data_directory_mount_point)
             .await?
         {
+            if fuser_kill {
+                if let Err(err) = run_cmd("fuser", ["-km", data_directory_mount_point]).await {
+                    warn!(
+                        "failed to 'fuser -km {data_directory_mount_point}' before umount: {err}"
+                    );
+                }
+            }
             run_cmd("umount", [data_directory_mount_point])
                 .await
                 .map_err(|err| anyhow!("failed to umount {data_directory_mount_point}: {err}"))?;

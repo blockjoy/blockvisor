@@ -146,6 +146,9 @@ type of node and customer needs
 - Once the binaries and the blockchain data are in place, and you have a sense of what it means to run nodes
 on different networks of the same blockchain, you can move on to implement/customize Babel Plugin (rhai script).
 
+Also make sure that following tools, required by Babel, are available:
+- `fallocate`
+- `fuser`
 
 ### Implementing/Customizing Babel Plugin for New Blockchain
 

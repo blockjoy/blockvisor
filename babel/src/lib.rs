@@ -60,7 +60,11 @@ impl BabelEngineConnector for VSockConnector {
 #[async_trait]
 pub trait BabelPal {
     async fn mount_data_drive(&self, data_directory_mount_point: &str) -> Result<()>;
-    async fn umount_data_drive(&self, data_directory_mount_point: &str) -> Result<()>;
+    async fn umount_data_drive(
+        &self,
+        data_directory_mount_point: &str,
+        fuser_kill: bool,
+    ) -> Result<()>;
     async fn is_data_drive_mounted(&self, data_directory_mount_point: &str) -> Result<bool>;
     async fn set_hostname(&self, hostname: &str) -> Result<()>;
     async fn set_swap_file(&self, swap_size_mb: usize, swap_file_location: &str) -> Result<()>;

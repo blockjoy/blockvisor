@@ -115,8 +115,9 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .map_err(|err| Status::internal(format!("failed to shutdown jobs_manger: {err:#}")))?;
 
         if let Ok(config) = load_config(&self.babel_cfg_path).await {
+            // since node is going to be stopped, it is safe to set fuser_kill flag as true
             self.pal
-                .umount_data_drive(&config.data_directory_mount_point)
+                .umount_data_drive(&config.data_directory_mount_point, true)
                 .await
                 .map_err(|err| {
                     Status::internal(eyre!("failed to umount data drive: {err:#}").to_string())
@@ -479,7 +480,11 @@ mod tests {
             Ok(())
         }
 
-        async fn umount_data_drive(&self, _data_directory_mount_point: &str) -> Result<()> {
+        async fn umount_data_drive(
+            &self,
+            _data_directory_mount_point: &str,
+            _fuser_kill: bool,
+        ) -> Result<()> {
             Ok(())
         }
 
