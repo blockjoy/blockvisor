@@ -67,7 +67,7 @@ tera = {version = "1.18.1", default-features = false}
 thiserror = "1.0.31"
 tokio = {version = "1.0", features = ["full"]}
 tokio-stream = {version = "0.1.9", features = ["net", "sync"]}
-tonic = {version = "0.8.3", features = ["tls-roots"]}
+tonic = {version = "0.8.3", features = ["tls-roots", "gzip"]}
 tonic-rpc = { version = "0.2.1", features = ["bincode"] }
 tower = "0.4.13"
 tracing = "0.1.37"

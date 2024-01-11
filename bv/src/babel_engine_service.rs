@@ -1,13 +1,8 @@
 use crate::{
-    api_with_retry,
-    babel_engine::NodeInfo,
-    config::SharedConfig,
-    firecracker_machine::VSOCK_PATH,
-    services::{self, api::pb},
+    babel_engine::NodeInfo, config::SharedConfig, firecracker_machine::VSOCK_PATH, services,
 };
 use async_trait::async_trait;
 use babel_api::engine::DownloadManifest;
-use bv_utils::rpc::with_timeout;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -32,27 +27,14 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
     ) -> eyre::Result<Response<()>, Status> {
         debug!("putting DownloadManifest to API...");
         let manifest = request.into_inner();
-        // DownloadManifest may be pretty big, so better set longer timeout that depends on number of chunks
-        let custom_timeout =
-            bv_utils::rpc::estimate_put_download_manifest_request_timeout(manifest.chunks.len());
-        let manifest = pb::BlockchainArchiveServicePutDownloadManifestRequest {
-            id: Some(self.node_info.image.clone().try_into().map_err(|err| {
-                Status::invalid_argument(format!("invalid node image id: {err}"))
-            })?),
-            network: self.node_info.network.clone(),
-            manifest: Some(manifest.into()),
-        };
-        let mut client = services::ApiClient::build_with_default_connector(
+        services::blockchain_archive::put_download_manifest(
             &self.config,
-            pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
+            self.node_info.image.clone(),
+            self.node_info.network.clone(),
+            manifest,
         )
         .await
-        .map_err(|err| Status::internal(format!("can not connect archives service: {err}")))?;
-        api_with_retry!(
-            client,
-            client.put_download_manifest(with_timeout(manifest.clone(), custom_timeout))
-        )
-        .map_err(|err| Status::internal(format!("put_download_manifest failed with: {err}")))?;
+        .map_err(|err| Status::internal(err.to_string()))?;
         Ok(Response::new(()))
     }
 

@@ -12,6 +12,7 @@ use tonic::{
 
 pub mod api;
 pub mod blockchain;
+pub mod blockchain_archive;
 pub mod kernel;
 pub mod mqtt;
 

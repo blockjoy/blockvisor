@@ -9,19 +9,16 @@
 /// Engine methods that implementation needs to interact with node via BV are sent as `NodeRequest`.
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{
-    api_with_retry,
     babel_engine_service::{self, BabelEngineServer},
     config::SharedConfig,
     node_connection::RPC_REQUEST_TIMEOUT,
     node_data::{NodeImage, NodeProperties},
     pal::NodeConnection,
     services,
-    services::api::pb,
 };
 use babel_api::{
     engine::{
-        DownloadManifest, HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest,
-        RestRequest, ShResponse, UploadManifest,
+        HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, RestRequest, ShResponse,
     },
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
@@ -29,7 +26,7 @@ use bv_utils::{
     rpc::with_timeout,
     {run_flag::RunFlag, with_retry},
 };
-use eyre::{anyhow, bail, Context, Error, Result};
+use eyre::{anyhow, bail, Error, Result};
 use futures_util::StreamExt;
 use std::{
     collections::HashMap,
@@ -431,7 +428,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         match &mut job_config.job_type {
             JobType::Download { manifest, .. } => {
                 if manifest.is_none() {
-                    match retrieve_download_manifest(
+                    match services::blockchain_archive::retrieve_download_manifest(
                         &self.api_config,
                         self.node_info.image.clone(),
                         self.node_info.network.clone(),
@@ -467,7 +464,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                         .into_inner(),
                         Some(slots) => *slots,
                     };
-                    match retrieve_upload_manifest(
+                    match services::blockchain_archive::retrieve_upload_manifest(
                         &self.api_config,
                         self.node_info.image.clone(),
                         self.node_info.network.clone(),
@@ -503,82 +500,6 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             .map_err(|err| self.handle_connection_errors(err))
             .map(|v| v.into_inner())
     }
-}
-
-async fn retrieve_download_manifest(
-    config: &SharedConfig,
-    image: NodeImage,
-    network: String,
-) -> Result<DownloadManifest> {
-    let mut client = services::ApiClient::build_with_default_connector(
-        config,
-        pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
-    )
-    .await
-    .with_context(|| "cannot connect to manifest service")?;
-    api_with_retry!(
-        client,
-        client.get_download_manifest(with_timeout(
-            pb::BlockchainArchiveServiceGetDownloadManifestRequest {
-                id: Some(image.clone().try_into()?),
-                network: network.clone(),
-            },
-            // we don't know how download manifest is big, but it can be pretty big
-            // lets give it time that should be enough for 20 000 of chunks ~ 20TB of blockchian data
-            Duration::from_secs(200),
-        ))
-    )
-    .with_context(|| {
-        format!(
-            "cannot retrieve download manifest for {:?}-{}",
-            image, network
-        )
-    })?
-    .into_inner()
-    .manifest
-    .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
-    .try_into()
-}
-
-async fn retrieve_upload_manifest(
-    config: &SharedConfig,
-    image: NodeImage,
-    network: String,
-    slots: u32,
-    url_expires: Option<u32>,
-    data_version: Option<u64>,
-) -> Result<UploadManifest> {
-    let mut client = services::ApiClient::build_with_default_connector(
-        config,
-        pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
-    )
-    .await
-    .with_context(|| "cannot connect to manifest service")?;
-    api_with_retry!(
-        client,
-        client.get_upload_manifest(with_timeout(
-            pb::BlockchainArchiveServiceGetUploadManifestRequest {
-                id: Some(image.clone().try_into()?),
-                network: network.clone(),
-                data_version,
-                slots,
-                url_expires,
-            },
-            // let make timeout proportional to number of slots
-            // it is expected that 1000 of slots should be downloaded in lest thant 5s
-            services::DEFAULT_REQUEST_TIMEOUT + Duration::from_secs(slots as u64 / 200),
-        ))
-    )
-    .with_context(|| {
-        format!(
-            "cannot retrieve upload manifest for {:?}-{}",
-            image, network
-        )
-    })?
-    .into_inner()
-    .manifest
-    .ok_or_else(|| anyhow!("manifest not found for {:?}-{}", image, network))?
-    .try_into()
 }
 
 /// Engine trait implementation. For methods that require interaction with async BV code, it translate
