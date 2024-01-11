@@ -123,7 +123,8 @@ pub trait NodeConnection {
     /// Check if connection was marked as broken.
     fn is_broken(&self) -> bool;
     /// Perform basic connectivity test, to check actual connection state.
-    async fn test(&self) -> Result<()>;
+    /// It may mutate internal state it connection was marked as broken, but now test pass.
+    async fn test(&mut self) -> Result<()>;
     /// Get reference to Babel rpc client. Try to reestablish connection if it's necessary.
     async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient>;
     /// Get reference to BabelSup rpc client. Try to reestablish connection if it's necessary.

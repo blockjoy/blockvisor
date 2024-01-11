@@ -74,9 +74,11 @@ impl pal::NodeConnection for NodeConnection {
         matches!(self.state, NodeConnectionState::Broken)
     }
 
-    async fn test(&self) -> Result<()> {
+    async fn test(&mut self) -> Result<()> {
         let mut client = connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?;
         with_retry!(client.get_version(()))?;
+        // update connection state (otherwise it still may be seen as broken)
+        self.state = NodeConnectionState::BabelSup(client);
         Ok(())
     }
 

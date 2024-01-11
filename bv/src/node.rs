@@ -674,7 +674,7 @@ pub mod tests {
             fn is_closed(&self) -> bool;
             fn mark_broken(&mut self);
             fn is_broken(&self) -> bool;
-            async fn test(&self) -> Result<()>;
+            async fn test(&mut self) -> Result<()>;
             async fn babelsup_client<'a>(&'a mut self) -> Result<&'a mut BabelSupClient>;
             async fn babel_client<'a>(&'a mut self) -> Result<&'a mut BabelClient>;
         }

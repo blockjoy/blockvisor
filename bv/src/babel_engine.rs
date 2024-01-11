@@ -968,7 +968,7 @@ mod tests {
             false
         }
 
-        async fn test(&self) -> Result<()> {
+        async fn test(&mut self) -> Result<()> {
             Ok(())
         }
 
