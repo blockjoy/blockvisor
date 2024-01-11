@@ -1,8 +1,8 @@
 use crate::config::SharedConfig;
 use crate::linux_platform::bv_root;
-use crate::services;
 use crate::services::api::pb;
 use crate::BV_VAR_PATH;
+use crate::{api_with_retry, services};
 use eyre::{anyhow, Result};
 use metrics::{register_gauge, Gauge};
 use std::collections::HashMap;
@@ -143,7 +143,7 @@ impl pb::MetricsServiceHostRequest {
 
 pub async fn send_info_update(config: SharedConfig) -> Result<()> {
     let info = HostInfo::collect()?;
-    let mut client = services::connect_to_api_service(
+    let mut client = services::ApiClient::build_with_default_connector(
         &config,
         pb::host_service_client::HostServiceClient::with_interceptor,
     )
@@ -159,7 +159,7 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
         total_disk_space: Some(info.disk_space_bytes),
         managed_by: None,
     };
-    client.update(update).await?;
+    api_with_retry!(client, client.update(update.clone()))?;
 
     Ok(())
 }

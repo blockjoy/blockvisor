@@ -1,7 +1,7 @@
 use crate::{
     node_data::{NodeData, NodeImage},
     pal::Pal,
-    services::blockchain::{BlockchainService, BABEL_PLUGIN_NAME, DATA_FILE},
+    services::blockchain::{self, BABEL_PLUGIN_NAME, DATA_FILE},
     BV_VAR_PATH,
 };
 use babel_api::{metadata::BlockchainMetadata, rhai_plugin};
@@ -94,7 +94,7 @@ impl NodeContext {
         image: &NodeImage,
     ) -> Result<(String, BlockchainMetadata)> {
         fs::copy(
-            BlockchainService::get_image_download_folder_path(&self.bv_root, image)
+            blockchain::get_image_download_folder_path(&self.bv_root, image)
                 .join(BABEL_PLUGIN_NAME),
             &self.plugin_script,
         )

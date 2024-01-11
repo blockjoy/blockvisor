@@ -508,7 +508,7 @@ pub async fn process_chain_command(config: SharedConfig, command: ChainCommand) 
             number,
         } => {
             let mut blockchain_service =
-                BlockchainService::connect(services::DefaultConnector { config }, bv_root).await?;
+                BlockchainService::new(services::DefaultConnector { config }, bv_root).await?;
             let mut versions = blockchain_service
                 .list_image_versions(&protocol, &r#type)
                 .await?;

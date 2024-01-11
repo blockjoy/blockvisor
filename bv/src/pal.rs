@@ -54,7 +54,7 @@ pub trait Pal {
     ) -> Self::CommandsStreamConnector;
 
     /// Type representing API service connector.
-    type ApiServiceConnector: services::ApiServiceConnector;
+    type ApiServiceConnector: services::ApiServiceConnector + Clone;
     /// Creates commands stream connector.
     fn create_api_service_connector(&self, config: &SharedConfig) -> Self::ApiServiceConnector;
 

@@ -10,8 +10,8 @@ use crate::{
     node_metrics,
     pal::{NetInterface, Pal},
     services::{
-        blockchain::{BlockchainService, BABEL_PLUGIN_NAME},
-        kernel::KernelService,
+        blockchain::{self, BlockchainService, BABEL_PLUGIN_NAME},
+        kernel,
     },
     utils, BV_VAR_PATH,
 };
@@ -754,14 +754,14 @@ impl<P: Pal + Debug> NodesManager<P> {
         image: &NodeImage,
     ) -> Result<BlockchainMetadata> {
         let bv_root = pal.bv_root();
-        let folder = BlockchainService::get_image_download_folder_path(bv_root, image);
+        let folder = blockchain::get_image_download_folder_path(bv_root, image);
         let rhai_path = folder.join(BABEL_PLUGIN_NAME);
 
-        let script = if !BlockchainService::is_image_cache_valid(bv_root, image)
+        let script = if !blockchain::is_image_cache_valid(bv_root, image)
             .await
             .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
         {
-            let mut blockchain_service = BlockchainService::connect(
+            let mut blockchain_service = BlockchainService::new(
                 pal.create_api_service_connector(&api_config),
                 bv_root.to_path_buf(),
             )
@@ -780,20 +780,17 @@ impl<P: Pal + Debug> NodesManager<P> {
             fs::read_to_string(rhai_path).await.map_err(into_internal)?
         };
         let meta = rhai_plugin::read_metadata(&script)?;
-        if !KernelService::is_kernel_cache_valid(bv_root, &meta.kernel)
+        if !kernel::is_kernel_cache_valid(bv_root, &meta.kernel)
             .await
             .with_context(|| format!("Failed to check kernel cache: `{}`", meta.kernel))?
         {
-            let mut kernel_service = KernelService::connect(
+            kernel::download_kernel(
+                bv_root,
                 pal.create_api_service_connector(&api_config),
-                bv_root.to_path_buf(),
+                &meta.kernel,
             )
             .await
-            .with_context(|| "cannot connect to kernel service")?;
-            kernel_service
-                .download_kernel(&meta.kernel)
-                .await
-                .with_context(|| "cannot download kernel")?;
+            .with_context(|| "cannot download kernel")?;
         }
 
         info!("Reading blockchain requirements: {:?}", &meta.requirements);
@@ -1702,8 +1699,8 @@ mod tests {
         )
         .await?;
         fs::copy(
-            KernelService::get_kernel_path(&test_env.tmp_root, TEST_KERNEL),
-            KernelService::get_kernel_path(&test_env.tmp_root, "5.10.175"),
+            kernel::get_kernel_path(&test_env.tmp_root, TEST_KERNEL),
+            kernel::get_kernel_path(&test_env.tmp_root, "5.10.175"),
         )
         .await?;
         assert_eq!(

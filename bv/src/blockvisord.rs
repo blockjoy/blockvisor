@@ -1,5 +1,5 @@
 use crate::{
-    cluster,
+    api_with_retry, cluster,
     config::{Config, SharedConfig},
     hosts::{self, HostMetrics},
     internal_server,
@@ -10,15 +10,14 @@ use crate::{
     self_updater,
     services::{
         self,
-        api::{self, common, pb},
-        mqtt,
+        api::{self, common, pb, MetricsServiceClient},
+        mqtt, ApiClient, ApiInterceptor, ApiServiceConnector,
     },
     try_set_bv_status,
     utils::with_jitter,
     ServiceStatus,
 };
 use bv_utils::run_flag::RunFlag;
-use bv_utils::with_retry;
 use eyre::{Context, Result};
 use metrics::{register_counter, Counter};
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -36,7 +35,7 @@ use tokio::{
     sync::{watch, watch::Receiver},
     time::{sleep, Duration},
 };
-use tonic::transport::Server;
+use tonic::transport::{Channel, Server};
 use tracing::{debug, error, info, warn};
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
@@ -406,7 +405,7 @@ where
                         });
                     }
                     let metrics: pb::MetricsServiceNodeRequest = metrics.into();
-                    if let Err(err) = with_retry!(client.node(metrics.clone())) {
+                    if let Err(err) = api_with_retry!(client, client.node(metrics.clone())) {
                         warn!("Could not send node metrics! `{err}`");
                     } else {
                         // update cache only if request succeed
@@ -433,7 +432,7 @@ where
                     if let Ok(mut client) = Self::connect_metrics_service(&config).await {
                         metrics.set_all_gauges();
                         let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
-                        if let Err(err) = with_retry!(client.host(metrics.clone())) {
+                        if let Err(err) = api_with_retry!(client, client.host(metrics.clone())) {
                             warn!("Could not send host metrics! `{err}`");
                         }
                     }
@@ -450,8 +449,15 @@ where
 
     async fn connect_metrics_service(
         config: &SharedConfig,
-    ) -> Result<api::MetricsServiceClient, tonic::Status> {
-        let client = services::connect_to_api_service(
+    ) -> Result<
+        ApiClient<
+            MetricsServiceClient,
+            impl ApiServiceConnector,
+            impl Fn(Channel, ApiInterceptor) -> MetricsServiceClient + Clone,
+        >,
+        tonic::Status,
+    > {
+        let client = services::ApiClient::build_with_default_connector(
             config,
             pb::metrics_service_client::MetricsServiceClient::with_interceptor,
         )
@@ -467,15 +473,13 @@ where
         config: &SharedConfig,
         update: pb::NodeServiceUpdateStatusRequest,
     ) -> Result<()> {
-        let mut client = services::connect_to_api_service(
+        let mut client = services::ApiClient::build_with_default_connector(
             config,
             pb::node_service_client::NodeServiceClient::with_interceptor,
         )
         .await
         .with_context(|| "Error connecting to api".to_string())?;
-        client
-            .update_status(update)
-            .await
+        api_with_retry!(client, client.update_status(update.clone()))
             .with_context(|| "Cannot send node update".to_string())?;
         Ok(())
     }

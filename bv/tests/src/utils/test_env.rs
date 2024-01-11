@@ -330,6 +330,7 @@ impl Pal for DummyPlatform {
     }
 }
 
+#[derive(Clone)]
 pub struct DummyApiConnector;
 
 #[async_trait]

@@ -1,4 +1,5 @@
 use crate::{
+    api_with_retry,
     babel_engine::NodeInfo,
     config::SharedConfig,
     firecracker_machine::VSOCK_PATH,
@@ -7,7 +8,6 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::engine::DownloadManifest;
 use bv_utils::rpc::with_timeout;
-use bv_utils::with_retry;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -42,14 +42,17 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
             network: self.node_info.network.clone(),
             manifest: Some(manifest.into()),
         };
-        let mut client = services::connect_to_api_service(
+        let mut client = services::ApiClient::build_with_default_connector(
             &self.config,
             pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
         )
         .await
         .map_err(|err| Status::internal(format!("can not connect archives service: {err}")))?;
-        with_retry!(client.put_download_manifest(with_timeout(manifest.clone(), custom_timeout)))
-            .map_err(|err| Status::internal(format!("put_download_manifest failed with: {err}")))?;
+        api_with_retry!(
+            client,
+            client.put_download_manifest(with_timeout(manifest.clone(), custom_timeout))
+        )
+        .map_err(|err| Status::internal(format!("put_download_manifest failed with: {err}")))?;
         Ok(Response::new(()))
     }
 

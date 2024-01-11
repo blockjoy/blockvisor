@@ -1,5 +1,8 @@
-use crate::{config::SharedConfig, installer, services, services::api::pb, utils, BV_VAR_PATH};
-use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
+use crate::{
+    api_with_retry, config::SharedConfig, installer, services, services::api::pb, utils,
+    BV_VAR_PATH,
+};
+use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{anyhow, Context, Result};
 use std::{
     cmp::Ordering,
@@ -52,7 +55,7 @@ pub async fn new<T: AsyncTimer>(
     })
 }
 
-impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
+impl<T: AsyncTimer, C: services::ApiServiceConnector + Clone> SelfUpdater<T, C> {
     pub async fn run(mut self, mut run: RunFlag) {
         if let Some(check_interval) = self.check_interval {
             while run.load() {
@@ -87,15 +90,18 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
     }
 
     pub async fn get_latest(&mut self) -> Result<Option<pb::BundleIdentifier>> {
-        let mut client = self
-            .bundles
-            .connect(pb::bundle_service_client::BundleServiceClient::with_interceptor)
-            .await
-            .with_context(|| "cannot connect to bundle service")?;
-        let mut resp: pb::BundleServiceListBundleVersionsResponse =
-            with_retry!(client.list_bundle_versions(pb::BundleServiceListBundleVersionsRequest {}))
-                .with_context(|| "cannot list bundle versions")?
-                .into_inner();
+        let mut client = services::ApiClient::build(
+            self.bundles.clone(),
+            pb::bundle_service_client::BundleServiceClient::with_interceptor,
+        )
+        .await
+        .with_context(|| "cannot connect to bundle service")?;
+        let mut resp: pb::BundleServiceListBundleVersionsResponse = api_with_retry!(
+            client,
+            client.list_bundle_versions(pb::BundleServiceListBundleVersionsRequest {})
+        )
+        .with_context(|| "cannot list bundle versions")?
+        .into_inner();
         resp.identifiers
             .sort_by(|a, b| utils::semver_cmp(&b.version, &a.version));
         Ok(resp.identifiers.first().cloned())
@@ -115,15 +121,17 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector> SelfUpdater<T, C> {
     }
 
     pub async fn download_and_install(&mut self, bundle: pb::BundleIdentifier) -> Result<()> {
-        let mut client = self
-            .bundles
-            .connect(pb::bundle_service_client::BundleServiceClient::with_interceptor)
-            .await?;
-        let archive = with_retry!(client.retrieve(tonic::Request::new(
-            pb::BundleServiceRetrieveRequest {
+        let mut client = services::ApiClient::build(
+            self.bundles.clone(),
+            pb::bundle_service_client::BundleServiceClient::with_interceptor,
+        )
+        .await?;
+        let archive = api_with_retry!(
+            client,
+            client.retrieve(tonic::Request::new(pb::BundleServiceRetrieveRequest {
                 id: Some(bundle.clone()),
-            }
-        )))?
+            }))
+        )?
         .into_inner()
         .location
         .ok_or_else(|| anyhow!("missing location"))?;
@@ -186,6 +194,7 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
     struct TestConnector {
         tmp_root: PathBuf,
     }

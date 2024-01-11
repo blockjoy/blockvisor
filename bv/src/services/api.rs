@@ -1,14 +1,20 @@
 use crate::{
-    command_failed, commands, commands::Error, config::SharedConfig, get_bv_status,
-    node_data::NodeImage, nodes_manager, nodes_manager::NodesManager, pal::Pal, services,
-    services::AuthenticatedService, ServiceStatus,
+    api_with_retry, command_failed, commands,
+    commands::Error,
+    config::SharedConfig,
+    get_bv_status,
+    node_data::NodeImage,
+    nodes_manager,
+    nodes_manager::NodesManager,
+    pal::Pal,
+    services::{ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService},
+    ServiceStatus,
 };
 use babel_api::engine::Slot;
 use babel_api::{
     engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation, UploadManifest},
     metadata::firewall,
 };
-use bv_utils::with_retry;
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
@@ -23,6 +29,7 @@ use std::{
     {str::FromStr, sync::Arc},
 };
 use tokio::time::Instant;
+use tonic::transport::Channel;
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
@@ -70,8 +77,15 @@ pub type MetricsServiceClient = metrics_service_client::MetricsServiceClient<Aut
 
 async fn connect_command_service(
     config: &SharedConfig,
-) -> Result<CommandServiceClient, tonic::Status> {
-    let client = services::connect_to_api_service(
+) -> Result<
+    ApiClient<
+        CommandServiceClient,
+        impl ApiServiceConnector,
+        impl Fn(Channel, ApiInterceptor) -> CommandServiceClient + Clone,
+    >,
+    tonic::Status,
+> {
+    let client = ApiClient::build_with_default_connector(
         config,
         command_service_client::CommandServiceClient::with_interceptor,
     )
@@ -110,7 +124,7 @@ impl<'a> CommandsService<'a> {
             filter_type: None,
         };
         let mut client = connect_command_service(self.config).await.ok()?;
-        match with_retry!(client.pending(req.clone())) {
+        match api_with_retry!(client, client.pending(req.clone())) {
             Ok(resp) => {
                 let commands = resp.into_inner().commands;
                 for command in &commands {
@@ -118,7 +132,7 @@ impl<'a> CommandsService<'a> {
                     let req = pb::CommandServiceAckRequest {
                         id: command_id.clone(),
                     };
-                    if let Err(err) = with_retry!(client.ack(req.clone())) {
+                    if let Err(err) = api_with_retry!(client, client.ack(req.clone())) {
                         warn!("failed to send ACK for command {command_id}: {err:#}");
                     }
                 }
@@ -209,7 +223,7 @@ impl<'a> CommandsService<'a> {
             }
         };
         let mut client = connect_command_service(self.config).await?;
-        with_retry!(client.update(req.clone()))
+        api_with_retry!(client, client.update(req.clone()))
             .with_context(|| format!("failed to update command '{command_id}' status"))?;
         Ok(())
     }

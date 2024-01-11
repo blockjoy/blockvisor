@@ -9,6 +9,7 @@
 /// Engine methods that implementation needs to interact with node via BV are sent as `NodeRequest`.
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{
+    api_with_retry,
     babel_engine_service::{self, BabelEngineServer},
     config::SharedConfig,
     node_connection::RPC_REQUEST_TIMEOUT,
@@ -509,18 +510,19 @@ async fn retrieve_download_manifest(
     image: NodeImage,
     network: String,
 ) -> Result<DownloadManifest> {
-    let mut client = services::connect_to_api_service(
+    let mut client = services::ApiClient::build_with_default_connector(
         config,
         pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
     )
     .await
     .with_context(|| "cannot connect to manifest service")?;
-    with_retry!(client.get_download_manifest(
-        pb::BlockchainArchiveServiceGetDownloadManifestRequest {
+    api_with_retry!(
+        client,
+        client.get_download_manifest(pb::BlockchainArchiveServiceGetDownloadManifestRequest {
             id: Some(image.clone().try_into()?),
             network: network.clone(),
-        }
-    ))
+        })
+    )
     .with_context(|| {
         format!(
             "cannot retrieve download manifest for {:?}-{}",
@@ -541,13 +543,14 @@ async fn retrieve_upload_manifest(
     url_expires: Option<u32>,
     data_version: Option<u64>,
 ) -> Result<UploadManifest> {
-    let mut client = services::connect_to_api_service(
+    let mut client = services::ApiClient::build_with_default_connector(
         config,
         pb::blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor,
     )
     .await
     .with_context(|| "cannot connect to manifest service")?;
-    with_retry!(
+    api_with_retry!(
+        client,
         client.get_upload_manifest(pb::BlockchainArchiveServiceGetUploadManifestRequest {
             id: Some(image.clone().try_into()?),
             network: network.clone(),
