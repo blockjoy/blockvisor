@@ -68,7 +68,9 @@ pub type NodesServiceClient = node_service_client::NodeServiceClient<Authenticat
 pub type CommandServiceClient = command_service_client::CommandServiceClient<AuthenticatedService>;
 pub type MetricsServiceClient = metrics_service_client::MetricsServiceClient<AuthenticatedService>;
 
-async fn connect_command_service(config: &SharedConfig) -> Result<CommandServiceClient> {
+async fn connect_command_service(
+    config: &SharedConfig,
+) -> Result<CommandServiceClient, tonic::Status> {
     let client = services::connect_to_api_service(
         config,
         command_service_client::CommandServiceClient::with_interceptor,

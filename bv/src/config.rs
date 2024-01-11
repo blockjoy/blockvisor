@@ -41,7 +41,7 @@ impl SharedConfig {
         self.config.write().await.blockjoy_mqtt_url = mqtt_url;
     }
 
-    pub async fn token(&self) -> Result<AuthToken> {
+    pub async fn token(&self) -> Result<AuthToken, tonic::Status> {
         let token = &self.read().await.token;
         Ok(AuthToken(if AuthToken::expired(token)? {
             let token = {
@@ -61,18 +61,22 @@ impl SharedConfig {
                     ),
                 )
                 .await
-                .with_context(|| {
-                    format!(
+                .map_err(|_| {
+                    tonic::Status::deadline_exceeded(format!(
                         "refresh token request has sucked for more than {}s",
                         REFRESH_TOKEN_TIMEOUT.as_secs()
-                    )
+                    ))
                 })??;
 
                 write_lock.token = resp.token.clone();
                 write_lock.refresh_token = resp.refresh;
                 resp.token
             };
-            self.read().await.save(&self.bv_root).await?;
+            self.read()
+                .await
+                .save(&self.bv_root)
+                .await
+                .map_err(|err| tonic::Status::internal(err.to_string()))?;
             token
         } else {
             token.clone()

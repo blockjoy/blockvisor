@@ -17,8 +17,7 @@ use babel_api::{
     rhai_plugin,
     rhai_plugin::RhaiPlugin,
 };
-use bv_utils::rpc::with_timeout;
-use bv_utils::{cmd::run_cmd, with_retry};
+use bv_utils::{cmd::run_cmd, rpc::with_timeout, with_retry};
 use chrono::Utc;
 use eyre::{bail, Context, Result};
 use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
@@ -651,7 +650,7 @@ pub mod tests {
 
     #[async_trait]
     impl services::ApiServiceConnector for TestConnector {
-        async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
+        async fn connect<T, I>(&self, with_interceptor: I) -> Result<T, Status>
         where
             I: Send + Sync + Fn(Channel, ApiInterceptor) -> T,
         {

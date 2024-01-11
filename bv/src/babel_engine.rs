@@ -42,7 +42,8 @@ use tracing::{debug, error, info, instrument, trace, warn, Level};
 use uuid::Uuid;
 
 lazy_static::lazy_static! {
-    static ref NON_RETRIABLE: Vec<tonic::Code> = vec![tonic::Code::Internal, tonic::Code::Cancelled];
+    static ref NON_RETRIABLE: Vec<tonic::Code> = vec![tonic::Code::Internal, tonic::Code::Cancelled,
+        tonic::Code::InvalidArgument, tonic::Code::Unimplemented, tonic::Code::PermissionDenied];
 }
 
 #[macro_export]

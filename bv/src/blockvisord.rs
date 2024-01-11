@@ -448,7 +448,9 @@ where
         None
     }
 
-    async fn connect_metrics_service(config: &SharedConfig) -> Result<api::MetricsServiceClient> {
+    async fn connect_metrics_service(
+        config: &SharedConfig,
+    ) -> Result<api::MetricsServiceClient, tonic::Status> {
         let client = services::connect_to_api_service(
             config,
             pb::metrics_service_client::MetricsServiceClient::with_interceptor,

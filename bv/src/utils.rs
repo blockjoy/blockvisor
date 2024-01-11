@@ -1,4 +1,4 @@
-use bv_utils::cmd::run_cmd;
+use bv_utils::{cmd::run_cmd, with_retry};
 use cidr_utils::cidr::Ipv4Cidr;
 use eyre::{anyhow, bail, Context, Result};
 use rand::Rng;
@@ -6,8 +6,8 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, ffi::OsStr, net::Ipv4Addr, path::PathBuf, time::Duration};
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
-use tokio::{fs, io::AsyncWriteExt, time::sleep};
-use tracing::{debug, warn};
+use tokio::{fs, io::AsyncWriteExt};
+use tracing::debug;
 
 // image download should never take more than 15min
 const ARCHIVE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -86,17 +86,12 @@ const DOWNLOAD_RETRY_MAX: u32 = 3;
 const DOWNLOAD_BACKOFF_BASE_SEC: u64 = 3;
 
 pub async fn download_archive_with_retry(url: &str, path: PathBuf) -> Result<Archive> {
-    let mut retry_count = 0;
-    while let Err(err) = download_file(url, &path).await {
-        if retry_count < DOWNLOAD_RETRY_MAX {
-            retry_count += 1;
-            let backoff = DOWNLOAD_BACKOFF_BASE_SEC * 2u64.pow(retry_count);
-            warn!("download failed for {url} with {err}; {retry_count} retry after {backoff}s");
-            sleep(Duration::from_secs(backoff)).await;
-        } else {
-            bail!("download failed for {url} with {err}; retries exceeded");
-        }
-    }
+    with_retry!(
+        download_file(url, &path),
+        DOWNLOAD_RETRY_MAX,
+        DOWNLOAD_BACKOFF_BASE_SEC
+    )
+    .with_context(|| format!("download failed for {url}"))?;
     Ok(Archive(path))
 }
 

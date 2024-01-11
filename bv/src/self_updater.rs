@@ -192,7 +192,7 @@ mod tests {
 
     #[async_trait]
     impl services::ApiServiceConnector for TestConnector {
-        async fn connect<T, I>(&self, with_interceptor: I) -> Result<T>
+        async fn connect<T, I>(&self, with_interceptor: I) -> Result<T, tonic::Status>
         where
             I: Send + Sync + Fn(Channel, ApiInterceptor) -> T,
         {
