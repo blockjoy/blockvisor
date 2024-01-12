@@ -65,7 +65,9 @@ pub fn build_socket_channel(socket_path: impl AsRef<Path>) -> Channel {
 }
 
 pub fn estimate_put_download_manifest_request_timeout(chunks_len: usize) -> Duration {
-    Duration::from_secs(10 + u64::try_from(chunks_len / 1000).unwrap_or(10))
+    // download manifest can be pretty big, so make timeout proportional to number of chunks
+    // min 10s and then 10s for each 1000 of chunks
+    Duration::from_secs(10 + u64::try_from(chunks_len / 100).unwrap_or(180))
 }
 
 #[cfg(test)]

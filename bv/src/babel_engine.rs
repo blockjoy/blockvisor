@@ -518,10 +518,15 @@ async fn retrieve_download_manifest(
     .with_context(|| "cannot connect to manifest service")?;
     api_with_retry!(
         client,
-        client.get_download_manifest(pb::BlockchainArchiveServiceGetDownloadManifestRequest {
-            id: Some(image.clone().try_into()?),
-            network: network.clone(),
-        })
+        client.get_download_manifest(with_timeout(
+            pb::BlockchainArchiveServiceGetDownloadManifestRequest {
+                id: Some(image.clone().try_into()?),
+                network: network.clone(),
+            },
+            // we don't know how download manifest is big, but it can be pretty big
+            // lets give it time that should be enough for 20 000 of chunks ~ 20TB of blockchian data
+            Duration::from_secs(200),
+        ))
     )
     .with_context(|| {
         format!(
@@ -551,13 +556,18 @@ async fn retrieve_upload_manifest(
     .with_context(|| "cannot connect to manifest service")?;
     api_with_retry!(
         client,
-        client.get_upload_manifest(pb::BlockchainArchiveServiceGetUploadManifestRequest {
-            id: Some(image.clone().try_into()?),
-            network: network.clone(),
-            data_version,
-            slots,
-            url_expires,
-        })
+        client.get_upload_manifest(with_timeout(
+            pb::BlockchainArchiveServiceGetUploadManifestRequest {
+                id: Some(image.clone().try_into()?),
+                network: network.clone(),
+                data_version,
+                slots,
+                url_expires,
+            },
+            // let make timeout proportional to number of slots
+            // it is expected that 1000 of slots should be downloaded in lest thant 5s
+            services::DEFAULT_REQUEST_TIMEOUT + Duration::from_secs(slots as u64 / 200),
+        ))
     )
     .with_context(|| {
         format!(
