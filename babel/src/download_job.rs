@@ -177,6 +177,7 @@ impl Downloader {
         drop(downloaders); // drop last sender so writer know that download is done
 
         writer.await??;
+        self.unify_file_times()?;
         if !run.load() {
             bail!("download interrupted");
         }
@@ -218,6 +219,32 @@ impl Downloader {
             downloaded_chunks,
         );
         tokio::spawn(writer.run(run.clone()))
+    }
+
+    /// Update all downloaded files times with the same value.
+    fn unify_file_times(&self) -> Result<()> {
+        let now = std::time::SystemTime::now();
+        let times = fs::FileTimes::new().set_accessed(now).set_modified(now);
+        let paths = self
+            .manifest
+            .chunks
+            .iter()
+            .fold(HashSet::new(), |paths, chunk| {
+                chunk.destinations.iter().fold(paths, |mut paths, dest| {
+                    paths.insert(&dest.path);
+                    paths
+                })
+            });
+        for path in paths {
+            let full_path = self.destination_dir.join(path);
+            let file = File::options()
+                .write(true)
+                .open(&full_path)
+                .with_context(|| format!("can't open `{}` to change times", full_path.display()))?;
+            file.set_times(times)
+                .with_context(|| format!("can't set times for `{}`", full_path.display()))?;
+        }
+        Ok(())
     }
 }
 
@@ -642,6 +669,7 @@ mod tests {
     use bv_utils::timer::SysTimer;
     use mockito::{Server, ServerGuard};
     use std::fs;
+    use std::os::unix::fs::MetadataExt;
 
     struct TestEnv {
         tmp_dir: PathBuf,
@@ -821,6 +849,14 @@ mod tests {
             fs::read(test_env.tmp_dir.join("second.file"))?
         );
         assert_eq!(0, test_env.tmp_dir.join("empty.file").metadata()?.len());
+        assert_eq!(
+            test_env.tmp_dir.join("empty.file").metadata()?.mtime(),
+            test_env.tmp_dir.join("second.file").metadata()?.mtime()
+        );
+        assert_eq!(
+            test_env.tmp_dir.join("first.file").metadata()?.mtime(),
+            test_env.tmp_dir.join("second.file").metadata()?.mtime()
+        );
         assert!(!test_env.download_parts_path.exists());
         assert!(test_env.download_progress_path.exists());
         Ok(())
@@ -1230,6 +1266,9 @@ mod tests {
             .with_body(vec![3u8; 150])
             .create();
 
+        // create files form first chunk
+        fs::write(test_env.tmp_dir.join("zero.file"), "")?;
+        fs::write(test_env.tmp_dir.join("first.file"), "")?;
         // mark first file as downloaded
         let mut parts = HashSet::new();
         parts.insert("first_chunk");
@@ -1250,7 +1289,6 @@ mod tests {
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );
 
-        assert!(!test_env.tmp_dir.join("zero.file").exists());
         assert_eq!(
             vec![2u8; 150],
             fs::read(test_env.tmp_dir.join("second.file"))?
