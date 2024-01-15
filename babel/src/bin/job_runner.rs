@@ -31,7 +31,7 @@ async fn main() -> eyre::Result<()> {
     if args.count() != 0 {
         bail!("Invalid number of arguments! Expected only one argument: unique job name.");
     }
-    setup_logging();
+    setup_logging()?;
     info!(
         "Starting {} {} ...",
         env!("CARGO_BIN_NAME"),

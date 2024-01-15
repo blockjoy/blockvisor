@@ -15,7 +15,7 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    setup_logging();
+    setup_logging()?;
     info!(
         "Starting {} {} ...",
         env!("CARGO_BIN_NAME"),

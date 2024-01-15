@@ -263,7 +263,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
     }
 
     async fn start(&self, name: &str) -> Result<()> {
-        info!("Requested '{name} job to start'");
+        info!("Requested '{name}' job to start");
         let jobs = &mut self.jobs_registry.lock().await.jobs;
         if let Some(job) = jobs.get_mut(name) {
             match &mut job.state {

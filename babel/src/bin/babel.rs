@@ -26,7 +26,7 @@ const VSOCK_BABEL_PORT: u32 = 42;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    setup_logging();
+    setup_logging()?;
     info!(
         "Starting {} {} ...",
         env!("CARGO_BIN_NAME"),

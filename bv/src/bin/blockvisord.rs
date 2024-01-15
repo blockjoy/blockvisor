@@ -7,7 +7,7 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    setup_logging();
+    setup_logging()?;
     let run = RunFlag::run_until_ctrlc();
     let pal = LinuxPlatform::new()?;
     info!(
