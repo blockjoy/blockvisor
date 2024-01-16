@@ -4,9 +4,15 @@ use eyre::{anyhow, bail, Result};
 use metrics::{register_counter, Counter};
 use prost::Message;
 use reqwest::Url;
-use rumqttc::v5::mqttbytes::v5::LastWill;
-use rumqttc::v5::mqttbytes::QoS;
-use rumqttc::v5::{AsyncClient, Event, EventLoop, Incoming, MqttOptions};
+use rumqttc::{
+    v5::{
+        mqttbytes::v5::LastWill,
+        mqttbytes::QoS,
+        {AsyncClient, Event, EventLoop, Incoming, MqttOptions},
+    },
+    Transport,
+};
+use rustls::ClientConfig;
 use std::time::Duration;
 use tracing::{debug, info};
 
@@ -59,6 +65,20 @@ impl pal::ServiceConnector<MqttStream> for MqttConnector {
             });
             // use jwt as username, set empty password
             options.set_credentials(token.0, "");
+            if port == 8883 {
+                // set ssl cert options in case of tls/ssl connection
+                let mut root_certificates = rustls::RootCertStore::empty();
+                let certificates = rustls_native_certs::load_native_certs()?;
+                for cert in certificates {
+                    root_certificates.add(&rustls::Certificate(cert.0))?;
+                }
+                let client_config = ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_root_certificates(root_certificates)
+                    .with_no_client_auth();
+
+                options.set_transport(Transport::tls_with_config(client_config.into()));
+            }
 
             let client_channel_capacity = 100;
             let (client, eventloop) = AsyncClient::new(options, client_channel_capacity);

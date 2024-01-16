@@ -709,6 +709,8 @@ dependencies = [
  "rand",
  "reqwest",
  "rumqttc",
+ "rustls 0.21.9",
+ "rustls-native-certs",
  "semver",
  "serde",
  "serde_json",
