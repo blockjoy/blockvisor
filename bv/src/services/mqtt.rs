@@ -28,6 +28,7 @@ pub struct MqttConnector {
 
 pub struct MqttStream {
     event_loop: EventLoop,
+    config: SharedConfig,
 }
 
 #[async_trait]
@@ -95,6 +96,7 @@ impl pal::ServiceConnector<MqttStream> for MqttConnector {
 
             Ok(MqttStream {
                 event_loop: eventloop,
+                config: self.config.clone(),
             })
         })
         .await
@@ -123,6 +125,8 @@ impl pal::CommandsStream for MqttStream {
                 Ok(None)
             }
             Err(e) => {
+                // in case of connection error reset mqtt url, so it will be rediscover on next connect
+                self.config.set_mqtt_url(None).await;
                 bail!("MQTT error = {e:?}")
             }
         }

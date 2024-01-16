@@ -232,7 +232,7 @@ where
                                 Ok(Some(_)) => notify(),
                                 Ok(None) => {}
                                 Err(e) => {
-                                    warn!("MQTT error: {e:?}");
+                                    warn!("{e:?}");
                                     mqtt::MQTT_ERROR_COUNTER.increment(1);
                                     break;
                                 }
