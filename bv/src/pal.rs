@@ -88,7 +88,7 @@ pub trait NetInterface {
     /// Remaster the network interface.
     async fn remaster(&self) -> Result<()>;
     /// Delete the network interface.
-    async fn delete(self) -> Result<()>;
+    async fn delete(&self) -> Result<()>;
 }
 
 #[async_trait]
@@ -144,7 +144,7 @@ pub trait VirtualMachine {
     /// Checks the VM actual state
     fn state(&self) -> VmState;
     /// Deletes the VM, cleaning up all associated resources.
-    async fn delete(mut self) -> Result<()>;
+    async fn delete(&mut self) -> Result<()>;
     /// Request for graceful shutdown of the VM.
     async fn shutdown(&mut self) -> Result<()>;
     /// Forcefully shutdown the VM.

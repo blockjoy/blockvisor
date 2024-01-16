@@ -315,14 +315,21 @@ impl<P: Pal + Debug> NodesManager<P> {
 
     #[instrument(skip(self))]
     pub async fn delete(&self, id: Uuid) -> commands::Result<()> {
-        if let Some(node_lock) = self.nodes.write().await.remove(&id) {
-            let node = node_lock.into_inner();
-            node.delete_node_data().await?;
-            self.node_ids.write().await.remove(&node.data.name);
-            self.node_data_cache.write().await.remove(&id);
+        let name = {
+            let nodes_lock = self.nodes.read().await;
+            let mut node = nodes_lock
+                .get(&id)
+                .ok_or_else(|| Error::NodeNotFound(id))?
+                .write()
+                .await;
             node.delete().await?;
-            debug!("Node deleted");
-        }
+            node.delete_node_data().await?;
+            node.data.name.clone()
+        };
+        self.nodes.write().await.remove(&id);
+        self.node_ids.write().await.remove(&name);
+        self.node_data_cache.write().await.remove(&id);
+        debug!("Node deleted");
         Ok(())
     }
 

@@ -179,7 +179,7 @@ impl NetInterface for LinuxNetInterface {
     }
 
     /// Delete the network interface.
-    async fn delete(self) -> Result<()> {
+    async fn delete(&self) -> Result<()> {
         delete(&self.name).await
     }
 }

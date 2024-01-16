@@ -370,7 +370,7 @@ impl NetInterface for DummyNet {
     async fn remaster(&self) -> Result<()> {
         Ok(())
     }
-    async fn delete(self) -> Result<()> {
+    async fn delete(&self) -> Result<()> {
         Ok(())
     }
 }

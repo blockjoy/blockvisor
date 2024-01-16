@@ -24,7 +24,7 @@ pub const VSOCK_PATH: &str = "vsock.socket";
 
 #[derive(Debug)]
 pub struct FirecrackerMachine {
-    machine: Machine<'static>,
+    machine: Option<Machine<'static>>,
 }
 
 pub async fn create(
@@ -32,7 +32,7 @@ pub async fn create(
     node_data: &NodeData<impl pal::NetInterface>,
 ) -> Result<FirecrackerMachine> {
     Ok(FirecrackerMachine {
-        machine: Machine::create(create_config(bv_root, node_data).await?).await?,
+        machine: Some(Machine::create(create_config(bv_root, node_data).await?).await?),
     })
 }
 
@@ -41,11 +41,13 @@ pub async fn attach(
     node_data: &NodeData<impl pal::NetInterface>,
 ) -> Result<FirecrackerMachine> {
     Ok(FirecrackerMachine {
-        machine: Machine::connect(
-            create_config(bv_root, node_data).await?,
-            get_process_pid(FC_BIN_NAME, &node_data.id.to_string()).ok(),
-        )
-        .await,
+        machine: Some(
+            Machine::connect(
+                create_config(bv_root, node_data).await?,
+                get_process_pid(FC_BIN_NAME, &node_data.id.to_string()).ok(),
+            )
+            .await,
+        ),
     })
 }
 
@@ -60,29 +62,40 @@ pub fn build_vm_data_path(bv_root: &Path, id: Uuid) -> PathBuf {
 #[async_trait]
 impl pal::VirtualMachine for FirecrackerMachine {
     fn state(&self) -> pal::VmState {
-        match self.machine.state() {
-            MachineState::SHUTOFF => pal::VmState::SHUTOFF,
-            MachineState::RUNNING => pal::VmState::RUNNING,
-        }
+        self.machine
+            .as_ref()
+            .map(|machine| match machine.state() {
+                MachineState::SHUTOFF => pal::VmState::SHUTOFF,
+                MachineState::RUNNING => pal::VmState::RUNNING,
+            })
+            .unwrap_or(pal::VmState::SHUTOFF)
     }
 
-    async fn delete(self) -> Result<()> {
-        self.machine.delete().await?;
+    async fn delete(&mut self) -> Result<()> {
+        if let Some(machine) = self.machine.take() {
+            machine.delete().await?;
+        }
         Ok(())
     }
 
     async fn shutdown(&mut self) -> Result<()> {
-        self.machine.shutdown().await?;
+        if let Some(machine) = &self.machine {
+            machine.shutdown().await?;
+        }
         Ok(())
     }
 
     async fn force_shutdown(&mut self) -> Result<()> {
-        self.machine.force_shutdown().await?;
+        if let Some(machine) = &mut self.machine {
+            machine.force_shutdown().await?;
+        }
         Ok(())
     }
 
     async fn start(&mut self) -> Result<()> {
-        self.machine.start().await?;
+        if let Some(machine) = &mut self.machine {
+            machine.start().await?;
+        }
         Ok(())
     }
 }

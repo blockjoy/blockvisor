@@ -200,11 +200,12 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
         let status = self.status();
-        if status == NodeStatus::Running {
-            return Ok(());
-        }
         if status == NodeStatus::Failed && self.expected_status() == NodeStatus::Stopped {
             bail!("can't start node which is not stopped properly");
+        }
+        self.save_expected_status(NodeStatus::Running).await?;
+        if status == NodeStatus::Running {
+            return Ok(());
         }
 
         if self.machine.state() == pal::VmState::SHUTOFF {
@@ -240,8 +241,6 @@ impl<P: Pal + Debug> Node<P> {
             self.setup_firewall_rules().await?;
             self.data.has_pending_update = false;
         }
-        // We save the `running` status only after all of the previous steps have succeeded.
-        self.data.expected_status = NodeStatus::Running;
         self.data.started_at = Some(Utc::now());
         self.data.save(&self.context.registry).await?;
         debug!("Node started");
@@ -251,6 +250,7 @@ impl<P: Pal + Debug> Node<P> {
     /// Stops the running node.
     #[instrument(skip(self))]
     pub async fn stop(&mut self, force: bool) -> Result<()> {
+        self.save_expected_status(NodeStatus::Stopped).await?;
         if self.status() == NodeStatus::Stopped {
             return Ok(());
         }
@@ -290,7 +290,6 @@ impl<P: Pal + Debug> Node<P> {
         }
 
         self.babel_engine.node_connection.close();
-        self.data.expected_status = NodeStatus::Stopped;
         self.data.started_at = None;
         self.data.save(&self.context.registry).await?;
         debug!("Node stopped");
@@ -308,7 +307,9 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Deletes the node.
     #[instrument(skip(self))]
-    pub async fn delete(self) -> Result<()> {
+    pub async fn delete(&mut self) -> Result<()> {
+        // set expected to `Stopped` just in case of delete errors
+        self.save_expected_status(NodeStatus::Stopped).await?;
         self.machine.delete().await?;
         self.data.network_interface.delete().await
     }
@@ -615,8 +616,8 @@ pub mod tests {
                 Ok(())
             }
         }
-        async fn delete(self) -> Result<()> {
-            if let Some(err) = self.delete_error {
+        async fn delete(&self) -> Result<()> {
+            if let Some(err) = self.delete_error.clone() {
                 bail!(err)
             } else {
                 Ok(())
@@ -687,7 +688,7 @@ pub mod tests {
         #[async_trait]
         impl VirtualMachine for TestVM {
             fn state(&self) -> VmState;
-            async fn delete(self) -> Result<()>;
+            async fn delete(&mut self) -> Result<()>;
             async fn shutdown(&mut self) -> Result<()>;
             async fn force_shutdown(&mut self) -> Result<()>;
             async fn start(&mut self) -> Result<()>;
@@ -1414,7 +1415,7 @@ pub mod tests {
             "Rhai call_fn error",
             node.start().await.unwrap_err().to_string()
         );
-        assert_eq!(NodeStatus::Stopped, node.data.expected_status);
+        assert_eq!(NodeStatus::Running, node.data.expected_status);
         assert!(!node.data.initialized);
         assert_eq!(None, node.data.started_at);
 
@@ -1530,11 +1531,10 @@ pub mod tests {
             .unwrap_err()
             .to_string()
             .starts_with("Failed to gracefully shutdown babel and background jobs"));
-        assert_eq!(NodeStatus::Running, node.data.expected_status);
+        assert_eq!(NodeStatus::Stopped, node.data.expected_status);
         assert_eq!(Some(now), node.data.started_at);
 
         // force stop node in failed state
-        node.data.expected_status = NodeStatus::Stopped;
         node.stop(true).await?;
         assert_eq!(NodeStatus::Stopped, node.data.expected_status);
         assert_eq!(None, node.data.started_at);
