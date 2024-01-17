@@ -88,24 +88,16 @@ impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
     }
 
     pub async fn save(&self, registry_config_dir: &Path) -> Result<()> {
-        let path = self.file_path(registry_config_dir);
+        let path = file_path(self.id, registry_config_dir);
         info!("Writing node config: {}", path.display());
         let config = serde_json::to_string(self)?;
         fs::write(&path, &*config).await?;
 
         Ok(())
     }
+}
 
-    pub async fn delete_config(&self, registry_config_dir: &Path) -> Result<()> {
-        let path = self.file_path(registry_config_dir);
-        info!("Deleting node config: {}", path.display());
-        fs::remove_file(&path)
-            .await
-            .with_context(|| format!("Failed to delete node file `{}`", path.display()))
-    }
-
-    fn file_path(&self, registry_config_dir: &Path) -> PathBuf {
-        let filename = format!("{}.json", self.id);
-        registry_config_dir.join(filename)
-    }
+pub fn file_path(id: Uuid, registry_config_dir: &Path) -> PathBuf {
+    let filename = format!("{}.json", id);
+    registry_config_dir.join(filename)
 }

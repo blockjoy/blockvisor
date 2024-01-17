@@ -64,6 +64,77 @@ struct RecoveryCounters {
     start: usize,
 }
 
+struct MaybeNode<P: Pal> {
+    context: NodeContext,
+    data: NodeData<P::NetInterface>,
+    machine: Option<P::VirtualMachine>,
+}
+
+macro_rules! check {
+    ($res:expr, $self:ident) => {{
+        match $res {
+            Ok(res) => res,
+            Err(err) => return Err((err, $self)),
+        }
+    }};
+}
+
+impl<P: Pal> MaybeNode<P> {
+    async fn try_create(
+        mut self,
+        pal: Arc<P>,
+        api_config: SharedConfig,
+    ) -> Result<Node<P>, (eyre::Report, Self)> {
+        let node_id = self.data.id;
+        info!("Creating node with ID: {node_id}");
+
+        let (script, metadata) = check!(
+            self.context.copy_and_check_plugin(&self.data.image).await,
+            self
+        );
+        let _ = tokio::fs::remove_dir_all(&self.context.vm_data_dir).await;
+        check!(self.context.prepare_data_image::<P>(&self.data).await, self);
+        self.machine = Some(check!(pal.create_vm(&self.data).await, self));
+        check!(self.data.save(&self.context.registry).await, self);
+
+        let babel_engine = check!(
+            BabelEngine::new(
+                NodeInfo {
+                    node_id,
+                    image: self.data.image.clone(),
+                    properties: self.data.properties.clone(),
+                    network: self.data.network.clone(),
+                },
+                pal.create_node_connection(node_id),
+                api_config,
+                |engine| RhaiPlugin::new(&script, engine),
+                self.context.plugin_data.clone(),
+                self.context.vm_data_dir.clone(),
+            )
+            .await,
+            self
+        );
+        Ok(Node {
+            data: self.data,
+            babel_engine,
+            metadata,
+            // if we got into that place, then it is safe to unwrap
+            machine: self.machine.unwrap(),
+            context: self.context,
+            pal,
+            recovery_counters: Default::default(),
+        })
+    }
+
+    async fn cleanup(mut self) -> Result<()> {
+        if let Some(mut machine) = self.machine.take() {
+            machine.delete().await?;
+        }
+        self.context.delete().await?;
+        self.data.network_interface.delete().await
+    }
+}
+
 impl<P: Pal + Debug> Node<P> {
     /// Creates a new node according to specs.
     #[instrument(skip(pal, api_config))]
@@ -72,41 +143,20 @@ impl<P: Pal + Debug> Node<P> {
         api_config: SharedConfig,
         data: NodeData<P::NetInterface>,
     ) -> Result<Self> {
-        let node_id = data.id;
-        let context = NodeContext::build(pal.as_ref(), node_id);
-        info!("Creating node with ID: {node_id}");
-
-        let (script, metadata) = context.copy_and_check_plugin(&data.image).await?;
-
-        let _ = tokio::fs::remove_dir_all(&context.data_dir).await;
-        context.prepare_data_image::<P>(&data).await?;
-        let machine = pal.create_vm(&data).await?;
-
-        data.save(&context.registry).await?;
-
-        let babel_engine = BabelEngine::new(
-            NodeInfo {
-                node_id,
-                image: data.image.clone(),
-                properties: data.properties.clone(),
-                network: data.network.clone(),
-            },
-            pal.create_node_connection(node_id),
-            api_config,
-            |engine| RhaiPlugin::new(&script, engine),
-            context.plugin_data.clone(),
-            context.data_dir.clone(),
-        )
-        .await?;
-        Ok(Self {
+        let maybe_node = MaybeNode {
+            context: NodeContext::build(pal.as_ref(), data.id),
             data,
-            babel_engine,
-            metadata,
-            machine,
-            context,
-            pal,
-            recovery_counters: Default::default(),
-        })
+            machine: None,
+        };
+        match maybe_node.try_create(pal, api_config).await {
+            Ok(node) => Ok(node),
+            Err((err, maybe_node)) => {
+                if let Err(err) = maybe_node.cleanup().await {
+                    error!("Cleanup failed after unsuccessful node create: {err}");
+                }
+                Err(err)
+            }
+        }
     }
 
     /// Returns node previously created on this host.
@@ -151,7 +201,7 @@ impl<P: Pal + Debug> Node<P> {
             api_config,
             |engine| RhaiPlugin::new(&script, engine),
             context.plugin_data.clone(),
-            context.data_dir.clone(),
+            context.vm_data_dir.clone(),
         )
         .await?;
         Ok(Self {
@@ -296,21 +346,14 @@ impl<P: Pal + Debug> Node<P> {
         Ok(())
     }
 
-    /// Deletes node associated files.
-    #[instrument(skip(self))]
-    pub async fn delete_node_data(&self) -> Result<()> {
-        self.data.delete_config(&self.context.registry).await?;
-        let _ = fs::remove_file(&self.context.plugin_script).await;
-        let _ = fs::remove_file(&self.context.plugin_data).await;
-        Ok(())
-    }
-
     /// Deletes the node.
     #[instrument(skip(self))]
     pub async fn delete(&mut self) -> Result<()> {
         // set expected to `Stopped` just in case of delete errors
         self.save_expected_status(NodeStatus::Stopped).await?;
+        self.babel_engine.stop_server().await?;
         self.machine.delete().await?;
+        self.context.delete().await?;
         self.data.network_interface.delete().await
     }
 
@@ -480,7 +523,7 @@ impl<P: Pal + Debug> Node<P> {
         let root_fs_path = blockchain::get_image_download_folder_path(&self.context.bv_root, image)
             .join(ROOT_FS_FILE);
 
-        let data_dir = &self.context.data_dir;
+        let data_dir = &self.context.vm_data_dir;
         fs::create_dir_all(data_dir).await?;
 
         run_cmd("cp", [root_fs_path.as_os_str(), data_dir.as_os_str()]).await?;
@@ -1412,7 +1455,7 @@ pub mod tests {
             .unwrap();
         let server = test_env.start_server(babel_sup_mock, babel_mock).await;
         assert_eq!(
-            "Rhai call_fn error",
+            "Rhai function 'init' returned error",
             node.start().await.unwrap_err().to_string()
         );
         assert_eq!(NodeStatus::Running, node.data.expected_status);

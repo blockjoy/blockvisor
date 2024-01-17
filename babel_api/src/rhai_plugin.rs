@@ -213,7 +213,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         let mut scope = rhai::Scope::new();
         self.rhai_engine
             .call_fn::<R>(&mut scope, &self.ast, name, args)
-            .with_context(|| "Rhai call_fn error")
+            .with_context(|| format!("Rhai function '{name}' returned error"))
     }
 }
 
@@ -745,7 +745,7 @@ mod tests {
             .return_once(|| bail!("some Rust error"));
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
-            "Rhai call_fn error",
+            "Rhai function 'custom_method_with_exception' returned error",
             plugin
                 .call_custom_method("custom_method_with_exception", "")
                 .unwrap_err()
@@ -757,9 +757,11 @@ mod tests {
                 .call_custom_method("custom_failing_method", "")
                 .unwrap_err()
         )
-        .starts_with("Rhai call_fn error: Runtime error: some Rust error"));
+        .starts_with(
+            "Rhai function 'custom_failing_method' returned error: Runtime error: some Rust error"
+        ));
         assert_eq!(
-            "Rhai call_fn error: Function not found: no_method",
+            "Rhai function 'no_method' returned error: Function not found: no_method",
             format!(
                 "{:#}",
                 plugin.call_custom_method("no_method", "").unwrap_err()

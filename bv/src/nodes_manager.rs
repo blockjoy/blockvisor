@@ -210,6 +210,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let meta = Self::fetch_image_data(self.pal.clone(), self.api_config.clone(), &config.image)
             .await
             .with_context(|| "fetch image data failed")?;
+
         if !meta.nets.contains_key(&config.network) {
             command_failed!(Error::Internal(anyhow!(
                 "invalid network name '{}'",
@@ -247,7 +248,6 @@ impl<P: Pal + Debug> NodesManager<P> {
             standalone: config.standalone,
             has_pending_update: false,
         };
-        self.save_state().await?;
 
         let node = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
         self.nodes.write().await.insert(id, RwLock::new(node));
@@ -323,7 +323,6 @@ impl<P: Pal + Debug> NodesManager<P> {
                 .write()
                 .await;
             node.delete().await?;
-            node.delete_node_data().await?;
             node.data.name.clone()
         };
         self.nodes.write().await.remove(&id);
@@ -740,17 +739,23 @@ impl<P: Pal + Debug> NodesManager<P> {
         ip: IpAddr,
         gateway: IpAddr,
     ) -> Result<P::NetInterface> {
-        let mut data = self.state.write().await;
-        data.machine_index += 1;
+        let machine_index = {
+            let mut data = self.state.write().await;
+            data.machine_index += 1;
+            data.machine_index
+        };
         let iface = self
             .pal
-            .create_net_interface(data.machine_index, ip, gateway, &self.api_config)
+            .create_net_interface(machine_index, ip, gateway, &self.api_config)
             .await
-            .context(format!(
-                "failed to create VM bridge bv{}",
-                data.machine_index
-            ))?;
-
+            .context(format!("failed to create VM bridge bv{}", machine_index))?;
+        let res = self.save_state().await;
+        if res.is_err() {
+            if let Err(err) = iface.delete().await {
+                error!("Can't delete network interface after unsuccessful node create: {err}");
+            }
+            res?
+        }
         Ok(iface)
     }
 

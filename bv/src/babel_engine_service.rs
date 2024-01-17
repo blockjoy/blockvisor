@@ -10,7 +10,7 @@ use tonic::{
     transport::Server,
     {Request, Response, Status},
 };
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 const BABEL_ENGINE_PORT: u32 = 40;
 
@@ -27,15 +27,19 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
     ) -> eyre::Result<Response<()>, Status> {
         debug!("putting DownloadManifest to API...");
         let manifest = request.into_inner();
-        services::blockchain_archive::put_download_manifest(
+        if let Err(err) = services::blockchain_archive::put_download_manifest(
             &self.config,
             self.node_info.image.clone(),
             self.node_info.network.clone(),
             manifest,
         )
         .await
-        .map_err(|err| Status::internal(err.to_string()))?;
-        Ok(Response::new(()))
+        {
+            warn!("{err:?}");
+            Err(Status::internal(err.to_string()))
+        } else {
+            Ok(Response::new(()))
+        }
     }
 
     async fn upgrade_blocking_jobs_finished(

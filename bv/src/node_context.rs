@@ -1,5 +1,5 @@
 use crate::{
-    node_data::{NodeData, NodeImage},
+    node_data::{self, NodeData, NodeImage},
     pal::Pal,
     services::blockchain::{self, BABEL_PLUGIN_NAME, DATA_FILE},
     BV_VAR_PATH,
@@ -28,9 +28,10 @@ pub fn build_registry_dir(bv_root: &Path) -> PathBuf {
 pub struct NodeContext {
     pub bv_root: PathBuf,
     pub data_cache_dir: PathBuf,
-    pub data_dir: PathBuf,
+    pub vm_data_dir: PathBuf,
     pub plugin_data: PathBuf,
     pub plugin_script: PathBuf,
+    pub node_config: PathBuf,
     pub registry: PathBuf,
 }
 
@@ -41,17 +42,18 @@ impl NodeContext {
         Self {
             bv_root: bv_root.to_path_buf(),
             data_cache_dir: bv_root.join(BV_VAR_PATH).join(DATA_CACHE_DIR),
-            data_dir: pal.build_vm_data_path(id),
+            vm_data_dir: pal.build_vm_data_path(id),
             plugin_data: registry.join(format!("{id}.data")),
             plugin_script: registry.join(format!("{id}.rhai")),
+            node_config: node_data::file_path(id, &registry),
             registry,
         }
     }
 
     /// Create new data drive in chroot location, or copy it from cache
     pub async fn prepare_data_image<P: Pal>(&self, data: &NodeData<P::NetInterface>) -> Result<()> {
-        fs::create_dir_all(&self.data_dir).await?;
-        let path = self.data_dir.join(DATA_FILE);
+        fs::create_dir_all(&self.vm_data_dir).await?;
+        let path = self.vm_data_dir.join(DATA_FILE);
         let data_cache_path = self
             .data_cache_dir
             .join(&data.image.protocol)
@@ -104,4 +106,29 @@ impl NodeContext {
         let metadata = rhai_plugin::read_metadata(&script)?;
         Ok((script, metadata))
     }
+
+    pub async fn delete(&self) -> Result<()> {
+        if self.vm_data_dir.exists() {
+            fs::remove_dir_all(&self.vm_data_dir)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to delete node vm data `{}`",
+                        self.vm_data_dir.display()
+                    )
+                })?;
+        }
+        remove_node_file(&self.node_config).await?;
+        remove_node_file(&self.plugin_script).await?;
+        remove_node_file(&self.plugin_data).await
+    }
+}
+
+async fn remove_node_file(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_file(path)
+            .await
+            .with_context(|| format!("failed to delete node file `{}`", path.display()))?;
+    }
+    Ok(())
 }
