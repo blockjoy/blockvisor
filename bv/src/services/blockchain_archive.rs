@@ -105,7 +105,7 @@ pub async fn retrieve_upload_manifest(
     image: NodeImage,
     network: String,
     slots: u32,
-    url_expires: Option<u32>,
+    url_expires: u32,
     data_version: Option<u64>,
 ) -> Result<UploadManifest> {
     let mut client = connect_blockchain_archive_service(config).await?;
@@ -117,7 +117,7 @@ pub async fn retrieve_upload_manifest(
                 network: network.clone(),
                 data_version,
                 slots,
-                url_expires,
+                url_expires: Some(url_expires),
             },
             // let make timeout proportional to number of slots
             // it is expected that 1000 of slots should be downloaded in lest thant 5s

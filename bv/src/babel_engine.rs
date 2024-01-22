@@ -469,7 +469,10 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                         self.node_info.image.clone(),
                         self.node_info.network.clone(),
                         slots,
-                        *url_expires_secs,
+                        // with expect upload speed at least 33MB/s
+                        // upload of one chunk (recommended 1GB size) should not take more than 30s,
+                        // but be generous and give at least 1h
+                        url_expires_secs.unwrap_or(3600 + slots * 30),
                         *data_version,
                     )
                     .await
