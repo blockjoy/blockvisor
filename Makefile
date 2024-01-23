@@ -76,5 +76,6 @@ reinstall:
 ci-clean:
 	bv node rm --all --yes || true
 	pkill -9 firecracker || true
+	rm -rf /var/lib/blockvisor/firecracker/
 	rm -rf /var/lib/blockvisor/nodes/
 	for i in $$(seq 1 100); do ip link delete bv$$i type tuntap; done || true
