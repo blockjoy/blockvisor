@@ -31,7 +31,7 @@ For _Ubuntu_ based distributions:
 
 ```shell
 apt update
-apt install tmux pigz util-linux e2fsprogs chrony
+apt install pigz debootstrap tmux util-linux e2fsprogs chrony
 ```
 
 ### Network Setup
