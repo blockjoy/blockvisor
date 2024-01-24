@@ -126,12 +126,19 @@ impl JobsData {
                 manifest,
                 destination,
                 ..
-            } => download_job::cleanup_job(
-                &parts_file_path(name, &self.jobs_status_dir),
-                manifest
-                    .as_ref()
-                    .map(|manifest| (destination.as_path(), &manifest.chunks)),
-            ),
+            } => {
+                let destination = if let Some(destination) = destination {
+                    destination.as_path()
+                } else {
+                    &babel_api::engine::BLOCKCHAIN_DATA_PATH
+                };
+                download_job::cleanup_job(
+                    &parts_file_path(name, &self.jobs_status_dir),
+                    manifest
+                        .as_ref()
+                        .map(|manifest| (destination, &manifest.chunks)),
+                )
+            }
             JobType::Upload { .. } => {
                 cleanup_job_data(&parts_file_path(name, &self.jobs_status_dir))
             }

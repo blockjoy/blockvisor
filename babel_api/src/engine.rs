@@ -11,6 +11,10 @@ use url::Url;
 
 pub const DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_JOB_SHUTDOWN_SIGNAL: PosixSignal = PosixSignal::SIGTERM;
+pub const DATA_DRIVE_MOUNT_POINT: &str = "/blockjoy/";
+lazy_static::lazy_static! {
+    pub static ref BLOCKCHAIN_DATA_PATH: &'static Path = Path::new("/blockjoy/blockchain_data/");
+}
 
 /// Plugin engine must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -184,8 +188,10 @@ pub enum JobType {
         /// If `None` BV will ask blockvisor-api for manifest
         /// based on node `NodeImage` and `network`.  
         manifest: Option<DownloadManifest>,
-        /// Destination directory for downloaded files.
-        destination: PathBuf,
+        /// [deprecated] Destination directory for downloaded files.
+        /// Don't use that field. It is left only for backward compatibility
+        // TODO remove once all nodes are upgraded
+        destination: Option<PathBuf>,
         /// Maximum number of parallel opened connections.
         max_connections: Option<usize>,
         /// Maximum number of parallel workers.
@@ -198,8 +204,10 @@ pub enum JobType {
         /// based on node `NodeImage`, `network`, and size of data
         /// stored in `source` directory.  
         manifest: Option<UploadManifest>,
-        /// Source directory with files to be uploaded.
-        source: PathBuf,
+        /// [deprecated] Source directory with files to be uploaded.
+        /// Don't use that field. It is left only for backward compatibility
+        // TODO remove once all nodes are upgraded
+        source: Option<PathBuf>,
         /// List of exclude patterns. Files in `source` directory that match any of pattern,
         /// won't be taken into account.
         exclude: Option<Vec<String>>,

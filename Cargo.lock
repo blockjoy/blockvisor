@@ -565,6 +565,7 @@ dependencies = [
  "cidr-utils",
  "eyre",
  "futures-core",
+ "lazy_static",
  "mockall",
  "rhai",
  "serde",

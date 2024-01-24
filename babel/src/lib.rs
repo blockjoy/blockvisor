@@ -86,7 +86,7 @@ pub async fn apply_babel_config<P: BabelPal>(pal: &P, config: &BabelConfig) -> R
         .await
         .with_context(|| "failed to add ram disks")?;
 
-    pal.mount_data_drive(&config.data_directory_mount_point)
+    pal.mount_data_drive(babel_api::engine::DATA_DRIVE_MOUNT_POINT)
         .await
         .with_context(|| "failed to mount data disks")?;
 
@@ -109,7 +109,7 @@ pub async fn is_babel_config_applied<P: BabelPal>(pal: &P, config: &BabelConfig)
             .await
             .with_context(|| "failed to add check disks")?
         && pal
-            .is_data_drive_mounted(&config.data_directory_mount_point)
+            .is_data_drive_mounted(babel_api::engine::DATA_DRIVE_MOUNT_POINT)
             .await
             .with_context(|| "failed to check data disks")?)
 }

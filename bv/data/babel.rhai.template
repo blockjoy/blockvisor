@@ -41,7 +41,6 @@ const METADATA = #{
     // Configuration of Babel - agent running inside VM.
     babel_config: #{
         // Path to mount data drive to.
-        data_directory_mount_point: "/blockjoy/miner/data",
         // Capacity of log buffer (in lines).
         log_buffer_capacity_ln: 1024,
         // Size of swap file created on the node, in MB.
@@ -101,29 +100,24 @@ const METADATA = #{
 
 // You can define some constants to use in the code
 const API_HOST = "http://localhost:4467/";
+const A_DIR = BLOCKCHAIN_DATA_PATH + "/A/";
+const B_DIR = BLOCKCHAIN_DATA_PATH + "/B/";
+const NET =  global::METADATA.nets[node_params().NETWORK];
 
-// Function that is called by BV on first node start.
-// It takes keys key-value map as argument.
-// SHALL be implemented
-fn init(keys) {
-    // Run Sh script on the blockchain VM and return it's result (with default 15s timeout)
-    let res = run_sh("echo 'noop template rhai file'");
-    if res.exit_code != 0  {
-        throw res;
-    }
+// Helper function to stop all blockchain services (aka entrypoints)
+fn stop_blockchain() {
+    stop_job("blockchain_service_a");
+    stop_job("blockchain_service_b");
+}
 
-    // Allowing people to put arbitrary data into sh-commands safely
-    let param = sanitize_sh_param(node_params().EXAMPLE_PARAM);
-
-    // Logging function like debug, info, warn, error could be used
-    info("some important step logged with INFO level");
-
+// Helper function to start all blockchain services (aka entrypoints)
+fn start_blockchain(needed) {
     // Start background job with unique name
-    start_job("echo", #{
+    start_job("blockchain_service_a", #{
         // Job type
         job_type: #{
             // Sh script body
-            run_sh: "echo \"Testing entry_point not configured, but parametrized with " + param + "!\"",
+            run_sh: `/usr/bin/blockchain_service_a start --home=${A_DIR} --chain=${NET.net_type} --rest-server --seeds ${NET.seeds} "$@"`,
         },
         // Job restart policy
         // "never" indicates that this job will never be restarted, whether succeeded or not - appropriate for jobs
@@ -136,14 +130,80 @@ fn init(keys) {
                 backoff_timeout_ms: 60000,
                 // base time (in miliseconds) for backof,
                 // multiplied by consecutive power of 2 each time
-                backoff_base_ms: 10000,
+                backoff_base_ms: 1000,
                 // [optional] maximum number of retries, or there is no such limit if not set
                 // max_retries: 3,
             },
         },
         // [optional] List of job names that this job needs to be finished before start, may be empty
-        needs: [],
+        needs: needed,
     });
+    start_job("blockchain_service_b", #{
+        job_type: #{
+            run_sh: `/usr/bin/blockchain_service_b --chain=${NET.net_type} --datadir=${A_DIR} --snapshots=false`,
+        },
+        restart: #{
+            always: #{
+                backoff_timeout_ms: 60000,
+                backoff_base_ms: 1000,
+            },
+        },
+        needs: needed,
+    });
+}
+
+// Function that is called by BV on first node start.
+// It takes keys key-value map as argument.
+// SHALL be implemented
+fn init(keys) {
+    // Allowing people to put arbitrary data into sh-commands safely
+    let param = sanitize_sh_param(node_params().EXAMPLE_PARAM);
+
+    // Run Sh script on the blockchain VM and return it's result (with default 15s timeout)
+    let res = run_sh("echo 'noop template rhai file parametrized with: " + param + "'");
+    if res.exit_code != 0  {
+        throw res;
+    }
+
+    // Logging function like debug, info, warn, error could be used
+    info("some important step logged with INFO level");
+
+    try {
+        // try built-in download method first, to speedup regular nodes setup
+        start_job("download", #{
+            job_type: #{
+                download: #{
+                    // [optional] Maximum number of parallel opened connections.
+                    max_connections: 5,
+                    // [optional] Maximum number of parallel workers.
+                    max_runners: 8,
+                },
+            },
+            restart: #{
+                on_failure: #{
+                    backoff_timeout_ms: 60000,
+                    backoff_base_ms: 1000,
+                    max_retries: 5,
+                },
+            },
+        });
+    } catch {
+        // if it fail (maybe not uploaded yet), try blockchain provided archives (if any), to speed up first sync
+        start_job("download", #{
+            job_type: #{
+                run_sh: `/usr/bin/wget -q -O - ${global::SNAPSHOT_UTIL_URL}`,
+            },
+            restart: #{
+                on_failure: #{
+                    backoff_timeout_ms: 60000,
+                    backoff_base_ms: 10000,
+                    max_retries: 3,
+                },
+            },
+        });
+    }
+    // start blockchain services once download is finished
+    start_blockchain(["download"]);
 }
 
 // The address of the node.
@@ -203,4 +263,47 @@ fn test_height_value(param) {
     if height() < 0 {
         throw "Invalid node height value: " + height();
     }
+}
+
+// Helper function that can be run, to upload blockchain data archive.
+fn upload(param) {
+    stop_blockchain();
+    start_job("upload", #{
+        job_type: #{
+            upload: #{
+                // [optional] List of exclude patterns. Files in `BLOCKCHAIN_DATA_PATH` directory that match any of pattern,
+                // won't be taken into account.
+                exclude: [
+                    "**/something_to_ignore*",
+                    ".gitignore",
+                    "some_subdir/*.bak",
+                ],
+                // [optional] Compression to be used on chunks.
+                compression: #{
+                    ZSTD: 3, // compression level
+                },
+                // [optional] Maximum number of parallel opened connections.
+                max_connections: 4,
+                // [optional] Maximum number of parallel workers.
+                max_runners: 12,
+                // [optional] Number of chunks that blockchain data should be split into.
+                // Recommended chunk size is about 1GB. Estimated by BV based on data size, if not provided.
+                //number_of_chunks: 700,
+                // [optional] Seconds after which presigned urls in generated `UploadManifest` may expire.
+                //url_expires_secs: 240000,
+                // [optional] Version number for uploaded data. Auto-assigned if not provided.
+                //data_version: 3,
+            }
+        },
+        restart: #{
+            on_failure: #{
+                backoff_timeout_ms: 60000,
+                backoff_base_ms: 1000,
+                max_retries: 5,
+            },
+        },
+    });
+    // start blockchain services again once upload is finished
+    start_blockchain(["upload"]);
+    "Upload started!"
 }

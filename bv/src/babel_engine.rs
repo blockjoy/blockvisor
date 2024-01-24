@@ -459,8 +459,12 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             } => {
                 if manifest.is_none() {
                     let slots = match number_of_chunks {
-                        None => with_retry!(babel_client
-                            .recommended_number_of_chunks((source.clone(), exclude.clone())))?
+                        None => with_retry!(babel_client.recommended_number_of_chunks((
+                            source
+                                .clone()
+                                .unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
+                            exclude.clone()
+                        )))?
                         .into_inner(),
                         Some(slots) => *slots,
                     };

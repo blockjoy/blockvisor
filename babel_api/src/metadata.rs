@@ -54,8 +54,6 @@ pub struct BlockchainMetadata {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BabelConfig {
-    /// Path to mount data drive to.
-    pub data_directory_mount_point: String,
     /// Capacity of log buffer (in lines).
     pub log_buffer_capacity_ln: usize,
     /// Size of swap file created on the node, in MB.

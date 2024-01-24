@@ -22,7 +22,6 @@ const METADATA = #{
         },
     },
     babel_config: #{
-        data_directory_mount_point: "/blockjoy/miner/data",
         log_buffer_capacity_ln: 1024,
         swap_size_mb: 512,
         ramdisks: [

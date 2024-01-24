@@ -1,5 +1,5 @@
 use crate::{
-    engine::{Engine, JrpcRequest},
+    engine::{self, Engine, JrpcRequest},
     metadata::{check_metadata, BlockchainMetadata},
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
@@ -211,6 +211,11 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         args: P,
     ) -> Result<R> {
         let mut scope = rhai::Scope::new();
+        scope.push("DATA_DRIVE_MOUNT_POINT", engine::DATA_DRIVE_MOUNT_POINT);
+        scope.push(
+            "BLOCKCHAIN_DATA_PATH",
+            engine::BLOCKCHAIN_DATA_PATH.to_string_lossy(),
+        );
         self.rhai_engine
             .call_fn::<R>(&mut scope, &self.ast, name, args)
             .with_context(|| format!("Rhai function '{name}' returned error"))
@@ -332,7 +337,6 @@ mod tests {
     };
     use eyre::bail;
     use mockall::*;
-    use std::path::PathBuf;
 
     mock! {
         pub BabelEngine {}
@@ -478,9 +482,7 @@ mod tests {
         });
         create_job("download_job_name", #{
              job_type: #{
-                download: #{
-                    destination: "destination/path/for/blockchain_data",    
-                },
+                download: #{},
             },
             restart: "never",
         });
@@ -554,7 +556,7 @@ mod tests {
                 predicate::eq(JobConfig {
                     job_type: JobType::Download {
                         manifest: None,
-                        destination: PathBuf::from("destination/path/for/blockchain_data"),
+                        destination: None,
                         max_connections: None,
                         max_runners: None,
                     },
@@ -803,7 +805,6 @@ const METADATA = #{
         },
     },
     babel_config: #{
-        data_directory_mount_point: "/mnt/data/",
         log_buffer_capacity_ln: 1024,
         swap_size_mb: 1024,
         ramdisks: [
@@ -880,7 +881,6 @@ fn any_function() {}
             ]),
             min_babel_version: "0.0.9".to_string(),
             babel_config: BabelConfig {
-                data_directory_mount_point: "/mnt/data/".to_string(),
                 log_buffer_capacity_ln: 1024,
                 swap_size_mb: 1024,
                 swap_file_location: "/swapfile".to_string(),

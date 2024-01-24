@@ -1,6 +1,6 @@
 use crate::{
-    apply_babel_config, jobs_manager::JobsManagerClient, load_config,
-    ufw_wrapper::apply_firewall_config, utils, utils::sources_list, BabelPal,
+    apply_babel_config, jobs_manager::JobsManagerClient, ufw_wrapper::apply_firewall_config, utils,
+    utils::sources_list, BabelPal,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -114,15 +114,13 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .await
             .map_err(|err| Status::internal(format!("failed to shutdown jobs_manger: {err:#}")))?;
 
-        if let Ok(config) = load_config(&self.babel_cfg_path).await {
-            // since node is going to be stopped, it is safe to set fuser_kill flag as true
-            self.pal
-                .umount_data_drive(&config.data_directory_mount_point, true)
-                .await
-                .map_err(|err| {
-                    Status::internal(eyre!("failed to umount data drive: {err:#}").to_string())
-                })?;
-        }
+        // since node is going to be stopped, it is safe to set fuser_kill flag as true
+        self.pal
+            .umount_data_drive(babel_api::engine::DATA_DRIVE_MOUNT_POINT, true)
+            .await
+            .map_err(|err| {
+                Status::internal(eyre!("failed to umount data drive: {err:#}").to_string())
+            })?;
 
         Ok(Response::new(()))
     }
@@ -849,7 +847,6 @@ mod tests {
             .setup_babel((
                 "localhost".to_string(),
                 BabelConfig {
-                    data_directory_mount_point: "".to_string(),
                     log_buffer_capacity_ln: 10,
                     swap_size_mb: 16,
                     swap_file_location: "/swapfile".to_string(),

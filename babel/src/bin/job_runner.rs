@@ -80,7 +80,7 @@ async fn main() -> eyre::Result<()> {
             DownloadJob::new(
                 bv_utils::timer::SysTimer,
                 manifest,
-                destination,
+                destination.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
                 job_config.restart,
                 build_transfer_config(
                     &job_name,
@@ -105,7 +105,7 @@ async fn main() -> eyre::Result<()> {
                 bv_utils::timer::SysTimer,
                 VSockConnector,
                 manifest.ok_or(anyhow!("missing UploadManifest"))?,
-                source,
+                source.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
                 exclude.unwrap_or_default(),
                 job_config.restart,
                 build_transfer_config(

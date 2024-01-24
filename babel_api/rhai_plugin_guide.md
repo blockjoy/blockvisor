@@ -94,9 +94,6 @@ const METADATA = #{
     
     // Configuration of Babel - agent running inside VM.
     babel_config: #{
-        // Path to mount data drive to.
-        data_directory_mount_point: "/blockjoy/example_node/data",
-        
         // Capacity of log buffer (in lines).
         log_buffer_capacity_ln: 1024,
         
@@ -180,8 +177,8 @@ Functions listed below are required by BV to work properly.
 **Minimalistic Example (see [Blockchain Data Archives](#blockchain-data-archives) chapter for example including download step):**
 ```
 fn init(params) {
-  let A_DIR = global::METADATA.babel_config.data_directory_mount_point + "/A/";
-  let B_DIR = global::METADATA.babel_config.data_directory_mount_point + "/B/";
+  let A_DIR = BLOCKCHAIN_DATA_PATH + "/A/";
+  let B_DIR = BLOCKCHAIN_DATA_PATH + "/B/";
   let NET =  global::METADATA.nets[node_params().NETWORK];
 
   let response = run_sh(`mkdir -p ${A_DIR} ${B_DIR} && mkdir -p /opt/netdata/var/cache/netdata && mkdir -p /opt/netdata/var/lib/netdata && rm -rf /opt/netdata/var/lib/netdata/* && rm -rf /opt/netdata/var/cache/netdata/*`);
@@ -374,6 +371,9 @@ Return its http response (with default 15s timeout) as following structure:
 - `node_params()` - Get node params as key-value map.
 - `save_data(value)` - Save plugin data to persistent storage. It takes string as argument. `to_json` can be used for more complex structures.
 - `load_data()` - Load plugin data from persistent storage. Returns string (as it was passed to `save_data`).
+- `DATA_DRIVE_MOUNT_POINT` - Globally available constant, containing absolute path to directory where data drive is mounted.
+- `BLOCKCHAIN_DATA_PATH` - Globally available constant, containing absolute path to directory where blockchain data are stored.
+  This is the path, where blockchain data archives are downloaded to, and where are uploaded from.
 
 ### Background Jobs
 
@@ -414,8 +414,6 @@ Each background job has its __unique__ name and configuration structure describe
     let job_config_B = #{
             job_type: #{
                 download: #{
-                    // Destination directory for downloaded files.
-                    destination: "destination/path/for/blockchain_data",
                     // [optional] Maximum number of parallel opened connections.
                     max_connections: 5,
                     // [optional] Maximum number of parallel workers.
@@ -472,9 +470,7 @@ Each background job has its __unique__ name and configuration structure describe
     let upload_job_config = #{
         job_type: #{
             upload: #{
-                // Source directory with files to be uploaded.
-                source: "source/path/for/blockchain_data",
-                // [optional] List of exclude patterns. Files in `source` directory that match any of pattern,
+                // [optional] List of exclude patterns. Files in `BLOCKCHAIN_DATA_PATH` directory that match any of pattern,
                 // won't be taken into account.
                 exclude: ["file_to_be_excluded", "or_more/**"],
                 // [optional] Compression to be used on chunks.
@@ -555,18 +551,19 @@ download job config options.
 
 ### Example
 ```
+const A_DIR = BLOCKCHAIN_DATA_PATH + "/A/";
+const B_DIR = BLOCKCHAIN_DATA_PATH + "/B/";
+const NET =  global::METADATA.nets[node_params().NETWORK];
+
 fn stop_blockchain() {
     stop_job("blockchain_service_a");
     stop_job("blockchain_service_b");
 }
 
 fn start_blockchain(needed) {
-    let A_DIR = global::METADATA.babel_config.data_directory_mount_point + "/A/";
-    let B_DIR = global::METADATA.babel_config.data_directory_mount_point + "/B/";
-    let NET =  global::METADATA.nets[node_params().NETWORK];
     start_job("blockchain_service_a", #{
         job_type: #{
-            run_sh: `/usr/bin/blockchain_service_a --chain=${NET.net_type} --datadir=${B_DIR} --snapshots=false`,
+            run_sh: `/usr/bin/blockchain_service_a --chain=${NET.net_type} --datadir=${A_DIR} --snapshots=false`,
         },
         restart: #{
             always: #{
@@ -591,10 +588,6 @@ fn start_blockchain(needed) {
 }
 
 fn init(keys) {
-    let A_DIR = global::METADATA.babel_config.data_directory_mount_point + "/A/";
-    let B_DIR = global::METADATA.babel_config.data_directory_mount_point + "/B/";
-    let NET =  global::METADATA.nets[node_params().NETWORK];
-
     let response = run_sh(`mkdir -p ${A_DIR} ${B_DIR} && mkdir -p /opt/netdata/var/cache/netdata && mkdir -p /opt/netdata/var/lib/netdata && rm -rf /opt/netdata/var/lib/netdata/* && rm -rf /opt/netdata/var/cache/netdata/*`);
     debug(`Response from shell command ${cmd}': ${response}`);
     if response.exit_code != 0 {
@@ -607,7 +600,6 @@ fn init(keys) {
         start_job("download", #{
             job_type: #{
                 download: #{
-                    destination: "/blockjoy/data",
                     max_connections: 5,
                     max_runners: 8,
                 },
@@ -644,7 +636,6 @@ fn upload(param) {
     start_job("upload", #{
         job_type: #{
             upload: #{
-                source: "/blockjoy/data",
                 exclude: [
                     "**/something_to_ignore*",
                     ".gitignore",
@@ -655,7 +646,6 @@ fn upload(param) {
                 },
                 max_connections: 4,
                 max_runners: 12,
-                url_expires_secs: 240000,
             }
         },
         restart: #{
