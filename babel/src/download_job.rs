@@ -6,7 +6,7 @@ use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
-    jobs::{cleanup_job_data, load_job_data, save_job_data},
+    jobs::{load_job_data, save_job_data},
     BabelEngineConnector, VSockConnector,
 };
 use async_trait::async_trait;
@@ -40,16 +40,44 @@ use tracing::{error, info};
 // if downloading single part (about 100Mb) takes more than 10min, it mean that something
 // is not ok
 const DOWNLOAD_SINGLE_PART_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const COMPLETED_FILENAME: &str = "download.completed";
+const PARTS_FILENAME: &str = "download.parts";
+const MANIFEST_FILENAME: &str = "manifest.json";
 
-pub fn cleanup_job(parts_file_path: &Path, chunks: Option<(&Path, &Vec<Chunk>)>) {
-    cleanup_job_data(parts_file_path);
-    if let Some((destination_dir, chunks)) = chunks {
-        for chunk in chunks {
-            for destination in &chunk.destinations {
-                let _ = fs::remove_file(destination_dir.join(&destination.path));
+pub fn cleanup_job(meta_dir: &Path, destination_dir: &Path) -> Result<()> {
+    let manifest_path = meta_dir.join(MANIFEST_FILENAME);
+    if manifest_path.exists() {
+        remove_remnants(
+            load_job_data::<DownloadManifest>(&manifest_path)?,
+            destination_dir,
+        )?;
+        remove_manifest(&manifest_path)?;
+    }
+    Ok(())
+}
+
+pub fn remove_manifest(parts_path: &Path) -> Result<()> {
+    fs::remove_file(parts_path).with_context(|| {
+        format!(
+            "failed to cleanup download parts file `{}`",
+            parts_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+pub fn remove_remnants(manifest: DownloadManifest, destination_dir: &Path) -> Result<()> {
+    for chunk in manifest.chunks {
+        for destination in &chunk.destinations {
+            let file_path = destination_dir.join(&destination.path);
+            if file_path.exists() {
+                fs::remove_file(&file_path).with_context(|| {
+                    format!("failed to remove remnant file '{}'", file_path.display())
+                })?;
             }
         }
     }
+    Ok(())
 }
 
 pub struct DownloadJob<T> {
@@ -84,25 +112,7 @@ impl<T: AsyncTimer + Send> DownloadJob<T> {
     }
 
     pub async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus {
-        let parts_file_path = self.downloader.config.parts_file_path.clone();
-        let destination_dir = self.downloader.destination_dir.clone();
-        let chunks = self.downloader.manifest.chunks.clone();
-        let job_status = <Self as JobRunner>::run(self, run, name, jobs_dir).await;
-        match &job_status {
-            JobStatus::Finished {
-                exit_code: Some(0), ..
-            }
-            | JobStatus::Stopped
-            | JobStatus::Pending
-            | JobStatus::Running => {
-                // job finished successfully or is going to be continued after restart, so do nothing
-            }
-            JobStatus::Finished { .. } => {
-                // job failed - remove both parts metadata and partially downloaded files
-                cleanup_job(&parts_file_path, Some((&destination_dir, &chunks)));
-            }
-        }
-        job_status
+        <Self as JobRunner>::run(self, run, name, jobs_dir).await
     }
 }
 
@@ -111,10 +121,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
     /// Run and restart downloader until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
-        info!(
-            "download job '{name}' started, with manifest: {:?}",
-            self.downloader.manifest
-        );
+        info!("download job '{name}' started",);
 
         let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
         while run.load() {
@@ -140,7 +147,12 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
 
 impl Downloader {
     async fn download(&mut self, mut run: RunFlag) -> Result<()> {
-        let downloaded_chunks: HashSet<String> = load_job_data(&self.config.parts_file_path);
+        let completed_path = self.config.archive_jobs_meta_dir.join(COMPLETED_FILENAME);
+        if completed_path.exists() {
+            // download job shall be idempotent, to avoid downloading everything again after upgrade
+            return Ok(());
+        }
+        let downloaded_chunks = self.try_resume_or_cleanup()?;
         self.check_disk_space(&downloaded_chunks)?;
         let (tx, rx) = mpsc::channel(self.config.max_runners);
         let mut parallel_downloaders_run = run.child_flag();
@@ -173,16 +185,50 @@ impl Downloader {
                 None => break,
             }
         }
-        downloaders_result?;
         drop(downloaders); // drop last sender so writer know that download is done
 
         writer.await??;
+        downloaders_result?;
         self.unify_file_times()?;
         if !run.load() {
             bail!("download interrupted");
         }
-        cleanup_job(&self.config.parts_file_path, None);
+        File::create(completed_path)?;
         Ok(())
+    }
+
+    fn try_resume_or_cleanup(&self) -> Result<HashSet<String>> {
+        let mut downloaded_chunks = Default::default();
+        let manifest_path = self.config.archive_jobs_meta_dir.join(MANIFEST_FILENAME);
+        if manifest_path.exists() {
+            let manifest = load_job_data::<DownloadManifest>(&manifest_path)?;
+            if self.is_manifest_compatible(&manifest) {
+                downloaded_chunks =
+                    load_job_data(&self.config.archive_jobs_meta_dir.join(PARTS_FILENAME))
+                        .unwrap_or_default();
+            } else {
+                remove_remnants(manifest, &self.destination_dir)?;
+                save_job_data(&manifest_path, &self.manifest)?;
+            }
+        } else {
+            save_job_data(&manifest_path, &self.manifest)?;
+        }
+        Ok(downloaded_chunks)
+    }
+
+    fn is_manifest_compatible(&self, old_manifest: &DownloadManifest) -> bool {
+        old_manifest.total_size == self.manifest.total_size
+            && old_manifest.compression == self.manifest.compression
+            && old_manifest.chunks.iter().all(|old_chunk| {
+                self.manifest
+                    .chunks
+                    .iter()
+                    .find(|chunk| old_chunk.key == chunk.key)
+                    .is_some_and(|chunk| {
+                        old_chunk.size == chunk.size && old_chunk.checksum == chunk.checksum
+                            || old_chunk.destinations == chunk.destinations
+                    })
+            })
     }
 
     fn check_disk_space(&self, downloaded_chunks: &HashSet<String>) -> Result<()> {
@@ -214,7 +260,7 @@ impl Downloader {
             self.destination_dir.clone(),
             self.config.max_opened_files,
             self.config.progress_file_path.clone(),
-            self.config.parts_file_path.clone(),
+            self.config.archive_jobs_meta_dir.join(PARTS_FILENAME),
             self.manifest.chunks.len(),
             downloaded_chunks,
         );
@@ -673,21 +719,33 @@ mod tests {
 
     struct TestEnv {
         tmp_dir: PathBuf,
+        dest_dir: PathBuf,
+        meta_dir: PathBuf,
         download_parts_path: PathBuf,
+        manifest_path: PathBuf,
+        completed_path: PathBuf,
         download_progress_path: PathBuf,
         server: ServerGuard,
     }
 
     fn setup_test_env() -> Result<TestEnv> {
         let tmp_dir = TempDir::new()?.to_path_buf();
-        fs::create_dir_all(&tmp_dir)?;
         let server = Server::new();
-        let download_parts_path = tmp_dir.join("download.parts");
+        let dest_dir = tmp_dir.join("data");
+        let meta_dir = tmp_dir.join(".meta");
+        fs::create_dir_all(&meta_dir)?;
+        let download_parts_path = meta_dir.join(PARTS_FILENAME);
+        let manifest_path = meta_dir.join(MANIFEST_FILENAME);
+        let completed_path = meta_dir.join(COMPLETED_FILENAME);
         let download_progress_path = tmp_dir.join("download.progress");
         Ok(TestEnv {
             tmp_dir,
+            dest_dir,
+            meta_dir,
             server,
             download_parts_path,
+            manifest_path,
+            completed_path,
             download_progress_path,
         })
     }
@@ -697,7 +755,7 @@ mod tests {
             DownloadJob {
                 downloader: Downloader {
                     manifest,
-                    destination_dir: self.tmp_dir.clone(),
+                    destination_dir: self.dest_dir.clone(),
                     config: TransferConfig {
                         max_opened_files: 1,
                         max_runners: 4,
@@ -705,7 +763,7 @@ mod tests {
                         max_buffer_size: 150,
                         max_retries: 0,
                         backoff_base_ms: 1,
-                        parts_file_path: self.download_parts_path.clone(),
+                        archive_jobs_meta_dir: self.meta_dir.clone(),
                         progress_file_path: self.download_progress_path.clone(),
                         compression: None,
                     },
@@ -831,34 +889,49 @@ mod tests {
                 message: "".to_string()
             },
             test_env
-                .download_job(manifest)
+                .download_job(manifest.clone())
                 .run(RunFlag::default(), "name", &test_env.tmp_dir)
                 .await
         );
 
         assert_eq!(
             vec![0u8; 100],
-            fs::read(test_env.tmp_dir.join("zero.file"))?
+            fs::read(test_env.dest_dir.join("zero.file"))?
         );
         assert_eq!(
             vec![1u8; 200],
-            fs::read(test_env.tmp_dir.join("first.file"))?
+            fs::read(test_env.dest_dir.join("first.file"))?
         );
         assert_eq!(
             [vec![2u8; 300], vec![3u8; 324]].concat(),
-            fs::read(test_env.tmp_dir.join("second.file"))?
+            fs::read(test_env.dest_dir.join("second.file"))?
         );
-        assert_eq!(0, test_env.tmp_dir.join("empty.file").metadata()?.len());
+        assert_eq!(0, test_env.dest_dir.join("empty.file").metadata()?.len());
         assert_eq!(
-            test_env.tmp_dir.join("empty.file").metadata()?.mtime(),
-            test_env.tmp_dir.join("second.file").metadata()?.mtime()
+            test_env.dest_dir.join("empty.file").metadata()?.mtime(),
+            test_env.dest_dir.join("second.file").metadata()?.mtime()
         );
         assert_eq!(
-            test_env.tmp_dir.join("first.file").metadata()?.mtime(),
-            test_env.tmp_dir.join("second.file").metadata()?.mtime()
+            test_env.dest_dir.join("first.file").metadata()?.mtime(),
+            test_env.dest_dir.join("second.file").metadata()?.mtime()
         );
-        assert!(!test_env.download_parts_path.exists());
+        assert!(test_env.download_parts_path.exists());
+        assert!(test_env.manifest_path.exists());
+        assert!(test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
+
+        // idempotency
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string()
+            },
+            test_env
+                .download_job(manifest)
+                .run(RunFlag::default(), "name", &test_env.tmp_dir)
+                .await
+        );
+
         Ok(())
     }
 
@@ -963,18 +1036,20 @@ mod tests {
 
         assert_eq!(
             vec![0u8; 100],
-            fs::read(test_env.tmp_dir.join("zero.file"))?
+            fs::read(test_env.dest_dir.join("zero.file"))?
         );
         assert_eq!(
             vec![1u8; 200],
-            fs::read(test_env.tmp_dir.join("first.file"))?
+            fs::read(test_env.dest_dir.join("first.file"))?
         );
         assert_eq!(
             [vec![2u8; 300], vec![3u8; 324]].concat(),
-            fs::read(test_env.tmp_dir.join("second.file"))?
+            fs::read(test_env.dest_dir.join("second.file"))?
         );
-        assert_eq!(0, test_env.tmp_dir.join("empty.file").metadata()?.len());
-        assert!(!test_env.download_parts_path.exists());
+        assert_eq!(0, test_env.dest_dir.join("empty.file").metadata()?.len());
+        assert!(test_env.download_parts_path.exists());
+        assert!(test_env.manifest_path.exists());
+        assert!(test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
         Ok(())
     }
@@ -1019,9 +1094,11 @@ mod tests {
                 .await
         );
 
-        assert_eq!(0, test_env.tmp_dir.join("empty_1.file").metadata()?.len());
-        assert_eq!(0, test_env.tmp_dir.join("empty_2.file").metadata()?.len());
-        assert!(!test_env.download_parts_path.exists());
+        assert_eq!(0, test_env.dest_dir.join("empty_1.file").metadata()?.len());
+        assert_eq!(0, test_env.dest_dir.join("empty_2.file").metadata()?.len());
+        assert!(test_env.download_parts_path.exists());
+        assert!(test_env.manifest_path.exists());
+        assert!(test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
         Ok(())
     }
@@ -1085,6 +1162,8 @@ mod tests {
                 .run(RunFlag::default(), "name", &test_env.tmp_dir)
                 .await
         );
+        assert!(test_env.manifest_path.exists());
+        assert!(!test_env.completed_path.exists());
         Ok(())
     }
 
@@ -1191,6 +1270,8 @@ mod tests {
                 .run(RunFlag::default(), "name", &test_env.tmp_dir)
                 .await
         );
+        assert!(test_env.manifest_path.exists());
+        assert!(!test_env.completed_path.exists());
         Ok(())
     }
 
@@ -1267,8 +1348,9 @@ mod tests {
             .create();
 
         // create files form first chunk
-        fs::write(test_env.tmp_dir.join("zero.file"), "")?;
-        fs::write(test_env.tmp_dir.join("first.file"), "")?;
+        fs::create_dir_all(&test_env.dest_dir)?;
+        fs::write(test_env.dest_dir.join("zero.file"), "")?;
+        fs::write(test_env.dest_dir.join("first.file"), "")?;
         // mark first file as downloaded
         let mut parts = HashSet::new();
         parts.insert("first_chunk");
@@ -1276,8 +1358,9 @@ mod tests {
             &test_env.download_parts_path,
             serde_json::to_string(&parts)?,
         )?;
+        fs::write(&test_env.manifest_path, serde_json::to_string(&manifest)?)?;
         // partially downloaded second file
-        fs::write(test_env.tmp_dir.join("second.file"), vec![1u8; 55])?;
+        fs::write(test_env.dest_dir.join("second.file"), vec![1u8; 55])?;
 
         let mut job = test_env.download_job(manifest);
         job.downloader.config.max_runners = 1;
@@ -1291,12 +1374,17 @@ mod tests {
 
         assert_eq!(
             vec![2u8; 150],
-            fs::read(test_env.tmp_dir.join("second.file"))?
+            fs::read(test_env.dest_dir.join("second.file"))?
         );
         assert_eq!(
             vec![3u8; 150],
-            fs::read(test_env.tmp_dir.join("third.file"))?
+            fs::read(test_env.dest_dir.join("third.file"))?
         );
+
+        assert!(test_env.download_parts_path.exists());
+        assert!(test_env.manifest_path.exists());
+        assert!(test_env.completed_path.exists());
+        assert!(test_env.download_progress_path.exists());
         Ok(())
     }
 
@@ -1360,6 +1448,7 @@ mod tests {
             .create();
 
         let job = test_env.download_job(manifest);
+        fs::create_dir_all(&test_env.dest_dir)?;
         let mut perms = fs::metadata(&job.downloader.destination_dir)?.permissions();
         perms.set_readonly(true);
         fs::set_permissions(&job.downloader.destination_dir, perms)?;
@@ -1378,7 +1467,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cleanup_after_fail() -> Result<()> {
+    async fn test_remnants_after_fail() -> Result<()> {
         let mut test_env = setup_test_env()?;
 
         let manifest = DownloadManifest {
@@ -1475,7 +1564,7 @@ mod tests {
             .with_body(vec![3u8; 24])
             .create();
 
-        let mut job = test_env.download_job(manifest);
+        let mut job = test_env.download_job(manifest.clone());
         job.downloader.config.max_runners = 1;
         assert_eq!(
             JobStatus::Finished {
@@ -1485,14 +1574,59 @@ mod tests {
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );
 
-        assert!(!test_env.tmp_dir.join("zero.file").exists());
-        assert!(!test_env.tmp_dir.join("first.file").exists());
-        assert!(!test_env.tmp_dir.join("second.file").exists());
-        assert!(!test_env.tmp_dir.join("third.file").exists());
-        assert!(!test_env.download_parts_path.exists());
+        assert!(test_env.dest_dir.join("zero.file").exists());
+        assert!(test_env.dest_dir.join("first.file").exists());
+        assert!(test_env.dest_dir.join("second.file").exists());
+        assert!(test_env.dest_dir.join("third.file").exists());
+        assert!(test_env.download_parts_path.exists());
+        assert_eq!(
+            load_job_data::<DownloadManifest>(&test_env.manifest_path).unwrap(),
+            manifest
+        );
+        assert!(!test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
         let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
         assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
+
+        let another_manifest = DownloadManifest {
+            total_size: 1,
+            compression: None,
+            chunks: vec![Chunk {
+                key: "first_chunk".to_string(),
+                url: test_env.url("first_chunk"),
+                checksum: Checksum::Blake3([
+                    85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8, 190,
+                    219, 61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
+                ]),
+                size: 1,
+                destinations: vec![FileLocation {
+                    path: PathBuf::from("zero.file"),
+                    pos: 0,
+                    size: 1,
+                }],
+            }],
+        };
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "download_job 'name' failed with: chunk 'first_chunk' download failed: server responded with 501 Not Implemented".to_string()
+            },
+            test_env.download_job(another_manifest.clone()).run(RunFlag::default(), "name", &test_env.tmp_dir).await
+        );
+        assert!(!test_env.dest_dir.join("zero.file").exists());
+        assert!(!test_env.dest_dir.join("first.file").exists());
+        assert!(!test_env.dest_dir.join("second.file").exists());
+        assert!(!test_env.dest_dir.join("third.file").exists());
+        assert!(test_env.download_parts_path.exists());
+        assert_eq!(
+            load_job_data::<DownloadManifest>(&test_env.manifest_path).unwrap(),
+            another_manifest
+        );
+        assert!(!test_env.completed_path.exists());
+        assert!(test_env.download_progress_path.exists());
+        let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
+        assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
+
         Ok(())
     }
 

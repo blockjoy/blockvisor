@@ -62,14 +62,14 @@ pub struct TransferConfig {
     pub max_buffer_size: usize,
     pub max_retries: u32,
     pub backoff_base_ms: u64,
-    pub parts_file_path: PathBuf,
+    pub archive_jobs_meta_dir: PathBuf,
     pub progress_file_path: PathBuf,
     pub compression: Option<Compression>,
 }
 
 impl TransferConfig {
     pub fn new(
-        parts_file_path: PathBuf,
+        archive_jobs_meta_dir: PathBuf,
         progress_file_path: PathBuf,
         compression: Option<Compression>,
         max_connections: usize,
@@ -83,7 +83,7 @@ impl TransferConfig {
             max_buffer_size: MAX_BUFFER_SIZE,
             max_retries: MAX_RETRIES,
             backoff_base_ms: BACKOFF_BASE_MS,
-            parts_file_path,
+            archive_jobs_meta_dir,
             progress_file_path,
             compression,
         })

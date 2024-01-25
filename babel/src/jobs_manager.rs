@@ -229,19 +229,9 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         info!("Requested '{name}' job to start: {config:?}",);
         let mut jobs_context = self.jobs_registry.lock().await;
 
-        if let Some(Job {
-            state,
-            config: old_config,
-            ..
-        }) = jobs_context.jobs.get(name)
-        {
+        if let Some(Job { state, .. }) = jobs_context.jobs.get(name) {
             if let JobState::Active(_) = state {
                 bail!("can't create job '{name}' while it is already running")
-            } else if config == *old_config {
-                info!(
-                    "job '{name}' recreated with different config - cleanup after previous run first"
-                );
-                jobs_context.jobs_data.cleanup_job(name, old_config);
             }
         } else if jobs_context.jobs.len() >= MAX_JOBS {
             bail!("Exceeded max number of supported jobs: {MAX_JOBS}");
@@ -306,7 +296,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         let jobs_context = self.jobs_registry.lock().await;
         if let Some(job) = jobs_context.jobs.get(name) {
             if let JobState::Inactive(_) = job.state {
-                jobs_context.jobs_data.cleanup_job(name, &job.config);
+                jobs_context.jobs_data.cleanup_job(&job.config)?;
             } else {
                 bail!("can't cleanup active job '{name}'");
             }

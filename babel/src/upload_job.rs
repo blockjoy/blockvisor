@@ -5,7 +5,7 @@
 use crate::{
     compression::{Coder, NoCoder, ZstdEncoder},
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
-    jobs::{cleanup_job_data, load_job_data, save_job_data},
+    jobs::{load_job_data, save_job_data},
     utils::sources_list,
     BabelEngineConnector,
 };
@@ -26,6 +26,7 @@ use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use nu_glob::{Pattern, PatternError};
 use std::{
     cmp::min,
+    fs,
     fs::File,
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
@@ -40,6 +41,21 @@ use tracing::{error, info};
 // if uploading single chunk (about 1Gb) takes more than 100min, it mean that something
 // is not ok
 const UPLOAD_SINGLE_CHUNK_TIMEOUT: Duration = Duration::from_secs(100 * 60);
+const PARTS_FILENAME: &str = "upload.parts";
+
+pub fn cleanup_job(meta_dir: &Path) -> Result<()> {
+    let parts_path = meta_dir.join(PARTS_FILENAME);
+    if parts_path.exists() {
+        fs::remove_file(&parts_path).with_context(|| {
+            format!(
+                "failed to cleanup upload parts file `{}`",
+                parts_path.display()
+            )
+        })
+    } else {
+        Ok(())
+    }
+}
 
 pub struct UploadJob<T, C> {
     uploader: Uploader<C>,
@@ -82,23 +98,7 @@ impl<T: AsyncTimer + Send, C: BabelEngineConnector + Send> UploadJob<T, C> {
     }
 
     pub async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus {
-        let parts_file_path = self.uploader.config.parts_file_path.clone();
-        let job_status = <Self as JobRunner>::run(self, run, name, jobs_dir).await;
-        match &job_status {
-            JobStatus::Finished {
-                exit_code: Some(0), ..
-            }
-            | JobStatus::Stopped
-            | JobStatus::Pending
-            | JobStatus::Running => {
-                // job finished successfully or is going to be continued after restart, so do nothing
-            }
-            JobStatus::Finished { .. } => {
-                // job failed - remove parts metadata
-                cleanup_job_data(&parts_file_path);
-            }
-        }
-        job_status
+        <Self as JobRunner>::run(self, run, name, jobs_dir).await
     }
 }
 
@@ -107,10 +107,7 @@ impl<T: AsyncTimer + Send, C: BabelEngineConnector + Send> JobRunnerImpl for Upl
     /// Run and restart uploader until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
-        info!(
-            "upload job '{name}' started, with manifest: {:?}",
-            self.uploader.manifest
-        );
+        info!("upload job '{name}' started");
 
         let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
         while run.load() {
@@ -136,8 +133,17 @@ impl<T: AsyncTimer + Send, C: BabelEngineConnector + Send> JobRunnerImpl for Upl
 
 impl<C: BabelEngineConnector> Uploader<C> {
     async fn upload(&mut self, mut run: RunFlag) -> Result<()> {
-        let mut manifest = if let Some(manifest) = load_job_data(&self.config.parts_file_path) {
-            manifest
+        let parts_path = self.config.archive_jobs_meta_dir.join(PARTS_FILENAME);
+        let mut manifest = if let Ok(manifest) = load_job_data::<DownloadManifest>(&parts_path) {
+            let resume_possible = manifest
+                .chunks
+                .iter()
+                .all(|chunk| self.manifest.slots.iter().any(|slot| slot.key == chunk.key));
+            if resume_possible {
+                manifest
+            } else {
+                self.prepare_blueprint()?
+            }
         } else {
             self.prepare_blueprint()?
         };
@@ -171,7 +177,7 @@ impl<C: BabelEngineConnector> Uploader<C> {
                     };
                     *blueprint = chunk;
                     uploaded_chunks += 1;
-                    save_job_data(&self.config.parts_file_path, &Some(&manifest))?;
+                    save_job_data(&parts_path, &Some(&manifest))?;
                     save_job_data(
                         &self.config.progress_file_path,
                         &JobProgress {
@@ -210,7 +216,7 @@ impl<C: BabelEngineConnector> Uploader<C> {
         with_retry!(client.put_download_manifest(with_timeout(manifest.clone(), custom_timeout)))
             .with_context(|| "failed to send DownloadManifest blueprint back to API")?;
 
-        cleanup_job_data(&self.config.parts_file_path);
+        cleanup_job(&self.config.archive_jobs_meta_dir)?;
         Ok(())
     }
 
@@ -605,21 +611,21 @@ mod tests {
 
     struct TestEnv {
         tmp_dir: PathBuf,
-        upload_parts_path: PathBuf,
+        parts_file_path: PathBuf,
         upload_progress_path: PathBuf,
         server: ServerGuard,
     }
 
     fn setup_test_env() -> Result<TestEnv> {
         let tmp_dir = TempDir::new()?.to_path_buf();
+        let parts_file_path = tmp_dir.join(PARTS_FILENAME);
         dummy_sources(&tmp_dir)?;
         let server = Server::new();
-        let upload_parts_path = tmp_dir.join("upload.parts");
         let upload_progress_path = tmp_dir.join("upload.progress");
         Ok(TestEnv {
             tmp_dir,
+            parts_file_path,
             server,
-            upload_parts_path,
             upload_progress_path,
         })
     }
@@ -660,7 +666,7 @@ mod tests {
                         max_buffer_size: 50,
                         max_retries: 0,
                         backoff_base_ms: 1,
-                        parts_file_path: self.upload_parts_path.clone(),
+                        archive_jobs_meta_dir: self.tmp_dir.clone(),
                         progress_file_path: self.upload_progress_path.clone(),
                         compression: None,
                     },
@@ -830,7 +836,7 @@ mod tests {
                 .await
         );
 
-        assert!(!test_env.upload_parts_path.exists());
+        assert!(!test_env.parts_file_path.exists());
         assert!(test_env.upload_progress_path.exists());
         let progress = fs::read_to_string(&test_env.upload_progress_path).unwrap();
         assert_eq!(&progress, r#"{"total":3,"current":3,"message":"chunks"}"#);
@@ -1072,7 +1078,13 @@ mod tests {
             4, 20, 229, 205, 55, 90, 194, 137, 167, 103, 54, 187, 43,
         ]);
         chunk_b.url = None;
-        save_job_data(&job.uploader.config.parts_file_path, &Some(&progress))?;
+        save_job_data(
+            &job.uploader
+                .config
+                .archive_jobs_meta_dir
+                .join(PARTS_FILENAME),
+            &Some(&progress),
+        )?;
 
         assert_eq!(
             JobStatus::Finished {
@@ -1081,7 +1093,7 @@ mod tests {
             },
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );
-        assert!(!test_env.upload_parts_path.exists());
+        assert!(!test_env.parts_file_path.exists());
         server.assert().await;
         Ok(())
     }
@@ -1121,10 +1133,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cleanup_after_fail() -> Result<()> {
+    async fn test_no_cleanup_after_fail() -> Result<()> {
         let test_env = setup_test_env()?;
         let manifest = UploadManifest { slots: vec![] };
-        fs::write(&test_env.upload_parts_path, r#"["key"]"#)?;
+        fs::write(&test_env.parts_file_path, r#"["key"]"#)?;
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
@@ -1137,7 +1149,7 @@ mod tests {
                 .run(RunFlag::default(), "name", &test_env.tmp_dir)
                 .await
         );
-        assert!(!test_env.upload_parts_path.exists());
+        assert!(test_env.parts_file_path.exists());
         Ok(())
     }
 

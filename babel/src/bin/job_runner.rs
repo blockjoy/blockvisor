@@ -8,7 +8,7 @@ use babel_api::engine::{
 use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobType};
 use bv_utils::{logging::setup_logging, rpc::RPC_REQUEST_TIMEOUT, run_flag::RunFlag};
 use eyre::{anyhow, bail};
-use std::{env, time::Duration};
+use std::{env, fs, time::Duration};
 use tokio::join;
 use tracing::{debug, info};
 
@@ -128,8 +128,11 @@ fn build_transfer_config(
     max_connections: usize,
     max_runners: usize,
 ) -> eyre::Result<TransferConfig> {
+    if !jobs::ARCHIVE_JOBS_META_DIR.exists() {
+        fs::create_dir_all(*jobs::ARCHIVE_JOBS_META_DIR)?;
+    }
     TransferConfig::new(
-        jobs::parts_file_path(job_name, &jobs::JOBS_DIR.join(jobs::STATUS_SUBDIR)),
+        jobs::ARCHIVE_JOBS_META_DIR.to_path_buf(),
         jobs::progress_file_path(job_name, &jobs::JOBS_DIR.join(jobs::STATUS_SUBDIR)),
         compression,
         max_connections,

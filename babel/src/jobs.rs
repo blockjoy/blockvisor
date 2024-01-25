@@ -1,5 +1,5 @@
-use crate::download_job;
-use babel_api::engine::{JobConfig, JobProgress, JobStatus, JobType};
+use crate::{download_job, upload_job};
+use babel_api::engine::{JobConfig, JobProgress, JobStatus, JobType, BLOCKCHAIN_DATA_PATH};
 use chrono::{DateTime, Local};
 use eyre::{Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
@@ -11,10 +11,11 @@ use std::{
 };
 use sysinfo::Pid;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 
 lazy_static::lazy_static! {
     pub static ref JOBS_DIR: &'static Path = Path::new("/var/lib/babel/jobs");
+    pub static ref ARCHIVE_JOBS_META_DIR: &'static Path = Path::new("/blockjoy/.babel_jobs");
 }
 
 pub const CONFIG_SUBDIR: &str = "config";
@@ -117,57 +118,27 @@ impl JobsData {
     }
 
     pub fn load_progress(&self, name: &str) -> Option<JobProgress> {
-        load_job_data(&progress_file_path(name, &self.jobs_status_dir))
+        load_job_data(&progress_file_path(name, &self.jobs_status_dir)).ok()
     }
 
-    pub fn cleanup_job(&self, name: &str, config: &JobConfig) {
+    pub fn cleanup_job(&self, config: &JobConfig) -> Result<()> {
         match &config.job_type {
-            JobType::Download {
-                manifest,
-                destination,
-                ..
-            } => {
-                let destination = if let Some(destination) = destination {
-                    destination.as_path()
-                } else {
-                    &babel_api::engine::BLOCKCHAIN_DATA_PATH
-                };
-                download_job::cleanup_job(
-                    &parts_file_path(name, &self.jobs_status_dir),
-                    manifest
-                        .as_ref()
-                        .map(|manifest| (destination, &manifest.chunks)),
-                )
+            JobType::Download { .. } => {
+                download_job::cleanup_job(&ARCHIVE_JOBS_META_DIR, &BLOCKCHAIN_DATA_PATH)?
             }
-            JobType::Upload { .. } => {
-                cleanup_job_data(&parts_file_path(name, &self.jobs_status_dir))
-            }
+            JobType::Upload { .. } => upload_job::cleanup_job(&ARCHIVE_JOBS_META_DIR)?,
             _ => {}
         }
+        Ok(())
     }
 }
 
-pub fn load_job_data<T: DeserializeOwned + Default>(file_path: &Path) -> T {
-    if file_path.exists() {
-        fs::read_to_string(file_path)
-            .and_then(|json| Ok(serde_json::from_str(&json)?))
-            .unwrap_or_default()
-    } else {
-        Default::default()
-    }
+pub fn load_job_data<T: DeserializeOwned>(file_path: &Path) -> Result<T> {
+    Ok(fs::read_to_string(file_path).and_then(|json| Ok(serde_json::from_str(&json)?))?)
 }
 
 pub fn save_job_data<T: Serialize>(file_path: &Path, data: &T) -> eyre::Result<()> {
     Ok(fs::write(file_path, serde_json::to_string(data)?)?)
-}
-
-pub fn cleanup_job_data(file_path: &Path) {
-    if let Err(err) = fs::remove_file(file_path) {
-        warn!(
-            "failed to cleanup job data file `{}`: {err:#}",
-            file_path.display()
-        );
-    }
 }
 
 pub fn load_config(path: &Path) -> Result<JobConfig> {
@@ -212,10 +183,5 @@ pub fn status_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
 
 pub fn progress_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
     let filename = format!("{}.progress", name);
-    jobs_status_dir.join(filename)
-}
-
-pub fn parts_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
-    let filename = format!("{}.parts", name);
     jobs_status_dir.join(filename)
 }

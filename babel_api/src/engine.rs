@@ -13,7 +13,7 @@ pub const DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_JOB_SHUTDOWN_SIGNAL: PosixSignal = PosixSignal::SIGTERM;
 pub const DATA_DRIVE_MOUNT_POINT: &str = "/blockjoy/";
 lazy_static::lazy_static! {
-    pub static ref BLOCKCHAIN_DATA_PATH: &'static Path = Path::new("/blockjoy/blockchain_data/");
+    pub static ref BLOCKCHAIN_DATA_PATH: &'static Path = Path::new("/blockjoy/blockchain_data");
 }
 
 /// Plugin engine must implement this interface, so it can be used by babel plugins.
@@ -176,7 +176,7 @@ pub struct UploadManifest {
     pub slots: Vec<Slot>,
 }
 
-/// Type of long running job.
+/// Type of long-running job.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobType {
