@@ -31,7 +31,6 @@ use std::{
     slice::Iter,
     usize,
 };
-use sysinfo::{DiskExt, System, SystemExt};
 use tokio::sync::Semaphore;
 use tokio::task::JoinError;
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
@@ -232,11 +231,8 @@ impl Downloader {
     }
 
     fn check_disk_space(&self, downloaded_chunks: &HashSet<String>) -> Result<()> {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        let available_space = bv_utils::system::find_disk_by_path(&sys, &self.destination_dir)
-            .map(|disk| disk.available_space())
-            .ok_or_else(|| anyhow!("Cannot get available disk space"))?;
+        let available_space =
+            bv_utils::system::available_disk_space_by_path(&self.destination_dir)?;
 
         let required_space = required_disk_space(downloaded_chunks, &self.manifest)?;
         if required_space > available_space {

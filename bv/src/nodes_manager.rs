@@ -1,3 +1,4 @@
+use crate::services::blockchain::ROOT_FS_FILE;
 use crate::{
     command_failed,
     commands::{self, into_internal, Error},
@@ -218,7 +219,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             )));
         }
 
-        self.check_node_requirements(&meta.requirements, None)
+        self.check_node_requirements(&meta.requirements, &config.image, None)
             .await?;
 
         let network_interface = self.create_network_interface(ip, gateway).await?;
@@ -294,7 +295,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                 command_failed!(Error::Internal(anyhow!("Cannot upgrade disk requirements")));
             }
 
-            self.check_node_requirements(&new_meta.requirements, Some(&data.requirements))
+            self.check_node_requirements(&new_meta.requirements, &image, Some(&data.requirements))
                 .await?;
 
             let mut node = nodes_lock
@@ -568,30 +569,38 @@ impl<P: Pal + Debug> NodesManager<P> {
     async fn check_node_requirements(
         &self,
         requirements: &Requirements,
+        image: &NodeImage,
         tolerance: Option<&Requirements>,
     ) -> commands::Result<()> {
+        let bv_root = self.pal.bv_root();
         let host_info = HostInfo::collect()?;
+        let available_space =
+            bv_utils::system::available_disk_space_by_path(&bv_root.join(BV_VAR_PATH))?;
+        let os_image_size = blockchain::get_image_download_folder_path(bv_root, image)
+            .join(ROOT_FS_FILE)
+            .metadata()
+            .with_context(|| format!("can't check '{ROOT_FS_FILE}' size for {image}"))?
+            .len();
+        // take into account additional copy of os.img made by firec while creating vm
+        let mut available_space = (available_space - os_image_size) as usize / 1_000_000;
 
-        let mut allocated_disk_size_gb = 0;
         let mut allocated_mem_size_mb = 0;
         let mut allocated_vcpu_count = 0;
         for n in self.nodes.read().await.values() {
             let node = n.read().await;
-            allocated_disk_size_gb += node.data.requirements.disk_size_gb;
             allocated_mem_size_mb += node.data.requirements.mem_size_mb;
             allocated_vcpu_count += node.data.requirements.vcpu_count;
         }
 
-        let mut total_disk_size_gb = host_info.disk_space_bytes as usize / 1_000_000_000;
         let mut total_mem_size_mb = host_info.memory_bytes as usize / 1_000_000;
         let mut total_vcpu_count = host_info.cpu_count;
         if let Some(tol) = tolerance {
-            total_disk_size_gb += tol.disk_size_gb;
+            available_space += tol.disk_size_gb;
             total_mem_size_mb += tol.mem_size_mb;
             total_vcpu_count += tol.vcpu_count;
         }
 
-        if (allocated_disk_size_gb + requirements.disk_size_gb) > total_disk_size_gb {
+        if requirements.disk_size_gb > available_space {
             command_failed!(Error::Internal(anyhow!(
                 "Not enough disk space to allocate for the node"
             )));

@@ -59,3 +59,12 @@ pub fn find_disk_by_path<'a>(sys: &'a System, path: &Path) -> Option<&'a Disk> {
             }
         })
 }
+
+/// Get available disk space for drive on which given path reside.
+pub fn available_disk_space_by_path(path: &Path) -> Result<u64> {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    find_disk_by_path(&sys, path)
+        .map(|disk| disk.available_space())
+        .ok_or_else(|| anyhow!("Cannot get available disk space"))
+}
