@@ -1,15 +1,16 @@
 use eyre::Result;
 use tracing_subscriber::{
-    self, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, FmtSubscriber,
+    self, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry,
 };
 
 pub fn setup_logging() -> Result<()> {
-    FmtSubscriber::builder()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_ansi(false)
-        .finish()
-        .with(tracing_journald::layer()?)
+    tracing_subscriber::registry()
+        .with(<tracing_journald::Layer as tracing_subscriber::Layer<
+            Registry,
+        >>::with_filter(
+            tracing_journald::layer()?,
+            EnvFilter::from_default_env(),
+        ))
         .init();
-
     Ok(())
 }
