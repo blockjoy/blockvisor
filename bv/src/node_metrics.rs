@@ -147,11 +147,11 @@ where
     match tokio::time::timeout(TIMEOUT, fut).await {
         Ok(Ok(res)) => Ok(res),
         Ok(Err(e)) => {
-            warn!("Collecting node metric failed! `{e}`");
+            warn!("Collecting node metric failed! `{e:#}`");
             Err(e)
         }
         Err(e) => {
-            warn!("Collecting node metric timed out! `{e}`");
+            warn!("Collecting node metric timed out! `{e:#}`");
             Err(e.into())
         }
     }

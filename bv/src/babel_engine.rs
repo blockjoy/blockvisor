@@ -26,7 +26,7 @@ use bv_utils::{
     rpc::with_timeout,
     {run_flag::RunFlag, with_retry},
 };
-use eyre::{anyhow, bail, Error, Result};
+use eyre::{anyhow, bail, Error, Result, WrapErr};
 use futures_util::StreamExt;
 use std::{
     collections::HashMap,
@@ -292,7 +292,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             }),
             self.node_request_handler(handler_run)
         );
-        resp?
+        resp?.with_context(|| format!("node_id={}", self.node_info.node_id))
     }
 
     /// Listen for `NodeRequest`'s, handle them and send results back to plugin.
