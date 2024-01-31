@@ -197,7 +197,10 @@ async fn remaster(name: &str, bridge_ifa: &str) -> Result<()> {
 }
 
 async fn delete(name: &str) -> Result<()> {
-    run_cmd("ip", ["link", "delete", name, "type", "tuntap"]).await?;
+    // try to delete only if exists
+    if run_cmd("ip", ["link", "show", name]).await.is_ok() {
+        run_cmd("ip", ["link", "delete", name, "type", "tuntap"]).await?;
+    }
     Ok(())
 }
 
