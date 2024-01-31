@@ -100,7 +100,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         } else {
             // try cleanup after install, but cleanup result should not affect exit code
             self.cleanup() // do not interrupt cleanup on errors
-                .unwrap_or_else(|err| warn!("failed to cleanup after install with: {err}"));
+                .unwrap_or_else(|err| warn!("failed to cleanup after install with: {err:#}"));
             Ok(())
         }
     }
@@ -177,13 +177,13 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         match self.backup_status {
             BackupStatus::Done(_) => {
                 self.rollback().await?;
-                bail!("installation failed with: {err}, but rolled back to previous version")
+                bail!("installation failed with: {err:#}, but rolled back to previous version")
             }
             BackupStatus::ThisIsRollback => {
-                bail!("rollback failed - host needs manual fix: {err}")
+                bail!("rollback failed - host needs manual fix: {err:#}")
             }
             BackupStatus::NothingToBackup => {
-                bail!("installation failed: {err}");
+                bail!("installation failed: {err:#}");
             }
         }
     }
@@ -271,7 +271,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
                     }
                     Err(err) => {
                         if expired() {
-                            bail!("prepare running BV for update failed, BV start_update respond with {err}");
+                            bail!("prepare running BV for update failed, BV start_update respond with {err:#}");
                         }
                     }
                 }
@@ -365,7 +365,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
                 }
                 Err(err) => {
                     if expired() {
-                        bail!("installed BV health check failed, BV health respond with {err}");
+                        bail!("installed BV health check failed, BV health respond with {err:#}");
                     }
                 }
             }
@@ -449,7 +449,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
                 .map_err(|err| {
                     let path = entry.path();
                     warn!(
-                        "failed to cleanup after install, can't remove {} with: {}",
+                        "failed to cleanup after install, can't remove {} with: {:#}",
                         path.to_string_lossy(),
                         err
                     )

@@ -90,9 +90,9 @@ pub struct NodeConfig {
 pub enum BabelError {
     #[error("given method not found")]
     MethodNotFound,
-    #[error("BV plugin error: {err}")]
+    #[error("BV plugin error: {err:#}")]
     Plugin { err: eyre::Error },
-    #[error("BV internal error: {err}")]
+    #[error("BV internal error: {err:#}")]
     Internal { err: eyre::Error },
 }
 
@@ -145,7 +145,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes_lock = self.nodes.read().await;
         for (id, node) in nodes_lock.iter() {
             if let Err(err) = node.write().await.babel_engine.stop_server().await {
-                warn!("error while stopping babel engine server for node {id}: {err}")
+                warn!("error while stopping babel engine server for node {id}: {err:#}")
             }
         }
     }
@@ -417,7 +417,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                     && node.expected_status() != NodeStatus::Failed
                 {
                     if let Err(e) = node.recover().await {
-                        error!("node `{id}` recovery failed with: {e}");
+                        error!("node `{id}` recovery failed with: {e:#}");
                     }
                 }
             }
@@ -716,7 +716,11 @@ impl<P: Pal + Debug> NodesManager<P> {
                 Err(e) => {
                     // blockvisord should not bail on problems with individual node files.
                     // It should log error though.
-                    error!("Failed to load node from file `{}`: {}", path.display(), e);
+                    error!(
+                        "Failed to load node from file `{}`: {:#}",
+                        path.display(),
+                        e
+                    );
                 }
             };
         }
@@ -761,7 +765,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let res = self.save_state().await;
         if res.is_err() {
             if let Err(err) = iface.delete().await {
-                error!("Can't delete network interface after unsuccessful node create: {err}");
+                error!("Can't delete network interface after unsuccessful node create: {err:#}");
             }
             res?
         }

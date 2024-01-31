@@ -84,7 +84,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             let nodes = client.get_nodes(()).await?.into_inner();
             let mut nodes = nodes
                 .iter()
-                .filter(|n| (!running || (n.status == NodeStatus::Running)))
+                .filter(|n| !running || n.status == NodeStatus::Running)
                 .peekable();
             if nodes.peek().is_some() {
                 let mut table = vec![];

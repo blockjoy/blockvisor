@@ -78,7 +78,7 @@ impl LogBuffer {
                     let mut line = String::default();
                     match reader.read_line(&mut line).await {
                         Err(err) => {
-                            warn!("Invalid stream {err}");
+                            warn!("Invalid stream {err:#}");
                             break;
                         }
                         Ok(0) => break,

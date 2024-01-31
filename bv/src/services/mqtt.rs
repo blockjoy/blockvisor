@@ -127,7 +127,7 @@ impl pal::CommandsStream for MqttStream {
             Err(e) => {
                 // in case of connection error reset mqtt url, so it will be rediscover on next connect
                 self.config.set_mqtt_url(None).await;
-                bail!("MQTT error = {e:?}")
+                bail!("MQTT error = {e:#}")
             }
         }
     }

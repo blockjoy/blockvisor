@@ -61,7 +61,7 @@ pub async fn request_refresh_token(
     refresh: &str,
 ) -> Result<pb::AuthServiceRefreshResponse, Status> {
     let channel = Endpoint::from_str(url)
-        .map_err(|err| Status::internal(err.to_string()))?
+        .map_err(|err| Status::internal(format!("{err:#}")))?
         .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
         .connect_lazy();
     let req = pb::AuthServiceRefreshRequest {
@@ -155,7 +155,7 @@ where
 {
     let url = config.read().await.blockjoy_api_url;
     let endpoint = Endpoint::from_str(&url)
-        .map_err(|err| Status::internal(err.to_string()))?
+        .map_err(|err| Status::internal(format!("{err:#}")))?
         .connect_timeout(DEFAULT_CONNECT_TIMEOUT);
     let channel = Endpoint::connect_lazy(&endpoint);
     Ok(with_interceptor(

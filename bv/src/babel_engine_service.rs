@@ -35,7 +35,7 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         )
         .await
         {
-            warn!("{err:?}");
+            warn!("{err:#}");
             Err(Status::internal(err.to_string()))
         } else {
             Ok(Response::new(()))

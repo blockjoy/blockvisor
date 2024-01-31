@@ -98,7 +98,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
                 }
                 Err(err) => {
                     backoff
-                        .stopped(None, format!("Failed to spawn job '{name}': {err}"))
+                        .stopped(None, format!("Failed to spawn job '{name}': {err:#}"))
                         .await?;
                 }
             }

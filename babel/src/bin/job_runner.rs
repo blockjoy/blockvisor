@@ -152,7 +152,7 @@ async fn run_log_handler(
     while log_run.load() {
         if let Some(Ok(log)) = log_run.select(log_rx.recv()).await {
             while let Err(err) = client.send_log(log.clone()).await {
-                debug!("send_log failed with: {err}");
+                debug!("send_log failed with: {err:#}");
                 // try to send log every 1s - log server may be temporarily unavailable
                 log_run.select(tokio::time::sleep(LOG_RETRY_INTERVAL)).await;
                 if !log_run.load() {

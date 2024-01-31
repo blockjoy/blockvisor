@@ -159,25 +159,25 @@ async fn open_stream(socket_path: PathBuf, port: u32, max_delay: Duration) -> Re
                 Ok(_) => break Ok(stream),
                 Err(e) if start.elapsed() < max_delay => {
                     debug!(
-                        "Handshake error, retrying in {} seconds: {}",
+                        "Handshake error, retrying in {} seconds: {:#}",
                         RETRY_INTERVAL.as_secs(),
                         e
                     );
                 }
-                Err(e) => break Err(anyhow!("handshake error {e}")),
+                Err(e) => break Err(anyhow!("handshake error: {e:#}")),
             },
             Err(e) if start.elapsed() < max_delay => {
                 debug!(
-                    "No socket file yet, retrying in {} seconds: {}",
+                    "No socket file yet, retrying in {} seconds: {:#}",
                     RETRY_INTERVAL.as_secs(),
                     e
                 );
             }
-            Err(e) => break Err(anyhow!("uds connect error {e}")),
+            Err(e) => break Err(anyhow!("uds connect error {e:#}")),
         };
         sleep(Ord::min(RETRY_INTERVAL, max_delay - start.elapsed())).await;
     }
-    .context("Failed to connect to node bus")?;
+    .with_context(|| "Failed to connect to node bus")?;
 
     Ok(stream)
 }
@@ -201,8 +201,8 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<()> {
         stream.readable().await?;
         match stream.try_read(&mut sock_opened_buf) {
             Ok(0) => {
-                info!("Socket responded to open message with empty message :(");
-                bail!("Socket responded to open message with empty message :(");
+                debug!("Socket responded to open message with empty message");
+                bail!("Socket responded to open message with empty message");
             }
             Ok(n) => {
                 let sock_opened_msg = std::str::from_utf8(&sock_opened_buf[..n]).unwrap();
@@ -212,7 +212,7 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<()> {
             }
             // Ignore false-positive readable events
             Err(e) if e.kind() == WouldBlock => continue,
-            Err(e) => bail!("Establishing socket failed with `{e}`"),
+            Err(e) => bail!("Establishing socket failed with `{e:#}`"),
         }
     }
     Ok(())

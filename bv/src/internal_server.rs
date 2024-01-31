@@ -661,7 +661,7 @@ where
                     used_ips.push(node.read().await.data.network_interface.ip().to_string());
                 }
                 let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {
-                    anyhow!("failed to auto assign ip - provide it manually : {err}")
+                    anyhow!("failed to auto assign ip - provide it manually : {err:#}")
                 })?;
                 info!("Auto-assigned ip `{ip}` for node '{id}'");
                 ip

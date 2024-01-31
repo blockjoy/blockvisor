@@ -109,7 +109,7 @@ where
         let builder = PrometheusBuilder::new();
         builder
             .install()
-            .unwrap_or_else(|e| error!("Cannot create Prometheus endpoint: {e}"));
+            .unwrap_or_else(|e| error!("Cannot create Prometheus endpoint: {e:#}"));
 
         let cmds_connector = self.pal.create_commands_stream_connector(&self.config);
         let nodes_manager = NodesManager::load(self.pal, self.config.clone()).await?;
@@ -149,7 +149,7 @@ where
 
         // send up to date information about host software
         if let Err(e) = hosts::send_info_update(self.config.clone()).await {
-            warn!("Cannot send host info update: {e:?}");
+            warn!("Cannot send host info update: {e:#}");
         }
         let _ = tokio::join!(
             internal_api_server_future,
@@ -232,7 +232,7 @@ where
                                 Ok(Some(_)) => notify(),
                                 Ok(None) => {}
                                 Err(e) => {
-                                    warn!("{e:?}");
+                                    warn!("{e:#}");
                                     mqtt::MQTT_ERROR_COUNTER.increment(1);
                                     break;
                                 }
@@ -240,7 +240,7 @@ where
                         }
                     }
                 }
-                Err(e) => warn!("Error connecting to MQTT: {:?}", e),
+                Err(e) => warn!("Error connecting to MQTT: {e:#}"),
             }
             run.select(sleep(RECONNECT_INTERVAL)).await;
             // get pending commands if mqtt is not avail
@@ -284,7 +284,7 @@ where
                         }
                     }
                     Err(e) => {
-                        warn!("Cannot serialize node updates for cluster: {e:?}");
+                        warn!("Cannot serialize node updates for cluster: {e:#}");
                     }
                 }
             };
@@ -360,7 +360,7 @@ where
                         // cache to not send the same data if it has not changed
                         updates_cache.insert(node_id, update);
                     }
-                    Err(e) => warn!("Cannot send node `{node_id}` info update: {e:?}"),
+                    Err(e) => warn!("Cannot send node `{node_id}` info update: {e:#}"),
                 }
             }
             BV_NODES_INFO_COUNTER.increment(1);
@@ -406,7 +406,7 @@ where
                     }
                     let metrics: pb::MetricsServiceNodeRequest = metrics.into();
                     if let Err(err) = api_with_retry!(client, client.node(metrics.clone())) {
-                        warn!("Could not send node metrics! `{err}`");
+                        warn!("Could not send node metrics! `{err:#}`");
                     } else {
                         // update cache only if request succeed
                         job_info_cache.extend(job_info_cache_update.into_iter());
@@ -433,12 +433,12 @@ where
                         metrics.set_all_gauges();
                         let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
                         if let Err(err) = api_with_retry!(client, client.host(metrics.clone())) {
-                            warn!("Could not send host metrics! `{err}`");
+                            warn!("Could not send host metrics! `{err:#}`");
                         }
                     }
                 }
                 Err(err) => {
-                    error!("Could not collect host metrics! `{err}`");
+                    error!("Could not collect host metrics! `{err:#}`");
                 }
             };
             BV_HOST_METRICS_COUNTER.increment(1);
@@ -463,7 +463,7 @@ where
         )
         .await;
         if let Err(err) = &client {
-            warn!("Metrics could not be sent: {err}");
+            warn!("Metrics could not be sent: {err:#}");
         };
         client
     }

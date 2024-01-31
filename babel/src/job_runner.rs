@@ -40,8 +40,9 @@ impl<T: JobRunnerImpl + Send> JobRunner for T {
         if let Err(status) = self.try_run_job(run.clone(), name).await {
             if let Err(err) = jobs::save_status(&status, name, &jobs_dir.join(jobs::STATUS_SUBDIR))
             {
-                let err_msg =
-                    format!("job status changed to {status:?}, but failed to save job data: {err}");
+                let err_msg = format!(
+                    "job status changed to {status:?}, but failed to save job data: {err:#}"
+                );
                 error!(err_msg);
                 let mut client = VSockConnector.connect();
                 let _ = with_retry!(client.bv_error(err_msg.clone()));

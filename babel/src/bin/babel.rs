@@ -127,7 +127,7 @@ impl BabelPal for Pal {
                 .await
                 .map_err(|err| {
                     anyhow!(
-                    "failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point}: {err}"
+                    "failed to mount {DATA_DRIVE_PATH} into {data_directory_mount_point}: {err:#}"
                 )
                 })?;
         }
@@ -146,13 +146,13 @@ impl BabelPal for Pal {
             if fuser_kill {
                 if let Err(err) = run_cmd("fuser", ["-km", data_directory_mount_point]).await {
                     warn!(
-                        "failed to 'fuser -km {data_directory_mount_point}' before umount: {err}"
+                        "failed to 'fuser -km {data_directory_mount_point}' before umount: {err:#}"
                     );
                 }
             }
             run_cmd("umount", [data_directory_mount_point])
                 .await
-                .map_err(|err| anyhow!("failed to umount {data_directory_mount_point}: {err}"))?;
+                .map_err(|err| anyhow!("failed to umount {data_directory_mount_point}: {err:#}"))?;
         }
         Ok(())
     }
@@ -160,14 +160,14 @@ impl BabelPal for Pal {
     async fn is_data_drive_mounted(&self, data_directory_mount_point: &str) -> eyre::Result<bool> {
         let df_out = run_cmd("df", ["--output=target"])
             .await
-            .map_err(|err| anyhow!("can't check if data drive is mounted, df: {err}"))?;
+            .map_err(|err| anyhow!("can't check if data drive is mounted, df: {err:#}"))?;
         Ok(df_out.contains(data_directory_mount_point.trim_end_matches('/')))
     }
 
     async fn set_hostname(&self, hostname: &str) -> eyre::Result<()> {
         run_cmd("hostnamectl", ["set-hostname", hostname])
             .await
-            .map_err(|err| anyhow!("hostnamectl error: {err}"))?;
+            .map_err(|err| anyhow!("hostnamectl error: {err:#}"))?;
         Ok(())
     }
 
@@ -191,22 +191,22 @@ impl BabelPal for Pal {
             ["-l", &format!("{swap_size_mb}MB"), swap_file_location],
         )
         .await
-        .map_err(|err| anyhow!("fallocate error: {err}"))?;
+        .map_err(|err| anyhow!("fallocate error: {err:#}"))?;
         run_cmd("chmod", ["600", swap_file_location])
             .await
-            .map_err(|err| anyhow!("chmod error: {err}"))?;
+            .map_err(|err| anyhow!("chmod error: {err:#}"))?;
         run_cmd("mkswap", [swap_file_location])
             .await
-            .map_err(|err| anyhow!("mkswap error: {err}"))?;
+            .map_err(|err| anyhow!("mkswap error: {err:#}"))?;
         run_cmd("swapon", [swap_file_location])
             .await
-            .map_err(|err| anyhow!("swapon error: {err}"))?;
+            .map_err(|err| anyhow!("swapon error: {err:#}"))?;
         run_cmd("sysctl", [&format!("vm.swappiness={swappiness}")])
             .await
-            .map_err(|err| anyhow!("sysctl error: {err}"))?;
+            .map_err(|err| anyhow!("sysctl error: {err:#}"))?;
         run_cmd("sysctl", [&format!("vm.vfs_cache_pressure={pressure}")])
             .await
-            .map_err(|err| anyhow!("sysctl error: {err}"))?;
+            .map_err(|err| anyhow!("sysctl error: {err:#}"))?;
         Ok(())
     }
 
@@ -231,14 +231,14 @@ impl BabelPal for Pal {
         let ram_disks = ram_disks.unwrap_or_default();
         let df_out = run_cmd("df", ["-t", "tmpfs", "--output=target"])
             .await
-            .map_err(|err| anyhow!("cant check mounted ramdisks with df: {err}"))?;
+            .map_err(|err| anyhow!("cant check mounted ramdisks with df: {err:#}"))?;
         for disk in ram_disks {
             if df_out.contains(&disk.ram_disk_mount_point) {
                 continue;
             }
             run_cmd("mkdir", ["-p", &disk.ram_disk_mount_point])
                 .await
-                .map_err(|err| anyhow!("mkdir error: {err}"))?;
+                .map_err(|err| anyhow!("mkdir error: {err:#}"))?;
             run_cmd(
                 "mount",
                 [
@@ -251,7 +251,7 @@ impl BabelPal for Pal {
                 ],
             )
             .await
-            .map_err(|err| anyhow!("mount error: {err}"))?;
+            .map_err(|err| anyhow!("mount error: {err:#}"))?;
         }
         Ok(())
     }
@@ -263,7 +263,7 @@ impl BabelPal for Pal {
         let ram_disks = ram_disks.unwrap_or_default();
         let df_out = run_cmd("df", ["-t", "tmpfs", "--output=target"])
             .await
-            .map_err(|err| anyhow!("cant check mounted ramdisks with df: {err}"))?;
+            .map_err(|err| anyhow!("cant check mounted ramdisks with df: {err:#}"))?;
         Ok(ram_disks
             .iter()
             .all(|disk| df_out.contains(disk.ram_disk_mount_point.trim_end_matches('/'))))

@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
 
             match service_info(bv_url.clone()).await {
                 Ok(info) => println!("blockvisor service started successfully: {info}"),
-                Err(e) => bail!("blockvisor service did not start: {e:?}"),
+                Err(e) => bail!("blockvisor service did not start: {e:#}"),
             }
         }
         Command::Stop(_) => {

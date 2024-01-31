@@ -127,7 +127,7 @@ async fn load_jobs(
                 Err(err) => {
                     // invalid job config file log error, remove invalid file and go to next one
                     let err_msg = format!(
-                        "invalid job '{}' config file {}, load failed with: {}",
+                        "invalid job '{}' config file {}, load failed with: {:#}",
                         name,
                         path.display(),
                         err
@@ -505,9 +505,10 @@ impl<C: BabelEngineConnector> Manager<C> {
                                 job.push_log(&message);
                                 warn!(message);
                                 if let Err(err) = save_result {
-                                    // if we can't save save status for some reason, just log
-                                    let message =
-                                        format!("failed to save failed job '{name}' status: {err}");
+                                    // if we can't save status for some reason, just log
+                                    let message = format!(
+                                        "failed to save failed job '{name}' status: {err:#}"
+                                    );
                                     job.push_log(&message);
                                     error!(message);
                                     let mut client = jobs_context.connector.connect();
@@ -534,7 +535,7 @@ impl<C: BabelEngineConnector> Manager<C> {
         let status = match jobs_data.load_status(name) {
             Err(err) => {
                 let message = format!(
-                    "can't load job '{name}' status from file after it stopped, with: {err}"
+                    "can't load job '{name}' status from file after it stopped, with: {err:#}"
                 );
                 job.push_log(&message);
                 error!(message);
@@ -569,7 +570,7 @@ impl<C: BabelEngineConnector> Manager<C> {
                 JobState::Active(pid)
             }
             Err(err) => {
-                let message = format!("failed to start job '{name}': {err}");
+                let message = format!("failed to start job '{name}': {err:#}");
                 job.push_log(&message);
                 warn!(message);
                 let status = JobStatus::Finished {
@@ -579,7 +580,7 @@ impl<C: BabelEngineConnector> Manager<C> {
                 match jobs_data.save_status(&status, name) {
                     Ok(()) => JobState::Inactive(status),
                     Err(_) => {
-                        let message = format!("failed to save failed job '{name}' status: {err}");
+                        let message = format!("failed to save failed job '{name}' status: {err:#}");
                         job.push_log(&message);
                         error!(message);
                         let mut client = connector.connect();
@@ -1258,7 +1259,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: None,
-                message: format!("can't load job 'test_job' status from file after it stopped, with: Failed to read job status file `{}`",
+                message: format!("can't load job 'test_job' status from file after it stopped, with: Failed to read job status file `{}`: No such file or directory (os error 2)",
                                  test_env.jobs_status_dir.join("test_job.status").display()),
             },
             info.status

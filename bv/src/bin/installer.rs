@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
 
     let installer = Installer::new(SysTimer, SystemCtl, &bv_root()).await?;
     if let Err(err) = installer.run().await {
-        error!("{err}");
+        error!("{err:#}");
         Err(err)
     } else {
         Ok(())

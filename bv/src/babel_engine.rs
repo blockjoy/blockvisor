@@ -439,8 +439,8 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                             let _ = manifest.replace(retrieved_manifest);
                         }
                         Err(err) => {
-                            warn!("{err:?}");
-                            bail!("{err}");
+                            warn!("{err:#}");
+                            return Err(err);
                         }
                     }
                 } // if already set it mean that plugin use some custom manifest source - other than the API
@@ -485,8 +485,8 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                             let _ = manifest.replace(retrieved_manifest);
                         }
                         Err(err) => {
-                            warn!("{err:?}");
-                            bail!("{err}");
+                            warn!("{err:#}");
+                            return Err(err);
                         }
                     }
                 } // if already set it mean that plugin use some custom manifest source - other than the API

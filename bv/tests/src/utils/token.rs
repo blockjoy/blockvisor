@@ -47,10 +47,7 @@ impl TokenGenerator {
             data: Default::default(),
         };
 
-        match Self::encode(&claim, secret) {
-            Ok(token) => token,
-            Err(_) => String::default(),
-        }
+        Self::encode(&claim, secret).unwrap_or_default()
     }
 
     fn encode<T: Serialize>(claim: &T, secret: &str) -> Result<String> {

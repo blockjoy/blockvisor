@@ -59,7 +59,7 @@ impl babel_api::babelsup::babel_sup_server::BabelSup for BabelSupService {
         let mut stream = request.into_inner();
         let checksum = utils::save_bin_stream(&self.babel_bin_path, &mut stream)
             .await
-            .map_err(|e| Status::internal(format!("start_new_babel failed with {e}")))?;
+            .map_err(|e| Status::internal(format!("start_new_babel failed with {e:#}")))?;
         self.babel_change_tx.send_modify(|value| {
             let _ = value.insert(checksum);
         });
@@ -74,12 +74,12 @@ impl babel_api::babelsup::babel_sup_server::BabelSup for BabelSupService {
         if let SupervisorStatus::Uninitialized(_) = status.deref() {
             let cfg = request.into_inner();
             let cfg_str = serde_json::to_string(&cfg).map_err(|err| {
-                Status::internal(format!("failed to serialize supervisor config: {err}"))
+                Status::internal(format!("failed to serialize supervisor config: {err:#}"))
             })?;
             let _ = fs::remove_file(&self.supervisor_cfg_path);
             fs::write(&self.supervisor_cfg_path, cfg_str).map_err(|err| {
                 Status::internal(format!(
-                    "failed to save supervisor config into {}: {}",
+                    "failed to save supervisor config into {}: {:#}",
                     &self.supervisor_cfg_path.to_string_lossy(),
                     err
                 ))

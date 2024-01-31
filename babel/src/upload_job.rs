@@ -333,7 +333,7 @@ impl<'a> ParallelChunkUploaders<'a> {
         self.futures
             .next()
             .await
-            .map(|r| r.unwrap_or_else(|err| bail!("{err}")))
+            .map(|r| r.unwrap_or_else(|err| bail!("{err:#}")))
     }
 }
 

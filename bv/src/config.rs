@@ -76,7 +76,7 @@ impl SharedConfig {
                 .await
                 .save(&self.bv_root)
                 .await
-                .map_err(|err| tonic::Status::internal(err.to_string()))?;
+                .map_err(|err| tonic::Status::internal(format!("failed to save token: {err:#}")))?;
             token
         } else {
             token.clone()

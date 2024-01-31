@@ -126,7 +126,7 @@ impl<T: AsyncTimer> Supervisor<T> {
                     );
                 }
                 Err(err) => {
-                    error!("Failed to spawn babel: {err}");
+                    error!("Failed to spawn babel: {err:#}");
                     backoff.wait().await;
                 }
             }

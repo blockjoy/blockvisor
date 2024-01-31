@@ -91,7 +91,7 @@ async fn connect_command_service(
     )
     .await;
     if let Err(err) = &client {
-        warn!("error connecting to api while processing commands: {err:?}");
+        warn!("error connecting to api while processing commands: {err:#}");
     }
     client
 }

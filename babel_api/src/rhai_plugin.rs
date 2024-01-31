@@ -287,7 +287,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
 }
 
 fn into_rhai_result<T>(result: Result<T>) -> std::result::Result<T, Box<rhai::EvalAltResult>> {
-    Ok(result.map_err(|err| <String as Into<rhai::EvalAltResult>>::into(err.to_string()))?)
+    Ok(result.map_err(|err| <String as Into<rhai::EvalAltResult>>::into(format!("{err:#}")))?)
 }
 
 /// Helper structure that represents `JrpcRequest` from Rhai script perspective.

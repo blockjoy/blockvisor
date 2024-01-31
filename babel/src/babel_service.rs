@@ -7,7 +7,7 @@ use babel_api::{
     engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig},
 };
-use eyre::{eyre, ContextCompat, Result};
+use eyre::{anyhow, ContextCompat, Result};
 use nu_glob::{Pattern, PatternError};
 use reqwest::RequestBuilder;
 use serde_json::json;
@@ -75,7 +75,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 
         apply_babel_config(&self.pal, &config)
             .await
-            .map_err(|err| Status::internal(eyre!("{err}").to_string()))?;
+            .map_err(|err| Status::internal(anyhow!("{err:#}").to_string()))?;
         self.save_babel_conf(&config).await?;
 
         let mut state = self.state.lock().await;
@@ -119,7 +119,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .umount_data_drive(babel_api::engine::DATA_DRIVE_MOUNT_POINT, true)
             .await
             .map_err(|err| {
-                Status::internal(eyre!("failed to umount data drive: {err:#}").to_string())
+                Status::internal(anyhow!("failed to umount data drive: {err:#}").to_string())
             })?;
 
         Ok(Response::new(()))
@@ -132,7 +132,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         apply_firewall_config(request.into_inner())
             .await
             .map_err(|err| {
-                Status::internal(format!("failed to apply firewall config with: {err}"))
+                Status::internal(format!("failed to apply firewall config with: {err:#}"))
             })?;
         Ok(Response::new(()))
     }
@@ -159,7 +159,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         let mut lock = self.job_runner_lock.write().await;
         let checksum = utils::save_bin_stream(&self.job_runner_bin_path, &mut stream)
             .await
-            .map_err(|err| Status::internal(format!("upload_job_runner failed: {err}")))?;
+            .map_err(|err| Status::internal(format!("upload_job_runner failed: {err:#}")))?;
         lock.replace(checksum);
         Ok(Response::new(()))
     }
@@ -172,7 +172,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         self.jobs_manager
             .create(&name, config)
             .await
-            .map_err(|err| Status::internal(format!("create_job failed: {err}")))?;
+            .map_err(|err| Status::internal(format!("create_job failed: {err:#}")))?;
         Ok(Response::new(()))
     }
 
@@ -181,7 +181,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         self.jobs_manager
             .start(&name)
             .await
-            .map_err(|err| Status::internal(format!("start_job failed: {err}")))?;
+            .map_err(|err| Status::internal(format!("start_job failed: {err:#}")))?;
         Ok(Response::new(()))
     }
 
@@ -189,7 +189,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         self.jobs_manager
             .stop(&request.into_inner())
             .await
-            .map_err(|err| Status::internal(format!("stop_job failed: {err}")))?;
+            .map_err(|err| Status::internal(format!("stop_job failed: {err:#}")))?;
         Ok(Response::new(()))
     }
 
@@ -197,7 +197,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         self.jobs_manager
             .cleanup(&request.into_inner())
             .await
-            .map_err(|err| Status::internal(format!("cleanup_job failed: {err}")))?;
+            .map_err(|err| Status::internal(format!("cleanup_job failed: {err:#}")))?;
         Ok(Response::new(()))
     }
 
@@ -206,7 +206,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .jobs_manager
             .info(&request.into_inner())
             .await
-            .map_err(|err| Status::internal(format!("job_status failed: {err}")))?;
+            .map_err(|err| Status::internal(format!("job_status failed: {err:#}")))?;
         Ok(Response::new(info))
     }
 
@@ -218,7 +218,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .jobs_manager
             .list()
             .await
-            .map_err(|err| Status::internal(format!("list jobs failed: {err}")))?;
+            .map_err(|err| Status::internal(format!("list jobs failed: {err:#}")))?;
         Ok(Response::new(jobs))
     }
 
@@ -261,7 +261,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             Ok(())
         };
         render().map_err(|err| {
-            Status::internal(format!("failed to render template file with: {err}"))
+            Status::internal(format!("failed to render template file with: {err:#}"))
         })?;
         Ok(Response::new(()))
     }
@@ -276,10 +276,11 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .iter()
             .map(|pattern_str| Pattern::new(pattern_str))
             .collect::<Result<Vec<Pattern>, PatternError>>()
-            .map_err(|err| Status::invalid_argument(format!("invalid exclude pattern: {err}")))?;
+            .map_err(|err| Status::invalid_argument(format!("invalid exclude pattern: {err:#}")))?;
         Ok(Response::new(
-            estimate_nb_of_chunks(source, exclude)
-                .map_err(|err| Status::internal(format!("failed to calculate data size: {err}")))?,
+            estimate_nb_of_chunks(source, exclude).map_err(|err| {
+                Status::internal(format!("failed to calculate data size: {err:#}"))
+            })?,
         ))
     }
 
@@ -316,7 +317,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .args(["-u", "babelsup", "-n", &max_lines.to_string(), "-o", "cat"])
             .output()
             .await
-            .map_err(|err| Status::internal(format!("failed to run journalctl: {err}")))?;
+            .map_err(|err| Status::internal(format!("failed to run journalctl: {err:#}")))?;
         for line in String::from_utf8_lossy(&out.stdout).split_inclusive('\n') {
             logs.push(Ok(line.to_owned()));
         }
@@ -355,14 +356,15 @@ impl<J, P> BabelService<J, P> {
 
     async fn save_babel_conf(&self, config: &BabelConfig) -> Result<(), Status> {
         // write config to file in case of babel crash (will be restarted by babelsup)
-        let cfg_str = serde_json::to_string(config)
-            .map_err(|err| Status::internal(format!("failed to serialize babel config: {err}")))?;
+        let cfg_str = serde_json::to_string(config).map_err(|err| {
+            Status::internal(format!("failed to serialize babel config: {err:#}"))
+        })?;
         let _ = fs::remove_file(&self.babel_cfg_path).await;
         fs::write(&self.babel_cfg_path, &cfg_str)
             .await
             .map_err(|err| {
                 Status::internal(format!(
-                    "failed to save babel config into {}: {}",
+                    "failed to save babel config into {}: {:#}",
                     &self.babel_cfg_path.to_string_lossy(),
                     err
                 ))

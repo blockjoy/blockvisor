@@ -152,7 +152,7 @@ impl<P: Pal + Debug> Node<P> {
             Ok(node) => Ok(node),
             Err((err, maybe_node)) => {
                 if let Err(err) = maybe_node.cleanup().await {
-                    error!("Cleanup failed after unsuccessful node create: {err}");
+                    error!("Cleanup failed after unsuccessful node create: {err:#}");
                 }
                 Err(err)
             }
@@ -183,10 +183,10 @@ impl<P: Pal + Debug> Node<P> {
             if let Err(err) =
                 connect(&mut node_conn, NODE_RECONNECT_TIMEOUT, pal.babel_path()).await
             {
-                warn!("failed to reestablish babel connection to running node {node_id}: {err}");
+                warn!("failed to reestablish babel connection to running node {node_id}: {err:#}");
                 node_conn.close();
             } else if let Err(err) = check_job_runner(&mut node_conn, pal.job_runner_path()).await {
-                warn!("failed to check/update job runner on running node {node_id}: {err}");
+                warn!("failed to check/update job runner on running node {node_id}: {err:#}");
                 node_conn.close();
             }
         }
@@ -307,21 +307,20 @@ impl<P: Pal + Debug> Node<P> {
         if !force {
             let babel_client = self.babel_engine.node_connection.babel_client().await?;
             let timeout = with_retry!(babel_client.get_babel_shutdown_timeout(()))?.into_inner();
-            if let Err(err) = with_retry!(
+            with_retry!(
                 babel_client.shutdown_babel(with_timeout((), timeout + RPC_REQUEST_TIMEOUT))
-            ) {
-                bail!("Failed to gracefully shutdown babel and background jobs: {err:#}");
-            }
+            )
+            .with_context(|| "Failed to gracefully shutdown babel and background jobs")?;
         }
         match self.machine.state() {
             pal::VmState::SHUTOFF => {}
             pal::VmState::RUNNING => {
                 if let Err(err) = self.machine.shutdown().await {
-                    warn!("Graceful shutdown failed: {err}");
-
-                    if let Err(err) = self.machine.force_shutdown().await {
-                        bail!("Forced shutdown failed: {err}");
-                    }
+                    warn!("Graceful shutdown failed: {err:#}");
+                    self.machine
+                        .force_shutdown()
+                        .await
+                        .with_context(|| "Forced shutdown failed")?;
                 }
                 let start = Instant::now();
                 loop {
@@ -433,9 +432,9 @@ impl<P: Pal + Debug> Node<P> {
                 self.recovery_counters.stop += 1;
                 info!("Recovery: stopping node with ID `{id}`");
                 if let Err(e) = self.stop(false).await {
-                    warn!("Recovery: stopping node with ID `{id}` failed: {e}");
+                    warn!("Recovery: stopping node with ID `{id}` failed: {e:#}");
                     if self.recovery_counters.stop >= MAX_STOP_TRIES {
-                        error!("Recovery: retries count exceeded, mark as failed");
+                        error!("Recovery: retries count exceeded, mark as failed: {e:#}");
                         self.save_expected_status(NodeStatus::Failed).await?;
                     }
                 } else {
@@ -473,9 +472,9 @@ impl<P: Pal + Debug> Node<P> {
         self.recovery_counters.start += 1;
         info!("Recovery: starting node with ID `{id}`");
         if let Err(e) = self.start().await {
-            warn!("Recovery: starting node with ID `{id}` failed: {e}");
+            warn!("Recovery: starting node with ID `{id}` failed: {e:#}");
             if self.recovery_counters.start >= MAX_START_TRIES {
-                error!("Recovery: retries count exceeded, mark as failed");
+                error!("Recovery: retries count exceeded, mark as failed: {e:#}");
                 self.save_expected_status(NodeStatus::Failed).await?;
             }
         } else {
@@ -489,15 +488,15 @@ impl<P: Pal + Debug> Node<P> {
         self.recovery_counters.reconnect += 1;
         info!("Recovery: fix broken connection to node with ID `{id}`");
         if let Err(e) = self.babel_engine.node_connection.test().await {
-            warn!("Recovery: reconnect to node with ID `{id}` failed: {e}");
+            warn!("Recovery: reconnect to node with ID `{id}` failed: {e:#}");
             if self.recovery_counters.reconnect >= MAX_RECONNECT_TRIES {
                 info!("Recovery: restart broken node with ID `{id}`");
 
                 self.recovery_counters.stop += 1;
                 if let Err(e) = self.stop(true).await {
-                    warn!("Recovery: stopping node with ID `{id}` failed: {e}");
+                    warn!("Recovery: stopping node with ID `{id}` failed: {e:#}");
                     if self.recovery_counters.stop >= MAX_STOP_TRIES {
-                        error!("Recovery: retries count exceeded, mark as failed");
+                        error!("Recovery: retries count exceeded, mark as failed: {e:#}");
                         self.save_expected_status(NodeStatus::Failed).await?;
                     }
                 } else {
@@ -1454,10 +1453,10 @@ pub mod tests {
             .await
             .unwrap();
         let server = test_env.start_server(babel_sup_mock, babel_mock).await;
-        assert_eq!(
-            "Rhai function 'init' returned error",
-            node.start().await.unwrap_err().to_string()
-        );
+        let start_err = node.start().await.unwrap_err();
+        assert!(format!("{start_err:#}").starts_with(
+            "node_id=4931bafa-92d9-4521-9fc6-a77eee047530: Rhai function 'init' returned error:"
+        ));
         assert_eq!(NodeStatus::Running, node.data.expected_status);
         assert!(!node.data.initialized);
         assert_eq!(None, node.data.started_at);
