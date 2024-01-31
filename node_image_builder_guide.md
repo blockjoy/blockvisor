@@ -16,7 +16,7 @@ It is recommended to familiarize with rest of documentation, to get a feel of th
 - The Blockvisor [README](README.md) provides a list of important paths to remember and suggestive diagrams for the platform.
 - The Blockvisor [Host Setup Guide](host_setup_guide.md) provides a how-to for host configuration.
 - The [RHAI plugin scripting guide](babel_api/rhai_plugin_guide.md) provides the structure and what functionality the Blockvisor API expects it to provide through Babel API.
-- The [Blockchain Data Upload](babel_api/rhai_plugin_guide.md#archive-blockchain-data) chapter provides guidelines to upload a blockchain's data to remote object storage.
+- The [Blockchain Data Upload](babel_api/rhai_plugin_guide.md#blockchain-data-archives) chapter provides guidelines to upload a blockchain's data to remote object storage.
 
 ### What is Node Image?
 Since BV itself is blockchain agnostic, specific blockchain support is plugged-into BV by "Node Image".
