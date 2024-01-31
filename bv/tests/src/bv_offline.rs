@@ -153,7 +153,7 @@ async fn test_bv_cmd_logs() -> Result<()> {
     println!("get babel logs");
     test_env.bv_run(
         &["node", "babel-logs", "-m", "256", vm_id],
-        "INFO babel::jobs: Reading job config file: /var/lib/babel/jobs/config/echo.cfg",
+        "Reading job config file: /var/lib/babel/jobs/config/echo.cfg",
     );
 
     println!("stop started node");
