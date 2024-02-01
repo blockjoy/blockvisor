@@ -15,13 +15,6 @@ use std::time::Duration;
 use tonic::transport::Channel;
 use tracing::info;
 
-pub const IMAGES_DIR: &str = "images";
-pub const BABEL_ARCHIVE_IMAGE_NAME: &str = "blockjoy.gz";
-pub const BABEL_IMAGE_NAME: &str = "blockjoy";
-pub const BABEL_PLUGIN_NAME: &str = "babel.rhai";
-pub const ROOT_FS_FILE: &str = "os.img";
-pub const DATA_FILE: &str = "data.img";
-
 type BlockchainArchiveServiceClient =
     blockchain_archive_service_client::BlockchainArchiveServiceClient<AuthenticatedService>;
 

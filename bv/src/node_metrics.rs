@@ -194,7 +194,7 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
                             exit_code,
                             message,
                             logs: info.logs,
-                            restarts: u64::try_from(info.restart_count).unwrap_or_default(),
+                            restarts: info.restart_count as u64,
                             progress: info.progress.map(|progress| pb::NodeJobProgress {
                                 total: Some(progress.total),
                                 current: Some(progress.current),

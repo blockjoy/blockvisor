@@ -32,7 +32,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
-    usize,
 };
 use tokio::{sync::Semaphore, task::JoinError};
 use tonic::{codegen::InterceptedService, transport::Channel};
@@ -460,7 +459,7 @@ async fn consume_reader<E: Coder>(
 struct FileDescriptor {
     file: File,
     offset: u64,
-    bytes_remaining: usize,
+    bytes_remaining: u64,
 }
 
 struct InterimBuffer<E> {
@@ -500,7 +499,7 @@ impl<E: Coder> DestinationsReader<E> {
         let current = FileDescriptor {
             file: File::open(&last.path)?,
             offset: last.pos,
-            bytes_remaining: usize::try_from(last.size)?,
+            bytes_remaining: last.size,
         };
         Ok(Self {
             iter,
@@ -562,21 +561,21 @@ impl<E: Coder> DestinationsReader<E> {
                 self.current = FileDescriptor {
                     file: File::open(&next.path)?,
                     offset: next.pos,
-                    bytes_remaining: usize::try_from(next.size)?,
+                    bytes_remaining: next.size,
                 };
             }
             let bytes_to_read = min(
                 self.current.bytes_remaining,
-                buffer.capacity() - buffer.len(),
+                u64::try_from(buffer.capacity() - buffer.len())?,
             );
+            let end = usize::try_from(bytes_to_read)?;
             let start = buffer.len();
-            buffer.resize(start + bytes_to_read, 0);
-            self.current.file.read_exact_at(
-                &mut buffer[start..(start + bytes_to_read)],
-                self.current.offset,
-            )?;
-            self.current.bytes_remaining -= bytes_to_read;
-            self.current.offset += u64::try_from(bytes_to_read)?;
+            buffer.resize(start + end, 0);
+            self.current
+                .file
+                .read_exact_at(&mut buffer[start..(start + end)], self.current.offset)?;
+            self.current.bytes_remaining -= bytes_to_read as u64;
+            self.current.offset += bytes_to_read as u64;
         }
         Ok(buffer)
     }
