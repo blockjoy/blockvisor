@@ -57,7 +57,7 @@ pub struct BabelConfig {
     /// Capacity of log buffer (in lines).
     pub log_buffer_capacity_ln: usize,
     /// Size of swap file created on the node, in MB.
-    pub swap_size_mb: usize,
+    pub swap_size_mb: u64,
     /// Location of swap file.
     #[serde(default = "default_swap_file_location")]
     pub swap_file_location: String,
@@ -70,7 +70,7 @@ pub struct RamdiskConfiguration {
     /// Path to mount RAM disk to.
     pub ram_disk_mount_point: String,
     /// RAM disk size, in MB.
-    pub ram_disk_size_mb: usize,
+    pub ram_disk_size_mb: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -78,9 +78,9 @@ pub struct Requirements {
     /// Virtual cores to share with VM.
     pub vcpu_count: usize,
     /// RAM allocated to VM in MB.
-    pub mem_size_mb: usize,
+    pub mem_size_mb: u64,
     /// Size of data drive for storing blockchain data (not to be confused with OS drive).
-    pub disk_size_gb: usize,
+    pub disk_size_gb: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

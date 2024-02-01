@@ -586,7 +586,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                 .metadata()
                 .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?
                 .len();
-            let declared_data_size = node.data.requirements.disk_size_gb as u64 * 1_000_000_000u64;
+            let declared_data_size = node.data.requirements.disk_size_gb * 1_000_000_000;
             if declared_data_size > actual_data_size {
                 available_space += declared_data_size - actual_data_size;
             }
@@ -599,9 +599,9 @@ impl<P: Pal + Debug> NodesManager<P> {
             .with_context(|| format!("can't check '{ROOT_FS_FILE}' size for {image}"))?
             .len();
         // take into account additional copy of os.img made by firec while creating vm
-        let mut available_space_gb = (available_space - os_image_size) as usize / 1_000_000_000;
+        let mut available_space_gb = (available_space - os_image_size) / 1_000_000_000;
 
-        let mut total_mem_size_mb = host_info.memory_bytes as usize / 1_000_000;
+        let mut total_mem_size_mb = host_info.memory_bytes / 1_000_000;
         let mut total_vcpu_count = host_info.cpu_count;
         if let Some(tol) = tolerance {
             available_space_gb += tol.disk_size_gb;

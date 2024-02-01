@@ -509,7 +509,7 @@ mod tests {
 
         async fn set_swap_file(
             &self,
-            _swap_size_mb: usize,
+            _swap_size_mb: u64,
             _swap_file_location: &str,
         ) -> eyre::Result<()> {
             Ok(())
@@ -517,7 +517,7 @@ mod tests {
 
         async fn is_swap_file_set(
             &self,
-            _swap_size_mb: usize,
+            _swap_size_mb: u64,
             _swap_file_location: &str,
         ) -> Result<bool> {
             Ok(false)

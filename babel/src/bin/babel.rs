@@ -177,11 +177,7 @@ impl BabelPal for Pal {
     ///
     /// Based on this tutorial:
     /// https://www.digitalocean.com/community/tutorials/how-to-add-swap-space-on-ubuntu-20-04
-    async fn set_swap_file(
-        &self,
-        swap_size_mb: usize,
-        swap_file_location: &str,
-    ) -> eyre::Result<()> {
+    async fn set_swap_file(&self, swap_size_mb: u64, swap_file_location: &str) -> eyre::Result<()> {
         let swappiness = 1;
         let pressure = 50;
         let _ = run_cmd("swapoff", [swap_file_location]).await;
@@ -212,7 +208,7 @@ impl BabelPal for Pal {
 
     async fn is_swap_file_set(
         &self,
-        _swap_size_mb: usize,
+        _swap_size_mb: u64,
         swap_file_location: &str,
     ) -> eyre::Result<bool> {
         let path = Path::new(swap_file_location);
