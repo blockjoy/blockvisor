@@ -36,6 +36,8 @@ pub trait Babel {
     fn cleanup_job(job_name: String);
     /// Get background job info by unique name.
     fn job_info(job_name: String) -> JobInfo;
+    /// Get maximum time it may take to gracefully shutdown job.
+    fn get_job_shutdown_timeout(job_name: String) -> Duration;
     /// Get jobs list.
     fn get_jobs() -> Vec<(String, JobInfo)>;
 

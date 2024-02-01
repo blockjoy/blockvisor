@@ -152,6 +152,7 @@ pub trait JobsManagerClient {
     async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
     async fn create(&self, name: &str, config: JobConfig) -> Result<()>;
     async fn start(&self, name: &str) -> Result<()>;
+    async fn get_job_shutdown_timeout(&self, name: &str) -> Duration;
     async fn stop(&self, name: &str) -> Result<()>;
     async fn cleanup(&self, name: &str) -> Result<()>;
     async fn info(&self, name: &str) -> Result<JobInfo>;
@@ -267,6 +268,26 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         }
         let _ = self.job_added_tx.send(());
         Ok(())
+    }
+
+    async fn get_job_shutdown_timeout(&self, name: &str) -> Duration {
+        self.jobs_registry
+            .lock()
+            .await
+            .jobs
+            .get(name)
+            .and_then(|job| {
+                if let JobState::Active(_) = &job.state {
+                    Some(Duration::from_secs(
+                        job.config
+                            .shutdown_timeout_secs
+                            .unwrap_or(DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default()
     }
 
     async fn stop(&self, name: &str) -> Result<()> {

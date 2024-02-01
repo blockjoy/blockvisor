@@ -843,6 +843,7 @@ pub mod tests {
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
+            async fn get_job_shutdown_timeout(&self, request: Request<String>) -> Result<Response<Duration>, Status>;
             async fn get_jobs(&self, request: Request<()>) -> Result<Response<Vec<(String, JobInfo)>>, Status>;
             async fn run_jrpc(
                 &self,

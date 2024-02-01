@@ -210,6 +210,16 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(info))
     }
 
+    async fn get_job_shutdown_timeout(
+        &self,
+        request: Request<String>,
+    ) -> Result<Response<Duration>, Status> {
+        let job = request.into_inner();
+        Ok(Response::new(
+            self.jobs_manager.get_job_shutdown_timeout(&job).await,
+        ))
+    }
+
     async fn get_jobs(
         &self,
         _request: Request<()>,
@@ -466,6 +476,7 @@ mod tests {
             async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
             async fn create(&self, name: &str, config: JobConfig) -> Result<()>;
             async fn start(&self, name: &str) -> Result<()>;
+            async fn get_job_shutdown_timeout(&self, name: &str) -> Duration;
             async fn stop(&self, name: &str) -> Result<()>;
             async fn cleanup(&self, name: &str) -> Result<()>;
             async fn info(&self, name: &str) -> Result<JobInfo>;

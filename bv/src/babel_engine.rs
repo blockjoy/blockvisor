@@ -1,3 +1,4 @@
+use crate::pal::BabelClient;
 /// This module wraps all Babel related functionality. In particular it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
@@ -242,7 +243,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     /// Request to stop given job.
     pub async fn stop_job(&mut self, name: &str) -> Result<()> {
         let babel_client = self.node_connection.babel_client().await?;
-        with_retry!(babel_client.stop_job(name.to_owned()))?;
+        stop_job(babel_client, name).await?;
         Ok(())
     }
 
@@ -369,9 +370,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 response_tx,
             } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
-                    Ok(babel_client) => with_retry!(babel_client.stop_job(job_name.clone()))
-                        .map_err(|err| self.handle_connection_errors(err))
-                        .map(|v| v.into_inner()),
+                    Ok(babel_client) => stop_job(babel_client, &job_name)
+                        .await
+                        .map_err(|err| self.handle_connection_errors(err)),
                     Err(err) => Err(err),
                 });
             }
@@ -509,7 +510,17 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 }
 
-/// Engine trait implementation. For methods that require interaction with async BV code, it translate
+async fn stop_job(client: &mut BabelClient, job_name: &str) -> Result<(), tonic::Status> {
+    let job_timeout =
+        with_retry!(client.get_job_shutdown_timeout(job_name.to_string()))?.into_inner();
+    with_retry!(client.stop_job(with_timeout(
+        job_name.to_string(),
+        job_timeout + RPC_REQUEST_TIMEOUT
+    )))
+    .map(|v| v.into_inner())
+}
+
+/// Engine trait implementation. For methods that require interaction with async BV code, it translates
 /// function into message that is sent to BV thread and synchronously waits for the response.
 #[derive(Debug, Clone)]
 pub struct Engine {
@@ -742,6 +753,10 @@ mod tests {
                 &self,
                 request: Request<Streaming<babel_api::utils::Binary>>,
             ) -> Result<Response<()>, Status>;
+            async fn get_job_shutdown_timeout(
+                &self,
+                request: Request<String>,
+            ) -> Result<Response<Duration>, Status>;
             async fn create_job(
                 &self,
                 request: Request<(String, JobConfig)>,
@@ -1040,6 +1055,10 @@ mod tests {
                 name == "custom_name"
             })
             .return_once(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_get_job_shutdown_timeout()
+            .withf(|req| req.get_ref() == "custom_name")
+            .return_once(|_| Ok(Response::new(Duration::from_secs(1))));
         babel_mock
             .expect_stop_job()
             .withf(|req| req.get_ref() == "custom_name")
