@@ -1,4 +1,4 @@
-use crate::services::blockchain::ROOT_FS_FILE;
+use crate::services::blockchain::{DATA_FILE, ROOT_FS_FILE};
 use crate::{
     command_failed,
     commands::{self, into_internal, Error},
@@ -574,8 +574,25 @@ impl<P: Pal + Debug> NodesManager<P> {
     ) -> commands::Result<()> {
         let bv_root = self.pal.bv_root();
         let host_info = HostInfo::collect()?;
-        let available_space =
+        let mut available_space =
             bv_utils::system::available_disk_space_by_path(&bv_root.join(BV_VAR_PATH))?;
+
+        let mut allocated_mem_size_mb = 0;
+        let mut allocated_vcpu_count = 0;
+        for n in self.nodes.read().await.values() {
+            let node = n.read().await;
+            let data_img_path = self.pal.build_vm_data_path(node.data.id).join(DATA_FILE);
+            let actual_data_size = data_img_path
+                .metadata()
+                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?
+                .len();
+            let declared_data_size = node.data.requirements.disk_size_gb as u64 * 1_000_000_000u64;
+            if declared_data_size > actual_data_size {
+                available_space += declared_data_size - actual_data_size;
+            }
+            allocated_mem_size_mb += node.data.requirements.mem_size_mb;
+            allocated_vcpu_count += node.data.requirements.vcpu_count;
+        }
         let os_image_size = blockchain::get_image_download_folder_path(bv_root, image)
             .join(ROOT_FS_FILE)
             .metadata()
@@ -583,14 +600,6 @@ impl<P: Pal + Debug> NodesManager<P> {
             .len();
         // take into account additional copy of os.img made by firec while creating vm
         let mut available_space_gb = (available_space - os_image_size) as usize / 1_000_000_000;
-
-        let mut allocated_mem_size_mb = 0;
-        let mut allocated_vcpu_count = 0;
-        for n in self.nodes.read().await.values() {
-            let node = n.read().await;
-            allocated_mem_size_mb += node.data.requirements.mem_size_mb;
-            allocated_vcpu_count += node.data.requirements.vcpu_count;
-        }
 
         let mut total_mem_size_mb = host_info.memory_bytes as usize / 1_000_000;
         let mut total_vcpu_count = host_info.cpu_count;
