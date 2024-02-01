@@ -70,6 +70,7 @@ pub struct NodeDataCache {
     pub image: NodeImage,
     pub ip: String,
     pub gateway: String,
+    pub requirements: Requirements,
     pub started_at: Option<DateTime<Utc>>,
     pub standalone: bool,
 }
@@ -231,6 +232,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             gateway: network_interface.gateway().to_string(),
             started_at: None,
             standalone: config.standalone,
+            requirements: meta.requirements.clone(),
         };
 
         let node_data = NodeData {
@@ -579,19 +581,18 @@ impl<P: Pal + Debug> NodesManager<P> {
 
         let mut allocated_mem_size_mb = 0;
         let mut allocated_vcpu_count = 0;
-        for n in self.nodes.read().await.values() {
-            let node = n.read().await;
-            let data_img_path = self.pal.build_vm_data_path(node.data.id).join(DATA_FILE);
+        for (node_id, node) in self.node_data_cache.read().await.clone().into_iter() {
+            let data_img_path = self.pal.build_vm_data_path(node_id).join(DATA_FILE);
             let actual_data_size = data_img_path
                 .metadata()
                 .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?
                 .len();
-            let declared_data_size = node.data.requirements.disk_size_gb * 1_000_000_000;
+            let declared_data_size = node.requirements.disk_size_gb * 1_000_000_000;
             if declared_data_size > actual_data_size {
                 available_space += declared_data_size - actual_data_size;
             }
-            allocated_mem_size_mb += node.data.requirements.mem_size_mb;
-            allocated_vcpu_count += node.data.requirements.vcpu_count;
+            allocated_mem_size_mb += node.requirements.mem_size_mb;
+            allocated_vcpu_count += node.requirements.vcpu_count;
         }
         let os_image_size = blockchain::get_image_download_folder_path(bv_root, image)
             .join(ROOT_FS_FILE)
@@ -718,6 +719,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                             image: node.data.image.clone(),
                             started_at: node.data.started_at,
                             standalone: node.data.standalone,
+                            requirements: node.data.requirements.clone(),
                         },
                     );
                     nodes.insert(id, RwLock::new(node));
@@ -1485,6 +1487,11 @@ mod tests {
                 gateway: first_node_config.gateway,
                 started_at: None,
                 standalone: first_node_config.standalone,
+                requirements: Requirements {
+                    vcpu_count: 1,
+                    mem_size_mb: 2048,
+                    disk_size_gb: 1,
+                },
             },
             nodes.node_data_cache(first_node_id).await?
         );
@@ -1688,6 +1695,11 @@ mod tests {
                 gateway: node_config.gateway.clone(),
                 started_at: None,
                 standalone: node_config.standalone,
+                requirements: Requirements {
+                    vcpu_count: 1,
+                    mem_size_mb: 2048,
+                    disk_size_gb: 1,
+                },
             },
             nodes.node_data_cache(node_id).await?
         );
@@ -1715,6 +1727,11 @@ mod tests {
                 gateway: node_config.gateway,
                 started_at: None,
                 standalone: node_config.standalone,
+                requirements: Requirements {
+                    vcpu_count: 1,
+                    mem_size_mb: 2048,
+                    disk_size_gb: 1,
+                },
             },
             nodes.node_data_cache(node_id).await?
         );
