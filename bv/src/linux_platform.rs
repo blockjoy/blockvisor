@@ -1,3 +1,6 @@
+use crate::hosts::HostInfo;
+use crate::pal::AvailableResources;
+use crate::services::blockchain::DATA_FILE;
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
     config,
@@ -5,9 +8,10 @@ use crate::{
     firecracker_machine, node_connection,
     node_data::NodeData,
     pal::{NetInterface, Pal},
-    services,
+    services, BV_VAR_PATH,
 };
 use async_trait::async_trait;
+use babel_api::metadata::Requirements;
 use bv_utils::cmd::run_cmd;
 use core::fmt;
 use eyre::{anyhow, bail, Context, Result};
@@ -143,6 +147,36 @@ impl Pal for LinuxPlatform {
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
         firecracker_machine::build_vm_data_path(&self.bv_root, id)
+    }
+
+    fn available_resources(
+        &self,
+        requirements: &[(Uuid, Requirements)],
+    ) -> Result<AvailableResources> {
+        let host_info = HostInfo::collect()?;
+        let mut available_mem_size_mb = host_info.memory_bytes / 1_000_000;
+        let mut available_vcpu_count = host_info.cpu_count;
+        let mut available_disk_space =
+            bv_utils::system::available_disk_space_by_path(&self.bv_root.join(BV_VAR_PATH))?;
+
+        for (node_id, requirements) in requirements {
+            let data_img_path = self.build_vm_data_path(*node_id).join(DATA_FILE);
+            let actual_data_size = data_img_path
+                .metadata()
+                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?
+                .len();
+            let declared_data_size = requirements.disk_size_gb * 1_000_000_000;
+            if declared_data_size > actual_data_size {
+                available_disk_space -= declared_data_size - actual_data_size;
+            }
+            available_mem_size_mb -= requirements.mem_size_mb;
+            available_vcpu_count -= requirements.vcpu_count;
+        }
+        Ok(AvailableResources {
+            vcpu_count: available_vcpu_count,
+            mem_size_mb: available_mem_size_mb,
+            disk_size_gb: available_disk_space / 1_000_000_000,
+        })
     }
 }
 

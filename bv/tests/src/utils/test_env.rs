@@ -1,5 +1,7 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
+use babel_api::metadata::Requirements;
+use blockvisord::pal::AvailableResources;
 use blockvisord::{
     blockvisord::BlockvisorD,
     config::{Config, SharedConfig},
@@ -327,6 +329,17 @@ impl Pal for DummyPlatform {
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
         firecracker_machine::build_vm_data_path(&self.bv_root, id)
+    }
+
+    fn available_resources(
+        &self,
+        _requirements: &[(Uuid, Requirements)],
+    ) -> Result<blockvisord::pal::AvailableResources> {
+        Ok(AvailableResources {
+            vcpu_count: 4,
+            mem_size_mb: 4096,
+            disk_size_gb: 10,
+        })
     }
 }
 

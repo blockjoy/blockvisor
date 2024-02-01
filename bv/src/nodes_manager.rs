@@ -1,10 +1,9 @@
-use crate::services::blockchain::{DATA_FILE, ROOT_FS_FILE};
+use crate::services::blockchain::ROOT_FS_FILE;
 use crate::{
     command_failed,
     commands::{self, into_internal, Error},
     config::SharedConfig,
     firecracker_machine::FC_BIN_NAME,
-    hosts::HostInfo,
     node::Node,
     node_context::build_registry_dir,
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
@@ -574,58 +573,46 @@ impl<P: Pal + Debug> NodesManager<P> {
         image: &NodeImage,
         tolerance: Option<&Requirements>,
     ) -> commands::Result<()> {
-        let bv_root = self.pal.bv_root();
-        let host_info = HostInfo::collect()?;
-        let mut available_space =
-            bv_utils::system::available_disk_space_by_path(&bv_root.join(BV_VAR_PATH))?;
+        let mut available = self.pal.available_resources(
+            &self
+                .node_data_cache
+                .read()
+                .await
+                .iter()
+                .map(|(id, node)| (*id, node.requirements.clone()))
+                .collect::<Vec<_>>(),
+        )?;
+        debug!("Available resources {available:?}");
 
-        let mut allocated_mem_size_mb = 0;
-        let mut allocated_vcpu_count = 0;
-        for (node_id, node) in self.node_data_cache.read().await.clone().into_iter() {
-            let data_img_path = self.pal.build_vm_data_path(node_id).join(DATA_FILE);
-            let actual_data_size = data_img_path
-                .metadata()
-                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?
-                .len();
-            let declared_data_size = node.requirements.disk_size_gb * 1_000_000_000;
-            if declared_data_size > actual_data_size {
-                available_space += declared_data_size - actual_data_size;
-            }
-            allocated_mem_size_mb += node.requirements.mem_size_mb;
-            allocated_vcpu_count += node.requirements.vcpu_count;
-        }
-        let os_image_size = blockchain::get_image_download_folder_path(bv_root, image)
-            .join(ROOT_FS_FILE)
-            .metadata()
-            .with_context(|| format!("can't check '{ROOT_FS_FILE}' size for {image}"))?
-            .len();
-        // take into account additional copy of os.img made by firec while creating vm
-        let mut available_space_gb = (available_space - os_image_size) / 1_000_000_000;
-
-        let mut total_mem_size_mb = host_info.memory_bytes / 1_000_000;
-        let mut total_vcpu_count = host_info.cpu_count;
         if let Some(tol) = tolerance {
-            available_space_gb += tol.disk_size_gb;
-            total_mem_size_mb += tol.mem_size_mb;
-            total_vcpu_count += tol.vcpu_count;
+            available.disk_size_gb += tol.disk_size_gb;
+            available.mem_size_mb += tol.mem_size_mb;
+            available.vcpu_count += tol.vcpu_count;
         }
 
-        if requirements.disk_size_gb > available_space_gb {
+        // take into account additional copy of os.img made by firec while creating vm
+        let os_image_size_gb =
+            blockchain::get_image_download_folder_path(self.pal.bv_root(), image)
+                .join(ROOT_FS_FILE)
+                .metadata()
+                .with_context(|| format!("can't check '{ROOT_FS_FILE}' size for {image}"))?
+                .len()
+                / 1_000_000_000;
+        if requirements.disk_size_gb + os_image_size_gb > available.disk_size_gb {
             command_failed!(Error::Internal(anyhow!(
                 "Not enough disk space to allocate for the node"
             )));
         }
-        if (allocated_mem_size_mb + requirements.mem_size_mb) > total_mem_size_mb {
+        if requirements.mem_size_mb > available.mem_size_mb {
             command_failed!(Error::Internal(anyhow!(
                 "Not enough memory to allocate for the node"
             )));
         }
-        if (allocated_vcpu_count + requirements.vcpu_count) > total_vcpu_count {
+        if requirements.vcpu_count > available.vcpu_count {
             command_failed!(Error::Internal(anyhow!(
                 "Not enough vcpu to allocate for the node"
             )));
         }
-
         Ok(())
     }
 
@@ -1076,6 +1063,7 @@ mod tests {
     ) {
         let expected_ip = config.ip.clone();
         let expected_gateway = config.gateway.clone();
+        // pal.expect_available_resources().with
         pal.expect_create_net_interface()
             .withf(move |index, ip, gateway, _| {
                 *index == expected_index

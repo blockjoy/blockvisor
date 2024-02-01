@@ -5,6 +5,7 @@
 ///
 use crate::{config::SharedConfig, node_data::NodeData, services};
 use async_trait::async_trait;
+use babel_api::metadata::Requirements;
 use eyre::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -20,7 +21,7 @@ use uuid::Uuid;
 /// can be easily tested.
 #[async_trait]
 pub trait Pal {
-    /// Root directory for all BV paths. Instead abstracting whole file system, just let tests
+    /// Root directory for all BV paths. Instead, abstracting whole file system, just let tests
     /// work in their own space - kind of 'chroot'.
     fn bv_root(&self) -> &Path;
 
@@ -77,7 +78,14 @@ pub trait Pal {
     ) -> Result<Self::VirtualMachine>;
     /// Build path to VM data directory, a place where kernel and other VM related data are stored.
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
+    /// Get available resources, but take into account requirements declared by nodes.
+    fn available_resources(
+        &self,
+        requirements: &[(Uuid, Requirements)],
+    ) -> Result<AvailableResources>;
 }
+
+pub type AvailableResources = Requirements;
 
 #[async_trait]
 pub trait NetInterface {

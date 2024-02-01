@@ -778,6 +778,7 @@ pub mod tests {
                 node_data: &NodeData<DummyNet>,
             ) -> Result<MockTestVM>;
             fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
+            fn available_resources(&self, requirements: &[(Uuid, Requirements)]) -> Result<pal::AvailableResources>;
         }
     }
 
