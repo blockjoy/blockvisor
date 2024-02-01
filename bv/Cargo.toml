@@ -44,6 +44,7 @@ cli-table = "0.4"
 crc = "3.0.0"
 chrono = {version = "0.4.24", features = ["serde"]}
 eyre = "0.6.8"
+filesize = "0.2.0"
 firec = {git = "https://github.com/blockjoy/firec.git", rev = "9e488cd"}
 fs_extra = "1.2.0"
 futures-util = "0.3"

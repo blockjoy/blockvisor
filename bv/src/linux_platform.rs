@@ -1,20 +1,20 @@
-use crate::hosts::HostInfo;
-use crate::pal::AvailableResources;
-use crate::services::blockchain::DATA_FILE;
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
     config,
     config::SharedConfig,
     firecracker_machine, node_connection,
     node_data::NodeData,
-    pal::{NetInterface, Pal},
-    services, BV_VAR_PATH,
+    pal::{AvailableResources, NetInterface, Pal},
+    services,
+    services::blockchain::DATA_FILE,
+    BV_VAR_PATH,
 };
 use async_trait::async_trait;
 use babel_api::metadata::Requirements;
 use bv_utils::cmd::run_cmd;
 use core::fmt;
 use eyre::{anyhow, bail, Context, Result};
+use filesize::PathExt;
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,6 +22,8 @@ use std::{
     net::IpAddr,
     path::{Path, PathBuf},
 };
+use sysinfo::{DiskExt, System, SystemExt};
+use tracing::debug;
 use uuid::Uuid;
 
 const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
@@ -153,19 +155,23 @@ impl Pal for LinuxPlatform {
         &self,
         requirements: &[(Uuid, Requirements)],
     ) -> Result<AvailableResources> {
-        let host_info = HostInfo::collect()?;
-        let mut available_mem_size_mb = host_info.memory_bytes / 1_000_000;
-        let mut available_vcpu_count = host_info.cpu_count;
+        let mut sys = System::new_all();
+        sys.refresh_all();
+        let mut available_mem_size_mb = sys.total_memory() / 1_000_000;
+        let mut available_vcpu_count = sys.cpus().len();
         let mut available_disk_space =
-            bv_utils::system::available_disk_space_by_path(&self.bv_root.join(BV_VAR_PATH))?;
+            bv_utils::system::find_disk_by_path(&sys, &self.bv_root.join(BV_VAR_PATH))
+                .map(|disk| disk.available_space())
+                .ok_or_else(|| anyhow!("Cannot get available disk space"))?;
 
         for (node_id, requirements) in requirements {
+            debug!("{node_id}:{requirements:?}");
             let data_img_path = self.build_vm_data_path(*node_id).join(DATA_FILE);
             let actual_data_size = data_img_path
-                .metadata()
-                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?
-                .len();
+                .size_on_disk()
+                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
             let declared_data_size = requirements.disk_size_gb * 1_000_000_000;
+            debug!("declared: {declared_data_size}; actual: {actual_data_size}");
             if declared_data_size > actual_data_size {
                 available_disk_space -= declared_data_size - actual_data_size;
             }
