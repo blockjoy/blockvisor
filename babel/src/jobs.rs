@@ -105,8 +105,12 @@ impl JobsData {
         save_config(config, name, &self.jobs_config_dir)
     }
 
-    pub fn clear_status(&self, name: &str) {
-        let _ = fs::remove_file(status_file_path(name, &self.jobs_status_dir));
+    pub fn clear_status(&self, name: &str) -> Result<()> {
+        let path = status_file_path(name, &self.jobs_status_dir);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
     }
 
     pub fn save_status(&self, status: &JobStatus, name: &str) -> Result<()> {

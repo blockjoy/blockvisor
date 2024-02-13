@@ -227,7 +227,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
     }
 
     async fn create(&self, name: &str, config: JobConfig) -> Result<()> {
-        info!("Requested '{name}' job to start: {config:?}",);
+        info!("Requested '{name}' job to create: {config:?}",);
         let mut jobs_context = self.jobs_registry.lock().await;
 
         if let Some(Job { state, .. }) = jobs_context.jobs.get(name) {
@@ -238,7 +238,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
             bail!("Exceeded max number of supported jobs: {MAX_JOBS}");
         }
 
-        jobs_context.jobs_data.clear_status(name);
+        jobs_context.jobs_data.clear_status(name)?;
         jobs_context
             .jobs_data
             .save_config(&config, name)
@@ -249,18 +249,23 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
             name.to_string(),
             Job::new(JobState::Inactive(JobStatus::Stopped), config),
         );
+        jobs_context
+            .jobs_data
+            .save_status(&JobStatus::Stopped, name)?;
         let _ = self.job_added_tx.send(());
         Ok(())
     }
 
     async fn start(&self, name: &str) -> Result<()> {
         info!("Requested '{name}' job to start");
-        let jobs = &mut self.jobs_registry.lock().await.jobs;
+        let mut jobs_context = self.jobs_registry.lock().await;
+        let jobs = &mut jobs_context.jobs;
         if let Some(job) = jobs.get_mut(name) {
             match &mut job.state {
                 JobState::Active(_) => return Ok(()),
                 JobState::Inactive(status) => {
                     *status = JobStatus::Pending;
+                    jobs_context.jobs_data.clear_status(name)?;
                 }
             }
         } else {
@@ -584,33 +589,42 @@ impl<C: BabelEngineConnector> Manager<C> {
     }
 
     async fn start_job(&self, name: &str, job: &mut Job, jobs_data: &JobsData, connector: &C) {
-        jobs_data.clear_status(name);
-        job.state = match self.start_job_runner(name).await {
-            Ok(pid) => {
-                info!("started job '{name}' with PID {pid}");
-                JobState::Active(pid)
-            }
-            Err(err) => {
-                let message = format!("failed to start job '{name}': {err:#}");
-                job.push_log(&message);
-                warn!(message);
-                let status = JobStatus::Finished {
-                    exit_code: None,
-                    message,
-                };
-                match jobs_data.save_status(&status, name) {
-                    Ok(()) => JobState::Inactive(status),
-                    Err(_) => {
-                        let message = format!("failed to save failed job '{name}' status: {err:#}");
-                        job.push_log(&message);
-                        error!(message);
-                        let mut client = connector.connect();
-                        let _ = with_retry!(client.bv_error(message.clone()));
-                        JobState::Inactive(JobStatus::Pending)
+        if let Err(err) = jobs_data.clear_status(name) {
+            let message = format!("failed to clear job '{name}' status, before new run: {err:#}");
+            job.push_log(&message);
+            error!(message);
+            let mut client = connector.connect();
+            let _ = with_retry!(client.bv_error(message.clone()));
+            job.state = JobState::Inactive(JobStatus::Pending);
+        } else {
+            job.state = match self.start_job_runner(name).await {
+                Ok(pid) => {
+                    info!("started job '{name}' with PID {pid}");
+                    JobState::Active(pid)
+                }
+                Err(err) => {
+                    let message = format!("failed to start job '{name}': {err:#}");
+                    job.push_log(&message);
+                    warn!(message);
+                    let status = JobStatus::Finished {
+                        exit_code: None,
+                        message,
+                    };
+                    match jobs_data.save_status(&status, name) {
+                        Ok(()) => JobState::Inactive(status),
+                        Err(_) => {
+                            let message =
+                                format!("failed to save failed job '{name}' status: {err:#}");
+                            job.push_log(&message);
+                            error!(message);
+                            let mut client = connector.connect();
+                            let _ = with_retry!(client.bv_error(message.clone()));
+                            JobState::Inactive(JobStatus::Pending)
+                        }
                     }
                 }
-            }
-        };
+            };
+        }
     }
 
     async fn start_job_runner(&self, name: &str) -> Result<Pid> {

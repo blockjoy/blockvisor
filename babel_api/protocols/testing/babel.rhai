@@ -69,7 +69,6 @@ fn init(keys) {
         },
         restart: "never",
         shutdown_signal: "SIGINT",
-        needs: [],
     });
     create_job("echo", #{
         job_type: #{
