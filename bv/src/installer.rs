@@ -410,7 +410,6 @@ impl<T: Timer, S: BvService> Installer<T, S> {
     fn blacklist_this_version(&self) -> Result<()> {
         let path = &self.paths.blacklist;
         let mut file = fs::OpenOptions::new()
-            .write(true)
             .append(true)
             .create(true)
             .open(path)?;

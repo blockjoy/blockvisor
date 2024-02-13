@@ -574,8 +574,8 @@ impl<E: Coder> DestinationsReader<E> {
             self.current
                 .file
                 .read_exact_at(&mut buffer[start..(start + end)], self.current.offset)?;
-            self.current.bytes_remaining -= bytes_to_read as u64;
-            self.current.offset += bytes_to_read as u64;
+            self.current.bytes_remaining -= bytes_to_read;
+            self.current.offset += bytes_to_read;
         }
         Ok(buffer)
     }
