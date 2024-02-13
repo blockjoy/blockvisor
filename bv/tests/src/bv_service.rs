@@ -362,11 +362,13 @@ async fn test_bv_service_e2e() {
 }
 
 async fn node_version(id: &str) -> String {
-    NodeData::<DummyNet>::load(Path::new(&format!("/var/lib/blockvisor/nodes/{id}.json")))
-        .await
-        .unwrap()
-        .image
-        .node_version
+    if let Ok(node_data) =
+        NodeData::<DummyNet>::load(Path::new(&format!("/var/lib/blockvisor/nodes/{id}.json"))).await
+    {
+        node_data.image.node_version
+    } else {
+        Default::default()
+    }
 }
 
 fn parse_out_node_id(image: &str, std_out: String) -> String {
