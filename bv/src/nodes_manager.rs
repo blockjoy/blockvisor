@@ -840,6 +840,7 @@ mod tests {
     use super::*;
     use crate::{
         node::tests::*,
+        pal,
         pal::VmState,
         services::{
             api::{common, pb},
@@ -1054,6 +1055,18 @@ mod tests {
         }
     }
 
+    const TEST_NODE_REQUIREMENTS: Requirements = Requirements {
+        vcpu_count: 1,
+        mem_size_mb: 2048,
+        disk_size_gb: 1,
+    };
+
+    fn available_test_resources(
+        _requirements: &[(Uuid, Requirements)],
+    ) -> Result<pal::AvailableResources> {
+        Ok(TEST_NODE_REQUIREMENTS)
+    }
+
     fn add_create_node_expectations(
         pal: &mut MockTestPal,
         expected_index: u32,
@@ -1063,7 +1076,10 @@ mod tests {
     ) {
         let expected_ip = config.ip.clone();
         let expected_gateway = config.gateway.clone();
-        // pal.expect_available_resources().with
+        pal.expect_available_resources()
+            .withf(move |req| expected_index - 1 == req.len() as u32)
+            .once()
+            .returning(available_test_resources);
         pal.expect_create_net_interface()
             .withf(move |index, ip, gateway, _| {
                 *index == expected_index
@@ -1100,6 +1116,23 @@ mod tests {
     ) {
         let expected_ip = config.ip.clone();
         let expected_gateway = config.gateway.clone();
+        pal.expect_available_resources()
+            .withf(move |req| expected_index - 1 == req.len() as u32)
+            .once()
+            .returning(|_requirements| bail!("failed to check available resources"));
+        pal.expect_available_resources()
+            .withf(move |req| expected_index - 1 == req.len() as u32)
+            .once()
+            .returning(|_requirements| {
+                Ok(pal::AvailableResources {
+                    vcpu_count: 1,
+                    mem_size_mb: 1024,
+                    disk_size_gb: 1,
+                })
+            });
+        pal.expect_available_resources()
+            .withf(move |req| expected_index - 1 == req.len() as u32)
+            .returning(available_test_resources);
         pal.expect_create_net_interface()
             .withf(move |index, ip, gateway, _| {
                 *index == expected_index
@@ -1147,11 +1180,7 @@ mod tests {
                 remaster_error: None,
                 delete_error: Some("net delete error".to_string()),
             },
-            requirements: Requirements {
-                vcpu_count: 1,
-                mem_size_mb: 2048,
-                disk_size_gb: 1,
-            },
+            requirements: TEST_NODE_REQUIREMENTS,
             firewall_rules: config.rules,
             properties: config
                 .properties
@@ -1248,20 +1277,10 @@ mod tests {
         assert!(nodes.nodes_list().await.is_empty());
 
         let (test_server, _http_server, http_mocks) = test_env
-            .start_test_server(vec![
-                (
-                    test_env.test_image.clone(),
-                    include_bytes!("../../babel_api/protocols/testing/babel.rhai").to_vec(),
-                ),
-                (
-                    NodeImage {
-                        protocol: "huge_blockchain".to_string(),
-                        node_type: "validator".to_string(),
-                        node_version: "1.2.3".to_string(),
-                    },
-                    HUGE_IMAGE_RHAI.to_owned().into_bytes(),
-                ),
-            ])
+            .start_test_server(vec![(
+                test_env.test_image.clone(),
+                include_bytes!("../../babel_api/protocols/testing/babel.rhai").to_vec(),
+            )])
             .await;
 
         nodes
@@ -1274,25 +1293,17 @@ mod tests {
             .create(second_node_id, second_node_config.clone())
             .await?;
         assert_eq!(
-            "BV internal error: Not enough disk space to allocate for the node",
+            "BV internal error: failed to check available resources",
             nodes
-                .create(
-                    failed_node_id,
-                    NodeConfig {
-                        name: "huge node name".to_string(),
-                        image: NodeImage {
-                            protocol: "huge_blockchain".to_string(),
-                            node_type: "validator".to_string(),
-                            node_version: "1.2.3".to_string(),
-                        },
-                        ip: "192.168.0.9".to_string(),
-                        gateway: "192.168.0.1".to_string(),
-                        rules: vec![],
-                        properties: Default::default(),
-                        network: "test".to_string(),
-                        standalone: false,
-                    }
-                )
+                .create(failed_node_id, failed_node_config.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "BV internal error: Not enough memory to allocate for the node",
+            nodes
+                .create(failed_node_id, failed_node_config.clone())
                 .await
                 .unwrap_err()
                 .to_string()
@@ -1475,11 +1486,7 @@ mod tests {
                 gateway: first_node_config.gateway,
                 started_at: None,
                 standalone: first_node_config.standalone,
-                requirements: Requirements {
-                    vcpu_count: 1,
-                    mem_size_mb: 2048,
-                    disk_size_gb: 1,
-                },
+                requirements: TEST_NODE_REQUIREMENTS,
             },
             nodes.node_data_cache(first_node_id).await?
         );
@@ -1635,6 +1642,14 @@ mod tests {
         let mut vm_mock = MockTestVM::new();
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         add_create_node_expectations(&mut pal, 1, node_id, node_config.clone(), vm_mock);
+        pal.expect_available_resources()
+            .withf(move |req| 1 == req.len() as u32)
+            .once()
+            .returning(|_requirements| bail!("failed to get available resources"));
+        pal.expect_available_resources()
+            .withf(move |req| 1 == req.len() as u32)
+            .times(2)
+            .returning(available_test_resources);
         pal.expect_attach_vm()
             .with(predicate::eq(expected_node_data(
                 1,
@@ -1683,11 +1698,7 @@ mod tests {
                 gateway: node_config.gateway.clone(),
                 started_at: None,
                 standalone: node_config.standalone,
-                requirements: Requirements {
-                    vcpu_count: 1,
-                    mem_size_mb: 2048,
-                    disk_size_gb: 1,
-                },
+                requirements: TEST_NODE_REQUIREMENTS,
             },
             nodes.node_data_cache(node_id).await?
         );
@@ -1697,6 +1708,14 @@ mod tests {
             node.data.initialized = true;
             assert!(node.babel_engine.has_capability("info").await?);
         }
+        assert_eq!(
+            "BV internal error: failed to get available resources",
+            nodes
+                .upgrade(node_id, new_image.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
         nodes.upgrade(node_id, new_image.clone()).await?;
         let not_found_id = Uuid::new_v4();
         assert_eq!(
@@ -1715,11 +1734,7 @@ mod tests {
                 gateway: node_config.gateway,
                 started_at: None,
                 standalone: node_config.standalone,
-                requirements: Requirements {
-                    vcpu_count: 1,
-                    mem_size_mb: 2048,
-                    disk_size_gb: 1,
-                },
+                requirements: TEST_NODE_REQUIREMENTS,
             },
             nodes.node_data_cache(node_id).await?
         );
@@ -1821,6 +1836,10 @@ mod tests {
             standalone: true,
         };
 
+        pal.expect_available_resources()
+            .withf(move |req| req.is_empty())
+            .once()
+            .returning(available_test_resources);
         pal.expect_create_net_interface()
             .return_once(|index, ip, gateway, _config| {
                 Ok(DummyNet {
@@ -1968,37 +1987,6 @@ const METADATA = #{
         default_out: "allow",
         rules: [],
     },
-"#;
-    const HUGE_IMAGE_RHAI: &str = r#"
-const METADATA = #{
-    min_babel_version: "0.0.9",
-    kernel: "5.10.174-build.1+fc.ufw",
-    node_version: "1.15.9",
-    protocol: "huge_blockchain",
-    node_type: "validator",
-    requirements: #{
-        vcpu_count: 1073741824,
-        mem_size_mb: 1073741824,
-        disk_size_gb: 1073741824,
-    },
-    nets: #{
-        test: #{
-            url: "https://testnet-api.helium.wtf/v1/",
-            net_type: "test",
-        },
-    },
-    babel_config: #{
-        log_buffer_capacity_ln: 1024,
-        swap_size_mb: 512,
-        ramdisks: []
-    },
-    firewall: #{
-        enabled: true,
-        default_in: "deny",
-        default_out: "allow",
-        rules: [],
-    },
-};
 "#;
 
     const CPU_DEVOURER_IMAGE_RHAI: &str = r#"
