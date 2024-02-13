@@ -1,13 +1,16 @@
 use crate::config::SharedConfig;
 use crate::linux_platform::bv_root;
 use crate::services::api::pb;
-use crate::BV_VAR_PATH;
 use crate::{api_with_retry, services};
-use eyre::{anyhow, Result};
+use crate::{utils, BV_VAR_PATH};
+use babel_api::metadata::Requirements;
+use eyre::{anyhow, Context, Result};
 use metrics::{register_gauge, Gauge};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, System, SystemExt};
 use systemstat::{saturating_sub_bytes, Platform, System as System2};
+use uuid::Uuid;
 
 /// The interval by which we collect metrics from this host.
 pub const COLLECT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
@@ -61,7 +64,7 @@ impl HostInfo {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HostMetrics {
     pub used_cpu_count: u32,
     pub used_memory_bytes: u64,
@@ -87,7 +90,8 @@ impl HostMetrics {
         SYSTEM_HOST_UPTIME_GAUGE.set(self.uptime_secs as f64);
     }
 
-    pub fn collect() -> Result<Self> {
+    pub fn collect(nodes_requirements: &[(Uuid, Requirements)]) -> Result<Self> {
+        let bv_root = bv_root();
         let mut sys = System::new_all();
         // We need to refresh twice:
         // https://docs.rs/sysinfo/latest/sysinfo/trait.CpuExt.html#tymethod.cpu_usage
@@ -104,10 +108,12 @@ impl HostMetrics {
             used_memory_bytes: saturating_sub_bytes(mem.total, mem.free).as_u64(),
             used_disk_space_bytes: bv_utils::system::find_disk_by_path(
                 &sys,
-                &bv_root().canonicalize()?.join(BV_VAR_PATH),
+                &bv_root.canonicalize()?.join(BV_VAR_PATH),
             )
             .map(|disk| disk.total_space() - disk.available_space())
-            .ok_or_else(|| anyhow!("Cannot get used disk space"))?,
+            .ok_or_else(|| anyhow!("Cannot get used disk space"))?
+                + utils::used_disk_space_correction(&bv_root, nodes_requirements)
+                    .with_context(|| "failed to get used_disk_space_correction")?,
             load_one: load.one,
             load_five: load.five,
             load_fifteen: load.fifteen,
@@ -175,6 +181,6 @@ mod tests {
 
     #[test]
     fn test_host_metrics_collect() {
-        assert!(HostMetrics::collect().is_ok());
+        assert!(HostMetrics::collect(&[]).is_ok());
     }
 }

@@ -509,6 +509,7 @@ fn check_kernel_requirements() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hosts;
     use crate::internal_server;
     use crate::node_data::{NodeImage, NodeStatus};
     use crate::node_metrics;
@@ -545,6 +546,10 @@ mod tests {
                 &self,
                 request: tonic::Request<()>,
             ) -> Result<tonic::Response<ServiceStatus>, tonic::Status>;
+            async fn get_host_metrics(
+                &self,
+                request: tonic::Request<()>,
+            ) -> Result<tonic::Response<hosts::HostMetrics>, tonic::Status>;
             async fn get_node_status(
                 &self,
                 request: tonic::Request<Uuid>,

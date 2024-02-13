@@ -497,7 +497,8 @@ impl<E: Coder> DestinationsReader<E> {
             Some(first) => Ok(first),
         }?;
         let current = FileDescriptor {
-            file: File::open(&last.path)?,
+            file: File::open(&last.path)
+                .with_context(|| format!("can't open '{}'", last.path.display()))?,
             offset: last.pos,
             bytes_remaining: last.size,
         };
@@ -521,7 +522,7 @@ impl<E: Coder> DestinationsReader<E> {
                 let buffer = self.read_data()?;
                 self.bytes_read += u64::try_from(buffer.len())?;
                 if self.iter.is_empty() && self.current.bytes_remaining == 0 {
-                    // it is end of chunk, so we can take interim_buffer (won't be used anymore) and finalize it's members
+                    // it is end of chunk, so we can take interim_buffer (won't be used anymore) and finalize its members
                     let mut interim = self.interim_buffer.take().unwrap();
                     // feed encoder with last data if any
                     interim.encoder.feed(buffer)?;
@@ -559,7 +560,8 @@ impl<E: Coder> DestinationsReader<E> {
                     break;
                 };
                 self.current = FileDescriptor {
-                    file: File::open(&next.path)?,
+                    file: File::open(&next.path)
+                        .with_context(|| format!("can't open '{}'", next.path.display()))?,
                     offset: next.pos,
                     bytes_remaining: next.size,
                 };

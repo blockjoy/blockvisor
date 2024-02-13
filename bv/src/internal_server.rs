@@ -1,7 +1,7 @@
-use crate::config::SharedConfig;
 use crate::{
     cluster::ClusterData,
-    config::Config,
+    config::{Config, SharedConfig},
+    hosts,
     linux_platform::LinuxPlatform,
     node::Node,
     node_data::{NodeImage, NodeStatus},
@@ -54,6 +54,7 @@ trait Service {
     fn info() -> String;
     fn health() -> ServiceStatus;
     fn start_update() -> ServiceStatus;
+    fn get_host_metrics() -> hosts::HostMetrics;
     fn get_node_status(id: Uuid) -> NodeStatus;
     fn get_node(id: Uuid) -> NodeDisplayInfo;
     fn get_nodes() -> Vec<NodeDisplayInfo>;
@@ -135,6 +136,17 @@ where
     async fn start_update(&self, _request: Request<()>) -> Result<Response<ServiceStatus>, Status> {
         set_bv_status(ServiceStatus::Updating).await;
         Ok(Response::new(ServiceStatus::Updating))
+    }
+
+    #[instrument(skip(self), ret(Debug))]
+    async fn get_host_metrics(
+        &self,
+        _request: Request<()>,
+    ) -> Result<Response<hosts::HostMetrics>, Status> {
+        Ok(Response::new(
+            hosts::HostMetrics::collect(&self.nodes_manager.nodes_requirements().await)
+                .map_err(|e| Status::unknown(format!("{e:#}")))?,
+        ))
     }
 
     #[instrument(skip(self), ret(Debug))]

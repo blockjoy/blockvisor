@@ -5,16 +5,13 @@ use crate::{
     firecracker_machine, node_connection,
     node_data::NodeData,
     pal::{AvailableResources, NetInterface, Pal},
-    services,
-    services::blockchain::DATA_FILE,
-    BV_VAR_PATH,
+    services, utils, BV_VAR_PATH,
 };
 use async_trait::async_trait;
 use babel_api::metadata::Requirements;
 use bv_utils::cmd::run_cmd;
 use core::fmt;
 use eyre::{anyhow, bail, Context, Result};
-use filesize::PathExt;
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -23,7 +20,6 @@ use std::{
     path::{Path, PathBuf},
 };
 use sysinfo::{DiskExt, System, SystemExt};
-use tracing::debug;
 use uuid::Uuid;
 
 const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
@@ -157,27 +153,20 @@ impl Pal for LinuxPlatform {
     ) -> Result<AvailableResources> {
         let mut sys = System::new_all();
         sys.refresh_all();
-        let mut available_mem_size_mb = sys.total_memory() / 1_000_000;
-        let mut available_vcpu_count = sys.cpus().len();
-        let mut available_disk_space =
+        let (available_mem_size_mb, available_vcpu_count) = requirements.iter().fold(
+            (sys.total_memory() / 1_000_000, sys.cpus().len()),
+            |(available_mem_size_mb, available_vcpu_count), (_, requirements)| {
+                (
+                    available_mem_size_mb - requirements.mem_size_mb,
+                    available_vcpu_count - requirements.vcpu_count,
+                )
+            },
+        );
+        let available_disk_space =
             bv_utils::system::find_disk_by_path(&sys, &self.bv_root.join(BV_VAR_PATH))
                 .map(|disk| disk.available_space())
-                .ok_or_else(|| anyhow!("Cannot get available disk space"))?;
-
-        for (node_id, requirements) in requirements {
-            debug!("{node_id}:{requirements:?}");
-            let data_img_path = self.build_vm_data_path(*node_id).join(DATA_FILE);
-            let actual_data_size = data_img_path
-                .size_on_disk()
-                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
-            let declared_data_size = requirements.disk_size_gb * 1_000_000_000;
-            debug!("declared: {declared_data_size}; actual: {actual_data_size}");
-            if declared_data_size > actual_data_size {
-                available_disk_space -= declared_data_size - actual_data_size;
-            }
-            available_mem_size_mb -= requirements.mem_size_mb;
-            available_vcpu_count -= requirements.vcpu_count;
-        }
+                .ok_or_else(|| anyhow!("Cannot get available disk space"))?
+                - utils::used_disk_space_correction(&self.bv_root, requirements)?;
         Ok(AvailableResources {
             vcpu_count: available_vcpu_count,
             mem_size_mb: available_mem_size_mb,

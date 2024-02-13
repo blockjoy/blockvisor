@@ -4,7 +4,7 @@ use crate::{
         WorkspaceCommand,
     },
     config::SharedConfig,
-    hosts::{self, HostInfo, HostMetrics},
+    hosts::{self, HostInfo},
     internal_server,
     internal_server::NodeCreateRequest,
     linux_platform::{bv_root, LinuxPlatform},
@@ -32,7 +32,11 @@ use std::{
 use tonic::{transport::Channel, Code};
 use uuid::Uuid;
 
-pub async fn process_host_command(config: SharedConfig, command: HostCommand) -> Result<()> {
+pub async fn process_host_command(
+    bv_url: String,
+    config: SharedConfig,
+    command: HostCommand,
+) -> Result<()> {
     let to_gb = |n| n as f64 / 1_000_000_000.0;
     match command {
         HostCommand::Info => {
@@ -49,7 +53,8 @@ pub async fn process_host_command(config: SharedConfig, command: HostCommand) ->
             println!("Host info update sent");
         }
         HostCommand::Metrics => {
-            let metrics = HostMetrics::collect()?;
+            let mut client = NodeClient::new(bv_url).await?;
+            let metrics = client.get_host_metrics(()).await?.into_inner();
             println!("Used cpu:       {:>10} %", metrics.used_cpu_count);
             println!(
                 "Used mem:       {:>10.3} GB",

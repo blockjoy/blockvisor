@@ -36,9 +36,10 @@ fn test_bv_cli_start_without_init() {
         ));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn test_bv_host_metrics() -> Result<()> {
-    let test_env = TestEnv::new().await?;
+    let mut test_env = TestEnv::new().await?;
+    test_env.run_blockvisord(RunFlag::default()).await?;
     test_env.bv_run(&["host", "metrics"], "Used cpu:");
     Ok(())
 }

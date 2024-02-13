@@ -573,15 +573,9 @@ impl<P: Pal + Debug> NodesManager<P> {
         image: &NodeImage,
         tolerance: Option<&Requirements>,
     ) -> commands::Result<()> {
-        let mut available = self.pal.available_resources(
-            &self
-                .node_data_cache
-                .read()
-                .await
-                .iter()
-                .map(|(id, node)| (*id, node.requirements.clone()))
-                .collect::<Vec<_>>(),
-        )?;
+        let mut available = self
+            .pal
+            .available_resources(&self.nodes_requirements().await)?;
         debug!("Available resources {available:?}");
 
         if let Some(tol) = tolerance {
@@ -637,6 +631,15 @@ impl<P: Pal + Debug> NodesManager<P> {
             .ok_or_else(|| Error::NodeNotFound(id))?;
 
         Ok(cache)
+    }
+
+    pub async fn nodes_requirements(&self) -> Vec<(Uuid, Requirements)> {
+        self.node_data_cache
+            .read()
+            .await
+            .iter()
+            .map(|(id, node)| (*id, node.requirements.clone()))
+            .collect()
     }
 
     async fn load_data(registry_path: &Path) -> Result<State> {

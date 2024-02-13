@@ -63,7 +63,7 @@ fn init(keys) {
         throw res;
     }
     let param = sanitize_sh_param(node_params().TESTING_PARAM);
-    start_job("upload", #{
+    create_job("upload", #{
         job_type: #{
             run_sh: "echo dummy_upload",
         },
@@ -82,7 +82,6 @@ fn init(keys) {
             },
         },
         shutdown_signal: "SIGINT",
-        needs: ["upload"],
     });
     start_job("echo");
 }
@@ -177,7 +176,6 @@ fn sh_inside(param) {
 }
 
 fn upload(param) {
-    stop_job("echo");
     start_job("upload", #{
         job_type: #{
             upload: #{
@@ -203,7 +201,6 @@ fn upload(param) {
             },
         },
     });
-    start_job("echo");
     "Upload started!"
 }
 
