@@ -100,24 +100,23 @@ pub async fn collect_metrics<P: Pal + Debug + 'static>(
 
 /// Returns the metric for a single node.
 pub async fn collect_metric<N: NodeConnection>(babel_engine: &mut BabelEngine<N>) -> Metric {
-    let capabilities = babel_engine.capabilities().await.unwrap_or_default();
-    let height = match capabilities.contains(&"height".to_string()) {
+    let height = match babel_engine.has_capability("height") {
         true => timeout(babel_engine.height()).await.ok(),
         false => None,
     };
-    let block_age = match capabilities.contains(&"block_age".to_string()) {
+    let block_age = match babel_engine.has_capability("block_age") {
         true => timeout(babel_engine.block_age()).await.ok(),
         false => None,
     };
-    let staking_status = match capabilities.contains(&"staking_status".to_string()) {
+    let staking_status = match babel_engine.has_capability("staking_status") {
         true => timeout(babel_engine.staking_status()).await.ok(),
         false => None,
     };
-    let consensus = match capabilities.contains(&"consensus".to_string()) {
+    let consensus = match babel_engine.has_capability("consensus") {
         true => timeout(babel_engine.consensus()).await.ok(),
         false => None,
     };
-    let sync_status = match capabilities.contains(&"sync_status".to_string()) {
+    let sync_status = match babel_engine.has_capability("sync_status") {
         true => timeout(babel_engine.sync_status()).await.ok(),
         false => None,
     };

@@ -47,7 +47,7 @@ pub fn rhai_smoke(path: &Path) -> eyre::Result<BlockchainMetadata> {
         .expect_load_data()
         .returning(|| Ok(Default::default()));
     let plugin = rhai_plugin::RhaiPlugin::new(&script, babel)?;
-    assert!(plugin.has_capability("init"));
+    assert!(plugin.capabilities().iter().any(|v| v == "init"));
     plugin
         .init(&HashMap::from_iter([(
             "key1".to_string(),

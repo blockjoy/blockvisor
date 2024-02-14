@@ -328,7 +328,9 @@ where
                         continue;
                     }
                     let status = node.status();
-                    let maybe_address = if status == NodeStatus::Running {
+                    let maybe_address = if status == NodeStatus::Running
+                        && node.babel_engine.has_capability("address")
+                    {
                         node.babel_engine.address().await.ok()
                     } else {
                         None

@@ -121,7 +121,7 @@ fn test_testing() -> eyre::Result<()> {
     )?;
     plugin.call_custom_method("download", "")?;
 
-    assert!(plugin.has_capability("init"));
+    assert!(plugin.capabilities().iter().any(|v| v == "init"));
     plugin.init(&HashMap::from_iter([(
         "key1".to_string(),
         "key1_value".to_string(),

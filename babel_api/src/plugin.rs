@@ -12,9 +12,6 @@ pub trait Plugin {
     /// Get list of supported method names.
     fn capabilities(&self) -> Vec<String>;
 
-    /// Check if method with given `name` is supported.
-    fn has_capability(&self, name: &str) -> bool;
-
     /// Init method is called by engine on node start.
     fn init(&self, params: &HashMap<String, String>) -> Result<()>;
 

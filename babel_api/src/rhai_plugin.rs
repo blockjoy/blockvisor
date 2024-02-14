@@ -234,10 +234,6 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             .collect()
     }
 
-    fn has_capability(&self, name: &str) -> bool {
-        self.ast.iter_functions().any(|meta| meta.name == name)
-    }
-
     fn init(&self, params: &HashMap<String, String>) -> Result<()> {
         let params = Map::from_iter(params.iter().map(|(k, v)| (k.into(), v.into())));
         self.call_fn("init", (params,))
@@ -386,8 +382,6 @@ mod tests {
         let mut capabilities = plugin.capabilities();
         capabilities.sort();
         assert_eq!(expected_capabilities, capabilities);
-        assert!(!plugin.has_capability("function_a"));
-        assert!(plugin.has_capability("function_b"));
         Ok(())
     }
 

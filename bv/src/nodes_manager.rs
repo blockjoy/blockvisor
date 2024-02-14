@@ -518,12 +518,12 @@ impl<P: Pal + Debug> NodesManager<P> {
     #[instrument(skip(self))]
     pub async fn capabilities(&self, id: Uuid) -> Result<Vec<String>> {
         let nodes = self.nodes.read().await;
-        let mut node = nodes
+        let node = nodes
             .get(&id)
             .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
-        node.babel_engine.capabilities().await
+        Ok(node.babel_engine.capabilities().clone())
     }
 
     #[instrument(skip(self))]
@@ -547,12 +547,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                 .await
                 .map_err(|err| BabelError::Internal { err })?;
         }
-        if !node
-            .babel_engine
-            .has_capability(method)
-            .await
-            .map_err(|err| BabelError::Internal { err })?
-        {
+        if !node.babel_engine.has_capability(method) {
             Err(BabelError::MethodNotFound)
         } else {
             node.babel_engine
@@ -1709,7 +1704,7 @@ mod tests {
             let mut nodes_list = nodes.nodes.write().await;
             let mut node = nodes_list.get_mut(&node_id).unwrap().write().await;
             node.data.initialized = true;
-            assert!(node.babel_engine.has_capability("info").await?);
+            assert!(node.babel_engine.has_capability("info"));
         }
         assert_eq!(
             "BV internal error: failed to get available resources",
@@ -1745,7 +1740,7 @@ mod tests {
             let mut nodes_list = nodes.nodes.write().await;
             let mut node = nodes_list.get_mut(&node_id).unwrap().write().await;
             assert!(!node.data.initialized);
-            assert!(!node.babel_engine.has_capability("info").await?);
+            assert!(!node.babel_engine.has_capability("info"));
         }
         fs::create_dir_all(
             test_env

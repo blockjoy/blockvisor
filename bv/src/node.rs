@@ -394,7 +394,8 @@ impl<P: Pal + Debug> Node<P> {
         let (script, metadata) = self.context.copy_and_check_plugin(image).await?;
         self.metadata = metadata;
         self.babel_engine
-            .update_plugin(|engine| RhaiPlugin::new(&script, engine))?;
+            .update_plugin(|engine| RhaiPlugin::new(&script, engine))
+            .await?;
 
         self.data.image = image.clone();
         self.data.requirements = self.metadata.requirements.clone();
@@ -416,6 +417,7 @@ impl<P: Pal + Debug> Node<P> {
         self.metadata = rhai_plugin::read_metadata(&script)?;
         self.babel_engine
             .update_plugin(|engine| RhaiPlugin::new(&script, engine))
+            .await
     }
 
     pub async fn recover(&mut self) -> Result<()> {

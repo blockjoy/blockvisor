@@ -214,8 +214,6 @@ fn init(params) {
 }
 ```
 
-- `address()` - The address of the node. The meaning of this varies from blockchain to blockchain.
-  <br>**Example**: _/p2p/11Uxv9YpMpXvLf8ZyvGWBdbgq3BXv8z1pra1LBqkRS5wmTEHNW3_
 - `application_status()` - Returns blockchain application status.
   <br>**Allowed return values**: _provisioning_, _broadcasting_, _cancelled_, _delegating_, _delinquent_, _disabled_, _earning_, _electing_, _elected_, _exported_, _ingesting_, _mining_, _minting_, _processing_, _relaying_, _removed_, _removing_
 
@@ -226,6 +224,8 @@ It is recommended to implement all of them, if feasible.
 
 - `height()` - Returns the height of the blockchain (in blocks).
 - `block_age()` - Returns the block age of the blockchain (in seconds).
+- `address()` - The address of the node. The meaning of this varies from blockchain to blockchain.
+  <br>**Example**: _/p2p/11Uxv9YpMpXvLf8ZyvGWBdbgq3BXv8z1pra1LBqkRS5wmTEHNW3_
 - `name()` - Returns the name of the node. This is usually some random generated name that you may use
 to recognise the node, but the purpose may vary per blockchain.
   <br>**Example**: _chilly-peach-kangaroo_

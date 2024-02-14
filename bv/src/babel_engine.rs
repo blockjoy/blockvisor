@@ -70,6 +70,7 @@ pub struct BabelEngine<N, P> {
     node_rx: tokio::sync::mpsc::Receiver<NodeRequest>,
     node_tx: tokio::sync::mpsc::Sender<NodeRequest>,
     server: Option<BabelEngineServer>,
+    capabilities: Vec<String>,
 }
 
 impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
@@ -92,16 +93,22 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             babel_engine_service::start_server(vm_data_path, node_info.clone(), api_config.clone())
                 .await?,
         );
-        Ok(Self {
+        let plugin = plugin_builder(engine)?;
+        let mut babel_engine = Self {
             node_info,
             node_connection,
             api_config,
-            plugin: plugin_builder(engine)?,
+            plugin,
             plugin_data_path,
             node_rx,
             node_tx,
             server,
-        })
+            capabilities: Default::default(),
+        };
+        babel_engine.capabilities = babel_engine
+            .on_plugin(move |plugin| Ok(plugin.capabilities()))
+            .await?;
+        Ok(babel_engine)
     }
 
     pub async fn stop_server(&mut self) -> Result<()> {
@@ -115,7 +122,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(())
     }
 
-    pub fn update_plugin<F: FnOnce(Engine) -> Result<P>>(
+    pub async fn update_plugin<F: FnOnce(Engine) -> Result<P>>(
         &mut self,
         plugin_builder: F,
     ) -> Result<()> {
@@ -126,6 +133,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             plugin_data_path: self.plugin_data_path.clone(),
         };
         self.plugin = plugin_builder(engine)?;
+        self.capabilities = self
+            .on_plugin(move |plugin| Ok(plugin.capabilities()))
+            .await?;
         Ok(())
     }
 
@@ -207,16 +217,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
 
     /// Returns the methods that are supported by this blockchain. Calling any method on this
     /// blockchain that is not listed here will result in an error being returned.
-    pub async fn capabilities(&mut self) -> Result<Vec<String>> {
-        self.on_plugin(move |plugin| Ok(plugin.capabilities()))
-            .await
+    pub fn capabilities(&self) -> &Vec<String> {
+        &self.capabilities
     }
 
     /// Checks if node has some particular capability
-    pub async fn has_capability(&mut self, method: &str) -> Result<bool> {
-        let method = method.to_owned();
-        self.on_plugin(move |plugin| Ok(plugin.has_capability(&method)))
-            .await
+    pub fn has_capability(&mut self, method: &str) -> bool {
+        self.capabilities.iter().any(|v| v == method)
     }
 
     /// Returns the list of jobs from blockchain jobs.
@@ -816,10 +823,6 @@ mod tests {
             self.engine.run_sh("capabilities", None).unwrap();
             vec!["some_method".to_string()]
         }
-        fn has_capability(&self, _name: &str) -> bool {
-            self.engine.run_sh("has_capability", None).unwrap();
-            true
-        }
         fn init(&self, params: &HashMap<String, String>) -> Result<()> {
             self.engine.render_template(
                 Path::new("template"),
@@ -938,16 +941,13 @@ mod tests {
     /// path to root dir used in test, instance of AsyncPanicChecker to make sure that all panics
     /// from other threads will be propagated.
     struct TestEnv {
-        tmp_root: PathBuf,
         data_path: PathBuf,
         engine: BabelEngine<TestConnection, DummyPlugin>,
         _async_panic_checker: utils::tests::AsyncPanicChecker,
     }
 
     impl TestEnv {
-        async fn new() -> Result<Self> {
-            let tmp_root = TempDir::new()?.to_path_buf();
-            fs::create_dir_all(&tmp_root)?;
+        async fn new(tmp_root: PathBuf) -> Result<Self> {
             let vm_data_path = tmp_root.join("vm");
             fs::create_dir_all(&vm_data_path)?;
             let data_path = tmp_root.join("data");
@@ -994,28 +994,27 @@ mod tests {
             .await?;
 
             Ok(Self {
-                tmp_root,
                 data_path,
                 engine,
                 _async_panic_checker: Default::default(),
             })
         }
+    }
 
-        fn start_test_server(
-            &self,
-            babel_mock: MockBabelService,
-        ) -> bv_tests_utils::rpc::TestServer {
-            start_test_server!(
-                &self.tmp_root,
-                babel_api::babel::babel_server::BabelServer::new(babel_mock)
-            )
-        }
+    fn start_test_server(
+        tmp_root: &Path,
+        babel_mock: MockBabelService,
+    ) -> bv_tests_utils::rpc::TestServer {
+        fs::create_dir_all(tmp_root).unwrap();
+        start_test_server!(
+            tmp_root,
+            babel_api::babel::babel_server::BabelServer::new(babel_mock)
+        )
     }
 
     #[allow(clippy::cmp_owned)]
     #[tokio::test]
     async fn test_async_bridge_to_babel() -> Result<()> {
-        let mut test_env = TestEnv::new().await?;
         let mut babel_mock = MockBabelService::new();
         // from init
         babel_mock
@@ -1167,14 +1166,12 @@ mod tests {
             .return_once(return_request);
         babel_mock
             .expect_run_sh()
-            .withf(|req| req.get_ref() == "has_capability")
-            .return_once(return_request);
-        babel_mock
-            .expect_run_sh()
             .withf(|req| req.get_ref() == "metadata")
             .return_once(return_request);
 
-        let babel_server = test_env.start_test_server(babel_mock);
+        let tmp_root = TempDir::new()?.to_path_buf();
+        let babel_server = start_test_server(&tmp_root, babel_mock);
+        let mut test_env = TestEnv::new(tmp_root).await?;
 
         test_env
             .engine
@@ -1211,9 +1208,9 @@ mod tests {
         );
         assert_eq!(
             vec!["some_method".to_string()],
-            test_env.engine.capabilities().await?
+            *test_env.engine.capabilities()
         );
-        assert!(test_env.engine.has_capability("some method").await?);
+        assert!(test_env.engine.has_capability("some_method"));
         babel_server.assert().await;
 
         Ok(())
