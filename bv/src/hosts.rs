@@ -1,16 +1,15 @@
 use crate::config::SharedConfig;
 use crate::linux_platform::bv_root;
+use crate::nodes_manager::NodesDataCache;
 use crate::services::api::pb;
 use crate::{api_with_retry, services};
 use crate::{utils, BV_VAR_PATH};
-use babel_api::metadata::Requirements;
 use eyre::{anyhow, Context, Result};
 use metrics::{register_gauge, Gauge};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, System, SystemExt};
 use systemstat::{saturating_sub_bytes, Platform, System as System2};
-use uuid::Uuid;
 
 /// The interval by which we collect metrics from this host.
 pub const COLLECT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
@@ -69,6 +68,7 @@ pub struct HostMetrics {
     pub used_cpu_count: u32,
     pub used_memory_bytes: u64,
     pub used_disk_space_bytes: u64,
+    pub used_ips: Vec<String>,
     pub load_one: f64,
     pub load_five: f64,
     pub load_fifteen: f64,
@@ -90,7 +90,7 @@ impl HostMetrics {
         SYSTEM_HOST_UPTIME_GAUGE.set(self.uptime_secs as f64);
     }
 
-    pub fn collect(nodes_requirements: &[(Uuid, Requirements)]) -> Result<Self> {
+    pub fn collect(nodes_data_cache: NodesDataCache) -> Result<Self> {
         let bv_root = bv_root();
         let mut sys = System::new_all();
         // We need to refresh twice:
@@ -112,8 +112,12 @@ impl HostMetrics {
             )
             .map(|disk| disk.total_space() - disk.available_space())
             .ok_or_else(|| anyhow!("Cannot get used disk space"))?
-                + utils::used_disk_space_correction(&bv_root, nodes_requirements)
+                + utils::used_disk_space_correction(&bv_root, &nodes_data_cache)
                     .with_context(|| "failed to get used_disk_space_correction")?,
+            used_ips: nodes_data_cache
+                .into_iter()
+                .map(|(_, data)| data.ip)
+                .collect(),
             load_one: load.one,
             load_five: load.five,
             load_fifteen: load.fifteen,
@@ -140,6 +144,7 @@ impl pb::MetricsServiceHostRequest {
             network_received: Some(metrics.network_received_bytes),
             network_sent: Some(metrics.network_sent_bytes),
             uptime: Some(metrics.uptime_secs),
+            used_ips: metrics.used_ips,
         };
         Self {
             metrics: HashMap::from([(host_id, metrics)]),
@@ -181,6 +186,6 @@ mod tests {
 
     #[test]
     fn test_host_metrics_collect() {
-        assert!(HostMetrics::collect(&[]).is_ok());
+        assert!(HostMetrics::collect(Default::default()).is_ok());
     }
 }

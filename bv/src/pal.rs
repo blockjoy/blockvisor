@@ -3,7 +3,7 @@
 ///
 /// It defines `Pal` trait which is top level abstraction that contains definitions of sub layers.
 ///
-use crate::{config::SharedConfig, node_data::NodeData, services};
+use crate::{config::SharedConfig, node_data::NodeData, nodes_manager::NodesDataCache, services};
 use async_trait::async_trait;
 use babel_api::metadata::Requirements;
 use eyre::Result;
@@ -79,10 +79,7 @@ pub trait Pal {
     /// Build path to VM data directory, a place where kernel and other VM related data are stored.
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
     /// Get available resources, but take into account requirements declared by nodes.
-    fn available_resources(
-        &self,
-        requirements: &[(Uuid, Requirements)],
-    ) -> Result<AvailableResources>;
+    fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources>;
 }
 
 pub type AvailableResources = Requirements;

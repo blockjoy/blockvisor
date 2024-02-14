@@ -1,6 +1,6 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
-use babel_api::metadata::Requirements;
+use blockvisord::nodes_manager::NodesDataCache;
 use blockvisord::pal::AvailableResources;
 use blockvisord::{
     blockvisord::BlockvisorD,
@@ -333,7 +333,7 @@ impl Pal for DummyPlatform {
 
     fn available_resources(
         &self,
-        _requirements: &[(Uuid, Requirements)],
+        _nodes_data_cache: &NodesDataCache,
     ) -> Result<blockvisord::pal::AvailableResources> {
         Ok(AvailableResources {
             vcpu_count: 4,

@@ -1,5 +1,4 @@
-use crate::{firecracker_machine, services::blockchain::DATA_FILE};
-use babel_api::metadata::Requirements;
+use crate::{firecracker_machine, nodes_manager::NodesDataCache, services::blockchain::DATA_FILE};
 use bv_utils::{cmd::run_cmd, with_retry};
 use cidr_utils::cidr::Ipv4Cidr;
 use eyre::{anyhow, bail, Context, Result};
@@ -17,7 +16,6 @@ use std::{
 use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::debug;
-use uuid::Uuid;
 
 // image download should never take more than 15min
 const ARCHIVE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -55,18 +53,16 @@ pub fn get_all_processes_pids(process_name: &str) -> Result<Vec<u32>> {
 /// disk space need manual correction that include declared data image size.
 pub fn used_disk_space_correction(
     bv_root: &Path,
-    requirements: &[(Uuid, Requirements)],
+    nodes_data_cache: &NodesDataCache,
 ) -> Result<u64> {
     let mut correction = 0;
-    for (node_id, requirements) in requirements {
-        debug!("{node_id}:{requirements:?}");
-        let data_img_path =
-            firecracker_machine::build_vm_data_path(bv_root, *node_id).join(DATA_FILE);
+    for (id, data) in nodes_data_cache {
+        let data_img_path = firecracker_machine::build_vm_data_path(bv_root, *id).join(DATA_FILE);
         let actual_data_size = data_img_path
             .size_on_disk()
             .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
-        let declared_data_size = requirements.disk_size_gb * 1_000_000_000;
-        debug!("declared: {declared_data_size}; actual: {actual_data_size}");
+        let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
+        debug!("id: {id}; declared: {declared_data_size}; actual: {actual_data_size}");
         if declared_data_size > actual_data_size {
             correction += declared_data_size - actual_data_size;
         }

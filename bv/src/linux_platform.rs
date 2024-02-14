@@ -1,3 +1,4 @@
+use crate::nodes_manager::NodesDataCache;
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
     config,
@@ -8,7 +9,6 @@ use crate::{
     services, utils, BV_VAR_PATH,
 };
 use async_trait::async_trait;
-use babel_api::metadata::Requirements;
 use bv_utils::cmd::run_cmd;
 use core::fmt;
 use eyre::{anyhow, bail, Context, Result};
@@ -147,18 +147,15 @@ impl Pal for LinuxPlatform {
         firecracker_machine::build_vm_data_path(&self.bv_root, id)
     }
 
-    fn available_resources(
-        &self,
-        requirements: &[(Uuid, Requirements)],
-    ) -> Result<AvailableResources> {
+    fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
         let mut sys = System::new_all();
         sys.refresh_all();
-        let (available_mem_size_mb, available_vcpu_count) = requirements.iter().fold(
+        let (available_mem_size_mb, available_vcpu_count) = nodes_data_cache.iter().fold(
             (sys.total_memory() / 1_000_000, sys.cpus().len()),
-            |(available_mem_size_mb, available_vcpu_count), (_, requirements)| {
+            |(available_mem_size_mb, available_vcpu_count), (_, data)| {
                 (
-                    available_mem_size_mb - requirements.mem_size_mb,
-                    available_vcpu_count - requirements.vcpu_count,
+                    available_mem_size_mb - data.requirements.mem_size_mb,
+                    available_vcpu_count - data.requirements.vcpu_count,
                 )
             },
         );
@@ -166,7 +163,7 @@ impl Pal for LinuxPlatform {
             bv_utils::system::find_disk_by_path(&sys, &self.bv_root.join(BV_VAR_PATH))
                 .map(|disk| disk.available_space())
                 .ok_or_else(|| anyhow!("Cannot get available disk space"))?
-                - utils::used_disk_space_correction(&self.bv_root, requirements)?;
+                - utils::used_disk_space_correction(&self.bv_root, nodes_data_cache)?;
         Ok(AvailableResources {
             vcpu_count: available_vcpu_count,
             mem_size_mb: available_mem_size_mb,

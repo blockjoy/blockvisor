@@ -74,6 +74,8 @@ pub struct NodeDataCache {
     pub standalone: bool,
 }
 
+pub type NodesDataCache = Vec<(Uuid, NodeDataCache)>;
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct NodeConfig {
     pub name: String,
@@ -570,7 +572,7 @@ impl<P: Pal + Debug> NodesManager<P> {
     ) -> commands::Result<()> {
         let mut available = self
             .pal
-            .available_resources(&self.nodes_requirements().await)?;
+            .available_resources(&self.nodes_data_cache().await)?;
         debug!("Available resources {available:?}");
 
         if let Some(tol) = tolerance {
@@ -628,12 +630,12 @@ impl<P: Pal + Debug> NodesManager<P> {
         Ok(cache)
     }
 
-    pub async fn nodes_requirements(&self) -> Vec<(Uuid, Requirements)> {
+    pub async fn nodes_data_cache(&self) -> NodesDataCache {
         self.node_data_cache
             .read()
             .await
             .iter()
-            .map(|(id, node)| (*id, node.requirements.clone()))
+            .map(|(id, node)| (*id, node.clone()))
             .collect()
     }
 
@@ -1060,7 +1062,7 @@ mod tests {
     };
 
     fn available_test_resources(
-        _requirements: &[(Uuid, Requirements)],
+        _nodes_data_cache: &NodesDataCache,
     ) -> Result<pal::AvailableResources> {
         Ok(TEST_NODE_REQUIREMENTS)
     }

@@ -598,6 +598,7 @@ pub mod tests {
     use crate::{
         config::Config,
         node_context::build_registry_dir,
+        nodes_manager,
         pal::{
             BabelClient, BabelSupClient, CommandsStream, NodeConnection, ServiceConnector,
             VirtualMachine, VmState,
@@ -780,7 +781,7 @@ pub mod tests {
                 node_data: &NodeData<DummyNet>,
             ) -> Result<MockTestVM>;
             fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
-            fn available_resources(&self, requirements: &[(Uuid, Requirements)]) -> Result<pal::AvailableResources>;
+            fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
         }
     }
 

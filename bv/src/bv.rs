@@ -64,6 +64,7 @@ pub async fn process_host_command(
                 "Used disk:      {:>10.3} GB",
                 to_gb(metrics.used_disk_space_bytes)
             );
+            println!("Used IPs:      {:?}", metrics.used_ips);
             println!("Load (1 min):   {:>10}", metrics.load_one);
             println!("Load (5 mins):  {:>10}", metrics.load_five);
             println!("Load (15 mins): {:>10}", metrics.load_fifteen);
