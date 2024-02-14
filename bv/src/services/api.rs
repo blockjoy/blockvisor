@@ -10,9 +10,8 @@ use crate::{
     services::{ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService},
     ServiceStatus,
 };
-use babel_api::engine::Slot;
 use babel_api::{
-    engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation, UploadManifest},
+    engine::{Checksum, Chunk, Compression, DownloadManifest, FileLocation, Slot, UploadManifest},
     metadata::firewall,
 };
 use eyre::{anyhow, bail, Context, Result};
@@ -155,33 +154,31 @@ impl<'a> CommandsService<'a> {
             info!("Processing command: {command:?}");
             let command_id = &command.id;
 
-            match command.command {
-                Some(pb::command::Command::Node(node_command)) => {
-                    // check for bv health status
-                    let service_status = get_bv_status().await;
-                    if service_status == ServiceStatus::Ok {
-                        // process the command
-                        let command_result =
-                            process_node_command(nodes_manager.clone(), node_command).await;
-                        self.send_command_update(command_id, &command_result)
-                            .await?;
-                        command_result
-                            .with_context(|| format!("node command '{command_id}' failed"))?;
-                    } else {
-                        self.send_service_status_update(command_id, service_status)
-                            .await?;
-                        bail!("can't process command '{command_id}' while BV status is '{service_status:?}'");
+            // check for bv health status
+            let service_status = get_bv_status().await;
+            if service_status == ServiceStatus::Ok {
+                // process the command
+                let command_result = match command.command {
+                    Some(pb::command::Command::Node(node_command)) => {
+                        process_node_command(nodes_manager.clone(), node_command).await
                     }
-                }
-                Some(pb::command::Command::Host(_)) => {
-                    self.send_command_update(command_id, &Err(Error::NotSupported))
-                        .await?;
-                    bail!("command '{command_id}' type `Host` not supported");
-                }
-                None => {
-                    bail!("command '{command_id}' type is `None`");
-                }
-            };
+                    Some(pb::command::Command::Host(host_command)) => {
+                        process_host_command(host_command)
+                    }
+                    None => {
+                        bail!("command '{command_id}' type is `None`");
+                    }
+                };
+                self.send_command_update(command_id, &command_result)
+                    .await?;
+                command_result.with_context(|| format!("command '{command_id}' failed"))?;
+            } else {
+                self.send_service_status_update(command_id, service_status)
+                    .await?;
+                bail!(
+                    "can't process command '{command_id}' while BV status is '{service_status:?}'"
+                );
+            }
         }
         Ok(())
     }
@@ -338,7 +335,21 @@ async fn process_node_command<P: Pal + Debug>(
         },
         None => command_failed!(Error::Internal(anyhow!("Node command is `None`"))),
     };
+    Ok(())
+}
 
+fn process_host_command(host_command: pb::HostCommand) -> commands::Result<()> {
+    match host_command.command {
+        Some(cmd) => match cmd {
+            pb::host_command::Command::Pending(_) => {}
+            pb::host_command::Command::Start(_)
+            | pb::host_command::Command::Stop(_)
+            | pb::host_command::Command::Restart(_) => {
+                command_failed!(Error::NotSupported)
+            }
+        },
+        None => command_failed!(Error::Internal(anyhow!("Host command is `None`"))),
+    };
     Ok(())
 }
 
