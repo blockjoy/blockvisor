@@ -10,7 +10,7 @@ use clap::Parser;
 use eyre::{bail, Result};
 use tokio::time::{sleep, Duration};
 
-// TODO: use proper wait mechanism
+const BLOCKVISOR_STATUS_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 const BLOCKVISOR_START_TIMEOUT: Duration = Duration::from_secs(5);
 const BLOCKVISOR_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -34,22 +34,36 @@ async fn main() -> Result<()> {
             }
 
             run_cmd("systemctl", ["start", "blockvisor.service"]).await?;
-            sleep(BLOCKVISOR_START_TIMEOUT).await;
 
-            match service_info(bv_url.clone()).await {
-                Ok(info) => println!("blockvisor service started successfully: {info}"),
-                Err(e) => bail!("blockvisor service did not start: {e:#}"),
+            let start = std::time::Instant::now();
+            loop {
+                match service_info(bv_url.clone()).await {
+                    Ok(info) => {
+                        println!("blockvisor service started successfully: {info}");
+                        break;
+                    }
+                    Err(err) => {
+                        if start.elapsed() < BLOCKVISOR_START_TIMEOUT {
+                            sleep(BLOCKVISOR_STATUS_CHECK_INTERVAL).await;
+                        } else {
+                            bail!("blockvisor service did not start: {err:#}")
+                        }
+                    }
+                }
             }
         }
         Command::Stop(_) => {
             run_cmd("systemctl", ["stop", "blockvisor.service"]).await?;
-            sleep(BLOCKVISOR_STOP_TIMEOUT).await;
 
-            if let Ok(info) = service_info(bv_url).await {
-                bail!("blockvisor service did not stop: {info}");
-            } else {
-                println!("blockvisor service stopped successfully");
+            let start = std::time::Instant::now();
+            while let Ok(info) = service_info(bv_url.clone()).await {
+                if start.elapsed() < BLOCKVISOR_STOP_TIMEOUT {
+                    sleep(BLOCKVISOR_STATUS_CHECK_INTERVAL).await;
+                } else {
+                    bail!("blockvisor service did not stop: {info}");
+                }
             }
+            println!("blockvisor service stopped successfully");
         }
         Command::Status(_) => {
             if let Ok(info) = service_info(bv_url).await {
