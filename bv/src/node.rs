@@ -227,11 +227,12 @@ impl<P: Pal + Debug> Node<P> {
             pal::VmState::SHUTOFF => NodeStatus::Stopped,
         };
         if machine_status == self.data.expected_status {
-            if machine_status == NodeStatus::Running
-                && (self.babel_engine.node_connection.is_closed()
-                    || self.babel_engine.node_connection.is_broken())
-            {
-                // node is running, but there is no babel connection or is broken for some reason
+            if machine_status == NodeStatus::Running // node is running, but 
+                && (self.babel_engine.node_connection.is_closed() // there is no babel connection
+                    || self.babel_engine.node_connection.is_broken() // or is broken for some reason
+                    || self.data.has_pending_update // or it has pending update that failed to apply
+                    || !self.data.initialized // or it failed to initialize
+            ) {
                 NodeStatus::Failed
             } else {
                 machine_status
@@ -284,7 +285,11 @@ impl<P: Pal + Debug> Node<P> {
         if !self.data.initialized {
             // setup firewall, but only once
             self.setup_firewall_rules().await?;
-            self.babel_engine.init(Default::default()).await?;
+            if let Err(err) = self.babel_engine.init(Default::default()).await {
+                // mark as permanently failed - non-recoverable
+                self.save_expected_status(NodeStatus::Failed).await?;
+                return Err(err);
+            }
             self.data.initialized = true;
         } else if self.data.has_pending_update {
             // setup firewall, but only once
@@ -312,6 +317,9 @@ impl<P: Pal + Debug> Node<P> {
             )
             .with_context(|| "Failed to gracefully shutdown babel and background jobs")?;
         }
+        self.babel_engine.node_connection.close();
+        self.data.started_at = None;
+        self.data.save(&self.context.registry).await?;
         match self.machine.state() {
             pal::VmState::SHUTOFF => {}
             pal::VmState::RUNNING => {
@@ -337,10 +345,6 @@ impl<P: Pal + Debug> Node<P> {
                 }
             }
         }
-
-        self.babel_engine.node_connection.close();
-        self.data.started_at = None;
-        self.data.save(&self.context.registry).await?;
         debug!("Node stopped");
         Ok(())
     }
@@ -945,7 +949,7 @@ pub mod tests {
                 name: "node name".to_string(),
                 expected_status: NodeStatus::Running,
                 started_at: None,
-                initialized: false,
+                initialized: true,
                 has_pending_update: false,
                 image: NodeImage {
                     protocol: "testing".to_string(),
@@ -1458,11 +1462,12 @@ pub mod tests {
             .await
             .unwrap();
         let server = test_env.start_server(babel_sup_mock, babel_mock).await;
-        let start_err = node.start().await.unwrap_err();
-        assert!(format!("{start_err:#}").starts_with(
+        node.data.initialized = false;
+        let start_err = format!("{:#}", node.start().await.unwrap_err());
+        assert!(start_err.starts_with(
             "node_id=4931bafa-92d9-4521-9fc6-a77eee047530: Rhai function 'init' returned error:"
         ));
-        assert_eq!(NodeStatus::Running, node.data.expected_status);
+        assert_eq!(NodeStatus::Failed, node.data.expected_status);
         assert!(!node.data.initialized);
         assert_eq!(None, node.data.started_at);
 
@@ -1664,6 +1669,7 @@ pub mod tests {
         assert!(node.data.has_pending_update);
         test_env.assert_node_data_saved(&node.data).await;
 
+        node.data.has_pending_update = false;
         node.update(vec![firewall::Rule {
             name: "new test rule".to_string(),
             action: firewall::Action::Allow,

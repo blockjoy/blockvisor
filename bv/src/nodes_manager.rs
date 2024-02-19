@@ -1915,12 +1915,12 @@ mod tests {
             .await;
         sut.nodes.recover().await;
 
-        // recovery of node that is expected to be running but it is not
+        // recovery of node that is expected to be running, but it is not
         sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
             .await;
         sut.nodes.recover().await;
 
-        // recovery of node that is expected to be stopped but it is not
+        // recovery of node that is expected to be stopped, but it is not
         sut.on_node(|node| node.data.expected_status = NodeStatus::Stopped)
             .await;
         sut.nodes.recover().await;
@@ -1931,8 +1931,11 @@ mod tests {
         sut.nodes.recover().await;
 
         // no recovery needed - node is expected to be running
-        sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
-            .await;
+        sut.on_node(|node| {
+            node.data.expected_status = NodeStatus::Running;
+            node.data.initialized = true;
+        })
+        .await;
         sut.nodes.recover().await;
 
         for mock in http_mocks {

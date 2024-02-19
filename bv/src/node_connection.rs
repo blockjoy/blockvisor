@@ -82,7 +82,7 @@ impl pal::NodeConnection for NodeConnection {
         Ok(())
     }
 
-    /// This function gets gRPC client connected to babelsup. It reconnect to babelsup if necessary.
+    /// This function gets gRPC client connected to babelsup. It reconnects to babelsup if necessary.
     async fn babelsup_client(&mut self) -> Result<&mut pal::BabelSupClient> {
         match &mut self.state {
             NodeConnectionState::Closed => {
@@ -103,7 +103,7 @@ impl pal::NodeConnection for NodeConnection {
         }
     }
 
-    /// This function gets RPC client connected to babel. It reconnect to babel if necessary.
+    /// This function gets RPC client connected to babel. It reconnects to babel if necessary.
     async fn babel_client(&mut self) -> Result<&mut pal::BabelClient> {
         match &mut self.state {
             NodeConnectionState::Closed => {
