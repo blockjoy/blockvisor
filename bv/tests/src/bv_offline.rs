@@ -282,13 +282,13 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
 
     println!("disable and stop babelsup - permanently break node");
     test_env.bv_run(&["node", "run", "disable_babelsup", vm_id], "");
-    // it may fail because it stop babalsup so ignore result
+    // it may fail because it stops babalsup so ignore result
     let _ = test_env.try_bv_run(&["node", "run", "stop_babelsup", vm_id], "");
 
     println!("list running node before recovery");
     test_env.bv_run(&["node", "status", vm_id], "Failed");
     test_env
-        .wait_for_node_fail(vm_id, Duration::from_secs(300))
+        .wait_for_node_fail(vm_id, Duration::from_secs(600))
         .await;
 
     println!("delete started node");

@@ -1926,8 +1926,11 @@ mod tests {
         sut.nodes.recover().await;
 
         // node connection recovery
-        sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
-            .await;
+        sut.on_node(|node| {
+            node.data.expected_status = NodeStatus::Running;
+            node.post_recovery();
+        })
+        .await;
         sut.nodes.recover().await;
 
         // no recovery needed - node is expected to be running

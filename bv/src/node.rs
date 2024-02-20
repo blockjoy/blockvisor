@@ -17,9 +17,10 @@ use babel_api::{
     rhai_plugin,
     rhai_plugin::RhaiPlugin,
 };
-use bv_utils::{cmd::run_cmd, rpc::with_timeout, with_retry};
+use bv_utils::{cmd::run_cmd, exp_backoff_timeout, rpc::with_timeout, with_retry};
 use chrono::Utc;
 use eyre::{bail, Context, Result};
+use std::ops::Add;
 use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
 use tokio::{
     fs::{self, File},
@@ -62,6 +63,7 @@ struct RecoveryCounters {
     reconnect: usize,
     stop: usize,
     start: usize,
+    backoff_time: Option<Instant>,
 }
 
 struct MaybeNode<P: Pal> {
@@ -425,6 +427,11 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     pub async fn recover(&mut self) -> Result<()> {
+        if let Some(backoff_time) = &self.recovery_counters.backoff_time {
+            if Instant::now() < *backoff_time {
+                return Ok(());
+            }
+        }
         let id = self.id();
         match self.data.expected_status {
             NodeStatus::Running => {
@@ -437,7 +444,18 @@ impl<P: Pal + Debug> Node<P> {
             NodeStatus::Stopped => {
                 self.recovery_counters.stop += 1;
                 info!("Recovery: stopping node with ID `{id}`");
-                if let Err(e) = self.stop(false).await {
+                if let Err(e) = self
+                    .stop(
+                        // it doesn't make sense to try gracefully shutdown node that we can't communicate with,
+                        // so force shutdown if node_connection is already closed or broken
+                        self.babel_engine.node_connection.is_closed()
+                            || self.babel_engine.node_connection.is_broken(),
+                    )
+                    .await
+                {
+                    self.recovery_counters.backoff_time = Some(Instant::now().add(
+                        exp_backoff_timeout(45_000, self.recovery_counters.reconnect as u32),
+                    ));
                     warn!("Recovery: stopping node with ID `{id}` failed: {e:#}");
                     if self.recovery_counters.stop >= MAX_STOP_TRIES {
                         error!("Recovery: retries count exceeded, mark as failed: {e:#}");
@@ -478,6 +496,10 @@ impl<P: Pal + Debug> Node<P> {
         self.recovery_counters.start += 1;
         info!("Recovery: starting node with ID `{id}`");
         if let Err(e) = self.start().await {
+            self.recovery_counters.backoff_time = Some(Instant::now().add(exp_backoff_timeout(
+                15_000,
+                self.recovery_counters.reconnect as u32,
+            )));
             warn!("Recovery: starting node with ID `{id}` failed: {e:#}");
             if self.recovery_counters.start >= MAX_START_TRIES {
                 error!("Recovery: retries count exceeded, mark as failed: {e:#}");
@@ -496,10 +518,15 @@ impl<P: Pal + Debug> Node<P> {
         if let Err(e) = self.babel_engine.node_connection.test().await {
             warn!("Recovery: reconnect to node with ID `{id}` failed: {e:#}");
             if self.recovery_counters.reconnect >= MAX_RECONNECT_TRIES {
+                self.recovery_counters.backoff_time = Some(Instant::now().add(
+                    exp_backoff_timeout(5_000, self.recovery_counters.reconnect as u32),
+                ));
                 info!("Recovery: restart broken node with ID `{id}`");
 
                 self.recovery_counters.stop += 1;
                 if let Err(e) = self.stop(true).await {
+                    self.recovery_counters.backoff_time =
+                        Some(Instant::now().add(Duration::from_secs(30)));
                     warn!("Recovery: stopping node with ID `{id}` failed: {e:#}");
                     if self.recovery_counters.stop >= MAX_STOP_TRIES {
                         error!("Recovery: retries count exceeded, mark as failed: {e:#}");
@@ -518,7 +545,7 @@ impl<P: Pal + Debug> Node<P> {
         Ok(())
     }
 
-    fn post_recovery(&mut self) {
+    pub fn post_recovery(&mut self) {
         // reset counters on successful recovery
         self.recovery_counters = Default::default();
     }

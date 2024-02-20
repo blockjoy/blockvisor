@@ -1,5 +1,7 @@
 use babel_api::engine::{FileLocation, PosixSignal};
-use bv_utils::{run_flag::RunFlag, system::is_process_running, timer::AsyncTimer};
+use bv_utils::{
+    exp_backoff_timeout, run_flag::RunFlag, system::is_process_running, timer::AsyncTimer,
+};
 use eyre::{bail, Context, ContextCompat};
 use futures::StreamExt;
 use nu_glob::Pattern;
@@ -193,9 +195,9 @@ impl<T: AsyncTimer> Backoff<T> {
     }
 
     async fn backoff(&mut self) {
-        let sleep = self.timer.sleep(Duration::from_millis(
-            self.backoff_base_ms * 2u64.pow(self.counter),
-        ));
+        let sleep = self
+            .timer
+            .sleep(exp_backoff_timeout(self.backoff_base_ms, self.counter));
         self.run.select(sleep).await;
         self.counter += 1;
     }

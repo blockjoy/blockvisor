@@ -139,6 +139,7 @@ mod tests {
     use super::*;
     use crate::utils;
     use assert_fs::TempDir;
+    use bv_utils::exp_backoff_timeout;
     use bv_utils::timer::MockAsyncTimer;
     use eyre::Result;
     use mockall::*;
@@ -247,13 +248,13 @@ mod tests {
         for n in 0..RANGE {
             timer_mock
                 .expect_sleep()
-                .with(predicate::eq(Duration::from_millis(10 * 2u64.pow(n))))
+                .with(predicate::eq(exp_backoff_timeout(10, n)))
                 .returning(|_| ());
         }
         timer_mock
             .expect_sleep()
             .once()
-            .with(predicate::eq(Duration::from_millis(10 * 2u64.pow(RANGE))))
+            .with(predicate::eq(exp_backoff_timeout(10, RANGE)))
             .returning(move |_| {
                 test_run.stop();
             });

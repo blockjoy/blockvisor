@@ -1,9 +1,15 @@
+use std::time::Duration;
+
 pub mod cmd;
 pub mod logging;
 pub mod rpc;
 pub mod run_flag;
 pub mod system;
 pub mod timer;
+
+pub fn exp_backoff_timeout(backoff_base_ms: u64, retry_count: u32) -> Duration {
+    Duration::from_millis(backoff_base_ms * 2u64.pow(retry_count))
+}
 
 #[macro_export]
 macro_rules! with_retry {
@@ -41,8 +47,11 @@ macro_rules! _with_selective_retry {
                 Err(err) if !$non_retriable.contains(&err.code()) => {
                     if retry_count < $retry_max {
                         retry_count += 1;
-                        let backoff = $backoff_base_ms * 2u64.pow(retry_count);
-                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                        tokio::time::sleep($crate::exp_backoff_timeout(
+                            $backoff_base_ms,
+                            retry_count,
+                        ))
+                        .await;
                         continue;
                     } else {
                         break Err(err);
@@ -67,8 +76,11 @@ macro_rules! _with_retry {
                     if retry_count < $retry_max {
                         retry_count += 1;
                         if !cfg!(test) {
-                            let backoff = $backoff_base_ms * 2u64.pow(retry_count);
-                            tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                            tokio::time::sleep($crate::exp_backoff_timeout(
+                                $backoff_base_ms,
+                                retry_count,
+                            ))
+                            .await;
                         }
                         continue;
                     } else {
