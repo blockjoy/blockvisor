@@ -4,6 +4,7 @@ use babel::{
     jobs_manager, jobs_manager::JobsManagerState, load_config, logs_service::LogsService, utils,
     BabelPal, VSockConnector, BABEL_LOGS_UDS_PATH, JOBS_MONITOR_UDS_PATH,
 };
+use babel_api::babel::NodeContext;
 use babel_api::metadata::RamdiskConfiguration;
 use bv_utils::{cmd::run_cmd, logging::setup_logging, run_flag::RunFlag};
 use eyre::{anyhow, Context};
@@ -164,10 +165,35 @@ impl BabelPal for Pal {
         Ok(df_out.contains(data_directory_mount_point.trim_end_matches('/')))
     }
 
-    async fn set_hostname(&self, hostname: &str) -> eyre::Result<()> {
-        run_cmd("hostnamectl", ["set-hostname", hostname])
-            .await
-            .map_err(|err| anyhow!("hostnamectl error: {err:#}"))?;
+    async fn set_node_context(&self, node_context: NodeContext) -> eyre::Result<()> {
+        run_cmd(
+            "hostnamectl",
+            ["set-hostname", &node_context.node_name.clone()],
+        )
+        .await
+        .map_err(|err| anyhow!("hostnamectl error: {err:#}"))?;
+
+        std::env::set_var("BV_HOST_ID", &node_context.bv_id);
+        std::env::set_var("BV_HOST_NAME", &node_context.bv_name);
+        std::env::set_var("BV_API_URL", &node_context.bv_api_url);
+        std::env::set_var("NODE_ID", &node_context.node_id);
+        std::env::set_var("NODE_NAME", &node_context.node_name);
+        std::env::set_var("NODE_IP", &node_context.ip);
+        std::env::set_var("NODE_GATEWAY", &node_context.gateway);
+        std::env::set_var("NODE_STANDALONE", node_context.standalone.to_string());
+        let babel_profile = format!(
+            "export BV_HOST_ID={} BV_HOST_NAME={} BV_API_URL={} NODE_ID={} NODE_NAME={} NODE_IP={} NODE_GATEWAY={} NODE_STANDALONE={}",
+            node_context.bv_id,
+            node_context.bv_name,
+            node_context.bv_api_url,
+            node_context.node_id,
+            node_context.node_name,
+            node_context.ip,
+            node_context.gateway,
+            node_context.standalone);
+        if let Err(err) = fs::write("/etc/profile.d/babel.sh", babel_profile).await {
+            warn!("set node_contest as env variable failed: {err:#}");
+        }
         Ok(())
     }
 

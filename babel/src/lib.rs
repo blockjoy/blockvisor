@@ -16,6 +16,7 @@ pub mod upload_job;
 pub mod utils;
 
 use async_trait::async_trait;
+use babel_api::babel::NodeContext;
 use babel_api::metadata::{BabelConfig, RamdiskConfiguration};
 use bv_utils::rpc::{RPC_CONNECT_TIMEOUT, RPC_REQUEST_TIMEOUT};
 use eyre::{Context, Result};
@@ -66,7 +67,7 @@ pub trait BabelPal {
         fuser_kill: bool,
     ) -> Result<()>;
     async fn is_data_drive_mounted(&self, data_directory_mount_point: &str) -> Result<bool>;
-    async fn set_hostname(&self, hostname: &str) -> Result<()>;
+    async fn set_node_context(&self, node_context: NodeContext) -> Result<()>;
     async fn set_swap_file(&self, swap_size_mb: u64, swap_file_location: &str) -> Result<()>;
     async fn is_swap_file_set(&self, swap_size_mb: u64, swap_file_location: &str) -> Result<bool>;
     async fn set_ram_disks(&self, ram_disks: Option<Vec<RamdiskConfiguration>>) -> Result<()>;
