@@ -7,7 +7,7 @@ use crate::{
     node_connection::RPC_REQUEST_TIMEOUT,
     node_context::NodeContext,
     node_data::{NodeData, NodeImage, NodeStatus},
-    pal::{self, NetInterface, NodeConnection, Pal, VirtualMachine},
+    pal::{self, NetInterface, NodeConnection, Pal, RecoverBackoff, VirtualMachine},
     services::blockchain::{self, ROOT_FS_FILE},
 };
 use babel_api::{
@@ -17,10 +17,9 @@ use babel_api::{
     rhai_plugin,
     rhai_plugin::RhaiPlugin,
 };
-use bv_utils::{cmd::run_cmd, exp_backoff_timeout, rpc::with_timeout, with_retry};
+use bv_utils::{cmd::run_cmd, rpc::with_timeout, with_retry};
 use chrono::Utc;
 use eyre::{bail, Context, Result};
-use std::ops::Add;
 use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
 use tokio::{
     fs::{self, File},
@@ -37,9 +36,6 @@ const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FW_SETUP_TIMEOUT_SEC: u64 = 30;
 const FW_RULE_SETUP_TIMEOUT_SEC: u64 = 1;
-const MAX_START_TRIES: usize = 3;
-const MAX_STOP_TRIES: usize = 3;
-const MAX_RECONNECT_TRIES: usize = 3;
 const SUPERVISOR_CONFIG: SupervisorConfig = SupervisorConfig {
     backoff_timeout_ms: 3000,
     backoff_base_ms: 200,
@@ -55,15 +51,7 @@ pub struct Node<P: Pal> {
     machine: P::VirtualMachine,
     context: NodeContext,
     pal: Arc<P>,
-    recovery_counters: RecoveryCounters,
-}
-
-#[derive(Debug, Default)]
-struct RecoveryCounters {
-    reconnect: usize,
-    stop: usize,
-    start: usize,
-    backoff_time: Option<Instant>,
+    recovery_backoff: P::RecoveryBackoff,
 }
 
 struct MaybeNode<P: Pal> {
@@ -116,6 +104,7 @@ impl<P: Pal> MaybeNode<P> {
             .await,
             self
         );
+        let recovery_backoff = pal.create_recovery_backoff();
         Ok(Node {
             data: self.data,
             babel_engine,
@@ -124,7 +113,7 @@ impl<P: Pal> MaybeNode<P> {
             machine: self.machine.unwrap(),
             context: self.context,
             pal,
-            recovery_counters: Default::default(),
+            recovery_backoff,
         })
     }
 
@@ -206,6 +195,7 @@ impl<P: Pal + Debug> Node<P> {
             context.vm_data_dir.clone(),
         )
         .await?;
+        let recovery_backoff = pal.create_recovery_backoff();
         Ok(Self {
             data,
             babel_engine,
@@ -213,7 +203,7 @@ impl<P: Pal + Debug> Node<P> {
             machine,
             context,
             pal,
-            recovery_counters: Default::default(),
+            recovery_backoff,
         })
     }
 
@@ -427,10 +417,8 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     pub async fn recover(&mut self) -> Result<()> {
-        if let Some(backoff_time) = &self.recovery_counters.backoff_time {
-            if Instant::now() < *backoff_time {
-                return Ok(());
-            }
+        if self.recovery_backoff.backoff() {
+            return Ok(());
         }
         let id = self.id();
         match self.data.expected_status {
@@ -442,7 +430,6 @@ impl<P: Pal + Debug> Node<P> {
                 }
             }
             NodeStatus::Stopped => {
-                self.recovery_counters.stop += 1;
                 info!("Recovery: stopping node with ID `{id}`");
                 if let Err(e) = self
                     .stop(
@@ -453,11 +440,8 @@ impl<P: Pal + Debug> Node<P> {
                     )
                     .await
                 {
-                    self.recovery_counters.backoff_time = Some(Instant::now().add(
-                        exp_backoff_timeout(45_000, self.recovery_counters.reconnect as u32),
-                    ));
                     warn!("Recovery: stopping node with ID `{id}` failed: {e:#}");
-                    if self.recovery_counters.stop >= MAX_STOP_TRIES {
+                    if self.recovery_backoff.stop_failed() {
                         error!("Recovery: retries count exceeded, mark as failed: {e:#}");
                         self.save_expected_status(NodeStatus::Failed).await?;
                     }
@@ -493,15 +477,10 @@ impl<P: Pal + Debug> Node<P> {
 
     async fn started_node_recovery(&mut self) -> Result<()> {
         let id = self.id();
-        self.recovery_counters.start += 1;
         info!("Recovery: starting node with ID `{id}`");
         if let Err(e) = self.start().await {
-            self.recovery_counters.backoff_time = Some(Instant::now().add(exp_backoff_timeout(
-                15_000,
-                self.recovery_counters.reconnect as u32,
-            )));
             warn!("Recovery: starting node with ID `{id}` failed: {e:#}");
-            if self.recovery_counters.start >= MAX_START_TRIES {
+            if self.recovery_backoff.start_failed() {
                 error!("Recovery: retries count exceeded, mark as failed: {e:#}");
                 self.save_expected_status(NodeStatus::Failed).await?;
             }
@@ -513,22 +492,14 @@ impl<P: Pal + Debug> Node<P> {
 
     async fn node_connection_recovery(&mut self) -> Result<()> {
         let id = self.id();
-        self.recovery_counters.reconnect += 1;
         info!("Recovery: fix broken connection to node with ID `{id}`");
         if let Err(e) = self.babel_engine.node_connection.test().await {
             warn!("Recovery: reconnect to node with ID `{id}` failed: {e:#}");
-            if self.recovery_counters.reconnect >= MAX_RECONNECT_TRIES {
-                self.recovery_counters.backoff_time = Some(Instant::now().add(
-                    exp_backoff_timeout(5_000, self.recovery_counters.reconnect as u32),
-                ));
+            if self.recovery_backoff.reconnect_failed() {
                 info!("Recovery: restart broken node with ID `{id}`");
-
-                self.recovery_counters.stop += 1;
                 if let Err(e) = self.stop(true).await {
-                    self.recovery_counters.backoff_time =
-                        Some(Instant::now().add(Duration::from_secs(30)));
                     warn!("Recovery: stopping node with ID `{id}` failed: {e:#}");
-                    if self.recovery_counters.stop >= MAX_STOP_TRIES {
+                    if self.recovery_backoff.stop_failed() {
                         error!("Recovery: retries count exceeded, mark as failed: {e:#}");
                         self.save_expected_status(NodeStatus::Failed).await?;
                     }
@@ -546,8 +517,8 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     pub fn post_recovery(&mut self) {
-        // reset counters on successful recovery
-        self.recovery_counters = Default::default();
+        // reset backoff on successful recovery
+        self.recovery_backoff.reset();
     }
 
     /// Copy OS drive into chroot location.
@@ -701,6 +672,32 @@ pub mod tests {
         }
     }
 
+    #[derive(Debug, Default, Clone)]
+    pub struct DummyBackoff {
+        reconnect: u32,
+        stop: u32,
+        start: u32,
+    }
+
+    impl RecoverBackoff for DummyBackoff {
+        fn backoff(&self) -> bool {
+            false
+        }
+        fn reset(&mut self) {}
+        fn start_failed(&mut self) -> bool {
+            self.start += 1;
+            self.start >= 3
+        }
+        fn stop_failed(&mut self) -> bool {
+            self.stop += 1;
+            self.stop >= 3
+        }
+        fn reconnect_failed(&mut self) -> bool {
+            self.reconnect += 1;
+            self.reconnect >= 3
+        }
+    }
+
     #[derive(Clone)]
     pub struct EmptyStreamConnector;
     pub struct EmptyStream;
@@ -813,6 +810,9 @@ pub mod tests {
             ) -> Result<MockTestVM>;
             fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
             fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
+
+            type RecoveryBackoff = DummyBackoff;
+            fn create_recovery_backoff(&self) -> DummyBackoff;
         }
     }
 
@@ -967,6 +967,8 @@ pub mod tests {
                 .return_const(TestConnector {
                     tmp_root: self.tmp_root.clone(),
                 });
+            pal.expect_create_recovery_backoff()
+                .return_const(DummyBackoff::default());
             pal
         }
 

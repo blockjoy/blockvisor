@@ -70,6 +70,7 @@ where
     P::NodeConnection: Send + Sync,
     P::ApiServiceConnector: Send + Sync,
     P::VirtualMachine: Send + Sync,
+    P::RecoveryBackoff: Send + Sync + 'static,
 {
     pub async fn new(pal: P) -> Result<Self> {
         let bv_root = pal.bv_root().to_owned();

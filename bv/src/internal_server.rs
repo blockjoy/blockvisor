@@ -101,6 +101,7 @@ where
     P::NodeConnection: Send + Sync + 'static,
     P::ApiServiceConnector: Send + Sync + 'static,
     P::VirtualMachine: Send + Sync + 'static,
+    P::RecoveryBackoff: Send + Sync + 'static,
 {
     #[instrument(skip(self), ret(Debug))]
     async fn info(&self, _request: Request<()>) -> Result<Response<String>, Status> {

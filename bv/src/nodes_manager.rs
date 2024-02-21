@@ -947,6 +947,8 @@ mod tests {
                 .return_const(TestConnector {
                     tmp_root: self.tmp_root.clone(),
                 });
+            pal.expect_create_recovery_backoff()
+                .return_const(DummyBackoff::default());
             pal
         }
 

@@ -80,6 +80,11 @@ pub trait Pal {
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
     /// Get available resources, but take into account requirements declared by nodes.
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources>;
+
+    /// Type representing recovery backoff counter.
+    type RecoveryBackoff: RecoverBackoff + Debug;
+    /// Created new VM instance.
+    fn create_recovery_backoff(&self) -> Self::RecoveryBackoff;
 }
 
 pub type AvailableResources = Requirements;
@@ -156,4 +161,12 @@ pub trait VirtualMachine {
     async fn force_shutdown(&mut self) -> Result<()>;
     /// Start the VM.
     async fn start(&mut self) -> Result<()>;
+}
+
+pub trait RecoverBackoff {
+    fn backoff(&self) -> bool;
+    fn reset(&mut self);
+    fn start_failed(&mut self) -> bool;
+    fn stop_failed(&mut self) -> bool;
+    fn reconnect_failed(&mut self) -> bool;
 }

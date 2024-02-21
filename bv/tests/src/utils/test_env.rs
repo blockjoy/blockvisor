@@ -1,7 +1,7 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
 use blockvisord::nodes_manager::NodesDataCache;
-use blockvisord::pal::AvailableResources;
+use blockvisord::pal::{AvailableResources, RecoverBackoff};
 use blockvisord::{
     blockvisord::BlockvisorD,
     config::{Config, SharedConfig},
@@ -341,6 +341,12 @@ impl Pal for DummyPlatform {
             disk_size_gb: 10,
         })
     }
+
+    type RecoveryBackoff = DummyBackoff;
+
+    fn create_recovery_backoff(&self) -> DummyBackoff {
+        Default::default()
+    }
 }
 
 #[derive(Clone)]
@@ -403,5 +409,31 @@ impl CommandsStream for EmptyStream {
     async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>> {
         sleep(Duration::from_millis(100)).await;
         Ok(None)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct DummyBackoff {
+    reconnect: u32,
+    stop: u32,
+    start: u32,
+}
+
+impl RecoverBackoff for DummyBackoff {
+    fn backoff(&self) -> bool {
+        false
+    }
+    fn reset(&mut self) {}
+    fn start_failed(&mut self) -> bool {
+        self.start += 1;
+        self.start >= 1
+    }
+    fn stop_failed(&mut self) -> bool {
+        self.stop += 1;
+        self.stop >= 1
+    }
+    fn reconnect_failed(&mut self) -> bool {
+        self.reconnect += 1;
+        self.reconnect >= 1
     }
 }

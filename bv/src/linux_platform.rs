@@ -5,11 +5,12 @@ use crate::{
     config::SharedConfig,
     firecracker_machine, node_connection,
     node_data::NodeData,
+    pal,
     pal::{AvailableResources, NetInterface, Pal},
     services, utils, BV_VAR_PATH,
 };
 use async_trait::async_trait;
-use bv_utils::cmd::run_cmd;
+use bv_utils::{cmd::run_cmd, exp_backoff_timeout};
 use core::fmt;
 use eyre::{anyhow, bail, Context, Result};
 use futures_util::TryFutureExt;
@@ -18,6 +19,7 @@ use std::{
     fs,
     net::IpAddr,
     path::{Path, PathBuf},
+    time::Instant,
 };
 use sysinfo::{DiskExt, System, SystemExt};
 use uuid::Uuid;
@@ -170,6 +172,11 @@ impl Pal for LinuxPlatform {
             disk_size_gb: available_disk_space / 1_000_000_000,
         })
     }
+
+    type RecoveryBackoff = RecoveryBackoff;
+    fn create_recovery_backoff(&self) -> Self::RecoveryBackoff {
+        Default::default()
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -233,5 +240,58 @@ async fn delete(name: &str) -> Result<()> {
 impl fmt::Display for LinuxNetInterface {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.ip)
+    }
+}
+
+const MAX_START_TRIES: u32 = 3;
+const START_RECOVERY_BACKOFF_BASE_MS: u64 = 15_000;
+const MAX_STOP_TRIES: u32 = 3;
+const STOP_RECOVERY_BACKOFF_BASE_MS: u64 = 45_000;
+const MAX_RECONNECT_TRIES: u32 = 3;
+const RECONNECT_RECOVERY_BACKOFF_BASE_MS: u64 = 5_000;
+
+#[derive(Debug, Default)]
+pub struct RecoveryBackoff {
+    reconnect: u32,
+    stop: u32,
+    start: u32,
+    backoff_time: Option<Instant>,
+}
+
+impl pal::RecoverBackoff for RecoveryBackoff {
+    fn backoff(&self) -> bool {
+        if let Some(backoff_time) = &self.backoff_time {
+            Instant::now() < *backoff_time
+        } else {
+            false
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Default::default();
+    }
+
+    fn start_failed(&mut self) -> bool {
+        self.update_backoff_time(START_RECOVERY_BACKOFF_BASE_MS, self.start);
+        self.start += 1;
+        self.start >= MAX_START_TRIES
+    }
+
+    fn stop_failed(&mut self) -> bool {
+        self.update_backoff_time(STOP_RECOVERY_BACKOFF_BASE_MS, self.stop);
+        self.stop += 1;
+        self.stop >= MAX_STOP_TRIES
+    }
+
+    fn reconnect_failed(&mut self) -> bool {
+        self.update_backoff_time(RECONNECT_RECOVERY_BACKOFF_BASE_MS, self.reconnect);
+        self.reconnect += 1;
+        self.reconnect >= MAX_RECONNECT_TRIES
+    }
+}
+
+impl RecoveryBackoff {
+    fn update_backoff_time(&mut self, backoff_base_ms: u64, counter: u32) {
+        self.backoff_time = Some(Instant::now() + exp_backoff_timeout(backoff_base_ms, counter));
     }
 }
