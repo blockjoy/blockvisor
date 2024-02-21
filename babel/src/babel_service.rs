@@ -3,6 +3,7 @@ use crate::{
     utils::sources_list, BabelPal,
 };
 use async_trait::async_trait;
+use babel_api::babel::NodeContext;
 use babel_api::{
     engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig},
@@ -65,13 +66,14 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 {
     async fn setup_babel(
         &self,
-        request: Request<(String, BabelConfig)>,
+        request: Request<(NodeContext, BabelConfig)>,
     ) -> Result<Response<()>, Status> {
-        let (hostname, config) = request.into_inner();
+        let (context, config) = request.into_inner();
         self.pal
-            .set_hostname(&hostname)
+            .set_hostname(&context.bv_name)
             .await
             .map_err(|err| Status::internal(format!("failed to setup hostname with: {err:#}")))?;
+        export_node_context(context);
 
         apply_babel_config(&self.pal, &config)
             .await
@@ -338,6 +340,19 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
 
 fn to_blockchain_err(err: eyre::Error) -> Status {
     Status::internal(err.to_string())
+}
+
+fn export_node_context(context: NodeContext) {
+    std::env::set_var("BV_HOST_ID", context.bv_id);
+    std::env::set_var("BV_HOST_NAME", context.bv_name);
+    std::env::set_var("BV_API_URL", context.bv_api_url);
+    std::env::set_var("NODE_ID", context.node_id);
+    std::env::set_var("NODE_NAME", context.node_name);
+    std::env::set_var("NODE_IP", context.ip);
+    std::env::set_var("NODE_GATEWAY", context.gateway);
+    if context.standalone {
+        std::env::set_var("NODE_STANDALONE", "1");
+    }
 }
 
 impl<J, P> BabelService<J, P> {
@@ -858,7 +873,16 @@ mod tests {
         test_env
             .client
             .setup_babel((
-                "localhost".to_string(),
+                NodeContext {
+                    node_id: Default::default(),
+                    node_name: "localhost".to_string(),
+                    ip: "".to_string(),
+                    gateway: "".to_string(),
+                    standalone: false,
+                    bv_id: "".to_string(),
+                    bv_name: "".to_string(),
+                    bv_api_url: "".to_string(),
+                },
                 BabelConfig {
                     log_buffer_capacity_ln: 10,
                     swap_size_mb: 16,

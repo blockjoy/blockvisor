@@ -52,6 +52,14 @@ pub struct Node<P: Pal> {
     context: NodeContext,
     pal: Arc<P>,
     recovery_backoff: P::RecoveryBackoff,
+    bv_context: BvContext,
+}
+
+#[derive(Debug)]
+struct BvContext {
+    id: String,
+    name: String,
+    url: String,
 }
 
 struct MaybeNode<P: Pal> {
@@ -87,6 +95,12 @@ impl<P: Pal> MaybeNode<P> {
         self.machine = Some(check!(pal.create_vm(&self.data).await, self));
         check!(self.data.save(&self.context.registry).await, self);
 
+        let host_config = api_config.config.read().await.clone();
+        let bv_context = BvContext {
+            id: host_config.id,
+            name: host_config.name,
+            url: host_config.blockjoy_api_url,
+        };
         let babel_engine = check!(
             BabelEngine::new(
                 NodeInfo {
@@ -114,6 +128,7 @@ impl<P: Pal> MaybeNode<P> {
             context: self.context,
             pal,
             recovery_backoff,
+            bv_context,
         })
     }
 
@@ -181,6 +196,12 @@ impl<P: Pal + Debug> Node<P> {
                 node_conn.close();
             }
         }
+        let host_config = api_config.config.read().await.clone();
+        let bv_context = BvContext {
+            id: host_config.id,
+            name: host_config.name,
+            url: host_config.blockjoy_api_url,
+        };
         let babel_engine = BabelEngine::new(
             NodeInfo {
                 node_id,
@@ -204,6 +225,7 @@ impl<P: Pal + Debug> Node<P> {
             context,
             pal,
             recovery_backoff,
+            bv_context,
         })
     }
 
@@ -272,7 +294,19 @@ impl<P: Pal + Debug> Node<P> {
 
         // setup babel
         let babel_client = self.babel_engine.node_connection.babel_client().await?;
-        with_retry!(babel_client.setup_babel((id.to_string(), self.metadata.babel_config.clone())))?;
+        let node_context = babel_api::babel::NodeContext {
+            node_id: id.to_string(),
+            node_name: self.data.name.clone(),
+            ip: self.data.network_interface.ip().to_string(),
+            gateway: self.data.network_interface.gateway().to_string(),
+            standalone: self.data.standalone,
+            bv_id: self.bv_context.id.clone(),
+            bv_name: self.bv_context.name.clone(),
+            bv_api_url: self.bv_context.url.clone(),
+        };
+        with_retry!(
+            babel_client.setup_babel((node_context.clone(), self.metadata.babel_config.clone()))
+        )?;
 
         if !self.data.initialized {
             // setup firewall, but only once
@@ -845,7 +879,7 @@ pub mod tests {
         impl babel_api::babel::babel_server::Babel for TestBabelService {
             async fn setup_babel(
                 &self,
-                request: Request<(String, BabelConfig)>,
+                request: Request<(babel_api::babel::NodeContext, BabelConfig)>,
             ) -> Result<Response<()>, Status>;
             async fn get_babel_shutdown_timeout(
                 &self,
@@ -917,6 +951,7 @@ pub mod tests {
         SharedConfig::new(
             Config {
                 id: "host_id".to_string(),
+                name: "host_name".to_string(),
                 token: "token".to_string(),
                 refresh_token: "refresh_token".to_string(),
                 blockjoy_api_url: "api.url".to_string(),
@@ -1439,13 +1474,22 @@ pub mod tests {
             .expect_check_job_runner()
             .times(3)
             .returning(|_| Ok(Response::new(BinaryStatus::Ok)));
-        let expected_id = node.data.id.to_string();
+        let expected_context = babel_api::babel::NodeContext {
+            node_id: node.data.id.to_string(),
+            node_name: node.data.name.clone(),
+            ip: node.data.network_interface.ip().to_string(),
+            gateway: node.data.network_interface.gateway().to_string(),
+            standalone: node.data.standalone,
+            bv_id: node.bv_context.id.clone(),
+            bv_name: node.bv_context.name.clone(),
+            bv_api_url: node.bv_context.url.clone(),
+        };
         let expected_config = node.metadata.babel_config.clone();
         babel_mock
             .expect_setup_babel()
             .withf(move |req| {
-                let (id, config) = req.get_ref();
-                *id == expected_id && *config == expected_config
+                let (context, config) = req.get_ref();
+                *context == expected_context && *config == expected_config
             })
             .times(3)
             .returning(|_| Ok(Response::new(())));

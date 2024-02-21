@@ -146,7 +146,7 @@ async fn main() -> Result<()> {
 
         let create = pb::HostServiceCreateRequest {
             provision_token: cmd_args.provision_token.unwrap(),
-            name: host_info.name,
+            name: host_info.name.clone(),
             version: crate_version!().to_string(),
             cpu_count,
             mem_size_bytes: host_info.memory_bytes,
@@ -175,6 +175,7 @@ async fn main() -> Result<()> {
                 .host
                 .ok_or_else(|| anyhow!("No `host` in response"))?
                 .id,
+            name: host_info.name,
             token: host.token,
             refresh_token: host.refresh,
             blockjoy_api_url: cmd_args.blockjoy_api_url.clone(),

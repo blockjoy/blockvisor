@@ -738,7 +738,7 @@ mod tests {
         impl babel_api::babel::babel_server::Babel for BabelService {
             async fn setup_babel(
                 &self,
-                request: Request<(String, BabelConfig)>,
+                request: Request<(babel_api::babel::NodeContext, BabelConfig)>,
             ) -> Result<Response<()>, Status>;
             async fn get_babel_shutdown_timeout(
                 &self,
@@ -975,6 +975,7 @@ mod tests {
                 SharedConfig::new(
                     Config {
                         id: "".to_string(),
+                        name: "".to_string(),
                         token: "".to_string(),
                         refresh_token: "".to_string(),
                         blockjoy_api_url: "".to_string(),

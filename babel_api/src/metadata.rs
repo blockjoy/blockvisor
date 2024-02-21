@@ -61,7 +61,7 @@ pub struct BabelConfig {
     /// Location of swap file.
     #[serde(default = "default_swap_file_location")]
     pub swap_file_location: String,
-    /// RAM disks configuration
+    /// RAM disks configuration.
     pub ramdisks: Option<Vec<RamdiskConfiguration>>,
 }
 

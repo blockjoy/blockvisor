@@ -85,6 +85,7 @@ impl TestEnv {
     pub async fn new() -> Result<Self> {
         let api_config = Config {
             id: "host_id".to_owned(),
+            name: "host_name".to_string(),
             token: "token".to_owned(),
             refresh_token: "fresh boii".to_owned(),
             blockjoy_api_url: "http://localhost:8070".to_owned(),

@@ -1,10 +1,9 @@
 use crate::services::{request_refresh_token, AuthToken};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::time::Duration;
-use tokio::fs;
-use tokio::time::timeout;
+use std::{path::Path, time::Duration};
+use sysinfo::{System, SystemExt};
+use tokio::{fs, time::timeout};
 use tracing::{debug, info};
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.json";
@@ -19,9 +18,15 @@ pub fn default_iface() -> String {
     DEFAULT_BRIDGE_IFACE.to_string()
 }
 
+pub fn default_hostname() -> String {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    sys.host_name().unwrap_or_default()
+}
+
 #[derive(Debug, Clone)]
 pub struct SharedConfig {
-    config: std::sync::Arc<tokio::sync::RwLock<Config>>,
+    pub config: std::sync::Arc<tokio::sync::RwLock<Config>>,
     pub bv_root: std::path::PathBuf,
 }
 
@@ -88,6 +93,9 @@ impl SharedConfig {
 pub struct Config {
     /// Host uuid
     pub id: String,
+    /// Host name
+    #[serde(default = "default_hostname")]
+    pub name: String,
     /// Host auth token
     pub token: String,
     /// The refresh token.

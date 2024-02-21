@@ -569,6 +569,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     let id = Uuid::new_v4();
     let config = Config {
         id: id.to_string(),
+        name: "host name".to_string(),
         token: TokenGenerator::create_host(id, "1245456"),
         refresh_token: "any refresh token".to_string(),
         blockjoy_api_url: "http://localhost:8089".to_string(),
@@ -673,6 +674,7 @@ async fn test_discovery_on_connection_error() -> Result<()> {
     let id = Uuid::new_v4();
     let config = Config {
         id: id.to_string(),
+        name: "host name".to_string(),
         token: TokenGenerator::create_host(id, "1245456"),
         refresh_token: "any refresh token".to_string(),
         blockjoy_api_url: "http://localhost:8091".to_string(),
