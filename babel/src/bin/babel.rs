@@ -168,7 +168,7 @@ impl BabelPal for Pal {
     async fn set_node_context(&self, node_context: NodeContext) -> eyre::Result<()> {
         run_cmd(
             "hostnamectl",
-            ["set-hostname", &node_context.node_name.clone()],
+            ["set-hostname", &node_context.node_name.replace('_', "-")],
         )
         .await
         .map_err(|err| anyhow!("hostnamectl error: {err:#}"))?;
