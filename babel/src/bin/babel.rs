@@ -25,7 +25,7 @@ const DATA_DRIVE_PATH: &str = "/dev/vdb";
 const VSOCK_GUEST_CID: u32 = 3;
 const VSOCK_BABEL_PORT: u32 = 42;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
     setup_logging()?;
     info!(
