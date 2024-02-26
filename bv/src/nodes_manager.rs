@@ -513,8 +513,9 @@ impl<P: Pal + Debug> NodesManager<P> {
             .write()
             .await;
 
-        let metrics = node_metrics::collect_metric(&mut node.babel_engine).await;
-        Ok(metrics)
+        node_metrics::collect_metric(&mut node.babel_engine)
+            .await
+            .ok_or(anyhow!("metrics not available"))
     }
 
     #[instrument(skip(self))]

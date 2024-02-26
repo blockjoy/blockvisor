@@ -85,7 +85,9 @@ pub async fn collect_metrics<P: Pal + Debug + 'static>(
                 Err(_) => None,
                 Ok(mut node) => {
                     if node.status() == NodeStatus::Running && !node.data.standalone {
-                        Some((node.id(), collect_metric(&mut node.babel_engine).await))
+                        collect_metric(&mut node.babel_engine)
+                            .await
+                            .map(|metric| (node.id(), metric))
                     } else {
                         // don't collect metrics for not running or standalone nodes
                         None
@@ -99,43 +101,53 @@ pub async fn collect_metrics<P: Pal + Debug + 'static>(
 }
 
 /// Returns the metric for a single node.
-pub async fn collect_metric<N: NodeConnection>(babel_engine: &mut BabelEngine<N>) -> Metric {
-    let height = match babel_engine.has_capability("height") {
-        true => timeout(babel_engine.height()).await.ok(),
-        false => None,
-    };
-    let block_age = match babel_engine.has_capability("block_age") {
-        true => timeout(babel_engine.block_age()).await.ok(),
-        false => None,
-    };
-    let staking_status = match babel_engine.has_capability("staking_status") {
-        true => timeout(babel_engine.staking_status()).await.ok(),
-        false => None,
-    };
-    let consensus = match babel_engine.has_capability("consensus") {
-        true => timeout(babel_engine.consensus()).await.ok(),
-        false => None,
-    };
-    let sync_status = match babel_engine.has_capability("sync_status") {
-        true => timeout(babel_engine.sync_status()).await.ok(),
-        false => None,
-    };
+pub async fn collect_metric<N: NodeConnection>(
+    babel_engine: &mut BabelEngine<N>,
+) -> Option<Metric> {
+    let application_status = timeout(babel_engine.application_status()).await.ok();
+    match application_status {
+        Some(ApplicationStatus::Initializing)
+        | Some(ApplicationStatus::Downloading)
+        | Some(ApplicationStatus::Uploading) => None,
+        _ => {
+            let height = match babel_engine.has_capability("height") {
+                true => timeout(babel_engine.height()).await.ok(),
+                false => None,
+            };
+            let block_age = match babel_engine.has_capability("block_age") {
+                true => timeout(babel_engine.block_age()).await.ok(),
+                false => None,
+            };
+            let staking_status = match babel_engine.has_capability("staking_status") {
+                true => timeout(babel_engine.staking_status()).await.ok(),
+                false => None,
+            };
+            let consensus = match babel_engine.has_capability("consensus") {
+                true => timeout(babel_engine.consensus()).await.ok(),
+                false => None,
+            };
+            let sync_status = match babel_engine.has_capability("sync_status") {
+                true => timeout(babel_engine.sync_status()).await.ok(),
+                false => None,
+            };
 
-    let jobs = timeout(babel_engine.get_jobs())
-        .await
-        .ok()
-        .unwrap_or_default();
+            let jobs = timeout(babel_engine.get_jobs())
+                .await
+                .ok()
+                .unwrap_or_default();
 
-    Metric {
-        // these could be optional
-        height,
-        block_age,
-        staking_status,
-        consensus,
-        sync_status,
-        // these are expected in every chain
-        application_status: timeout(babel_engine.application_status()).await.ok(),
-        jobs,
+            Some(Metric {
+                // these could be optional
+                height,
+                block_age,
+                staking_status,
+                consensus,
+                sync_status,
+                // these are expected in every chain
+                application_status,
+                jobs,
+            })
+        }
     }
 }
 
@@ -260,6 +272,13 @@ impl From<ApplicationStatus> for common::NodeStatus {
             ApplicationStatus::Relaying => common::NodeStatus::Relaying,
             ApplicationStatus::Deleting => common::NodeStatus::Deleting,
             ApplicationStatus::Updating => common::NodeStatus::Updating,
+            ApplicationStatus::DeletePending => common::NodeStatus::DeletePending,
+            ApplicationStatus::Deleted => common::NodeStatus::Deleted,
+            ApplicationStatus::ProvisioningPending => common::NodeStatus::ProvisioningPending,
+            ApplicationStatus::UpdatePending => common::NodeStatus::UpdatePending,
+            ApplicationStatus::Initializing => common::NodeStatus::Initializing,
+            ApplicationStatus::Downloading => common::NodeStatus::Downloading,
+            ApplicationStatus::Uploading => common::NodeStatus::Uploading,
         }
     }
 }

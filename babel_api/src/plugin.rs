@@ -91,6 +91,13 @@ pub enum ApplicationStatus {
     Minting,
     Processing,
     Relaying,
+    DeletePending,
     Deleting,
+    Deleted,
+    ProvisioningPending,
+    UpdatePending,
     Updating,
+    Initializing,
+    Downloading,
+    Uploading,
 }

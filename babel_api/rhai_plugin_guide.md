@@ -215,7 +215,7 @@ fn init(params) {
 ```
 
 - `application_status()` - Returns blockchain application status.
-  <br>**Allowed return values**: _provisioning_, _broadcasting_, _cancelled_, _delegating_, _delinquent_, _disabled_, _earning_, _electing_, _elected_, _exported_, _ingesting_, _mining_, _minting_, _processing_, _relaying_, _removed_, _removing_
+  <br>**Allowed return values**: _provisioning_, _broadcasting_, _cancelled_, _delegating_, _delinquent_, _disabled_, _earning_, _electing_, _elected_, _exported_, _ingesting_, _mining_, _minting_, _processing_, _relaying_, _delete_pending_, _deleting_, _deleted_, _provisioning_pending_, _update_pending_, _updating_, _initializing_, _downloading_, _uploading_
 
 ### Functions that SHOULD be implemented by Plugin
 
