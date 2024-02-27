@@ -305,8 +305,7 @@ async fn process_node_command<P: Pal + Debug>(
                 API_STOP_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Restart(_) => {
-                nodes_manager.stop(node_id, false).await?;
-                nodes_manager.start(node_id, false).await?;
+                nodes_manager.restart(node_id, false).await?;
                 API_RESTART_COUNTER.increment(1);
                 API_RESTART_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }

@@ -70,6 +70,8 @@ pub struct NodeData<N> {
     pub network: String,
     #[serde(default)]
     pub standalone: bool,
+    #[serde(default)]
+    pub restarting: bool,
 }
 
 impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {

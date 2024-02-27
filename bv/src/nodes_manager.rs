@@ -251,6 +251,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             initialized: false,
             standalone: config.standalone,
             has_pending_update: false,
+            restarting: false,
         };
 
         let node = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
@@ -367,6 +368,18 @@ impl<P: Pal + Debug> NodesManager<P> {
         if NodeStatus::Stopped != node.expected_status() || force {
             node.stop(force).await?;
         }
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub async fn restart(&self, id: Uuid, force: bool) -> commands::Result<()> {
+        let nodes_lock = self.nodes.read().await;
+        let mut node = nodes_lock
+            .get(&id)
+            .ok_or_else(|| Error::NodeNotFound(id))?
+            .write()
+            .await;
+        node.restart(force).await?;
         Ok(())
     }
 
@@ -1192,6 +1205,7 @@ mod tests {
                 .collect(),
             network: config.network,
             standalone: config.standalone,
+            restarting: false,
         }
     }
 
@@ -1542,6 +1556,7 @@ mod tests {
             properties: Default::default(),
             network: "test".to_string(),
             standalone: false,
+            restarting: false,
         };
         fs::create_dir_all(pal.build_vm_data_path(node_data.id)).await?;
 

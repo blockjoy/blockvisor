@@ -323,6 +323,7 @@ impl<P: Pal + Debug> Node<P> {
             self.data.has_pending_update = false;
         }
         self.data.started_at = Some(Utc::now());
+        self.data.restarting = false;
         self.data.save(&self.context.registry).await?;
         debug!("Node started");
         Ok(())
@@ -372,6 +373,13 @@ impl<P: Pal + Debug> Node<P> {
             }
         }
         debug!("Node stopped");
+        Ok(())
+    }
+
+    pub async fn restart(&mut self, force: bool) -> Result<()> {
+        self.data.restarting = true;
+        self.stop(force).await?;
+        self.start().await?;
         Ok(())
     }
 
@@ -481,6 +489,9 @@ impl<P: Pal + Debug> Node<P> {
                     }
                 } else {
                     self.post_recovery();
+                    if self.data.restarting {
+                        self.start().await?;
+                    }
                 }
             }
             NodeStatus::Failed => {
@@ -531,14 +542,14 @@ impl<P: Pal + Debug> Node<P> {
             warn!("Recovery: reconnect to node with ID `{id}` failed: {e:#}");
             if self.recovery_backoff.reconnect_failed() {
                 info!("Recovery: restart broken node with ID `{id}`");
-                if let Err(e) = self.stop(true).await {
-                    warn!("Recovery: stopping node with ID `{id}` failed: {e:#}");
+                if let Err(e) = self.restart(true).await {
+                    warn!("Recovery: restart node with ID `{id}` failed: {e:#}");
                     if self.recovery_backoff.stop_failed() {
                         error!("Recovery: retries count exceeded, mark as failed: {e:#}");
                         self.save_expected_status(NodeStatus::Failed).await?;
                     }
                 } else {
-                    self.started_node_recovery().await?;
+                    self.post_recovery();
                 }
             }
         } else if self.babel_engine.node_connection.is_closed() {
@@ -1037,6 +1048,7 @@ pub mod tests {
                 properties: Default::default(),
                 network: "test".to_string(),
                 standalone: true,
+                restarting: false,
             }
         }
 
