@@ -562,7 +562,7 @@ where
         req: NodeCreateRequest,
     ) -> eyre::Result<NodeDisplayInfo> {
         let id = Uuid::new_v4();
-        let name = Petnames::default().generate_one(3, "_");
+        let name = Petnames::default().generate_one(3, "-");
         let properties = parse_props(&req)?.into_iter().collect();
         let (ip, gateway) = self.discover_ip_and_gateway(&req, id).await?;
         self.nodes_manager
