@@ -297,6 +297,9 @@ impl<P: Pal + Debug> Node<P> {
         let node_context = babel_api::babel::NodeContext {
             node_id: id.to_string(),
             node_name: self.data.name.clone(),
+            node_type: self.data.image.node_type.clone(),
+            protocol: self.data.image.protocol.clone(),
+            node_version: self.data.image.node_version.clone(),
             ip: self.data.network_interface.ip().to_string(),
             gateway: self.data.network_interface.gateway().to_string(),
             standalone: self.data.standalone,
@@ -1489,6 +1492,9 @@ pub mod tests {
         let expected_context = babel_api::babel::NodeContext {
             node_id: node.data.id.to_string(),
             node_name: node.data.name.clone(),
+            node_version: node.data.image.node_version.clone(),
+            protocol: node.data.image.protocol.clone(),
+            node_type: node.data.image.node_type.clone(),
             ip: node.data.network_interface.ip().to_string(),
             gateway: node.data.network_interface.gateway().to_string(),
             standalone: node.data.standalone,

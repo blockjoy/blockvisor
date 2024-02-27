@@ -24,6 +24,8 @@ lazy_static::lazy_static! {
 const DATA_DRIVE_PATH: &str = "/dev/vdb";
 const VSOCK_GUEST_CID: u32 = 3;
 const VSOCK_BABEL_PORT: u32 = 42;
+const NODE_ENV_FILE_PATH: &str = "/var/lib/babel/node_env";
+const POST_SETUP_SCRIPT: &str = "/var/lib/babel/post_setup.sh";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> eyre::Result<()> {
@@ -173,26 +175,35 @@ impl BabelPal for Pal {
         .await
         .map_err(|err| anyhow!("hostnamectl error: {err:#}"))?;
 
-        std::env::set_var("BV_HOST_ID", &node_context.bv_id);
-        std::env::set_var("BV_HOST_NAME", &node_context.bv_name);
-        std::env::set_var("BV_API_URL", &node_context.bv_api_url);
-        std::env::set_var("NODE_ID", &node_context.node_id);
-        std::env::set_var("NODE_NAME", &node_context.node_name);
-        std::env::set_var("NODE_IP", &node_context.ip);
-        std::env::set_var("NODE_GATEWAY", &node_context.gateway);
-        std::env::set_var("NODE_STANDALONE", node_context.standalone.to_string());
-        let babel_profile = format!(
-            "export BV_HOST_ID={} BV_HOST_NAME={} BV_API_URL={} NODE_ID={} NODE_NAME={} NODE_IP={} NODE_GATEWAY={} NODE_STANDALONE={}",
+        let node_env = format!(
+            "BV_HOST_ID={}\n\
+             BV_HOST_NAME={}\n\
+             BV_API_URL={}\n\
+             NODE_ID={}\n\
+             NODE_NAME={}\n\
+             NODE_TYPE={}\n\
+             BLOCKCHAIN_TYPE={}\n\
+             NODE_VERSION={}\n\
+             NODE_IP={}\n\
+             NODE_GATEWAY={}\n\
+             NODE_STANDALONE={}\n",
             node_context.bv_id,
             node_context.bv_name,
             node_context.bv_api_url,
             node_context.node_id,
             node_context.node_name,
+            node_context.node_type,
+            node_context.protocol,
+            node_context.node_version,
             node_context.ip,
             node_context.gateway,
-            node_context.standalone);
-        if let Err(err) = fs::write("/etc/profile.d/babel.sh", babel_profile).await {
-            warn!("set node_contest as env variable failed: {err:#}");
+            node_context.standalone
+        );
+        if let Err(err) = fs::write(NODE_ENV_FILE_PATH, node_env).await {
+            warn!("failed to write node_env file: {err:#}");
+        }
+        if Path::new(POST_SETUP_SCRIPT).exists() {
+            run_cmd::<[&str; 0], _>(POST_SETUP_SCRIPT, []).await?;
         }
         Ok(())
     }

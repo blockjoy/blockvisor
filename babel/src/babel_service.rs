@@ -860,14 +860,8 @@ mod tests {
             .client
             .setup_babel((
                 NodeContext {
-                    node_id: Default::default(),
                     node_name: "localhost".to_string(),
-                    ip: "".to_string(),
-                    gateway: "".to_string(),
-                    standalone: false,
-                    bv_id: "".to_string(),
-                    bv_name: "".to_string(),
-                    bv_api_url: "".to_string(),
+                    ..Default::default()
                 },
                 BabelConfig {
                     log_buffer_capacity_ln: 10,

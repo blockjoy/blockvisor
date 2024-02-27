@@ -72,7 +72,10 @@ used during debugging issues, not printed by default
 - `/etc/systemd/system/babelsup.service`
 - `/var/lib/babel/jobs/<job_name>.cfg`
 - `/var/lib/babel/jobs/<job_name>.status`
+- `/var/lib/babel/jobs_monitor.socket`
 - `/var/lib/babel/logs.socket`
+- `/var/lib/babel/node_env`
+- `/var/lib/babel/post_setup.sh`
 
 ### Bundle
 - `bundle/installer`

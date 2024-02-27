@@ -104,12 +104,18 @@ pub trait BabelEngine {
     fn bv_error(message: String);
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct NodeContext {
     /// Unique id of the node.
     pub node_id: String,
     /// Friendly name of the name.
     pub node_name: String,
+    /// Version of the image, that node was created from.
+    pub node_version: String,
+    /// Name of the blockchain protocol.
+    pub protocol: String,
+    /// Type of the node (validator, node, etc).
+    pub node_type: String,
     /// Node IP address.
     pub ip: String,
     // Node gateway address.

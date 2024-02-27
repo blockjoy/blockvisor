@@ -35,7 +35,7 @@ pub struct BlockchainMetadata {
     pub node_version: String,
     /// Name of the blockchain protocol.
     pub protocol: String,
-    /// Type of the node (validator, beacon, etc).
+    /// Type of the node (validator, node, etc).
     pub node_type: String,
     /// Some description of the node.
     pub description: Option<String>,
