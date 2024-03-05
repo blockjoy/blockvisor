@@ -27,7 +27,7 @@ use bv_utils::{
     rpc::with_timeout,
     {run_flag::RunFlag, with_retry},
 };
-use eyre::{anyhow, bail, Error, Result, WrapErr};
+use eyre::{bail, Error, Result, WrapErr};
 use futures_util::StreamExt;
 use std::{
     collections::HashMap,
@@ -112,13 +112,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     pub async fn stop_server(&mut self) -> Result<()> {
-        self.server
-            .take()
-            .ok_or(anyhow!(
-            "internal BV error - trying to stop babel engine server, while it is already stopped"
-        ))?
-            .stop()
-            .await?;
+        if let Some(server) = self.server.take() {
+            server.stop().await?;
+        }
         Ok(())
     }
 
