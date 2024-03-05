@@ -24,8 +24,10 @@ pub trait Engine {
     fn start_job(&self, job_name: &str) -> Result<()>;
     /// Stop background job with given unique name if running.
     fn stop_job(&self, job_name: &str) -> Result<()>;
-    /// Get background job status by unique name.
-    fn job_status(&self, job_name: &str) -> Result<JobStatus>;
+    /// Get background job info by unique name.
+    fn job_info(&self, job_name: &str) -> Result<JobInfo>;
+    /// Get background jobs info.
+    fn get_jobs(&self) -> Result<JobsInfo>;
 
     /// Execute Jrpc request to the current blockchain and return its http response. See `HttpResponse`.
     fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
@@ -188,9 +190,7 @@ pub enum JobType {
         /// If `None` BV will ask blockvisor-api for manifest
         /// based on node `NodeImage` and `network`.  
         manifest: Option<DownloadManifest>,
-        /// [deprecated] Destination directory for downloaded files.
-        /// Don't use that field. It is left only for backward compatibility
-        // TODO remove once all nodes are upgraded
+        /// Destination directory for downloaded files.
         destination: Option<PathBuf>,
         /// Maximum number of parallel opened connections.
         max_connections: Option<usize>,
@@ -204,9 +204,7 @@ pub enum JobType {
         /// based on node `NodeImage`, `network`, and size of data
         /// stored in `source` directory.  
         manifest: Option<UploadManifest>,
-        /// [deprecated] Source directory with files to be uploaded.
-        /// Don't use that field. It is left only for backward compatibility
-        // TODO remove once all nodes are upgraded
+        /// Source directory with files to be uploaded.
         source: Option<PathBuf>,
         /// List of exclude patterns. Files in `source` directory that match any of pattern,
         /// won't be taken into account.
@@ -253,7 +251,7 @@ pub struct RestRequest {
 /// Long running job configuration
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct JobConfig {
-    /// Sh script body.
+    /// Job type.
     pub job_type: JobType,
     /// Job restart policy.
     pub restart: RestartPolicy,
@@ -325,6 +323,8 @@ pub struct JobInfo {
     /// Node can't be upgraded while `upgrade_blocking` job is running.
     pub upgrade_blocking: bool,
 }
+
+pub type JobsInfo = HashMap<String, JobInfo>;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Hash)]
 pub struct JobProgress {

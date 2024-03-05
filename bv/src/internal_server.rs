@@ -11,6 +11,7 @@ use crate::{
     services::api::{self, common, pb},
     {get_bv_status, set_bv_status, utils, ServiceStatus}, {node_metrics, BV_VAR_PATH},
 };
+use babel_api::engine::JobsInfo;
 use chrono::Utc;
 use eyre::{anyhow, Context};
 use petname::Petnames;
@@ -63,7 +64,7 @@ trait Service {
     fn start_node(id: Uuid);
     fn stop_node(id: Uuid, force: bool);
     fn delete_node(id: Uuid);
-    fn get_node_jobs(id: Uuid) -> Vec<(String, babel_api::engine::JobInfo)>;
+    fn get_node_jobs(id: Uuid) -> JobsInfo;
     fn get_node_job_info(id: Uuid, job_name: String) -> babel_api::engine::JobInfo;
     fn start_node_job(id: Uuid, job_name: String);
     fn stop_node_job(id: Uuid, job_name: String);
@@ -302,10 +303,7 @@ where
     }
 
     #[instrument(skip(self))]
-    async fn get_node_jobs(
-        &self,
-        request: Request<Uuid>,
-    ) -> Result<Response<Vec<(String, babel_api::engine::JobInfo)>>, Status> {
+    async fn get_node_jobs(&self, request: Request<Uuid>) -> Result<Response<JobsInfo>, Status> {
         status_check().await?;
         let id = request.into_inner();
         let jobs = self

@@ -15,6 +15,7 @@ use crate::{
     },
     utils, BV_VAR_PATH,
 };
+use babel_api::engine::JobsInfo;
 use babel_api::{
     engine::JobInfo,
     metadata::{firewall, BlockchainMetadata, Requirements},
@@ -441,7 +442,7 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn jobs(&self, id: Uuid) -> Result<Vec<(String, JobInfo)>> {
+    pub async fn jobs(&self, id: Uuid) -> Result<JobsInfo> {
         let nodes = self.nodes.read().await;
         let mut node = nodes
             .get(&id)

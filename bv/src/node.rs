@@ -314,7 +314,7 @@ impl<P: Pal + Debug> Node<P> {
         if !self.data.initialized {
             // setup firewall, but only once
             self.setup_firewall_rules().await?;
-            if let Err(err) = self.babel_engine.init(Default::default()).await {
+            if let Err(err) = self.babel_engine.init().await {
                 // mark as permanently failed - non-recoverable
                 self.save_expected_status(NodeStatus::Failed).await?;
                 return Err(err);
@@ -658,6 +658,7 @@ pub mod tests {
     };
     use assert_fs::TempDir;
     use async_trait::async_trait;
+    use babel_api::engine::JobsInfo;
     use babel_api::{
         engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
         metadata::{BabelConfig, Requirements},
@@ -668,6 +669,7 @@ pub mod tests {
     use chrono::SubsecRound;
     use mockall::*;
     use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
     use std::{
         net::IpAddr,
         path::{Path, PathBuf},
@@ -927,7 +929,7 @@ pub mod tests {
             async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
             async fn get_job_shutdown_timeout(&self, request: Request<String>) -> Result<Response<Duration>, Status>;
-            async fn get_jobs(&self, request: Request<()>) -> Result<Response<Vec<(String, JobInfo)>>, Status>;
+            async fn get_jobs(&self, request: Request<()>) -> Result<Response<JobsInfo>, Status>;
             async fn run_jrpc(
                 &self,
                 request: Request<JrpcRequest>,
@@ -1822,7 +1824,7 @@ pub mod tests {
         let mut babel_mock = MockTestBabelService::new();
         // failed to gracefully shutdown babel
         babel_mock.expect_get_jobs().once().returning(|_| {
-            Ok(Response::new(vec![(
+            Ok(Response::new(HashMap::from_iter([(
                 "upgrade_blocking_job_name".to_string(),
                 JobInfo {
                     status: JobStatus::Running,
@@ -1831,7 +1833,7 @@ pub mod tests {
                     logs: vec![],
                     upgrade_blocking: true,
                 },
-            )]))
+            )])))
         });
 
         let server = test_env

@@ -1,11 +1,13 @@
 mod utils;
+use babel_api::engine::JobInfo;
 use babel_api::{
     engine::{HttpResponse, JobStatus, ShResponse},
     metadata::BlockchainMetadata,
     plugin::Plugin,
     rhai_plugin,
 };
-use std::{collections::HashMap, fs, path::Path};
+use std::collections::HashMap;
+use std::{fs, path::Path};
 
 pub fn rhai_smoke(path: &Path) -> eyre::Result<BlockchainMetadata> {
     let script = fs::read_to_string(path)?;
@@ -15,9 +17,16 @@ pub fn rhai_smoke(path: &Path) -> eyre::Result<BlockchainMetadata> {
     babel.expect_create_job().returning(|_, _| Ok(()));
     babel.expect_start_job().returning(|_| Ok(()));
     babel.expect_stop_job().returning(|_| Ok(()));
-    babel
-        .expect_job_status()
-        .returning(|_| Ok(JobStatus::Running));
+    babel.expect_job_info().returning(|_| {
+        Ok(JobInfo {
+            status: JobStatus::Running,
+            progress: None,
+            restart_count: 0,
+            logs: vec![],
+            upgrade_blocking: false,
+        })
+    });
+    babel.expect_get_jobs().returning(|| Ok(HashMap::default()));
     babel.expect_run_jrpc().returning(|_, _| {
         Ok(HttpResponse {
             status_code: 200,
@@ -48,12 +57,7 @@ pub fn rhai_smoke(path: &Path) -> eyre::Result<BlockchainMetadata> {
         .returning(|| Ok(Default::default()));
     let plugin = rhai_plugin::RhaiPlugin::new(&script, babel)?;
     assert!(plugin.capabilities().iter().any(|v| v == "init"));
-    plugin
-        .init(&HashMap::from_iter([(
-            "key1".to_string(),
-            "key1_value".to_string(),
-        )]))
-        .ok();
+    plugin.init().ok();
     plugin.height().ok();
     plugin.block_age().ok();
     plugin.name().ok();

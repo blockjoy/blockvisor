@@ -1,5 +1,5 @@
 use babel_api::engine::{
-    Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse,
+    Engine, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest, ShResponse,
 };
 use eyre::Result;
 use mockall::*;
@@ -12,7 +12,8 @@ mock! {
         fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
         fn start_job(&self, job_name: &str) -> Result<()>;
         fn stop_job(&self, job_name: &str) -> Result<()>;
-        fn job_status(&self, job_name: &str) -> Result<JobStatus>;
+        fn job_info(&self, job_name: &str) -> Result<JobInfo>;
+        fn get_jobs(&self) -> Result<JobsInfo>;
         fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
         fn run_rest(&self, req: RestRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
         fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<ShResponse>;

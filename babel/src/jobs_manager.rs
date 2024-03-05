@@ -14,7 +14,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use babel_api::engine::{
-    JobConfig, JobInfo, JobProgress, JobStatus, RestartPolicy, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
+    JobConfig, JobInfo, JobProgress, JobStatus, JobsInfo, RestartPolicy,
+    DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
 use bv_utils::run_flag::RunFlag;
 use bv_utils::with_retry;
@@ -149,7 +150,7 @@ pub trait JobsManagerClient {
     async fn startup(&self) -> Result<()>;
     async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
     async fn shutdown(&self) -> Result<()>;
-    async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
+    async fn list(&self) -> Result<JobsInfo>;
     async fn create(&self, name: &str, config: JobConfig) -> Result<()>;
     async fn start(&self, name: &str) -> Result<()>;
     async fn get_job_shutdown_timeout(&self, name: &str) -> Duration;
@@ -210,7 +211,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<(String, JobInfo)>> {
+    async fn list(&self) -> Result<JobsInfo> {
         let jobs_context = &mut *self.jobs_registry.lock().await;
         let res = jobs_context
             .jobs

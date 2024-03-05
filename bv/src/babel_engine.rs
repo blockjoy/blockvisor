@@ -1,4 +1,3 @@
-use crate::pal::BabelClient;
 /// This module wraps all Babel related functionality. In particular it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
@@ -14,12 +13,13 @@ use crate::{
     config::SharedConfig,
     node_connection::RPC_REQUEST_TIMEOUT,
     node_data::{NodeImage, NodeProperties},
+    pal::BabelClient,
     pal::NodeConnection,
     services,
 };
 use babel_api::{
     engine::{
-        HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, RestRequest, ShResponse,
+        HttpResponse, JobConfig, JobInfo, JobType, JobsInfo, JrpcRequest, RestRequest, ShResponse,
     },
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
@@ -177,8 +177,8 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         self.on_plugin(|plugin| plugin.staking_status()).await
     }
 
-    pub async fn init(&mut self, params: HashMap<String, String>) -> Result<()> {
-        self.on_plugin(move |plugin| plugin.init(&params)).await
+    pub async fn init(&mut self) -> Result<()> {
+        self.on_plugin(move |plugin| plugin.init()).await
     }
 
     /// This function calls babel by sending a blockchain command using the specified method name.
@@ -186,12 +186,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     pub async fn call_method(&mut self, name: &str, param: &str) -> Result<String> {
         Ok(match name {
             "init" => {
-                let keys = if param.is_empty() {
-                    Default::default()
-                } else {
-                    serde_json::from_str(param)?
-                };
-                self.init(keys).await?;
+                self.init().await?;
                 Default::default()
             }
             "height" => self.height().await?.to_string(),
@@ -223,10 +218,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     /// Returns the list of jobs from blockchain jobs.
-    pub async fn get_jobs(&mut self) -> Result<Vec<(String, JobInfo)>> {
+    pub async fn get_jobs(&mut self) -> Result<JobsInfo> {
         let babel_client = self.node_connection.babel_client().await?;
-        let jobs = with_retry!(babel_client.get_jobs(()))?.into_inner();
-        Ok(jobs)
+        Ok(with_retry!(babel_client.get_jobs(())).map(|v| v.into_inner())?)
     }
 
     /// Returns status of single job.
@@ -379,14 +373,22 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::JobStatus {
+            NodeRequest::JobInfo {
                 job_name,
                 response_tx,
             } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_retry!(babel_client.job_info(job_name.clone()))
                         .map_err(|err| self.handle_connection_errors(err))
-                        .map(|v| v.into_inner().status),
+                        .map(|v| v.into_inner()),
+                    Err(err) => Err(err),
+                });
+            }
+            NodeRequest::GetJobs { response_tx } => {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
+                    Ok(babel_client) => with_retry!(babel_client.get_jobs(()))
+                        .map_err(|err| self.handle_connection_errors(err))
+                        .map(|v| v.into_inner()),
                     Err(err) => Err(err),
                 });
             }
@@ -550,9 +552,12 @@ enum NodeRequest {
         job_name: String,
         response_tx: ResponseTx<Result<()>>,
     },
-    JobStatus {
+    JobInfo {
         job_name: String,
-        response_tx: ResponseTx<Result<JobStatus>>,
+        response_tx: ResponseTx<Result<JobInfo>>,
+    },
+    GetJobs {
+        response_tx: ResponseTx<Result<JobsInfo>>,
     },
     RunJrpc {
         req: JrpcRequest,
@@ -606,12 +611,19 @@ impl babel_api::engine::Engine for Engine {
         response_rx.blocking_recv()?
     }
 
-    fn job_status(&self, job_name: &str) -> Result<JobStatus> {
+    fn job_info(&self, job_name: &str) -> Result<JobInfo> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::JobStatus {
+        self.tx.blocking_send(NodeRequest::JobInfo {
             job_name: job_name.to_string(),
             response_tx,
         })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn get_jobs(&self) -> Result<JobsInfo> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .blocking_send(NodeRequest::GetJobs { response_tx })?;
         response_rx.blocking_recv()?
     }
 
@@ -719,7 +731,7 @@ mod tests {
     use assert_fs::TempDir;
     use async_trait::async_trait;
     use babel_api::{
-        engine::{Engine, JobInfo, JobType, RestartPolicy},
+        engine::{Engine, JobInfo, JobStatus, JobType, RestartPolicy},
         metadata::BabelConfig,
     };
     use bv_tests_utils::{rpc::test_channel, start_test_server};
@@ -771,7 +783,7 @@ mod tests {
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
-            async fn get_jobs(&self, request: Request<()>) -> Result<Response<Vec<(String, JobInfo)>>, Status>;
+            async fn get_jobs(&self, request: Request<()>) -> Result<Response<JobsInfo>, Status>;
             async fn run_jrpc(
                 &self,
                 request: Request<JrpcRequest>,
@@ -819,14 +831,20 @@ mod tests {
             self.engine.run_sh("capabilities", None).unwrap();
             vec!["some_method".to_string()]
         }
-        fn init(&self, params: &HashMap<String, String>) -> Result<()> {
+        fn init(&self) -> Result<()> {
             self.engine.render_template(
                 Path::new("template"),
                 Path::new("config"),
-                &serde_json::to_string(params)?,
+                "init_params",
             )?;
             Ok(())
         }
+
+        fn upload(&self) -> Result<()> {
+            self.engine.run_sh("upload", None)?;
+            Ok(())
+        }
+
         fn height(&self) -> Result<u64> {
             self.engine.run_sh("height", None)?;
             Ok(7)
@@ -870,7 +888,8 @@ mod tests {
             )?;
             self.engine.start_job(name)?;
             self.engine.stop_job(name)?;
-            self.engine.job_status(name)?;
+            self.engine.job_info(name)?;
+            self.engine.get_jobs()?;
             self.engine.run_jrpc(
                 JrpcRequest {
                     host: name.to_string(),
@@ -1018,11 +1037,9 @@ mod tests {
             .expect_render_template()
             .withf(|req| {
                 let (template, out, params) = req.get_ref();
-                let json: serde_json::Value = serde_json::from_str(params).unwrap();
-                let json = json.as_object().unwrap();
                 template == Path::new("template")
                     && out == Path::new("config")
-                    && json["custom_key"].to_string() == r#""custom value""#
+                    && params == "init_params"
             })
             .return_once(|_| Ok(Response::new(())));
         // from custom_method
@@ -1071,6 +1088,18 @@ mod tests {
                     upgrade_blocking: true,
                 }))
             });
+        babel_mock.expect_get_jobs().return_once(|_| {
+            Ok(Response::new(HashMap::from_iter([(
+                "custom_name".to_string(),
+                JobInfo {
+                    status: JobStatus::Running,
+                    progress: Default::default(),
+                    restart_count: 0,
+                    logs: vec![],
+                    upgrade_blocking: true,
+                },
+            )])))
+        });
         babel_mock
             .expect_run_jrpc()
             .withf(|req| {
@@ -1170,13 +1199,7 @@ mod tests {
         let babel_server = start_test_server(&tmp_root, babel_mock);
         let mut test_env = TestEnv::new(tmp_root).await?;
 
-        test_env
-            .engine
-            .init(HashMap::from_iter([(
-                "custom_key".to_string(),
-                "custom value".to_string(),
-            )]))
-            .await?;
+        test_env.engine.init().await?;
         assert_eq!(
             "dummy_name",
             test_env.engine.call_method("name", "param").await?

@@ -568,6 +568,7 @@ dependencies = [
  "lazy_static",
  "mockall",
  "rhai",
+ "semver",
  "serde",
  "serde_bytes",
  "serde_json",

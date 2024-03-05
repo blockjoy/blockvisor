@@ -1,7 +1,6 @@
 use crate::metadata::BlockchainMetadata;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Interface to be implemented by babel plugin.
 /// Babel plugin adds support for some blockchain type.
@@ -13,7 +12,10 @@ pub trait Plugin {
     fn capabilities(&self) -> Vec<String>;
 
     /// Init method is called by engine on node start.
-    fn init(&self, params: &HashMap<String, String>) -> Result<()>;
+    fn init(&self) -> Result<()>;
+
+    /// Upload blockchain data to remote storage.
+    fn upload(&self) -> Result<()>;
 
     /// Returns the height of the blockchain (in blocks).
     fn height(&self) -> Result<u64>;

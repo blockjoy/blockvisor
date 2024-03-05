@@ -515,6 +515,7 @@ mod tests {
     use crate::node_metrics;
     use crate::utils;
     use assert_fs::TempDir;
+    use babel_api::engine::JobsInfo;
     use bv_tests_utils::rpc::test_channel;
     use bv_tests_utils::start_test_server;
     use bv_utils::timer::MockTimer;
@@ -576,7 +577,7 @@ mod tests {
             async fn get_node_jobs(
                 &self,
                 request: tonic::Request<Uuid>,
-            ) -> Result<tonic::Response<Vec<(String, babel_api::engine::JobInfo)>>, tonic::Status>;
+            ) -> Result<tonic::Response<JobsInfo>, tonic::Status>;
             async fn get_node_job_info(
                 &self,
                 request: tonic::Request<(Uuid, String)>,

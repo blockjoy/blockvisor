@@ -1,4 +1,5 @@
 mod utils;
+use babel_api::engine::JobInfo;
 use babel_api::{
     engine::{HttpResponse, JobStatus, JobType, ShResponse},
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
@@ -28,10 +29,16 @@ fn test_testing() -> eyre::Result<()> {
         .expect_start_job()
         .withf(|name| name == "upload")
         .returning(|_| Ok(()));
-    babel.expect_job_status().returning(|_| {
-        Ok(JobStatus::Finished {
-            exit_code: Some(0),
-            message: "".to_string(),
+    babel.expect_job_info().returning(|_| {
+        Ok(JobInfo {
+            status: JobStatus::Finished {
+                exit_code: Some(0),
+                message: "".to_string(),
+            },
+            progress: None,
+            restart_count: 0,
+            logs: vec![],
+            upgrade_blocking: false,
         })
     });
     babel
@@ -54,9 +61,16 @@ fn test_testing() -> eyre::Result<()> {
     babel.expect_create_job().returning(|_, _| Ok(()));
     babel.expect_start_job().returning(|_| Ok(()));
     babel.expect_stop_job().returning(|_| Ok(()));
-    babel
-        .expect_job_status()
-        .returning(|_| Ok(JobStatus::Running));
+    babel.expect_job_info().returning(|_| {
+        Ok(JobInfo {
+            status: JobStatus::Running,
+            progress: None,
+            restart_count: 0,
+            logs: vec![],
+            upgrade_blocking: false,
+        })
+    });
+    babel.expect_get_jobs().returning(|| Ok(HashMap::default()));
     babel
         .expect_run_jrpc()
         .withf(|req, _| req.host == "http://localhost:4467/")
@@ -122,10 +136,7 @@ fn test_testing() -> eyre::Result<()> {
     plugin.call_custom_method("download", "")?;
 
     assert!(plugin.capabilities().iter().any(|v| v == "init"));
-    plugin.init(&HashMap::from_iter([(
-        "key1".to_string(),
-        "key1_value".to_string(),
-    )]))?;
+    plugin.init()?;
     assert_eq!(77, plugin.height()?);
     assert_eq!(18, plugin.block_age()?);
     assert_eq!("node name", plugin.name()?);

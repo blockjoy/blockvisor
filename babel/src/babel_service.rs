@@ -3,9 +3,9 @@ use crate::{
     utils::sources_list, BabelPal,
 };
 use async_trait::async_trait;
-use babel_api::babel::NodeContext;
 use babel_api::{
-    engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
+    babel::NodeContext,
+    engine::{HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig},
 };
 use eyre::{anyhow, ContextCompat, Result};
@@ -221,10 +221,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         ))
     }
 
-    async fn get_jobs(
-        &self,
-        _request: Request<()>,
-    ) -> Result<Response<Vec<(String, JobInfo)>>, Status> {
+    async fn get_jobs(&self, _request: Request<()>) -> Result<Response<JobsInfo>, Status> {
         let jobs = self
             .jobs_manager
             .list()
@@ -474,7 +471,7 @@ mod tests {
             async fn startup(&self) -> Result<()>;
             async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
             async fn shutdown(&self) -> Result<()>;
-            async fn list(&self) -> Result<Vec<(String, JobInfo)>>;
+            async fn list(&self) -> Result<JobsInfo>;
             async fn create(&self, name: &str, config: JobConfig) -> Result<()>;
             async fn start(&self, name: &str) -> Result<()>;
             async fn get_job_shutdown_timeout(&self, name: &str) -> Duration;

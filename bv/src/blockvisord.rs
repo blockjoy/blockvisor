@@ -396,7 +396,7 @@ where
                     for (id, metric) in metrics.iter_mut() {
                         // go through all jobs info in metrics and leave only this that has changed
                         // since last time
-                        metric.jobs.retain(|(name, info)| {
+                        metric.jobs.retain(|name, info| {
                             let mut state = DefaultHasher::new();
                             info.hash(&mut state);
                             let new_hash = state.finish();

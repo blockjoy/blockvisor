@@ -1,6 +1,7 @@
 use crate::{
     engine::{
-        DownloadManifest, HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse,
+        DownloadManifest, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest,
+        ShResponse,
     },
     metadata::{firewall, BabelConfig},
     utils::{Binary, BinaryStatus},
@@ -39,7 +40,7 @@ pub trait Babel {
     /// Get maximum time it may take to gracefully shutdown job.
     fn get_job_shutdown_timeout(job_name: String) -> Duration;
     /// Get jobs list.
-    fn get_jobs() -> Vec<(String, JobInfo)>;
+    fn get_jobs() -> JobsInfo;
 
     /// Send a Jrpc request to the current blockchain.
     fn run_jrpc(req: JrpcRequest) -> HttpResponse;

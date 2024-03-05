@@ -5,9 +5,8 @@ use crate::node_data::NodeStatus;
 use crate::nodes_manager::NodesManager;
 use crate::pal::{NodeConnection, Pal};
 use crate::services::api::{common, pb};
-use babel_api::engine::JobStatus;
 use babel_api::{
-    engine::JobInfo,
+    engine::{JobStatus, JobsInfo},
     plugin::{ApplicationStatus, StakingStatus, SyncStatus},
 };
 use eyre::Result;
@@ -39,7 +38,7 @@ pub struct Metric {
     pub consensus: Option<bool>,
     pub application_status: Option<ApplicationStatus>,
     pub sync_status: Option<SyncStatus>,
-    pub jobs: Vec<(String, JobInfo)>,
+    pub jobs: JobsInfo,
 }
 
 impl Metrics {
