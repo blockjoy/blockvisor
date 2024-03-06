@@ -1,5 +1,5 @@
 use crate::engine;
-use crate::engine::{Compression, JobConfig, JobType, PosixSignal, RestartConfig};
+use crate::engine::{JobConfig, JobType, PosixSignal, RestartConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -112,6 +112,13 @@ pub struct Upload {
     pub data_version: Option<u64>,
 }
 
+/// Type of compression used on chunk data.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum Compression {
+    NONE,
+    ZSTD(i32),
+}
+
 pub fn build_init_job_config(init_job: InitJob) -> JobConfig {
     JobConfig {
         job_type: JobType::RunSh(init_job.run_sh),
@@ -202,13 +209,18 @@ pub fn build_upload_job_config(value: Option<Upload>) -> JobConfig {
         backoff_base_ms: 500,
         max_retries: Some(10),
     };
+    const DEFAULT_COMPRESSION: engine::Compression = engine::Compression::ZSTD(3);
     if let Some(upload) = value {
         JobConfig {
             job_type: JobType::Upload {
                 manifest: None,
                 source: None,
                 exclude: upload.exclude,
-                compression: upload.compression,
+                compression: match upload.compression {
+                    None => Some(DEFAULT_COMPRESSION),
+                    Some(Compression::ZSTD(level)) => Some(engine::Compression::ZSTD(level)),
+                    Some(Compression::NONE) => None,
+                },
                 max_connections: upload.max_connections,
                 max_runners: upload.max_runners,
                 number_of_chunks: upload.number_of_chunks,
@@ -228,7 +240,7 @@ pub fn build_upload_job_config(value: Option<Upload>) -> JobConfig {
                 manifest: None,
                 source: None,
                 exclude: None,
-                compression: None,
+                compression: Some(DEFAULT_COMPRESSION),
                 max_connections: None,
                 max_runners: None,
                 number_of_chunks: None,
