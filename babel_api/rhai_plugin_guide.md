@@ -12,12 +12,8 @@ See [The Rhai Book](https://rhai.rs/book) for more details on Rhai language itse
 ### Core of All Babel Plugins
 
 1. `const METADATA` - Static image specification like blockchain protocol name, but also include default node configuration.
-2. `fn init(params)` - Main entrypoint where everything starts. Function called only once, when node is started first time.
-<br>It is the place where blockchain services running in background should be described as so called `jobs`.
-Also, any other one-off operations can be done here (e.g. initializing stuff, or downloading blockchain data archives).
-<br>See [Functions that SHALL be implemented by Plugin](#functions-that-shall-be-implemented-by-plugin)
-and [Background Jobs](#background-jobs)
-chapters for more details on `init()` function and `jobs`.
+2. `const PLUGIN_CONFIG` - The easiest way to describe node initialization and background services. Define this constant
+as described in [PLUGIN_CONFIG](#plugin_config) chapter, to use default implementation for `init()` and `upload()` functions.
 3. While image specification is statically defined in `METADATA`, dynamic node configuration is accessible via `node_params()`
 function, in particular `node_params().NETWORK`. This can and should be used in order
 to change the behavior of the script according to the node configuration.
@@ -165,14 +161,179 @@ const METADATA = #{
 };
 ```
 
+### PLUGIN_CONFIG
+
+`PLUGIN_CONFIG` constant is a convenient way to specify following things:
+ - node initialization process
+ - download job configuration
+ - alternative download command
+ - configuration for background services, to be run on the node
+ - upload job configuration
+
+See below example with comments for more details.
+
+**Example:**
+```protobuf
+const PLUGIN_CONFIG = #{
+    init: #{
+        // list of sh commands to be executed first
+        commands: [
+            `mkdir -p /opt/netdata/var/cache/netdata`,
+        ],
+        // list of sh jobs (long running tasks), to be starten then
+        jobs: [
+            #{
+                // Unique job name.
+                name: "init_job",
+                // Sh script body.
+                run_sh: `openssl rand -hex 32 > ${global::OP_DIR}/jwt.txt`,
+                // [optional] InitJob restart policy.
+                // If not set default to "never".
+                restart: "never",
+                // [optional] Job shutdown timeout - how long it may take to gracefully shutdown the job.
+                // After given time job won't be killed, but babel will rise the error.
+                // If not set default to 60s.
+                shutdown_timeout_secs: 120,
+                // [optional] POSIX signal that will be sent to child processes on job shutdown.
+                // See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
+                // If not set default to `SIGTERM`.
+                shutdown_signal: "SIGTINT",
+                // [optional] maximum number of retries, or there is no such limit if not set
+                needs: ["other_init_job_name"],
+            }
+        ]
+    },
+    // list of services to be started once init jobs and download is finished
+    services: [
+        #{
+            // Unique service job name.
+            name: "blockchain_service_a",
+            // Sh script body
+            run_sh: `/usr/bin/blockchain_service_a start --home=${global::A_DIR} --chain=${global::NET.net_type} --rest-server --seeds ${global::NET.seeds} "$@"`,
+            // [optional] Job restart config.
+            // If not set default to:
+            // #{
+            //    backoff_timeout_ms: 60000,
+            //    backoff_base_ms: 1000,
+            // }
+            restart_config: #{
+                // if job stay alive given amount of time (in milliseconds) backoff is reset
+                backoff_timeout_ms: 60000,
+                // base time (in milliseconds) for backoff,
+                // multiplied by consecutive power of 2 each time
+                backoff_base_ms: 1000,
+                // [optional] maximum number of retries, or there is no such limit if not set
+                max_retries: 13,
+            },
+            // [optional] Job shutdown timeout - how long it may take to gracefully shutdown the job.
+            // After given time job won't be killed, but babel will rise the error.
+            // If not set default to 60s.
+            shutdown_timeout_secs: 120,
+            // [optional] POSIX signal that will be sent to child processes on job shutdown.
+            // See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
+            // If not set default to `SIGTERM`.
+            shutdown_signal: "SIGTINT",
+        },
+        #{
+            name: "blockchain_service_b",
+            run_sh: `/usr/bin/blockchain_service_b --chain=${global::NET.net_type} --datadir=${global::A_DIR} --snapshots=false`,
+        }
+    ],
+    // [optional] download configuration
+    // built-in download will be started once all init jobs are finished
+    download: #{
+        config: #{
+            // [optional] Maximum number of parallel opened connections.
+            // If not set default to 3.
+            max_connections: 5,
+            // [optional] Maximum number of parallel workers.
+            // If not set default to 8.
+            max_runners: 8,
+        },
+        // [optional] Job restart config.
+        // If not set default to:
+        // #{
+        //    backoff_timeout_ms: 600000,
+        //    backoff_base_ms: 500,
+        //    max_retries: 10,
+        // }
+        restart_config: #{
+            backoff_timeout_ms: 60000,
+            backoff_base_ms: 1000,
+            max_retries: 5,
+        },
+    },
+    // [optional] alternative download if archive for standard one is not available
+    alternative_download: #{
+        // Sh script body.
+        run_sh: `/usr/bin/wget -q -O - ${global::SNAPSHOT_UTIL_URL}`,
+        // [optional] InitJob restart config.
+        // If not set default to "never".
+        restart_config: #{
+            backoff_timeout_ms: 60000,
+            backoff_base_ms: 10000,
+            max_retries: 3,
+        },
+    },
+    // [optional] upload configuration
+    // built-in upload can be manually triggered with `bv node run upload`
+    upload: #{
+        // [optional] List of exclude patterns. Files in `BLOCKCHAIN_DATA_PATH` directory that match any of pattern,
+        // won't be taken into account.
+        exclude: [
+            "**/something_to_ignore*",
+            ".gitignore",
+            "some_subdir/*.bak",
+        ],
+        // [optional] Compression to be used on chunks.
+        // If not set default to `ZSTD: 3`.
+        compression: #{
+            ZSTD: 5, // compression level
+        },
+        // [optional] Maximum number of parallel opened connections.
+        // If not set default to 3.
+        max_connections: 4,
+        // [optional] Maximum number of parallel workers.
+        // If not set default to 8.
+        max_runners: 12,
+        // [optional] Number of chunks that blockchain data should be split into.
+        // Recommended chunk size is about 1GB. Estimated by BV based on data size, if not provided.
+        // If not set calculated automatically by BV.
+        number_of_chunks: 700,
+        // [optional] Seconds after which presigned urls in generated `UploadManifest` may expire.
+        // If not set calculated automatically by BV.
+        url_expires_secs: 240000,
+        // [optional] Version number for uploaded data. Auto-assigned if not provided.
+        // If not set calculated automatically by Blockvisor API.
+        data_version: 3,
+        // [optional] Job restart config.
+        // If not set default to:
+        // #{
+        //    backoff_timeout_ms: 600000,
+        //    backoff_base_ms: 500,
+        //    max_retries: 10,
+        // }
+        restart_config: #{
+            backoff_timeout_ms: 60000,
+            backoff_base_ms: 1000,
+            max_retries: 5,
+        },
+    },
+};
+```
 ### Functions that SHALL be implemented by Plugin
 
 Functions listed below are required by BV to work properly.
 
-- `init` - Function that is called by BV on first node start. It takes `params` key-value map as argument.
-  It shall do all required initializations and start required background jobs. See 'Engine Interface' chapter for more details on how to start jobs.
-  Once node is **successfully** started it is not called by BV anymore. Hence `init` function may be called more than
-  once only if node start failed for some reason.
+- `init` - Main entrypoint where everything starts. Function called only once, when node is started first time.
+  <br>It is the place where blockchain services running in background should be described as so called `jobs`.
+  Also, any other one-off operations can be done here (e.g. initializing stuff, or downloading blockchain data archives).
+  <br>See [Engine Interface](#engine-interface) and [Background Jobs](#background-jobs) chapter for more details on how to start jobs.
+  <br> BV provide default implementation if [PLUGIN_CONFIG](#plugin_config) constant is defined.
+  Default implementation run all init commands and start init jobs according to config,
+  then try to start build-in download job, if fail then fallback to alternative download (if provided),
+  finally starts configured services.
+
 
 **Minimalistic Example (see [Blockchain Data Archives](#blockchain-data-archives) chapter for example including download step):**
 ```
@@ -181,41 +342,35 @@ fn init(params) {
   let B_DIR = BLOCKCHAIN_DATA_PATH + "/B/";
   let NET =  global::METADATA.nets[node_params().NETWORK];
 
-  let response = run_sh(`mkdir -p ${A_DIR} ${B_DIR} && mkdir -p /opt/netdata/var/cache/netdata && mkdir -p /opt/netdata/var/lib/netdata && rm -rf /opt/netdata/var/lib/netdata/* && rm -rf /opt/netdata/var/cache/netdata/*`);
-    debug(`Response from shell command ${cmd}': ${response}`);
-    if response.exit_code != 0 {
-        error(`init failed failed: ${response}`);
-        throw response;
-    }
-
-    start_job("blockchain_service_a", #{
-        job_type: #{
-            run_sh: `/usr/bin/blockchain_service_a --chain=${NET.net_type} --datadir=${B_DIR} --snapshots=false`,
-        },
-        restart: #{
-            always: #{
-                backoff_timeout_ms: 60000,
-                backoff_base_ms: 1000,
-            },
-        },
-    });
-
-    start_job("blockchain_service_b", #{
-        job_type: #{
-            run_sh: `/usr/bin/blockchain_service_b start --home=${B_DIR} --chain=${NET.net_type} --rest-server --seeds ${NET.seeds} "$@"`,
-        },
-        restart: #{
-            always: #{
-                backoff_timeout_ms: 60000,
-                backoff_base_ms: 1000,
-            },
-        },
-    });  
+  run_sh(`mkdir -p ${A_DIR} ${B_DIR} && mkdir -p /opt/netdata/var/cache/netdata && mkdir -p /opt/netdata/var/lib/netdata && rm -rf /opt/netdata/var/lib/netdata/* && rm -rf /opt/netdata/var/cache/netdata/*`).unwrap();
+  start_job("blockchain_service_a", #{
+      job_type: #{
+          run_sh: `/usr/bin/blockchain_service_a --chain=${NET.net_type} --datadir=${B_DIR} --snapshots=false`,
+      },
+      restart: #{
+          always: #{
+              backoff_timeout_ms: 60000,
+              backoff_base_ms: 1000,
+          },
+      },
+  });
+  start_job("blockchain_service_b", #{
+      job_type: #{
+          run_sh: `/usr/bin/blockchain_service_b start --home=${B_DIR} --chain=${NET.net_type} --rest-server --seeds ${NET.seeds} "$@"`,
+      },
+      restart: #{
+          always: #{
+              backoff_timeout_ms: 60000,
+              backoff_base_ms: 1000,
+          },
+      },
+  });  
 }
 ```
 
 - `application_status()` - Returns blockchain application status.
   <br>**Allowed return values**: _provisioning_, _broadcasting_, _cancelled_, _delegating_, _delinquent_, _disabled_, _earning_, _electing_, _elected_, _exported_, _ingesting_, _mining_, _minting_, _processing_, _relaying_, _delete_pending_, _deleting_, _deleted_, _provisioning_pending_, _update_pending_, _updating_, _initializing_, _downloading_, _uploading_
+  <br>**Following values indicate that BV should not gather metrics for given node**: _initializing_, _downloading_, _uploading_
 
 ### Functions that SHOULD be implemented by Plugin
 
@@ -234,13 +389,19 @@ to recognise the node, but the purpose may vary per blockchain.
   <br>**Allowed return values**: _syncing_, _synced_
 - `staking_status()` - Returns blockchain staking status.
   <br>**Allowed return values**: _follower_, _staked_, _staking_, _validating_, _consensus_, _unstaked_
+- `upload()` - Upload blockchain data snapshot to cloud storage, so it can be quickly reused by newly created nodes.
+  <br> BV provide default implementation if [PLUGIN_CONFIG](#plugin_config) constant is defined.
+  Default implementation stop all services, start upload job according to config, and then start services again.
+
+Beside above functions there should be `BABEL_VERSION` constant defined, defining minimum version of babel, required
+by this script. E.g: `const BABEL_VERSION = "0.55.0";`.
 
 #### Examples of functions implemented for Polygon
 ```
 const POLYGON_RPC_URL = "http://localhost:8545";
 
 fn address(){
-    run_sh(`heimdalld show-account | grep address | awk -F\" '{ print $4}'`).to_string();
+    run_sh(`heimdalld show-account | grep address | awk -F\" '{ print $4}'`).unwrap().to_string();
 }
 
 fn application_status() {
@@ -258,17 +419,12 @@ fn application_status() {
 }
 
 fn height(){
-    let res = run_jrpc(#{
+    parse_hex(run_jrpc(#{
         host: `${global::POLYGON_RPC_URL}`,
         method: "eth_blockNumber",
         params: [],
         headers: #{"Content-Type" : "application/json"},
-      });
-    if res.status_code != 200 {
-        throw res.status_code;
-    }
-    let hex = parse_json(res.body);
-    parse_int(sub_string(hex.result,2),16)
+    }).expect(200).result)
 }
 
 fn block_age(){
@@ -277,10 +433,7 @@ fn block_age(){
         method: "eth_getBlockByNumber",
         params: ["latest", false],
         headers: #{"Content-Type" : "application/json"},
-      });
-    if res.status_code != 200 {
-        throw res.status_code;
-    }
+      }).expect(200);
     return 0;
 }
 ```
@@ -312,7 +465,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
 - `stop_job(job_name)` - Stop background job with given unique name if running.
 - `job_status(job_name)` - Get background job status by unique name.
   <br>**Possible return values**: _pending_, _running_, _stopped_, _finished{exit_code, message}_
-- `run_jrpc(request)` - Execute Jrpc request to the current blockchain. Request must have following structure:
+- `run_jrpc(request)` - Execute Jrpc request to the current blockchain and return [HttpResponse](#httpresponse) (with default 15s timeout). Request must have following structure:
 ```rust
 {
   // This is the host for the JSON rpc request.
@@ -325,15 +478,8 @@ To make implementation of Babel Plugin interface possible, BV provides following
   headers: Map
 }
 ```
-Return http response (with default 15s timeout) as following structure:
-```rust
-{ 
-  status_code: i32,
-  body: String,
-}
-```
 - `run_jrpc(request, timeout)` - Same as above, but with custom request timeout (in seconds).
-- `run_rest(request)` - Execute a Rest request to the current blockchain. Request must have following structure:
+- `run_rest(request)` - Execute a Rest request to the current blockchain and return [HttpResponse](#httpresponse) (with default 15s timeout). Request must have following structure:
 ```rust
 {
   // This is the url of the rest endpoint.
@@ -342,23 +488,10 @@ Return http response (with default 15s timeout) as following structure:
   headers: Map
 }
 ```
-Return its http response (with default 15s timeout) as following structure:
-```rust
-{ 
-  status_code: i32,
-  body: String,
-}
-```
 - `run_rest(request, timeout)` - Same as above, but with custom request timeout (in seconds).
-- `run_sh(body)` - Run Sh script on the blockchain VM and return its result (with default 15s timeout). Result is following structure:
-```rust
-{ 
-  exit_code: i32,
-  stdout: String,
-  stderr: String,
-}
-```
+- `run_sh(body)` - Run Sh script on the blockchain VM and return [ShResponse](#shresponse) (with default 15s timeout).
 - `run_sh(body, timeout)` - Same as above, but with custom execution timeout (in seconds).
+- `parse_hex(hex)` - Convert `0x` hex string into decimal number.
 - `sanitize_sh_param(param)` - Allowing people to substitute arbitrary data into sh-commands is unsafe.
   Call this function over each value before passing it to `run_sh`. This function is deliberately more
   restrictive than needed; it just filters out each character that is not a number or a
@@ -375,13 +508,37 @@ Return its http response (with default 15s timeout) as following structure:
 - `BLOCKCHAIN_DATA_PATH` - Globally available constant, containing absolute path to directory where blockchain data are stored.
   This is the path, where blockchain data archives are downloaded to, and where are uploaded from.
 
+### HttpResponse
+
+```rust
+struct HttpResponse { 
+  status_code: i32,
+  body: String,
+}
+```
+Above structure provice following helper functions:
+- `expect(expected_code)` - Check if `status_code` match expected one and then return `body` parsed as json.
+- `expect(check)` - If provided `check` function return `true`, then return `body` parsed as json (e.g. `http_resp.expect(|code| code >= 200).json_field`).
+
+### ShResponse
+
+```rust
+struct ShResponse{ 
+  exit_code: i32,
+  stdout: String,
+  stderr: String,
+}
+```
+Above structure provice following helper function:
+- `unwrap()` - Check if `exit_code` is 0 and then return `stdout`.
+
 ### Background Jobs
 
 Background job is a way to asynchronously run long-running tasks. Currently, three types of tasks are supported:
 1. `run_sh` - arbitrary long-running shell script.
 2. `download` - download data (e.g. previously archived blockchain data, to speedup init process).
 3. `upload` - upload data (e.g. archive blockchain data).
-In particular, it can be used to define blockchain entrypoint(s) i.e. background process(es) that are automatically started
+In particular, it can be used to define blockchain service(s) i.e. background process(es) that are automatically started
 with the node.
 
 Each background job has its __unique__ name and configuration structure described by following example.
@@ -439,15 +596,15 @@ Each background job has its __unique__ name and configuration structure describe
     };
     start_job("job_name_B", job_config_B);
 
-    let entrypoint_config = #{
+    let service_config = #{
         job_type: #{
             // Sh script body
-            run_sh: "echo \"Blockchain entry_point parametrized with " + param + "\"",
+            run_sh: "echo \"Blockchain service parametrized with " + param + "\"",
         },
 
         // Job restart policy.
         restart: #{
-            // "always" key means that job is always restarted - equivalent to entrypoint.
+            // "always" key means that job is always restarted - equivalent to always running service.
             always: #{
                 // if job stay alive given amount of time (in miliseconds) backoff is reset
                 backoff_timeout_ms: 60000,
@@ -465,7 +622,7 @@ Each background job has its __unique__ name and configuration structure describe
         needs: ["job_name_A", "job_name_B"],
     };
     start_job("job_name_A");
-    start_job("unique_entrypoint_name", entrypoint_config);
+    start_job("unique_service_name", service_config);
 
     let upload_job_config = #{
         job_type: #{
@@ -540,9 +697,14 @@ upload job config options.
 
 To trigger upload, simply call `bv node run upload`.
 
+Define [PLUGIN_CONFIG](#plugin_config) constant to use default implementation for `upload`.
+
 ### Downloading Data Archives
 
 Once blockchain data archive is available on remote object storage, it can be used to speedup new nodes setup.
+
+To use default implementation define [PLUGIN_CONFIG](#plugin_config) constant. Otherwise see below example of custom
+`init()` function.
 
 Typically, download job is started in `init()` before other blockchain services are started. This is achieved by job
 `needs` configuration.
@@ -588,12 +750,8 @@ fn start_blockchain(needed) {
 }
 
 fn init(keys) {
-    let response = run_sh(`mkdir -p ${A_DIR} ${B_DIR} && mkdir -p /opt/netdata/var/cache/netdata && mkdir -p /opt/netdata/var/lib/netdata && rm -rf /opt/netdata/var/lib/netdata/* && rm -rf /opt/netdata/var/cache/netdata/*`);
+    run_sh(`mkdir -p ${A_DIR} ${B_DIR} && mkdir -p /opt/netdata/var/cache/netdata && mkdir -p /opt/netdata/var/lib/netdata && rm -rf /opt/netdata/var/lib/netdata/* && rm -rf /opt/netdata/var/cache/netdata/*`).unwrap();
     debug(`Response from shell command ${cmd}': ${response}`);
-    if response.exit_code != 0 {
-        error(`init failed failed: ${response}`);
-        throw response;
-    }
 
     try {
         // try built-in download method first, to speedup regular nodes setup
@@ -713,11 +871,8 @@ run_jrpc(data);
 const API_HOST = "http://localhost:4467/";
 
 fn block_age() {
-    let resp = run_jrpc(#{host: global::API_HOST, method: "info_block_age"});
-    if resp.status_code != 200 {
-      throw resp;
-    }
-    parse_json(resp.body).result.block_age
+    let resp = run_jrpc(#{host: global::API_HOST, method: "info_block_age"}).expect(200);
+    resp.result.block_age
 }
 ```
 
@@ -729,12 +884,8 @@ Hence, it is a good candidate for output mapping.
 **Example:**
 ```
 fn sync_status() {
-    let res = run_sh("get_sync_status");
-    if res.exit_code != 0 {
-        debug(res.stderr);
-        throw res;
-    }
-    let status = switch res.stdout {
+    let stdout = run_sh("get_sync_status").unwrap();
+    let status = switch stdout {
         "0" => "synced",
         _ => "syncing",
     };
