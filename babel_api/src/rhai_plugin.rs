@@ -5,7 +5,7 @@ use crate::{
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
     plugin_config::{self, PluginConfig},
 };
-use eyre::{anyhow, bail, Context, Error, Result};
+use eyre::{anyhow, bail, Context, Error, Report, Result};
 use rhai::{
     self,
     serde::{from_dynamic, to_dynamic},
@@ -137,69 +137,72 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         self.rhai_engine.register_fn("get_jobs", move || {
             to_dynamic(into_rhai_result(babel_engine.get_jobs())?)
         });
+        self.rhai_engine
+            .register_type_with_name::<DressedHttpResponse>("DressedHttpResponse")
+            .register_get("body", DressedHttpResponse::get_body)
+            .register_get("status_code", DressedHttpResponse::get_status_code)
+            .register_fn("expect", DressedHttpResponse::expect)
+            .register_fn("expect", DressedHttpResponse::expect_with);
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_jrpc", move |req: Dynamic, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
                 let req = into_rhai_result(from_dynamic::<BareJrpcRequest>(&req)?.try_into())?;
-                to_dynamic(into_rhai_result(
+                into_rhai_result(
                     babel_engine
                         .run_jrpc(req, Some(Duration::from_secs(timeout)))
                         .map(DressedHttpResponse::from),
-                )?)
+                )
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_jrpc", move |req: Dynamic| {
                 let req = into_rhai_result(from_dynamic::<BareJrpcRequest>(&req)?.try_into())?;
-                to_dynamic(into_rhai_result(
+                into_rhai_result(
                     babel_engine
                         .run_jrpc(req, None)
                         .map(DressedHttpResponse::from),
-                )?)
+                )
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_rest", move |req: Dynamic, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
-                to_dynamic(into_rhai_result(
+                into_rhai_result(
                     babel_engine
                         .run_rest(from_dynamic(&req)?, Some(Duration::from_secs(timeout)))
                         .map(DressedHttpResponse::from),
-                )?)
+                )
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_rest", move |req: Dynamic| {
-                to_dynamic(into_rhai_result(
+                into_rhai_result(
                     babel_engine
                         .run_rest(from_dynamic(&req)?, None)
                         .map(DressedHttpResponse::from),
-                )?)
+                )
             });
         self.rhai_engine
-            .register_type_with_name::<DressedHttpResponse>("HttpResponse")
-            .register_fn("expect", DressedHttpResponse::expect_with)
-            .register_fn("expect", DressedHttpResponse::expect);
+            .register_type_with_name::<DressedShResponse>("DressedShResponse")
+            .register_get("exit_code", DressedShResponse::get_exit_code)
+            .register_get("stdout", DressedShResponse::get_stdout)
+            .register_get("stderr", DressedShResponse::get_stderr)
+            .register_fn("unwrap", DressedShResponse::unwrap);
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_sh", move |body: &str, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
-                to_dynamic(into_rhai_result(
+                into_rhai_result(
                     babel_engine
                         .run_sh(body, Some(Duration::from_secs(timeout)))
                         .map(DressedShResponse::from),
-                )?)
+                )
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn("run_sh", move |body: &str| {
-            to_dynamic(into_rhai_result(
-                babel_engine.run_sh(body, None).map(DressedShResponse::from),
-            )?)
+            into_rhai_result(babel_engine.run_sh(body, None).map(DressedShResponse::from))
         });
-        self.rhai_engine
-            .register_type_with_name::<DressedShResponse>("ShResponse")
-            .register_fn("unwrap", DressedShResponse::unwrap);
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("sanitize_sh_param", move |param: &str| {
@@ -256,7 +259,9 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             rhai::Engine::new().parse_json(json, true)
         });
         self.rhai_engine.register_fn("parse_hex", |hex: &str| {
-            i64::from_str_radix(hex.strip_prefix("0x").unwrap_or(hex), 16)
+            into_rhai_result(
+                i64::from_str_radix(hex.strip_prefix("0x").unwrap_or(hex), 16).map_err(Report::new),
+            )
         });
     }
 
@@ -351,8 +356,12 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     }
 
     fn upload(&self) -> Result<()> {
-        if self.ast.iter_functions().any(|meta| meta.name == "upload") {
-            self.call_fn("upload", ())
+        if self
+            .ast
+            .iter_functions()
+            .any(|meta| meta.name == UPLOAD_JOB_NAME)
+        {
+            self.call_fn(UPLOAD_JOB_NAME, ())
         } else {
             let config: PluginConfig = find_const_in_ast(&self.ast, PLUGIN_CONFIG_CONST_NAME)?;
             for service in &config.services {
@@ -480,21 +489,28 @@ pub struct DressedHttpResponse {
 }
 
 impl DressedHttpResponse {
+    fn get_status_code(&mut self) -> i64 {
+        self.status_code as i64
+    }
+    fn get_body(&mut self) -> String {
+        self.body.clone()
+    }
+
     pub fn expect_with(
         &mut self,
         check: FnPtr,
     ) -> std::result::Result<Map, Box<rhai::EvalAltResult>> {
         let engine = rhai::Engine::new();
         into_rhai_result(
-            if check.call(&engine, &AST::empty(), (self.status_code,))? {
+            if check.call(&engine, &AST::empty(), (self.status_code as i64,))? {
                 Ok(engine.parse_json(&self.body, true)?)
             } else {
                 Err(anyhow!("unexpected status_code: {}", self.status_code))
             },
         )
     }
-    pub fn expect(&mut self, expected: u16) -> std::result::Result<Map, Box<rhai::EvalAltResult>> {
-        into_rhai_result(if self.status_code == expected {
+    pub fn expect(&mut self, expected: i64) -> std::result::Result<Map, Box<rhai::EvalAltResult>> {
+        into_rhai_result(if self.status_code as i64 == expected {
             Ok(rhai::Engine::new().parse_json(&self.body, true)?)
         } else {
             Err(anyhow!("unexpected status_code: {}", self.status_code))
@@ -523,6 +539,16 @@ pub struct DressedShResponse {
 }
 
 impl DressedShResponse {
+    fn get_exit_code(&mut self) -> i64 {
+        self.exit_code as i64
+    }
+    fn get_stdout(&mut self) -> String {
+        self.stdout.clone()
+    }
+    fn get_stderr(&mut self) -> String {
+        self.stderr.clone()
+    }
+
     pub fn unwrap(&mut self) -> std::result::Result<String, Box<rhai::EvalAltResult>> {
         into_rhai_result(if self.exit_code == 0 {
             Ok(self.stdout.clone())
@@ -552,10 +578,12 @@ mod tests {
     use crate::metadata::{
         firewall, BabelConfig, NetConfiguration, NetType, RamdiskConfiguration, Requirements,
     };
+    use crate::plugin_config::{AlternativeDownload, InitJob};
     use eyre::bail;
     use mockall::*;
 
     mock! {
+        #[derive(Debug)]
         pub BabelEngine {}
 
         impl Engine for BabelEngine {
@@ -711,22 +739,23 @@ mod tests {
         stop_job("test_job_name");
         out += "|" + job_info("test_job_name");
         out += "|" + get_jobs();
-        out += "|" + run_jrpc(#{host: "host", method: "method", headers: #{"custom_header": "header value"}}).body;
-        out += "|" + run_jrpc(#{host: "host", method: "method", params: #{"chain": "x"}}, 1).body;
+        out += "|" + run_jrpc(#{host: "host", method: "method", headers: #{"custom_header": "header value"}}).expect(200).key;
+        out += "|" + run_jrpc(#{host: "host", method: "method", params: #{"chain": "x"}}, 1).expect(|code| code >= 200).param;
         out += "|" + run_jrpc(#{host: "host", method: "method", params: ["positional", "args", "array"]}, 1).body;
         let http_out = run_rest(#{url: "url"});
         out += "|" + http_out.body;
         out += "|" + http_out.status_code;
         out += "|" + run_rest(#{url: "url", headers: #{"another-header": "another value"}}, 2).body;
-        out += "|" + run_sh("body").stdout;
+        out += "|" + run_sh("body").unwrap();
         let sh_out = run_sh("body", 3);
         out += "|" + sh_out.stderr;
         out += "|" + sh_out.exit_code;
         out += "|" + sanitize_sh_param("sh param");
+        out += "|" + parse_hex("0xff").to_string();
         render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"});
-        out += "|" + node_params().to_json(); 
-        save_data("some plugin data"); 
-        out += "|" + load_data(); 
+        out += "|" + node_params().to_json();
+        save_data("some plugin data");
+        out += "|" + load_data();
         out
     }
 "#;
@@ -841,7 +870,7 @@ mod tests {
             .return_once(|_, _| {
                 Ok(HttpResponse {
                     status_code: 200,
-                    body: "jrpc_response".to_string(),
+                    body: r#"{"key": "jrpc_response"}"#.to_string(),
                 })
             });
         babel
@@ -857,8 +886,8 @@ mod tests {
             )
             .return_once(|_, _| {
                 Ok(HttpResponse {
-                    status_code: 200,
-                    body: "jrpc_with_map_and_timeout_response".to_string(),
+                    status_code: 204,
+                    body: r#"{"param":"jrpc_with_map_and_timeout_response"}"#.to_string(),
                 })
             });
         babel
@@ -907,7 +936,7 @@ mod tests {
             )
             .return_once(|_, _| {
                 Ok(HttpResponse {
-                    status_code: 200,
+                    status_code: 204,
                     body: "rest_with_timeout_response".to_string(),
                 })
             });
@@ -959,9 +988,285 @@ mod tests {
 
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
-            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|{"key_A":"value_A"}|loaded data"#,
+            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|loaded data"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_babel_version() -> Result<()> {
+        let script = r#"const BABEL_VERSION = "777.777.777";"#;
+        assert_eq!(
+            format!(
+                "Required minimum babel version is `777.777.777`, running is `{}`",
+                env!("CARGO_PKG_VERSION")
+            ),
+            RhaiPlugin::new(script, MockBabelEngine::new())
+                .unwrap_err()
+                .to_string()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_application_status() -> Result<()> {
+        let script = r#"
+            const PLUGIN_CONFIG = #{
+                services: [
+                    #{
+                        name: "blockchain_service_a",
+                        run_sh: `echo A`,
+                    },
+                    #{
+                        name: "blockchain_service_b",
+                        run_sh: `echo B`,
+                    }
+                ],
+            };
+
+            fn application_status() {
+                "broadcasting"
+            }
+            "#;
+        let mut babel = MockBabelEngine::new();
+        babel.expect_get_jobs().once().returning(|| {
+            Ok(HashMap::from_iter([(
+                "download".to_string(),
+                JobInfo {
+                    status: JobStatus::Running,
+                    progress: Default::default(),
+                    restart_count: 0,
+                    logs: vec![],
+                    upgrade_blocking: true,
+                },
+            )]))
+        });
+        babel.expect_get_jobs().once().returning(|| {
+            Ok(HashMap::from_iter([
+                (
+                    "blockchain_service_a".to_string(),
+                    JobInfo {
+                        status: JobStatus::Running,
+                        progress: Default::default(),
+                        restart_count: 0,
+                        logs: vec![],
+                        upgrade_blocking: true,
+                    },
+                ),
+                (
+                    "blockchain_service_b".to_string(),
+                    JobInfo {
+                        status: JobStatus::Pending,
+                        progress: Default::default(),
+                        restart_count: 0,
+                        logs: vec![],
+                        upgrade_blocking: true,
+                    },
+                ),
+            ]))
+        });
+        babel.expect_get_jobs().once().returning(|| {
+            Ok(HashMap::from_iter([(
+                UPLOAD_JOB_NAME.to_string(),
+                JobInfo {
+                    status: JobStatus::Running,
+                    progress: Default::default(),
+                    restart_count: 0,
+                    logs: vec![],
+                    upgrade_blocking: true,
+                },
+            )]))
+        });
+        babel
+            .expect_get_jobs()
+            .once()
+            .returning(|| Ok(HashMap::default()));
+
+        let plugin = RhaiPlugin::new(script, babel)?;
+        assert_eq!(ApplicationStatus::Downloading, plugin.application_status()?);
+        assert_eq!(
+            ApplicationStatus::Initializing,
+            plugin.application_status()?
+        );
+        assert_eq!(ApplicationStatus::Uploading, plugin.application_status()?);
+        assert_eq!(
+            ApplicationStatus::Broadcasting,
+            plugin.application_status()?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_default_upload() -> Result<()> {
+        let script = r#"
+            const PLUGIN_CONFIG = #{
+                services: [
+                    #{
+                        name: "blockchain_service",
+                        run_sh: `echo A`,
+                    },
+                ],
+            };
+            "#;
+        let mut babel = MockBabelEngine::new();
+        babel
+            .expect_stop_job()
+            .with(predicate::eq("blockchain_service"))
+            .return_once(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq(UPLOAD_JOB_NAME),
+                predicate::eq(plugin_config::build_upload_job_config(None)),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq(UPLOAD_JOB_NAME))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("blockchain_service"),
+                predicate::eq(plugin_config::build_service_job_config(
+                    Service {
+                        name: "blockchain_service".to_string(),
+                        run_sh: "echo A".to_string(),
+                        restart: None,
+                        shutdown_timeout_secs: None,
+                        shutdown_signal: None,
+                    },
+                    vec![UPLOAD_JOB_NAME.to_string()],
+                )),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("blockchain_service"))
+            .once()
+            .returning(|_| Ok(()));
+
+        let plugin = RhaiPlugin::new(script, babel)?;
+        plugin.upload().unwrap();
+        Ok(())
+    }
+
+    #[test]
+    fn test_default_init() -> Result<()> {
+        let script = r#"
+            const PLUGIN_CONFIG = #{
+                init: #{
+                    commands: [
+                        `echo init_cmd`,
+                    ],
+                    jobs: [
+                        #{
+                            name: "init_job",
+                            run_sh: `echo init_job`,
+                        }
+                    ]
+                },
+                alternative_download: #{
+                    run_sh: `alternative download`,
+                },
+                services: [
+                    #{
+                        name: "blockchain_service",
+                        run_sh: `echo A`,
+                    },
+                ],
+            };
+            "#;
+        let mut babel = MockBabelEngine::new();
+        babel
+            .expect_run_sh()
+            .with(predicate::eq("echo init_cmd"), predicate::eq(None))
+            .return_once(|_, _| {
+                Ok(ShResponse {
+                    exit_code: 0,
+                    stdout: "".to_string(),
+                    stderr: "".to_string(),
+                })
+            });
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("init_job"),
+                predicate::eq(plugin_config::build_init_job_config(InitJob {
+                    name: "init_job".to_string(),
+                    run_sh: "echo init_job".to_string(),
+                    restart: None,
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: None,
+                })),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("init_job"))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq(DOWNLOAD_JOB_NAME),
+                predicate::eq(plugin_config::build_download_job_config(
+                    None,
+                    vec!["init_job".to_string()],
+                )),
+            )
+            .once()
+            .returning(|_, _| bail!("manifest not found - try alternative"));
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq(DOWNLOAD_JOB_NAME),
+                predicate::eq(plugin_config::build_alternative_download_job_config(
+                    AlternativeDownload {
+                        run_sh: "alternative download".to_string(),
+                        restart: None,
+                    },
+                    vec!["init_job".to_string()],
+                )),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq(DOWNLOAD_JOB_NAME))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("blockchain_service"),
+                predicate::eq(plugin_config::build_service_job_config(
+                    Service {
+                        name: "blockchain_service".to_string(),
+                        run_sh: "echo A".to_string(),
+                        restart: None,
+                        shutdown_timeout_secs: None,
+                        shutdown_signal: None,
+                    },
+                    vec![DOWNLOAD_JOB_NAME.to_string()],
+                )),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("blockchain_service"))
+            .once()
+            .returning(|_| Ok(()));
+
+        let plugin = RhaiPlugin::new(script, babel)?;
+        plugin.init().unwrap();
         Ok(())
     }
 
