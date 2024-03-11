@@ -346,7 +346,7 @@ pub enum ImageCommand {
 
         /// Size of image disk for image, in GB
         #[clap(long, default_value = "10")]
-        rootfs_size: usize,
+        rootfs_size: u64,
     },
 
     /// Create new node image from existing one

@@ -72,9 +72,8 @@ where
     P::VirtualMachine: Send + Sync,
     P::RecoveryBackoff: Send + Sync + 'static,
 {
-    pub async fn new(pal: P) -> Result<Self> {
+    pub async fn new(pal: P, config: Config) -> Result<Self> {
         let bv_root = pal.bv_root().to_owned();
-        let config = Config::load(&bv_root).await?;
         let url = format!("0.0.0.0:{}", config.blockvisor_port);
         let listener = TcpListener::bind(url).await?;
         let maybe_cluster = cluster::start_server(&config).await?;

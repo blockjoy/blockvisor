@@ -19,7 +19,7 @@ use babel_api::{
 };
 use bv_utils::{cmd::run_cmd, rpc::with_timeout, with_retry};
 use chrono::Utc;
-use eyre::{bail, Context, Result};
+use eyre::{bail, Context, Report, Result};
 use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
 use tokio::{
     fs::{self, File},
@@ -90,8 +90,13 @@ impl<P: Pal> MaybeNode<P> {
             self.context.copy_and_check_plugin(&self.data.image).await,
             self
         );
-        let _ = tokio::fs::remove_dir_all(&self.context.vm_data_dir).await;
-        check!(self.context.prepare_data_image::<P>(&self.data).await, self);
+        let _ = fs::remove_dir_all(&self.context.vm_data_dir).await;
+        check!(
+            fs::create_dir_all(&self.context.vm_data_dir)
+                .await
+                .map_err(Report::new),
+            self
+        );
         self.machine = Some(check!(pal.create_vm(&self.data).await, self));
         check!(self.data.save(&self.context.registry).await, self);
 
@@ -972,11 +977,9 @@ pub mod tests {
                 refresh_token: "refresh_token".to_string(),
                 blockjoy_api_url: "api.url".to_string(),
                 blockjoy_mqtt_url: Some("mqtt.url".to_string()),
-                update_check_interval_secs: None,
                 blockvisor_port: 888,
                 iface: "bvbr7".to_string(),
-                cluster_id: None,
-                cluster_seed_urls: None,
+                ..Default::default()
             },
             bv_root,
         )

@@ -675,17 +675,8 @@ mod tests {
                 bv_service,
                 &self.tmp_root,
                 Config {
-                    id: "".to_string(),
-                    name: "".to_string(),
-                    token: "".to_string(),
-                    refresh_token: "".to_string(),
-                    blockjoy_api_url: "".to_string(),
-                    blockjoy_mqtt_url: None,
-                    update_check_interval_secs: None,
-                    blockvisor_port: 0,
                     iface: "bvbr0".to_string(),
-                    cluster_id: None,
-                    cluster_seed_urls: None,
+                    ..Default::default()
                 },
                 test_channel(&self.tmp_root),
             )

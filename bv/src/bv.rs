@@ -437,7 +437,7 @@ pub async fn process_image_command(
             let images_dir = build_bv_var_path().join(IMAGES_DIR);
             let destination_image_path = images_dir.join(destination_image_id);
             fs::create_dir_all(&destination_image_path)?;
-            let pal = LinuxPlatform::new()?;
+            let (pal, _) = LinuxPlatform::new_with_config().await?;
             let _ = NodesManager::fetch_image_data(pal.into(), config, &source_image).await?;
             fs_extra::dir::copy(
                 images_dir.join(source_image_id),
@@ -778,7 +778,7 @@ async fn bootstrap_os_image(
     image_path: &Path,
     image: &NodeImage,
     debian_version: &str,
-    rootfs_size_gb: usize,
+    rootfs_size_gb: u64,
 ) -> Result<()> {
     let os_img_path = image_path.join(ROOT_FS_FILE);
 

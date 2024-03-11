@@ -89,7 +89,7 @@ impl SharedConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct Config {
     /// Host uuid
     pub id: String,
@@ -107,6 +107,7 @@ pub struct Config {
     /// Self update check interval - how often blockvisor shall check for new version of itself
     pub update_check_interval_secs: Option<u64>,
     /// Port to be used by blockvisor internal service
+    /// 0 has special meaning - pick first free port
     #[serde(default = "default_blockvisor_port")]
     pub blockvisor_port: u16,
     /// Network interface name

@@ -90,11 +90,9 @@ impl TestEnv {
             refresh_token: "fresh boii".to_owned(),
             blockjoy_api_url: "http://localhost:8070".to_owned(),
             blockjoy_mqtt_url: Some("mqtt://localhost:1873".to_string()),
-            update_check_interval_secs: None,
             blockvisor_port: 0, // 0 has special meaning - pick first free port
             iface: "bvbr0".to_string(),
-            cluster_id: None,
-            cluster_seed_urls: None,
+            ..Default::default()
         };
         Self::new_with_api_config(api_config).await
     }
@@ -113,7 +111,11 @@ impl TestEnv {
     }
 
     pub async fn run_blockvisord(&mut self, run: RunFlag) -> Result<JoinHandle<Result<()>>> {
-        let blockvisord = BlockvisorD::new(self.build_dummy_platform()).await?;
+        let blockvisord = BlockvisorD::new(
+            self.build_dummy_platform(),
+            Config::load(&self.bv_root).await?,
+        )
+        .await?;
         self.api_config.blockvisor_port = blockvisord.local_addr()?.port();
         self.api_config.save(&self.bv_root).await?;
         Ok(tokio::spawn(blockvisord.run(run)))
@@ -318,6 +320,7 @@ impl Pal for DummyPlatform {
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
+        blockvisord::linux_platform::prepare_data_image(&self.bv_root, node_data).await?;
         firecracker_machine::create(&self.bv_root, node_data).await
     }
 

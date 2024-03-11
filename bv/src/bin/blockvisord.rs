@@ -9,12 +9,12 @@ use tracing::info;
 async fn main() -> Result<()> {
     setup_logging()?;
     let run = RunFlag::run_until_ctrlc();
-    let pal = LinuxPlatform::new()?;
     info!(
         "Starting {} {} ...",
         env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
     );
-    BlockvisorD::new(pal).await?.run(run).await?;
+    let (pal, config) = LinuxPlatform::new_with_config().await?;
+    BlockvisorD::new(pal, config).await?.run(run).await?;
     Ok(())
 }

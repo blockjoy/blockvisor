@@ -185,8 +185,7 @@ async fn main() -> Result<()> {
                 .blockvisor_port
                 .unwrap_or_else(config::default_blockvisor_port),
             iface: cmd_args.bridge_ifa,
-            cluster_id: None,
-            cluster_seed_urls: None,
+            ..Default::default()
         };
         api_config.save(&bv_root).await?;
         Some(api_config)

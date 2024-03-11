@@ -1,13 +1,15 @@
-use crate::nodes_manager::NodesDataCache;
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
     config,
     config::SharedConfig,
     firecracker_machine, node_connection,
     node_data::NodeData,
+    nodes_manager::NodesDataCache,
     pal,
     pal::{AvailableResources, NetInterface, Pal},
-    services, utils, BV_VAR_PATH,
+    services,
+    services::blockchain::DATA_FILE,
+    utils, BV_VAR_PATH,
 };
 use async_trait::async_trait;
 use bv_utils::{cmd::run_cmd, exp_backoff_timeout};
@@ -16,6 +18,7 @@ use eyre::{anyhow, bail, Context, Result};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
+    ffi::OsStr,
     fs,
     net::IpAddr,
     path::{Path, PathBuf},
@@ -38,7 +41,9 @@ pub fn bv_root() -> PathBuf {
 }
 
 impl LinuxPlatform {
-    pub fn new() -> Result<Self> {
+    pub async fn new_with_config() -> Result<(Self, config::Config)> {
+        let bv_root = bv_root();
+        let config = config::Config::load(&bv_root).await?;
         let babel_dir = fs::canonicalize(
             std::env::current_exe().with_context(|| "failed to get current binary path")?,
         )
@@ -60,12 +65,35 @@ impl LinuxPlatform {
                 job_runner_path.display()
             )
         }
-        Ok(Self {
-            bv_root: bv_root(),
-            babel_path,
-            job_runner_path,
-        })
+        Ok((
+            Self {
+                bv_root,
+                babel_path,
+                job_runner_path,
+            },
+            config,
+        ))
     }
+}
+
+/// Create new data drive in chroot location, or copy it from cache
+pub async fn prepare_data_image<P>(bv_root: &Path, data: &NodeData<P>) -> Result<()> {
+    // allocate new image on location, if it's not there yet
+    let vm_data_dir = firecracker_machine::build_vm_data_path(bv_root, data.id);
+    let data_file_path = vm_data_dir.join(DATA_FILE);
+    if !data_file_path.exists() {
+        tokio::fs::create_dir_all(&vm_data_dir).await?;
+        let disk_size_gb = data.requirements.disk_size_gb;
+        let gb = &format!("{disk_size_gb}GB");
+        run_cmd(
+            "fallocate",
+            [OsStr::new("-l"), OsStr::new(gb), data_file_path.as_os_str()],
+        )
+        .await?;
+        run_cmd("mkfs.ext4", [data_file_path.as_os_str()]).await?;
+    }
+
+    Ok(())
 }
 
 #[async_trait]
@@ -135,6 +163,7 @@ impl Pal for LinuxPlatform {
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
+        prepare_data_image(&self.bv_root, node_data).await?;
         firecracker_machine::create(&self.bv_root, node_data).await
     }
 

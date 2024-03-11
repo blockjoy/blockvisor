@@ -1,10 +1,6 @@
 use blockvisord::{
-    config::{Config, SharedConfig},
-    internal_server,
-    linux_platform::LinuxPlatform,
-    nodes_manager::NodesManager,
-    pal::Pal,
-    set_bv_status, ServiceStatus,
+    config::SharedConfig, internal_server, linux_platform::LinuxPlatform,
+    nodes_manager::NodesManager, pal::Pal, set_bv_status, ServiceStatus,
 };
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::Result;
@@ -24,10 +20,9 @@ async fn main() -> Result<()> {
     set_bv_status(ServiceStatus::Ok).await;
 
     let mut run = RunFlag::run_until_ctrlc();
-    let pal = LinuxPlatform::new()?;
+    let (pal, config) = LinuxPlatform::new_with_config().await?;
 
     let bv_root = pal.bv_root().to_path_buf();
-    let config = Config::load(&bv_root).await?;
     let listener = TcpListener::bind(format!("0.0.0.0:{}", config.blockvisor_port)).await?;
 
     let config = SharedConfig::new(config, bv_root);
