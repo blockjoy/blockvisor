@@ -418,7 +418,7 @@ pub async fn process_image_command(
             let images_dir = build_bv_var_path().join(IMAGES_DIR);
             let destination_image_path = images_dir.join(image_id);
             fs::create_dir_all(&destination_image_path)?;
-            render_rhai_file(&destination_image_path, &destination_image).await?;
+            render_rhai_file(&destination_image_path, &destination_image)?;
             bootstrap_os_image(
                 &destination_image_path,
                 &destination_image,
@@ -846,10 +846,11 @@ async fn run_in_chroot(mount_point: &Path, cmd: &str) -> Result<()> {
     Ok(())
 }
 
-async fn render_rhai_file(image_path: &Path, image: &NodeImage) -> Result<()> {
+fn render_rhai_file(image_path: &Path, image: &NodeImage) -> Result<()> {
     let mut context = tera::Context::new();
     context.insert("protocol", &image.protocol);
     context.insert("node_type", &image.node_type);
+    context.insert("babel_version", env!("CARGO_PKG_VERSION"));
     let mut tera = tera::Tera::default();
     let template = include_str!("../data/babel.rhai.template");
     tera.add_raw_template("template", template)?;
@@ -944,4 +945,379 @@ async fn on_rootfs<C: FnOnce(PathBuf) -> F, F: Future<Output = Result<()>>>(
         .await
         .with_context(|| format!("failed to umount {ROOT_FS_FILE}"))?;
     call_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_fs::TempDir;
+
+    use babel_api::{
+        engine::{JobConfig, RestartConfig, ShResponse},
+        plugin::{ApplicationStatus, Plugin},
+        rhai_plugin,
+    };
+    use mockall::predicate;
+    use std::{collections::HashMap, fs};
+
+    #[test]
+    fn test_babel_rhai_template() -> Result<()> {
+        let tmp_root = TempDir::new()?.to_path_buf();
+        fs::create_dir_all(&tmp_root)?;
+        let rhai_path = tmp_root.join(BABEL_PLUGIN_NAME);
+        render_rhai_file(
+            &tmp_root,
+            &NodeImage {
+                protocol: "testing".to_string(),
+                node_type: "node".to_string(),
+                node_version: "1.2.3".to_string(),
+            },
+        )?;
+
+        let mut babel = bv_tests_utils::babel_engine_mock::MockBabelEngine::new();
+
+        babel.expect_node_params().returning(|| {
+            HashMap::from_iter([
+                ("NETWORK".to_string(), "main".to_string()),
+                ("TESTING_PARAM".to_string(), "testing_value".to_string()),
+            ])
+        });
+        babel
+            .expect_run_sh()
+            .with(
+                predicate::eq("mkdir -p /opt/netdata/var/cache/netdata"),
+                predicate::eq(None),
+            )
+            .once()
+            .returning(|_, _| {
+                Ok(ShResponse {
+                    exit_code: 0,
+                    stdout: Default::default(),
+                    stderr: Default::default(),
+                })
+            });
+
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("init_job"),
+                predicate::eq(JobConfig {
+                    job_type: babel_api::engine::JobType::RunSh(
+                        "openssl rand -hex 32 > /blockjoy/blockchain_data/A/jwt.txt".to_string(),
+                    ),
+                    restart: babel_api::engine::RestartPolicy::Never,
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: None,
+                }),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("init_job"))
+            .once()
+            .returning(|_| Ok(()));
+
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("download"),
+                predicate::eq(JobConfig {
+                    job_type: babel_api::engine::JobType::Download {
+                        manifest: None,
+                        destination: None,
+                        max_connections: None,
+                        max_runners: None,
+                    },
+                    restart: babel_api::engine::RestartPolicy::OnFailure(RestartConfig {
+                        backoff_timeout_ms: 600000,
+                        backoff_base_ms: 500,
+                        max_retries: Some(10),
+                    }),
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: Some(vec!["init_job".to_string()]),
+                }),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("download"))
+            .once()
+            .returning(|_| Ok(()));
+
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("blockchain_service_a"),
+                predicate::eq(JobConfig {
+                    job_type: babel_api::engine::JobType::RunSh(
+                        r#"/usr/bin/blockchain_service_a start --home=/blockjoy/blockchain_data/A --chain=main --rest-server --seeds main seed "$@""#.to_string(),
+                    ),
+                    restart: babel_api::engine::RestartPolicy::Always(RestartConfig{
+                        backoff_timeout_ms: 60000,
+                        backoff_base_ms: 1000,
+                        max_retries: None,
+                    }),
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: Some(vec!["download".to_string()]),
+                }),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("blockchain_service_a"))
+            .once()
+            .returning(|_| Ok(()));
+
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("blockchain_service_b"),
+                predicate::eq(JobConfig {
+                    job_type: babel_api::engine::JobType::RunSh(
+                        r#"/usr/bin/blockchain_service_b --chain=main --datadir=/blockjoy/blockchain_data/A --snapshots=false"#.to_string(),
+                    ),
+                    restart: babel_api::engine::RestartPolicy::Always(RestartConfig{
+                        backoff_timeout_ms: 60000,
+                        backoff_base_ms: 1000,
+                        max_retries: None,
+                    }),
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: Some(vec!["download".to_string()]),
+                }),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("blockchain_service_b"))
+            .once()
+            .returning(|_| Ok(()));
+
+        babel
+            .expect_stop_job()
+            .with(predicate::eq("blockchain_service_a"))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_stop_job()
+            .with(predicate::eq("blockchain_service_b"))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("upload"),
+                predicate::eq(JobConfig {
+                    job_type: babel_api::engine::JobType::Upload {
+                        manifest: None,
+                        source: None,
+                        exclude: Some(vec![
+                            "**/something_to_ignore*".to_string(),
+                            ".gitignore".to_string(),
+                            "some_subdir/*.bak".to_string(),
+                        ]),
+                        compression: Some(babel_api::engine::Compression::ZSTD(3)),
+                        max_connections: None,
+                        max_runners: None,
+                        number_of_chunks: None,
+                        url_expires_secs: None,
+                        data_version: None,
+                    },
+                    restart: babel_api::engine::RestartPolicy::OnFailure(RestartConfig {
+                        backoff_timeout_ms: 600000,
+                        backoff_base_ms: 500,
+                        max_retries: Some(10),
+                    }),
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: None,
+                }),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("upload"))
+            .once()
+            .returning(|_| Ok(()));
+
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("blockchain_service_a"),
+                predicate::eq(JobConfig {
+                    job_type: babel_api::engine::JobType::RunSh(
+                        r#"/usr/bin/blockchain_service_a start --home=/blockjoy/blockchain_data/A --chain=main --rest-server --seeds main seed "$@""#.to_string(),
+                    ),
+                    restart: babel_api::engine::RestartPolicy::Always(RestartConfig{
+                        backoff_timeout_ms: 60000,
+                        backoff_base_ms: 1000,
+                        max_retries: None,
+                    }),
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: Some(vec!["upload".to_string()]),
+                }),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("blockchain_service_a"))
+            .once()
+            .returning(|_| Ok(()));
+
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("blockchain_service_b"),
+                predicate::eq(JobConfig {
+                    job_type: babel_api::engine::JobType::RunSh(
+                        r#"/usr/bin/blockchain_service_b --chain=main --datadir=/blockjoy/blockchain_data/A --snapshots=false"#.to_string(),
+                    ),
+                    restart: babel_api::engine::RestartPolicy::Always(RestartConfig{
+                        backoff_timeout_ms: 60000,
+                        backoff_base_ms: 1000,
+                        max_retries: None,
+                    }),
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: Some(vec!["upload".to_string()]),
+                }),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("blockchain_service_b"))
+            .once()
+            .returning(|_| Ok(()));
+
+        babel
+            .expect_get_jobs()
+            .once()
+            .returning(|| Ok(Default::default()));
+        babel
+            .expect_run_jrpc()
+            .with(
+                predicate::eq(babel_api::engine::JrpcRequest {
+                    host: "http://localhost:4467/".to_string(),
+                    method: "health.health".to_string(),
+                    params: None,
+                    headers: Some(HashMap::from_iter(vec![(
+                        "content-type".to_string(),
+                        "application/json".to_string(),
+                    )])),
+                }),
+                predicate::eq(None),
+            )
+            .once()
+            .returning(|_, _| {
+                Ok(babel_api::engine::HttpResponse {
+                    status_code: 200,
+                    body: r#"{"healthy": true}"#.to_string(),
+                })
+            });
+        babel
+            .expect_run_jrpc()
+            .with(
+                predicate::eq(babel_api::engine::JrpcRequest {
+                    host: "http://localhost:4467/".to_string(),
+                    method: "info_height".to_string(),
+                    params: None,
+                    headers: None,
+                }),
+                predicate::eq(None),
+            )
+            .once()
+            .returning(|_, _| {
+                Ok(babel_api::engine::HttpResponse {
+                    status_code: 200,
+                    body: r#"{"result": "0x4d"}"#.to_string(),
+                })
+            });
+        babel
+            .expect_run_jrpc()
+            .with(
+                predicate::eq(babel_api::engine::JrpcRequest {
+                    host: "http://localhost:4467/".to_string(),
+                    method: "info_block_age".to_string(),
+                    params: None,
+                    headers: None,
+                }),
+                predicate::eq(None),
+            )
+            .once()
+            .returning(|_, _| {
+                Ok(babel_api::engine::HttpResponse {
+                    status_code: 200,
+                    body: r#"{"result": {"block_age": 18}}"#.to_string(),
+                })
+            });
+        babel
+            .expect_run_jrpc()
+            .with(
+                predicate::eq(babel_api::engine::JrpcRequest {
+                    host: "http://localhost:4467/".to_string(),
+                    method: "peer_addr".to_string(),
+                    params: None,
+                    headers: None,
+                }),
+                predicate::eq(None),
+            )
+            .once()
+            .returning(|_, _| {
+                Ok(babel_api::engine::HttpResponse {
+                    status_code: 205,
+                    body: r#"{"result": {"peer_addr": "peer/address"}}"#.to_string(),
+                })
+            });
+        babel
+            .expect_run_jrpc()
+            .with(
+                predicate::eq(babel_api::engine::JrpcRequest {
+                    host: "http://localhost:4467/".to_string(),
+                    method: "info_name".to_string(),
+                    params: None,
+                    headers: None,
+                }),
+                predicate::eq(None),
+            )
+            .once()
+            .returning(|_, _| {
+                Ok(babel_api::engine::HttpResponse {
+                    status_code: 200,
+                    body: r#"{"result": {"name": "node name"}}"#.to_string(),
+                })
+            });
+
+        let script = fs::read_to_string(rhai_path)?;
+        let plugin = rhai_plugin::RhaiPlugin::new(&script, babel)?;
+
+        plugin.init().unwrap();
+        plugin.upload().unwrap();
+        assert_eq!(
+            ApplicationStatus::Broadcasting,
+            plugin.application_status().unwrap()
+        );
+        assert_eq!(77, plugin.height()?);
+        assert_eq!(18, plugin.block_age()?);
+        assert_eq!("peer/address", plugin.address()?);
+        assert_eq!("node name", plugin.name()?);
+        assert!(!plugin.consensus()?);
+        assert_eq!(babel_api::plugin::SyncStatus::Synced, plugin.sync_status()?);
+        assert_eq!(
+            babel_api::plugin::StakingStatus::Staking,
+            plugin.staking_status()?
+        );
+        assert_eq!(1, plugin.metadata()?.requirements.vcpu_count);
+        Ok(())
+    }
 }

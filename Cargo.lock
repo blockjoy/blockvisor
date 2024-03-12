@@ -755,9 +755,13 @@ checksum = "7f30e7476521f6f8af1a1c4c0b8cc94f0bee37d91763d0ca2665f299b6cd8aec"
 name = "bv_tests_utils"
 version = "0.54.0"
 dependencies = [
+ "babel_api",
  "bv_utils",
+ "eyre",
+ "mockall",
  "tokio",
  "tonic",
+ "tracing",
 ]
 
 [[package]]
