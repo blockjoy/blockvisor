@@ -391,7 +391,7 @@ fn check_upload_and_download(node_id: &str) {
     let sha_e = sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_e");
 
     println!("start upload job");
-    test_env::bv_run(&["node", "run", "upload", node_id], "Upload started!", None);
+    test_env::bv_run(&["node", "run", "upload", node_id], "", None);
 
     println!("wait for upload finished");
     let start = std::time::Instant::now();

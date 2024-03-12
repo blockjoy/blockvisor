@@ -177,6 +177,10 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         self.on_plugin(|plugin| plugin.staking_status()).await
     }
 
+    pub async fn upload(&mut self) -> Result<()> {
+        self.on_plugin(|plugin| plugin.upload()).await
+    }
+
     pub async fn init(&mut self) -> Result<()> {
         self.on_plugin(move |plugin| plugin.init()).await
     }
@@ -197,6 +201,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             "application_status" => serde_json::to_string(&self.application_status().await?)?,
             "sync_status" => serde_json::to_string(&self.sync_status().await?)?,
             "staking_status" => serde_json::to_string(&self.staking_status().await?)?,
+            "upload" => serde_json::to_string(&self.upload().await?)?,
             _ => {
                 let method_name = name.to_owned();
                 let method_param = param.to_owned();

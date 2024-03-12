@@ -864,7 +864,7 @@ run_jrpc(data);
 
 ### Handling JRPC Output
 
-`run_jrpc` function return raw http response. Use `parse_json` on response body, to easily access json fields.
+`run_jrpc` function return raw http response. Use `expect` method or `parse_json` on response body, to easily access json fields.
 
 **Example:**
 ```

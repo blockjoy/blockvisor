@@ -356,12 +356,18 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     }
 
     fn upload(&self) -> Result<()> {
-        if self
+        if let Some(fn_meta) = self
             .ast
             .iter_functions()
-            .any(|meta| meta.name == UPLOAD_JOB_NAME)
+            .find(|meta| meta.name == UPLOAD_JOB_NAME)
         {
-            self.call_fn(UPLOAD_JOB_NAME, ())
+            if fn_meta.params.is_empty() {
+                self.call_fn(UPLOAD_JOB_NAME, ())
+            } else {
+                // keep backward compatibility with obsolete `upload(param)` functions
+                self.call_fn(UPLOAD_JOB_NAME, ("",))
+                    .map(|_ignored: String| ())
+            }
         } else {
             let config: PluginConfig = find_const_in_ast(&self.ast, PLUGIN_CONFIG_CONST_NAME)?;
             for service in &config.services {
