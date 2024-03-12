@@ -66,7 +66,7 @@ install: bundle
 		ln -srf /mnt/fc/etc/systemd/system/babelsup.service /mnt/fc/etc/systemd/system/multi-user.target.wants/babelsup.service; \
 		umount /mnt/fc; \
 	done
-	cp -f babel_api/protocols/testing/babel.rhai /var/lib/blockvisor/images/testing/validator/0.0.1/; \
+	cp -f bv/tests/babel.rhai /var/lib/blockvisor/images/testing/validator/0.0.1/; \
 
 reinstall:
 	systemctl stop blockvisor.service || true

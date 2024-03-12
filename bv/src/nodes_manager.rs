@@ -1297,7 +1297,7 @@ mod tests {
         let (test_server, _http_server, http_mocks) = test_env
             .start_test_server(vec![(
                 test_env.test_image.clone(),
-                include_bytes!("../../babel_api/protocols/testing/babel.rhai").to_vec(),
+                include_bytes!("../tests/babel.rhai").to_vec(),
             )])
             .await;
 
@@ -1684,7 +1684,7 @@ mod tests {
             .start_test_server(vec![
                 (
                     test_env.test_image.clone(),
-                    include_bytes!("../../babel_api/protocols/testing/babel.rhai").to_vec(),
+                    include_bytes!("../tests/babel.rhai").to_vec(),
                 ),
                 (
                     new_image.clone(),
@@ -1922,7 +1922,7 @@ mod tests {
         let (test_server, _http_server, http_mocks) = test_env
             .start_test_server(vec![(
                 test_env.test_image.clone(),
-                include_bytes!("../../babel_api/protocols/testing/babel.rhai").to_vec(),
+                include_bytes!("../tests/babel.rhai").to_vec(),
             )])
             .await;
         sut.nodes.create(node_id, node_config.clone()).await?;

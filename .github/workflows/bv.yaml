@@ -39,13 +39,13 @@ jobs:
           export AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}
           export AWS_REGION=us-east-1
           aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
-            babel_api/protocols/testing/babel.rhai \
+            bv/tests/babel.rhai \
             s3://cookbook-dev/chains/testing/validator/0.0.1/babel.rhai --metadata '{"status":"development"}'
           aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
-            babel_api/protocols/testing/babel.rhai \
+            bv/tests/babel.rhai \
             s3://cookbook-dev/chains/testing/validator/0.0.2/babel.rhai --metadata '{"status":"development"}'
           aws --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com/ s3 cp \
-            babel_api/protocols/testing/babel.rhai \
+            bv/tests/babel.rhai \
             s3://cookbook-dev/chains/testing/validator/0.0.3/babel.rhai --metadata '{"status":"development"}'
 
       - id: 'auth'

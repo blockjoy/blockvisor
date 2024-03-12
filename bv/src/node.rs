@@ -685,10 +685,7 @@ pub mod tests {
 
     pub const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
     pub fn testing_babel_path_absolute() -> String {
-        format!(
-            "{}/../babel_api/protocols/testing/babel.rhai",
-            env!("CARGO_MANIFEST_DIR")
-        )
+        format!("{}/tests/babel.rhai", env!("CARGO_MANIFEST_DIR"))
     }
 
     #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
