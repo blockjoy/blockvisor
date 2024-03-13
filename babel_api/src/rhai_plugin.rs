@@ -17,6 +17,7 @@ use tracing::Level;
 
 const DOWNLOAD_JOB_NAME: &str = "download";
 const UPLOAD_JOB_NAME: &str = "upload";
+const INIT_FN_NAME: &str = "init";
 const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
 const BABEL_VERSION_CONST_NAME: &str = "BABEL_VERSION";
 
@@ -305,14 +306,28 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     }
 
     fn capabilities(&self) -> Vec<String> {
-        self.ast
+        let mut capabilities: Vec<_> = self
+            .ast
             .iter_functions()
             .map(|meta| meta.name.to_string())
-            .collect()
+            .collect();
+        if find_const_in_ast::<PluginConfig>(&self.ast, PLUGIN_CONFIG_CONST_NAME).is_ok() {
+            if !capabilities.contains(&UPLOAD_JOB_NAME.to_string()) {
+                capabilities.push(UPLOAD_JOB_NAME.to_string())
+            }
+            if !capabilities.contains(&INIT_FN_NAME.to_string()) {
+                capabilities.push(INIT_FN_NAME.to_string())
+            }
+        }
+        capabilities
     }
 
     fn init(&self) -> Result<()> {
-        if let Some(init_meta) = self.ast.iter_functions().find(|meta| meta.name == "init") {
+        if let Some(init_meta) = self
+            .ast
+            .iter_functions()
+            .find(|meta| meta.name == INIT_FN_NAME)
+        {
             if init_meta.params.is_empty() {
                 self.call_fn(init_meta.name, ())
             } else {
@@ -687,7 +702,7 @@ mod tests {
         let mut babel = MockBabelEngine::new();
         babel
             .expect_save_data()
-            .with(predicate::eq("init"))
+            .with(predicate::eq(INIT_FN_NAME))
             .return_once(|_| Ok(()));
         babel
             .expect_save_data()
