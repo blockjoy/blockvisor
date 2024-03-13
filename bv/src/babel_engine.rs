@@ -40,6 +40,8 @@ use tonic::Status;
 use tracing::{debug, error, info, instrument, trace, warn, Level};
 use uuid::Uuid;
 
+const RNOC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
 lazy_static::lazy_static! {
     static ref NON_RETRIABLE: Vec<tonic::Code> = vec![tonic::Code::Internal, tonic::Code::Cancelled,
         tonic::Code::InvalidArgument, tonic::Code::Unimplemented, tonic::Code::PermissionDenied];
@@ -470,13 +472,19 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             } => {
                 if manifest.is_none() {
                     let slots = match number_of_chunks {
-                        None => with_retry!(babel_client.recommended_number_of_chunks((
-                            source
-                                .clone()
-                                .unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
-                            exclude.clone()
-                        )))?
-                        .into_inner(),
+                        None => {
+                            with_retry!(babel_client.recommended_number_of_chunks(with_timeout(
+                                (
+                                    source.clone().unwrap_or(
+                                        babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()
+                                    ),
+                                    exclude.clone()
+                                ),
+                                RNOC_REQUEST_TIMEOUT
+                            )))
+                            .with_context(|| "recommended_number_of_chunks")?
+                            .into_inner()
+                        }
                         Some(slots) => *slots,
                     };
                     match services::blockchain_archive::retrieve_upload_manifest(
