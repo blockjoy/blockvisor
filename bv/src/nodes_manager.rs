@@ -1947,6 +1947,7 @@ mod tests {
         // node connection recovery
         sut.on_node(|node| {
             node.data.expected_status = NodeStatus::Running;
+            node.data.initialized = true;
             node.post_recovery();
         })
         .await;

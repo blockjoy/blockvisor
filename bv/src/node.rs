@@ -473,7 +473,10 @@ impl<P: Pal + Debug> Node<P> {
         let id = self.id();
         match self.data.expected_status {
             NodeStatus::Running => {
-                if self.machine.state() == pal::VmState::SHUTOFF {
+                if self.machine.state() == pal::VmState::SHUTOFF
+                    || self.data.has_pending_update
+                    || !self.data.initialized
+                {
                     self.started_node_recovery().await?;
                 } else {
                     self.node_connection_recovery().await?;
