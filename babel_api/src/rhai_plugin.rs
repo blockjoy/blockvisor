@@ -60,8 +60,18 @@ fn find_metadata_in_ast(ast: &AST) -> Result<BlockchainMetadata> {
     Ok(meta)
 }
 
+fn build_scope() -> rhai::Scope<'static> {
+    let mut scope = rhai::Scope::new();
+    scope.push("DATA_DRIVE_MOUNT_POINT", engine::DATA_DRIVE_MOUNT_POINT);
+    scope.push(
+        "BLOCKCHAIN_DATA_PATH",
+        engine::BLOCKCHAIN_DATA_PATH.to_string_lossy().to_string(),
+    );
+    scope
+}
+
 fn find_const_in_ast<T: for<'a> Deserialize<'a>>(ast: &AST, name: &str) -> Result<T> {
-    let mut vars = ast.iter_literal_variables(true, false);
+    let mut vars = ast.iter_literal_variables(true, true);
     if let Some((_, _, dynamic)) = vars.find(|(v, _, _)| *v == name) {
         let value: T = from_dynamic(&dynamic)
             .with_context(|| format!("Invalid Rhai script - failed to deserialize {name}"))?;
@@ -271,12 +281,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         name: &str,
         args: P,
     ) -> Result<R> {
-        let mut scope = rhai::Scope::new();
-        scope.push("DATA_DRIVE_MOUNT_POINT", engine::DATA_DRIVE_MOUNT_POINT);
-        scope.push(
-            "BLOCKCHAIN_DATA_PATH",
-            engine::BLOCKCHAIN_DATA_PATH.to_string_lossy(),
-        );
+        let mut scope = build_scope();
         self.rhai_engine
             .call_fn::<R>(&mut scope, &self.ast, name, args)
             .with_context(|| format!("Rhai function '{name}' returned error"))
@@ -298,6 +303,18 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             .create_job(name, config)
             .and_then(|_| self.babel_engine.start_job(name))
     }
+
+    fn evaluate_var<T: for<'a> Deserialize<'a>>(&self, name: &str) -> Result<T> {
+        let mut scope = build_scope();
+        self.rhai_engine.run_ast_with_scope(&mut scope, &self.ast)?;
+        if let Some(dynamic) = scope.get(name) {
+            let value: T = from_dynamic(dynamic)
+                .with_context(|| format!("Invalid Rhai script - failed to deserialize {name}"))?;
+            Ok(value)
+        } else {
+            Err(anyhow!("Invalid Rhai script - missing {name} constant"))
+        }
+    }
 }
 
 impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
@@ -311,7 +328,10 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             .iter_functions()
             .map(|meta| meta.name.to_string())
             .collect();
-        if find_const_in_ast::<PluginConfig>(&self.ast, PLUGIN_CONFIG_CONST_NAME).is_ok() {
+        if self
+            .evaluate_var::<PluginConfig>(PLUGIN_CONFIG_CONST_NAME)
+            .is_ok()
+        {
             if !capabilities.contains(&UPLOAD_JOB_NAME.to_string()) {
                 capabilities.push(UPLOAD_JOB_NAME.to_string())
             }
@@ -334,7 +354,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 self.call_fn(init_meta.name, (Map::default(),))
             }
         } else {
-            let config: PluginConfig = find_const_in_ast(&self.ast, PLUGIN_CONFIG_CONST_NAME)?;
+            let config: PluginConfig = self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?;
             let mut init_jobs = vec![];
             if let Some(init_config) = config.init {
                 for command in init_config.commands {
@@ -384,7 +404,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                     .map(|_ignored: String| ())
             }
         } else {
-            let config: PluginConfig = find_const_in_ast(&self.ast, PLUGIN_CONFIG_CONST_NAME)?;
+            let config: PluginConfig = self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?;
             for service in &config.services {
                 self.babel_engine.stop_job(&service.name)?;
             }
@@ -428,14 +448,15 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             Ok(ApplicationStatus::Uploading)
         } else if check_job_status(DOWNLOAD_JOB_NAME, JobStatus::Running) {
             Ok(ApplicationStatus::Downloading)
-        } else if find_const_in_ast::<PluginConfig>(&self.ast, PLUGIN_CONFIG_CONST_NAME).is_ok_and(
-            |config| {
+        } else if self
+            .evaluate_var::<PluginConfig>(PLUGIN_CONFIG_CONST_NAME)
+            .is_ok_and(|config| {
                 config
                     .services
                     .iter()
                     .any(|service| check_job_status(&service.name, JobStatus::Pending))
-            },
-        ) {
+            })
+        {
             Ok(ApplicationStatus::Initializing)
         } else {
             Ok(from_dynamic(
@@ -1156,7 +1177,7 @@ mod tests {
                     Service {
                         name: "blockchain_service".to_string(),
                         run_sh: "echo A".to_string(),
-                        restart: None,
+                        restart_config: None,
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                     },
@@ -1172,6 +1193,7 @@ mod tests {
             .returning(|_| Ok(()));
 
         let plugin = RhaiPlugin::new(script, babel)?;
+        assert!(plugin.capabilities().iter().any(|v| v == "upload"));
         plugin.upload().unwrap();
         Ok(())
     }
@@ -1251,7 +1273,7 @@ mod tests {
                 predicate::eq(plugin_config::build_alternative_download_job_config(
                     AlternativeDownload {
                         run_sh: "alternative download".to_string(),
-                        restart: None,
+                        restart_config: None,
                     },
                     vec!["init_job".to_string()],
                 )),
@@ -1271,7 +1293,7 @@ mod tests {
                     Service {
                         name: "blockchain_service".to_string(),
                         run_sh: "echo A".to_string(),
-                        restart: None,
+                        restart_config: None,
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                     },
@@ -1287,6 +1309,7 @@ mod tests {
             .returning(|_| Ok(()));
 
         let plugin = RhaiPlugin::new(script, babel)?;
+        assert!(plugin.capabilities().iter().any(|v| v == "init"));
         plugin.init().unwrap();
         Ok(())
     }

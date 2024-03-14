@@ -61,7 +61,7 @@ pub struct Service {
     /// Sh script body.
     pub run_sh: String,
     /// Service restart config.
-    pub restart: Option<RestartConfig>,
+    pub restart_config: Option<RestartConfig>,
     /// Job shutdown timeout - how long it may take to gracefully shutdown the job.
     /// After given time job won't be killed, but babel will rise the error.
     /// If not set default to 60s.
@@ -75,7 +75,7 @@ pub struct Service {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Download {
     /// Download restart config.
-    pub restart: Option<RestartConfig>,
+    pub restart_config: Option<RestartConfig>,
     /// Maximum number of parallel opened connections.
     pub max_connections: Option<usize>,
     /// Maximum number of parallel workers.
@@ -87,13 +87,13 @@ pub struct AlternativeDownload {
     /// Sh script body.
     pub run_sh: String,
     /// AlternativeDownload restart config.
-    pub restart: Option<RestartConfig>,
+    pub restart_config: Option<RestartConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Upload {
     /// Upload restart config.
-    pub restart: Option<RestartConfig>,
+    pub restart_config: Option<RestartConfig>,
     /// List of exclude patterns. Files in `source` directory that match any of pattern,
     /// won't be taken into account.
     pub exclude: Option<Vec<String>>,
@@ -150,7 +150,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
                 max_runners: download.max_runners,
             },
             restart: engine::RestartPolicy::OnFailure(
-                download.restart.unwrap_or(DEFAULT_RESTART_CONFIG),
+                download.restart_config.unwrap_or(DEFAULT_RESTART_CONFIG),
             ),
             shutdown_timeout_secs: None,
             shutdown_signal: None,
@@ -178,7 +178,7 @@ pub fn build_alternative_download_job_config(
 ) -> JobConfig {
     JobConfig {
         job_type: JobType::RunSh(alternative_download.run_sh),
-        restart: if let Some(restart) = alternative_download.restart {
+        restart: if let Some(restart) = alternative_download.restart_config {
             engine::RestartPolicy::OnFailure(restart)
         } else {
             engine::RestartPolicy::Never
@@ -192,7 +192,7 @@ pub fn build_alternative_download_job_config(
 pub fn build_service_job_config(service: Service, needs: Vec<String>) -> JobConfig {
     JobConfig {
         job_type: JobType::RunSh(service.run_sh),
-        restart: engine::RestartPolicy::Always(service.restart.unwrap_or(RestartConfig {
+        restart: engine::RestartPolicy::Always(service.restart_config.unwrap_or(RestartConfig {
             backoff_timeout_ms: 60_000,
             backoff_base_ms: 1_000,
             max_retries: None,
@@ -228,7 +228,7 @@ pub fn build_upload_job_config(value: Option<Upload>) -> JobConfig {
                 data_version: upload.data_version,
             },
             restart: engine::RestartPolicy::OnFailure(
-                upload.restart.unwrap_or(DEFAULT_RESTART_CONFIG),
+                upload.restart_config.unwrap_or(DEFAULT_RESTART_CONFIG),
             ),
             shutdown_timeout_secs: None,
             shutdown_signal: None,
