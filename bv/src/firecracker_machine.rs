@@ -10,6 +10,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use eyre::{bail, Result};
+use firec::config::{IoLimits, RateLimiter, TokenBucket};
 use firec::{config::JailerMode, Machine, MachineState};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -126,6 +127,22 @@ async fn create_config(
         blockchain::get_image_download_folder_path(bv_root, &data.image).join(ROOT_FS_FILE);
     let kernel_path = kernel::get_kernel_path(bv_root, &data.kernel);
     let data_fs_path = build_vm_data_path(bv_root, data.id).join(DATA_FILE);
+    let io_limits = IoLimits {
+        ops: 40_000,
+        bandwidth: 100_000_000,
+    };
+    let rate_limiter = RateLimiter {
+        bandwidth: Some(TokenBucket {
+            size: 100_000_000,
+            one_time_burst: None,
+            refill_time_ms: 1000,
+        }),
+        ops: Some(TokenBucket {
+            size: 30_000,
+            one_time_burst: None,
+            refill_time_ms: 1000,
+        }),
+    };
 
     let config = firec::config::Config::builder(Some(data.id), kernel_path)
         // Jailer configuration.
@@ -139,12 +156,15 @@ async fn create_config(
         .vcpu_count(data.requirements.vcpu_count)
         .mem_size_mib(data.requirements.mem_size_mb as i64)
         .build()
+        .io_limits(Some(io_limits))
         // Add root drive.
         .add_drive("root", root_fs_path)
         .is_root_device(true)
+        .rate_limiter(Some(rate_limiter.clone()))
         .build()
         // Add data drive.
         .add_drive("data", data_fs_path)
+        .rate_limiter(Some(rate_limiter))
         .build()
         // Network configuration.
         .add_network_interface(iface)

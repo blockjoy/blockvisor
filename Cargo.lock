@@ -1321,7 +1321,7 @@ dependencies = [
 [[package]]
 name = "firec"
 version = "0.2.0"
-source = "git+https://github.com/blockjoy/firec.git?rev=9e488cd#9e488cd35c84d0bb041063bec5d6f581f2dd3295"
+source = "git+https://github.com/blockjoy/firec.git?rev=c04b685#c04b6853ca81c94f818c60e292bcf202ec023c08"
 dependencies = [
  "derivative",
  "futures-util",
