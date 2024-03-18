@@ -1,5 +1,5 @@
 use blockvisord::{
-    config::SharedConfig, internal_server, linux_platform::LinuxPlatform,
+    config, config::SharedConfig, internal_server, linux_platform::LinuxPlatform,
     nodes_manager::NodesManager, pal::Pal, set_bv_status, ServiceStatus,
 };
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
@@ -20,7 +20,8 @@ async fn main() -> Result<()> {
     set_bv_status(ServiceStatus::Ok).await;
 
     let mut run = RunFlag::run_until_ctrlc();
-    let (pal, config) = LinuxPlatform::new_with_config().await?;
+    let pal = LinuxPlatform::new().await?;
+    let config = config::Config::load(pal.bv_root()).await?;
 
     let bv_root = pal.bv_root().to_path_buf();
     let listener = TcpListener::bind(format!("0.0.0.0:{}", config.blockvisor_port)).await?;

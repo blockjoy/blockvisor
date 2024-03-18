@@ -1,5 +1,6 @@
 use crate::{
     cluster::ClusterData,
+    config,
     config::SharedConfig,
     hosts,
     linux_platform::LinuxPlatform,
@@ -106,7 +107,10 @@ where
 {
     #[instrument(skip(self), ret(Debug))]
     async fn info(&self, _request: Request<()>) -> Result<Response<String>, Status> {
-        let (pal, mut config) = LinuxPlatform::new_with_config()
+        let pal = LinuxPlatform::new()
+            .await
+            .map_err(|e| Status::internal(format!("{e:#}")))?;
+        let mut config = config::Config::load(pal.bv_root())
             .await
             .map_err(|e| Status::internal(format!("{e:#}")))?;
         config.token = "***".to_string();

@@ -41,9 +41,8 @@ pub fn bv_root() -> PathBuf {
 }
 
 impl LinuxPlatform {
-    pub async fn new_with_config() -> Result<(Self, config::Config)> {
+    pub async fn new() -> Result<Self> {
         let bv_root = bv_root();
-        let config = config::Config::load(&bv_root).await?;
         let babel_dir = fs::canonicalize(
             std::env::current_exe().with_context(|| "failed to get current binary path")?,
         )
@@ -65,14 +64,11 @@ impl LinuxPlatform {
                 job_runner_path.display()
             )
         }
-        Ok((
-            Self {
-                bv_root,
-                babel_path,
-                job_runner_path,
-            },
-            config,
-        ))
+        Ok(Self {
+            bv_root,
+            babel_path,
+            job_runner_path,
+        })
     }
 }
 
