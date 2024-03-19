@@ -1,9 +1,4 @@
-use blockvisord::{
-    blockvisord::BlockvisorD,
-    linux_fc_platform::bv_root,
-    pal::Pal,
-    {config, load_pal},
-};
+use blockvisord::{blockvisord::BlockvisorD, config, pal::Pal, pal_config};
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::Result;
 use tracing::info;
@@ -17,8 +12,17 @@ async fn main() -> Result<()> {
         env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
     );
-    let pal = load_pal!(&bv_root())?;
-    let config = config::Config::load(pal.bv_root()).await?;
-    BlockvisorD::new(pal, config).await?.run(run).await?;
+    match pal_config::PalConfig::load().await? {
+        pal_config::PalConfig::LinuxFc => {
+            let pal = blockvisord::linux_fc_platform::LinuxFcPlatform::new().await?;
+            let config = config::Config::load(pal.bv_root()).await?;
+            BlockvisorD::new(pal, config).await?.run(run).await?;
+        }
+        pal_config::PalConfig::LinuxBare => {
+            let pal = blockvisord::linux_bare_platform::LinuxBarePlatform::new().await?;
+            let config = config::Config::load(pal.bv_root()).await?;
+            BlockvisorD::new(pal, config).await?.run(run).await?;
+        }
+    }
     Ok(())
 }

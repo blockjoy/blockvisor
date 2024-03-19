@@ -3,7 +3,7 @@ use blockvisord::{
     cli::{App, Command},
     config::{Config, SharedConfig, CONFIG_PATH},
     internal_server,
-    linux_fc_platform::bv_root,
+    linux_platform::bv_root,
 };
 use bv_utils::cmd::run_cmd;
 use clap::Parser;

@@ -1,60 +1,50 @@
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
-    config,
+    bare_machine, config,
     config::SharedConfig,
-    firecracker_machine, linux_platform, node_connection,
+    linux_platform,
     node_data::NodeData,
     nodes_manager::NodesDataCache,
-    pal::{AvailableResources, NetInterface, Pal},
-    services,
-    services::blockchain::DATA_FILE,
-    utils, BV_VAR_PATH,
+    pal::{AvailableResources, BabelClient, NetInterface, NodeConnection, Pal},
+    services, utils, BV_VAR_PATH,
 };
 use async_trait::async_trait;
-use bv_utils::cmd::run_cmd;
 use core::fmt;
 use eyre::{anyhow, Result};
-use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
-    ffi::OsStr,
     net::IpAddr,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
 use sysinfo::{DiskExt, System, SystemExt};
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct LinuxFcPlatform(linux_platform::LinuxPlatform);
+pub struct LinuxBarePlatform(linux_platform::LinuxPlatform);
 
-impl LinuxFcPlatform {
+impl Deref for LinuxBarePlatform {
+    type Target = linux_platform::LinuxPlatform;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for LinuxBarePlatform {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl LinuxBarePlatform {
     pub async fn new() -> Result<Self> {
         Ok(Self(linux_platform::LinuxPlatform::new().await?))
     }
 }
 
-/// Create new data drive in chroot location, or copy it from cache
-pub async fn prepare_data_image<P>(bv_root: &Path, data: &NodeData<P>) -> Result<()> {
-    // allocate new image on location, if it's not there yet
-    let vm_data_dir = firecracker_machine::build_vm_data_path(bv_root, data.id);
-    let data_file_path = vm_data_dir.join(DATA_FILE);
-    if !data_file_path.exists() {
-        tokio::fs::create_dir_all(&vm_data_dir).await?;
-        let disk_size_gb = data.requirements.disk_size_gb;
-        let gb = &format!("{disk_size_gb}GB");
-        run_cmd(
-            "fallocate",
-            [OsStr::new("-l"), OsStr::new(gb), data_file_path.as_os_str()],
-        )
-        .await?;
-        run_cmd("mkfs.ext4", [data_file_path.as_os_str()]).await?;
-    }
-
-    Ok(())
-}
-
 #[async_trait]
-impl Pal for LinuxFcPlatform {
+impl Pal for LinuxBarePlatform {
     fn bv_root(&self) -> &Path {
         self.0.bv_root.as_path()
     }
@@ -68,6 +58,7 @@ impl Pal for LinuxFcPlatform {
     }
 
     type NetInterface = LinuxNetInterface;
+
     async fn create_net_interface(
         &self,
         index: u32,
@@ -76,9 +67,6 @@ impl Pal for LinuxFcPlatform {
         config: &SharedConfig,
     ) -> Result<Self::NetInterface> {
         let name = format!("bv{index}");
-        // First create the interface.
-        run_cmd("ip", ["tuntap", "add", &name, "mode", "tap"]).await?;
-
         Ok(LinuxNetInterface {
             name,
             bridge_ifa: config.read().await.iface.clone(),
@@ -105,30 +93,32 @@ impl Pal for LinuxFcPlatform {
         }
     }
 
-    type NodeConnection = node_connection::NodeConnection;
+    type NodeConnection = BareNodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        node_connection::new(&self.build_vm_data_path(node_id), self.0.babel_path.clone())
+        BareNodeConnection::new(&self.build_vm_data_path(node_id))
     }
 
-    type VirtualMachine = firecracker_machine::FirecrackerMachine;
+    type VirtualMachine = bare_machine::BareMachine;
 
     async fn create_vm(
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        prepare_data_image(&self.0.bv_root, node_data).await?;
-        firecracker_machine::create(&self.0.bv_root, node_data).await
+        bare_machine::create(&self.bv_root, node_data).await
     }
 
     async fn attach_vm(
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        firecracker_machine::attach(&self.0.bv_root, node_data).await
+        bare_machine::attach(&self.bv_root, node_data).await
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
-        firecracker_machine::build_vm_data_path(&self.0.bv_root, id)
+        self.bv_root
+            .join(BV_VAR_PATH)
+            .join("bare")
+            .join(id.to_string())
     }
 
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
@@ -144,10 +134,10 @@ impl Pal for LinuxFcPlatform {
             },
         );
         let available_disk_space =
-            bv_utils::system::find_disk_by_path(&sys, &self.0.bv_root.join(BV_VAR_PATH))
+            bv_utils::system::find_disk_by_path(&sys, &self.bv_root.join(BV_VAR_PATH))
                 .map(|disk| disk.available_space())
                 .ok_or_else(|| anyhow!("Cannot get available disk space"))?
-                - utils::used_disk_space_correction(&self.0.bv_root, nodes_data_cache)?;
+                - utils::used_disk_space_correction(&self.bv_root, nodes_data_cache)?;
         Ok(AvailableResources {
             vcpu_count: available_vcpu_count,
             mem_size_mb: available_mem_size_mb,
@@ -190,37 +180,61 @@ impl NetInterface for LinuxNetInterface {
 
     /// Remaster the network interface.
     async fn remaster(&self) -> Result<()> {
-        remaster(&self.name, &self.bridge_ifa).await
+        Ok(())
     }
 
     /// Delete the network interface.
     async fn delete(&self) -> Result<()> {
-        delete(&self.name).await
+        Ok(())
     }
-}
-
-async fn remaster(name: &str, bridge_ifa: &str) -> Result<()> {
-    // Try to create interface if it's not present (possibly after host reboot)
-    let _ = run_cmd("ip", ["tuntap", "add", name, "mode", "tap"]).await;
-
-    // Set bridge as the interface's master.
-    run_cmd("ip", ["link", "set", name, "master", bridge_ifa])
-        // Start the interface.
-        .and_then(|_| run_cmd("ip", ["link", "set", name, "up"]))
-        .await?;
-    Ok(())
-}
-
-async fn delete(name: &str) -> Result<()> {
-    // try to delete only if exists
-    if run_cmd("ip", ["link", "show", name]).await.is_ok() {
-        run_cmd("ip", ["link", "delete", name, "type", "tuntap"]).await?;
-    }
-    Ok(())
 }
 
 impl fmt::Display for LinuxNetInterface {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.ip)
+    }
+}
+
+#[derive(Debug)]
+pub struct BareNodeConnection {}
+
+impl BareNodeConnection {
+    fn new(_vm_path: &Path) -> Self {
+        Self {}
+    }
+}
+
+#[async_trait]
+impl NodeConnection for BareNodeConnection {
+    async fn setup(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn attach(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    fn close(&mut self) {
+        todo!()
+    }
+
+    fn is_closed(&self) -> bool {
+        todo!()
+    }
+
+    fn mark_broken(&mut self) {
+        todo!()
+    }
+
+    fn is_broken(&self) -> bool {
+        todo!()
+    }
+
+    async fn test(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn babel_client(&mut self) -> Result<&mut BabelClient> {
+        todo!()
     }
 }

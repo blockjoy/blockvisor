@@ -1,5 +1,5 @@
 use crate::config::SharedConfig;
-use crate::linux_fc_platform::bv_root;
+use crate::linux_platform::bv_root;
 use crate::nodes_manager::NodesDataCache;
 use crate::services::api::pb;
 use crate::{api_with_retry, services};

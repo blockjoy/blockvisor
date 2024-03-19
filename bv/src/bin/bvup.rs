@@ -2,7 +2,7 @@ use blockvisord::{
     config,
     config::{Config, SharedConfig},
     hosts::HostInfo,
-    linux_fc_platform::bv_root,
+    linux_platform::bv_root,
     self_updater,
     services::api::pb,
     utils, BV_VAR_PATH,

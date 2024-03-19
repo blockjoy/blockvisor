@@ -1,34 +1,22 @@
+use crate::linux_platform::bv_root;
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, path::Path};
+use std::fmt::Debug;
 use tokio::fs;
 use tracing::info;
 
 pub const CONFIG_PATH: &str = "var/lib/blockvisor/pal.json";
 
-#[macro_export]
-macro_rules! load_pal {
-    ($bv_root:expr) => {
-        match $crate::pal_config::PalConfig::load($bv_root).await? {
-            $crate::pal_config::PalConfig::LinuxFc => {
-                $crate::linux_fc_platform::LinuxFcPlatform::new().await
-            }
-            $crate::pal_config::PalConfig::LinuxBare => {
-                unimplemented!()
-            }
-        }
-    };
-}
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
 pub enum PalConfig {
     LinuxFc,
     LinuxBare,
 }
 
 impl PalConfig {
-    pub async fn load(bv_root: &Path) -> Result<PalConfig> {
-        let path = bv_root.join(CONFIG_PATH);
+    pub async fn load() -> Result<PalConfig> {
+        let path = bv_root().join(CONFIG_PATH);
         if path.exists() {
             info!("Reading pal config: {}", path.display());
             let config = fs::read_to_string(&path)

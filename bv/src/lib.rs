@@ -1,5 +1,6 @@
 pub mod babel_engine;
 pub mod babel_engine_service;
+mod bare_machine;
 pub mod blockvisord;
 pub mod bv;
 pub mod cli;
@@ -10,7 +11,9 @@ pub mod firecracker_machine;
 pub mod hosts;
 pub mod installer;
 pub mod internal_server;
+pub mod linux_bare_platform;
 pub mod linux_fc_platform;
+pub mod linux_platform;
 pub mod node;
 pub mod node_connection;
 pub mod node_context;
