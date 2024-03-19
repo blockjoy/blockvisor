@@ -12,7 +12,6 @@ use std::{
     fmt::Debug,
     net::IpAddr,
     path::{Path, PathBuf},
-    time::Duration,
 };
 use tonic::{codegen::InterceptedService, transport::Channel};
 use uuid::Uuid;
@@ -121,8 +120,10 @@ pub type BabelSupClient = babel_api::babelsup::babel_sup_client::BabelSupClient<
 
 #[async_trait]
 pub trait NodeConnection {
-    /// Open node connection with given `max_delay`.
-    async fn open(&mut self, max_delay: Duration) -> Result<()>;
+    /// Setup connection to just started node.
+    async fn setup(&mut self) -> Result<()>;
+    /// Attach to already running node.
+    async fn attach(&mut self) -> Result<()>;
     /// Close opened connection.
     fn close(&mut self);
     /// Check if connection is closed.
@@ -135,8 +136,6 @@ pub trait NodeConnection {
     /// Perform basic connectivity test, to check actual connection state.
     /// It may mutate internal state it connection was marked as broken, but now test pass.
     async fn test(&mut self) -> Result<()>;
-    /// Get reference to Babel rpc client. Try to reestablish connection if it's necessary.
-    async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient>;
     /// Get reference to BabelSup rpc client. Try to reestablish connection if it's necessary.
     async fn babel_client(&mut self) -> Result<&mut BabelClient>;
 }

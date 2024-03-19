@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use blockvisord::installer;
 use blockvisord::installer::Installer;
-use blockvisord::linux_platform::bv_root;
+use blockvisord::linux_fc_platform::bv_root;
 use bv_utils::{cmd::run_cmd, logging::setup_logging, timer::SysTimer};
 use eyre::Result;
 use tracing::error;

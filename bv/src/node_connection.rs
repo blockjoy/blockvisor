@@ -1,5 +1,6 @@
-use crate::{firecracker_machine::VSOCK_PATH, pal};
+use crate::{firecracker_machine::VSOCK_PATH, pal, utils};
 use async_trait::async_trait;
+use babel_api::babelsup::SupervisorConfig;
 use bv_utils::with_retry;
 use eyre::{anyhow, bail, ensure, Context, Result};
 use std::{
@@ -21,6 +22,12 @@ const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECTION_SWITCH_TIMEOUT: Duration = Duration::from_secs(1);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const NODE_START_TIMEOUT: Duration = Duration::from_secs(120);
+const NODE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const SUPERVISOR_CONFIG: SupervisorConfig = SupervisorConfig {
+    backoff_timeout_ms: 3000,
+    backoff_base_ms: 200,
+};
 
 #[derive(Debug)]
 pub enum NodeConnectionState {
@@ -33,19 +40,33 @@ pub enum NodeConnectionState {
 #[derive(Debug)]
 pub struct NodeConnection {
     socket_path: PathBuf,
+    babel_path: PathBuf,
     state: NodeConnectionState,
 }
 
 /// Creates new closed connection instance.
-pub fn new(vm_data_path: &Path) -> NodeConnection {
+pub fn new(vm_data_path: &Path, babel_path: PathBuf) -> NodeConnection {
     NodeConnection {
         socket_path: vm_data_path.join(VSOCK_PATH),
         state: NodeConnectionState::Closed,
+        babel_path,
     }
 }
 
-#[async_trait]
-impl pal::NodeConnection for NodeConnection {
+impl NodeConnection {
+    async fn connect(&mut self, max_delay: Duration) -> Result<()> {
+        self.open(max_delay).await?;
+        // check and update babel
+        let (babel_bin, checksum) = utils::load_bin(&self.babel_path).await?;
+        let client = self.babelsup_client().await?;
+        let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
+        if babel_status != babel_api::utils::BinaryStatus::Ok {
+            info!("Invalid or missing Babel service on VM, installing new one");
+            with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
+        }
+        Ok(())
+    }
+
     /// Tries to open a connection to the VM. Note that this fails if the VM hasn't started yet.
     /// It also initializes that connection by sending the opening message. Therefore, if this
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.
@@ -55,6 +76,41 @@ impl pal::NodeConnection for NodeConnection {
         info!("Connected to babelsup {babelsup_version}");
         self.state = NodeConnectionState::BabelSup(client);
         Ok(())
+    }
+
+    /// This function gets gRPC client connected to babelsup. It reconnects to babelsup if necessary.
+    async fn babelsup_client(&mut self) -> Result<&mut pal::BabelSupClient> {
+        match &mut self.state {
+            NodeConnectionState::Closed => {
+                bail!("Cannot change port to babelsup: node connection is closed")
+            }
+            NodeConnectionState::Babel { .. } | NodeConnectionState::Broken => {
+                debug!("Reconnecting to babelsup");
+                self.state = NodeConnectionState::BabelSup(
+                    connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?,
+                );
+            }
+            NodeConnectionState::BabelSup { .. } => {}
+        };
+        if let NodeConnectionState::BabelSup(client) = &mut self.state {
+            Ok(client)
+        } else {
+            unreachable!()
+        }
+    }
+}
+
+#[async_trait]
+impl pal::NodeConnection for NodeConnection {
+    async fn setup(&mut self) -> Result<()> {
+        self.connect(NODE_START_TIMEOUT).await?;
+        let babelsup_client = self.babelsup_client().await?;
+        with_retry!(babelsup_client.setup_supervisor(SUPERVISOR_CONFIG))?;
+        Ok(())
+    }
+
+    async fn attach(&mut self) -> Result<()> {
+        self.connect(NODE_RECONNECT_TIMEOUT).await
     }
 
     fn close(&mut self) {
@@ -80,27 +136,6 @@ impl pal::NodeConnection for NodeConnection {
         // update connection state (otherwise it still may be seen as broken)
         self.state = NodeConnectionState::BabelSup(client);
         Ok(())
-    }
-
-    /// This function gets gRPC client connected to babelsup. It reconnects to babelsup if necessary.
-    async fn babelsup_client(&mut self) -> Result<&mut pal::BabelSupClient> {
-        match &mut self.state {
-            NodeConnectionState::Closed => {
-                bail!("Cannot change port to babelsup: node connection is closed")
-            }
-            NodeConnectionState::Babel { .. } | NodeConnectionState::Broken => {
-                debug!("Reconnecting to babelsup");
-                self.state = NodeConnectionState::BabelSup(
-                    connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?,
-                );
-            }
-            NodeConnectionState::BabelSup { .. } => {}
-        };
-        if let NodeConnectionState::BabelSup(client) = &mut self.state {
-            Ok(client)
-        } else {
-            unreachable!()
-        }
     }
 
     /// This function gets RPC client connected to babel. It reconnects to babel if necessary.

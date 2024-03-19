@@ -9,9 +9,9 @@ use crate::{
     node_data::{NodeData, NodeImage, NodeStatus},
     pal::{self, NetInterface, NodeConnection, Pal, RecoverBackoff, VirtualMachine},
     services::blockchain::{self, ROOT_FS_FILE},
+    utils,
 };
 use babel_api::{
-    babelsup::SupervisorConfig,
     engine::JobStatus,
     metadata::{firewall, BlockchainMetadata},
     rhai_plugin,
@@ -21,25 +21,15 @@ use bv_utils::{cmd::run_cmd, rpc::with_timeout, with_retry};
 use chrono::Utc;
 use eyre::{bail, Context, Report, Result};
 use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
-use tokio::{
-    fs::{self, File},
-    io::{AsyncReadExt, BufReader},
-    time::Instant,
-};
+use tokio::{fs, time::Instant};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 const DEFAULT_UPGRADE_RETRY_HINT: Duration = Duration::from_secs(3600);
-const NODE_START_TIMEOUT: Duration = Duration::from_secs(120);
-const NODE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FW_SETUP_TIMEOUT_SEC: u64 = 30;
 const FW_RULE_SETUP_TIMEOUT_SEC: u64 = 1;
-const SUPERVISOR_CONFIG: SupervisorConfig = SupervisorConfig {
-    backoff_timeout_ms: 3000,
-    backoff_base_ms: 200,
-};
 
 pub type BabelEngine<N> = babel_engine::BabelEngine<N, RhaiPlugin<babel_engine::Engine>>;
 
@@ -191,9 +181,7 @@ impl<P: Pal + Debug> Node<P> {
             // Since this is the startup phase it doesn't make sense to wait a long time
             // for the nodes to come online. For that reason we restrict the allowed delay
             // further down.
-            if let Err(err) =
-                connect(&mut node_conn, NODE_RECONNECT_TIMEOUT, pal.babel_path()).await
-            {
+            if let Err(err) = node_conn.attach().await {
                 warn!("failed to reestablish babel connection to running node {node_id}: {err:#}");
                 node_conn.close();
             } else if let Err(err) = check_job_runner(&mut node_conn, pal.job_runner_path()).await {
@@ -283,14 +271,7 @@ impl<P: Pal + Debug> Node<P> {
             self.machine.start().await?;
         }
         let id = self.id();
-        connect(
-            &mut self.babel_engine.node_connection,
-            NODE_START_TIMEOUT,
-            self.pal.babel_path(),
-        )
-        .await?;
-        let babelsup_client = self.babel_engine.node_connection.babelsup_client().await?;
-        with_retry!(babelsup_client.setup_supervisor(SUPERVISOR_CONFIG))?;
+        self.babel_engine.node_connection.setup().await?;
         check_job_runner(
             &mut self.babel_engine.node_connection,
             self.pal.job_runner_path(),
@@ -591,29 +572,12 @@ impl<P: Pal + Debug> Node<P> {
     }
 }
 
-async fn connect(
-    connection: &mut impl NodeConnection,
-    max_delay: Duration,
-    babel_path: &Path,
-) -> Result<()> {
-    connection.open(max_delay).await?;
-    // check and update babel
-    let (babel_bin, checksum) = load_bin(babel_path).await?;
-    let client = connection.babelsup_client().await?;
-    let babel_status = with_retry!(client.check_babel(checksum))?.into_inner();
-    if babel_status != babel_api::utils::BinaryStatus::Ok {
-        info!("Invalid or missing Babel service on VM, installing new one");
-        with_retry!(client.start_new_babel(tokio_stream::iter(babel_bin.clone())))?;
-    }
-    Ok(())
-}
-
 async fn check_job_runner(
     connection: &mut impl NodeConnection,
     job_runner_path: &Path,
 ) -> Result<()> {
     // check and update job_runner
-    let (job_runner_bin, checksum) = load_bin(job_runner_path).await?;
+    let (job_runner_bin, checksum) = utils::load_bin(job_runner_path).await?;
     let client = connection.babel_client().await?;
     let job_runner_status = with_retry!(client.check_job_runner(checksum))?.into_inner();
     if job_runner_status != babel_api::utils::BinaryStatus::Ok {
@@ -621,27 +585,6 @@ async fn check_job_runner(
         with_retry!(client.upload_job_runner(tokio_stream::iter(job_runner_bin.clone())))?;
     }
     Ok(())
-}
-
-async fn load_bin(bin_path: &Path) -> Result<(Vec<babel_api::utils::Binary>, u32)> {
-    let file = File::open(bin_path)
-        .await
-        .with_context(|| format!("failed to load binary {}", bin_path.display()))?;
-    let mut reader = BufReader::new(file);
-    let mut buf = [0; 16384];
-    let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
-    let mut digest = crc.digest();
-    let mut babel_bin = Vec::<babel_api::utils::Binary>::default();
-    while let Ok(size) = reader.read(&mut buf[..]).await {
-        if size == 0 {
-            break;
-        }
-        digest.update(&buf[0..size]);
-        babel_bin.push(babel_api::utils::Binary::Bin(buf[0..size].to_vec()));
-    }
-    let checksum = digest.finalize();
-    babel_bin.push(babel_api::utils::Binary::Checksum(checksum));
-    Ok((babel_bin, checksum))
 }
 
 fn fw_setup_timeout(config: &firewall::Config) -> Duration {
@@ -658,8 +601,7 @@ pub mod tests {
         node_context::build_registry_dir,
         nodes_manager,
         pal::{
-            BabelClient, BabelSupClient, CommandsStream, NodeConnection, ServiceConnector,
-            VirtualMachine, VmState,
+            BabelClient, CommandsStream, NodeConnection, ServiceConnector, VirtualMachine, VmState,
         },
         services::{self, blockchain::BABEL_PLUGIN_NAME, ApiInterceptor, AuthToken},
         utils,
@@ -798,13 +740,13 @@ pub mod tests {
 
         #[async_trait]
         impl NodeConnection for TestNodeConnection {
-            async fn open(&mut self, _max_delay: Duration) -> Result<()>;
+            async fn setup(&mut self) -> Result<()>;
+            async fn attach(&mut self) -> Result<()>;
             fn close(&mut self);
             fn is_closed(&self) -> bool;
             fn mark_broken(&mut self);
             fn is_broken(&self) -> bool;
             async fn test(&mut self) -> Result<()>;
-            async fn babelsup_client<'a>(&'a mut self) -> Result<&'a mut BabelSupClient>;
             async fn babel_client<'a>(&'a mut self) -> Result<&'a mut BabelClient>;
         }
     }
@@ -868,27 +810,6 @@ pub mod tests {
 
             type RecoveryBackoff = DummyBackoff;
             fn create_recovery_backoff(&self) -> DummyBackoff;
-        }
-    }
-
-    mock! {
-        pub TestBabelSupService {}
-
-        #[tonic::async_trait]
-        impl babel_api::babelsup::babel_sup_server::BabelSup for TestBabelSupService {
-            async fn get_version(&self, request: Request<()>) -> Result<Response<String>, Status>;
-            async fn check_babel(
-                &self,
-                request: Request<u32>,
-            ) -> Result<Response<babel_api::utils::BinaryStatus>, Status>;
-            async fn start_new_babel(
-                &self,
-                request: Request<Streaming<babel_api::utils::Binary>>,
-            ) -> Result<Response<()>, Status>;
-            async fn setup_supervisor(
-                &self,
-                request: Request<SupervisorConfig>,
-            ) -> Result<Response<()>, Status>;
         }
     }
 
@@ -1062,12 +983,10 @@ pub mod tests {
 
         async fn start_server(
             &self,
-            babel_sup_mock: MockTestBabelSupService,
             babel_mock: MockTestBabelService,
         ) -> bv_tests_utils::rpc::TestServer {
             start_test_server!(
                 &self.tmp_root,
-                babel_api::babelsup::babel_sup_server::BabelSupServer::new(babel_sup_mock),
                 babel_api::babel::babel_server::BabelServer::new(babel_mock)
             )
         }
@@ -1083,17 +1002,6 @@ pub mod tests {
             .unwrap();
             assert_eq!(saved_data, node_data);
         }
-    }
-
-    fn test_babel_sup_client(tmp_root: &Path) -> &'static mut BabelSupClient {
-        // need to leak client, to mock method that return clients reference
-        // because of mock used which expect `static lifetime
-        Box::leak(Box::new(
-            babel_api::babelsup::babel_sup_client::BabelSupClient::with_interceptor(
-                test_channel(tmp_root),
-                bv_utils::rpc::DefaultTimeout(Duration::from_secs(1)),
-            ),
-        ))
     }
 
     fn test_babel_client(tmp_root: &Path) -> &'static mut BabelClient {
@@ -1191,13 +1099,7 @@ pub mod tests {
             .once()
             .returning(move |_| {
                 let mut mock = MockTestNodeConnection::new();
-                mock.expect_open()
-                    .with(predicate::eq(NODE_RECONNECT_TIMEOUT))
-                    .return_once(|_| Ok(()));
-                let tmp_root = test_tmp_root.clone();
-                mock.expect_babelsup_client()
-                    .once()
-                    .returning(move || Ok(test_babel_sup_client(&tmp_root)));
+                mock.expect_attach().return_once(|| Ok(()));
                 let tmp_root = test_tmp_root.clone();
                 mock.expect_babel_client()
                     .return_once(move || Ok(test_babel_client(&tmp_root)));
@@ -1212,26 +1114,17 @@ pub mod tests {
             .once()
             .returning(move |_| {
                 let mut mock = MockTestNodeConnection::new();
-                mock.expect_open()
-                    .with(predicate::eq(NODE_RECONNECT_TIMEOUT))
-                    .return_once(|_| Ok(()));
+                mock.expect_attach().return_once(|| Ok(()));
                 mock.expect_close().return_once(|| ());
                 mock.expect_is_closed().return_once(|| true);
                 mock
             });
-        let test_tmp_root = test_env.tmp_root.to_path_buf();
         pal.expect_create_node_connection()
             .with(predicate::eq(missing_job_runner_node_data.id))
             .once()
             .returning(move |_| {
                 let mut mock = MockTestNodeConnection::new();
-                mock.expect_open()
-                    .with(predicate::eq(NODE_RECONNECT_TIMEOUT))
-                    .return_once(|_| Ok(()));
-                let tmp_root = test_tmp_root.clone();
-                mock.expect_babelsup_client()
-                    .once()
-                    .returning(move || Ok(test_babel_sup_client(&tmp_root)));
+                mock.expect_attach().return_once(|| Ok(()));
                 mock.expect_close().return_once(|| ());
                 mock.expect_is_closed().return_once(|| true);
                 mock
@@ -1255,13 +1148,6 @@ pub mod tests {
                 mock.expect_state().return_const(VmState::RUNNING);
                 Ok(mock)
             });
-        let mut babel_sup_mock = MockTestBabelSupService::new();
-        babel_sup_mock
-            .expect_check_babel()
-            .returning(|_| Ok(Response::new(BinaryStatus::ChecksumMismatch)));
-        babel_sup_mock
-            .expect_start_new_babel()
-            .returning(|_| Ok(Response::new(())));
         let mut babel_mock = MockTestBabelService::new();
         babel_mock
             .expect_check_job_runner()
@@ -1346,7 +1232,7 @@ pub mod tests {
         fs::write(&test_env.tmp_root.join("job_runner"), "dummy job_runner")
             .await
             .unwrap();
-        let server = test_env.start_server(babel_sup_mock, babel_mock).await;
+        let server = test_env.start_server(babel_mock).await;
         let node = Node::attach(pal, config, node_data).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
         server.assert().await;
@@ -1377,13 +1263,7 @@ pub mod tests {
             let mut mock = MockTestNodeConnection::new();
             mock.expect_is_closed().return_once(|| false);
             mock.expect_is_broken().return_once(|| false);
-            mock.expect_open()
-                .with(predicate::eq(NODE_START_TIMEOUT))
-                .times(3)
-                .returning(|_| Ok(()));
-            let tmp_root = test_tmp_root.clone();
-            mock.expect_babelsup_client()
-                .returning(move || Ok(test_babel_sup_client(&tmp_root)));
+            mock.expect_setup().times(3).returning(|| Ok(()));
             let tmp_root = test_tmp_root.clone();
             mock.expect_babel_client()
                 .returning(move || Ok(test_babel_client(&tmp_root)));
@@ -1479,16 +1359,6 @@ pub mod tests {
             node.start().await.unwrap_err().to_string()
         );
 
-        let mut babel_sup_mock = MockTestBabelSupService::new();
-        babel_sup_mock
-            .expect_check_babel()
-            .times(3)
-            .returning(|_| Ok(Response::new(BinaryStatus::Ok)));
-        babel_sup_mock
-            .expect_setup_supervisor()
-            .withf(|req| req.get_ref() == &SUPERVISOR_CONFIG)
-            .times(3)
-            .returning(|_| Ok(Response::new(())));
         let mut babel_mock = MockTestBabelService::new();
         babel_mock
             .expect_check_job_runner()
@@ -1557,7 +1427,7 @@ pub mod tests {
         fs::write(&test_env.tmp_root.join("job_runner"), "dummy job_runner")
             .await
             .unwrap();
-        let server = test_env.start_server(babel_sup_mock, babel_mock).await;
+        let server = test_env.start_server(babel_mock).await;
         node.data.initialized = false;
         let start_err = format!("{:#}", node.start().await.unwrap_err());
         assert!(start_err.starts_with(
@@ -1670,9 +1540,7 @@ pub mod tests {
             .in_sequence(&mut seq)
             .returning(|_| Err(Status::internal("can't stop babel")));
 
-        let server = test_env
-            .start_server(MockTestBabelSupService::new(), babel_mock)
-            .await;
+        let server = test_env.start_server(babel_mock).await;
         assert!(node
             .stop(false)
             .await
@@ -1742,9 +1610,7 @@ pub mod tests {
             .in_sequence(&mut seq)
             .returning(|_| Ok(Response::new(())));
 
-        let server = test_env
-            .start_server(MockTestBabelSupService::new(), babel_mock)
-            .await;
+        let server = test_env.start_server(babel_mock).await;
 
         assert!(node.data.firewall_rules.is_empty());
         assert!(node
@@ -1839,9 +1705,7 @@ pub mod tests {
             )])))
         });
 
-        let server = test_env
-            .start_server(MockTestBabelSupService::new(), babel_mock)
-            .await;
+        let server = test_env.start_server(babel_mock).await;
 
         assert!(node.data.firewall_rules.is_empty());
         assert_eq!(

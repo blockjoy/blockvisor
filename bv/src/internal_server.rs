@@ -3,7 +3,7 @@ use crate::{
     config,
     config::SharedConfig,
     hosts,
-    linux_platform::LinuxPlatform,
+    linux_fc_platform::LinuxFcPlatform,
     node::Node,
     node_data::{NodeImage, NodeStatus},
     nodes_manager::{self, NodeConfig, NodesManager},
@@ -107,7 +107,7 @@ where
 {
     #[instrument(skip(self), ret(Debug))]
     async fn info(&self, _request: Request<()>) -> Result<Response<String>, Status> {
-        let pal = LinuxPlatform::new()
+        let pal = LinuxFcPlatform::new()
             .await
             .map_err(|e| Status::internal(format!("{e:#}")))?;
         let mut config = config::Config::load(pal.bv_root())

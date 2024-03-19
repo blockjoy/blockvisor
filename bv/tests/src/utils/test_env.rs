@@ -311,7 +311,10 @@ impl Pal for DummyPlatform {
     type NodeConnection = blockvisord::node_connection::NodeConnection;
 
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        blockvisord::node_connection::new(&self.build_vm_data_path(node_id))
+        blockvisord::node_connection::new(
+            &self.build_vm_data_path(node_id),
+            self.babel_path.clone(),
+        )
     }
 
     type VirtualMachine = firecracker_machine::FirecrackerMachine;
@@ -320,7 +323,7 @@ impl Pal for DummyPlatform {
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        blockvisord::linux_platform::prepare_data_image(&self.bv_root, node_data).await?;
+        blockvisord::linux_fc_platform::prepare_data_image(&self.bv_root, node_data).await?;
         firecracker_machine::create(&self.bv_root, node_data).await
     }
 

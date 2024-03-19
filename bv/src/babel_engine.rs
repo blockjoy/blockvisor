@@ -738,7 +738,7 @@ mod tests {
     use super::*;
     use crate::{
         config::Config,
-        pal::{BabelClient, BabelSupClient},
+        pal::BabelClient,
         utils::{self},
     };
     use assert_fs::TempDir;
@@ -936,7 +936,11 @@ mod tests {
     #[allow(clippy::diverging_sub_expression)]
     #[async_trait]
     impl NodeConnection for TestConnection {
-        async fn open(&mut self, _max_delay: Duration) -> Result<()> {
+        async fn setup(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn attach(&mut self) -> Result<()> {
             Ok(())
         }
 
@@ -954,10 +958,6 @@ mod tests {
 
         async fn test(&mut self) -> Result<()> {
             Ok(())
-        }
-
-        async fn babelsup_client(&mut self) -> Result<&mut BabelSupClient> {
-            unimplemented!()
         }
 
         async fn babel_client(&mut self) -> Result<&mut BabelClient> {

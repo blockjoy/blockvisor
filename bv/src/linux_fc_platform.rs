@@ -30,7 +30,7 @@ use uuid::Uuid;
 const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
 
 #[derive(Debug)]
-pub struct LinuxPlatform {
+pub struct LinuxFcPlatform {
     bv_root: PathBuf,
     babel_path: PathBuf,
     job_runner_path: PathBuf,
@@ -40,7 +40,7 @@ pub fn bv_root() -> PathBuf {
     PathBuf::from(std::env::var(ENV_BV_ROOT_KEY).unwrap_or_else(|_| "/".to_string()))
 }
 
-impl LinuxPlatform {
+impl LinuxFcPlatform {
     pub async fn new() -> Result<Self> {
         let bv_root = bv_root();
         let babel_dir = fs::canonicalize(
@@ -93,7 +93,7 @@ pub async fn prepare_data_image<P>(bv_root: &Path, data: &NodeData<P>) -> Result
 }
 
 #[async_trait]
-impl Pal for LinuxPlatform {
+impl Pal for LinuxFcPlatform {
     fn bv_root(&self) -> &Path {
         self.bv_root.as_path()
     }
@@ -107,10 +107,6 @@ impl Pal for LinuxPlatform {
     }
 
     type NetInterface = LinuxNetInterface;
-
-    /// Creates the new network interface and add it to our bridge.
-    ///
-    /// The `ip` is not assigned on the host but rather by the API.
     async fn create_net_interface(
         &self,
         index: u32,
@@ -150,7 +146,7 @@ impl Pal for LinuxPlatform {
 
     type NodeConnection = node_connection::NodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        node_connection::new(&self.build_vm_data_path(node_id))
+        node_connection::new(&self.build_vm_data_path(node_id), self.babel_path.clone())
     }
 
     type VirtualMachine = firecracker_machine::FirecrackerMachine;
