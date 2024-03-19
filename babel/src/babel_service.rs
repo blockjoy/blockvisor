@@ -1,6 +1,5 @@
 use crate::{
-    apply_babel_config, jobs_manager::JobsManagerClient, ufw_wrapper::apply_firewall_config, utils,
-    utils::sources_list, BabelPal,
+    apply_babel_config, jobs_manager::JobsManagerClient, pal::BabelPal, utils, utils::sources_list,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -65,6 +64,13 @@ impl<J, P> Deref for BabelService<J, P> {
 impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + 'static>
     babel_api::babel::babel_server::Babel for BabelService<J, P>
 {
+    async fn get_version(
+        &self,
+        _request: Request<()>,
+    ) -> std::result::Result<Response<String>, Status> {
+        Ok(Response::new(env!("CARGO_PKG_VERSION").to_string()))
+    }
+
     async fn setup_babel(
         &self,
         request: Request<(NodeContext, BabelConfig)>,
@@ -131,7 +137,8 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         &self,
         request: Request<firewall::Config>,
     ) -> Result<Response<()>, Status> {
-        apply_firewall_config(request.into_inner())
+        self.pal
+            .apply_firewall_config(request.into_inner())
             .await
             .map_err(|err| {
                 Status::internal(format!("failed to apply firewall config with: {err:#}"))
@@ -456,8 +463,10 @@ async fn send_http_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fc_platform::{VSockConnector, VSockServer};
     use assert_fs::TempDir;
     use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
+    use babel_api::metadata::firewall::Config;
     use babel_api::metadata::RamdiskConfiguration;
     use bv_tests_utils::start_test_server;
     use futures::StreamExt;
@@ -489,6 +498,16 @@ mod tests {
 
     #[async_trait]
     impl BabelPal for DummyPal {
+        type BabelServer = VSockServer;
+        fn babel_server(&self) -> Self::BabelServer {
+            VSockServer
+        }
+
+        type Connector = VSockConnector;
+        fn connector(&self) -> Self::Connector {
+            VSockConnector
+        }
+
         async fn mount_data_drive(&self, _data_directory_mount_point: &str) -> Result<()> {
             Ok(())
         }
@@ -537,6 +556,10 @@ mod tests {
             _ram_disks: Option<Vec<RamdiskConfiguration>>,
         ) -> Result<bool> {
             Ok(false)
+        }
+
+        async fn apply_firewall_config(&self, _config: Config) -> Result<()> {
+            Ok(())
         }
     }
 

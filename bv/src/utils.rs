@@ -1,8 +1,6 @@
-use crate::{firecracker_machine, nodes_manager::NodesDataCache, services::blockchain::DATA_FILE};
 use bv_utils::{cmd::run_cmd, with_retry};
 use cidr_utils::cidr::Ipv4Cidr;
 use eyre::{anyhow, bail, Context, Result};
-use filesize::PathExt;
 use rand::Rng;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -13,7 +11,8 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use sysinfo::{PidExt, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
+use sysinfo::{Pid, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
+use thiserror::Error;
 use tokio::{
     fs::{self, File},
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -44,54 +43,44 @@ pub async fn load_bin(bin_path: &Path) -> Result<(Vec<babel_api::utils::Binary>,
     Ok((binary, checksum))
 }
 
+#[derive(Error, Debug)]
+pub enum GetProcessIdError {
+    #[error("process not found")]
+    NotFound,
+    #[error("found more than 1 matching process")]
+    MoreThanOne,
+}
+
 /// Get the pid of the running VM process knowing its process name and part of command line.
-pub fn get_process_pid(process_name: &str, cmd: &str) -> Result<u32> {
+pub fn get_process_pid(process_name: &str, cmd: &str) -> Result<Pid, GetProcessIdError> {
     let mut sys = System::new();
     debug!("Retrieving pid for process `{process_name}` and cmd like `{cmd}`");
-    // TODO: would be great to save the System and not do a full refresh each time
     sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::everything()));
     let processes: Vec<_> = sys
         .processes_by_name(process_name)
-        .filter(|&process| process.cmd().contains(&cmd.to_string()))
+        .filter(|&process| {
+            process.cmd().contains(&cmd.to_string())
+                && process.status() != sysinfo::ProcessStatus::Zombie
+        })
         .collect();
 
     match processes.len() {
-        0 => bail!("No {process_name} processes running for id: {cmd}"),
-        1 => Ok(processes[0].pid().as_u32()),
-        _ => bail!("More then 1 {process_name} process running for id: {cmd}"),
+        0 => Err(GetProcessIdError::NotFound),
+        1 => Ok(processes[0].pid()),
+        _ => Err(GetProcessIdError::MoreThanOne),
     }
 }
 
 /// Get pids of the running VM processes.
-pub fn get_all_processes_pids(process_name: &str) -> Result<Vec<u32>> {
+pub fn get_all_processes_pids(process_name: &str) -> Result<Vec<Pid>> {
     let mut sys = System::new();
     debug!("Retrieving pids for processes of `{process_name}`");
     sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::everything()));
     Ok(sys
         .processes_by_name(process_name)
-        .map(|process| process.pid().as_u32())
+        .filter(|&process| process.status() != sysinfo::ProcessStatus::Zombie)
+        .map(|process| process.pid())
         .collect())
-}
-
-/// Calculate used disk space value correction. Regarding sparse files used for data images, used
-/// disk space need manual correction that include declared data image size.
-pub fn used_disk_space_correction(
-    bv_root: &Path,
-    nodes_data_cache: &NodesDataCache,
-) -> Result<u64> {
-    let mut correction = 0;
-    for (id, data) in nodes_data_cache {
-        let data_img_path = firecracker_machine::build_vm_data_path(bv_root, *id).join(DATA_FILE);
-        let actual_data_size = data_img_path
-            .size_on_disk()
-            .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
-        let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
-        debug!("id: {id}; declared: {declared_data_size}; actual: {actual_data_size}");
-        if declared_data_size > actual_data_size {
-            correction += declared_data_size - actual_data_size;
-        }
-    }
-    Ok(correction)
 }
 
 pub struct Archive(PathBuf);

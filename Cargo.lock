@@ -769,11 +769,13 @@ name = "bv_utils"
 version = "0.54.2"
 dependencies = [
  "async-trait",
+ "babel_api",
  "ctrlc",
  "eyre",
  "local-ip-address",
  "mockall",
  "sysinfo 0.29.11",
+ "thiserror",
  "tokio",
  "tonic",
  "tower",

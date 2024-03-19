@@ -1,9 +1,10 @@
 use crate::config::SharedConfig;
 use crate::linux_platform::bv_root;
 use crate::nodes_manager::NodesDataCache;
+use crate::pal::Pal;
 use crate::services::api::pb;
+use crate::BV_VAR_PATH;
 use crate::{api_with_retry, services};
-use crate::{utils, BV_VAR_PATH};
 use eyre::{anyhow, Context, Result};
 use metrics::{register_gauge, Gauge};
 use serde::{Deserialize, Serialize};
@@ -90,7 +91,7 @@ impl HostMetrics {
         SYSTEM_HOST_UPTIME_GAUGE.set(self.uptime_secs as f64);
     }
 
-    pub fn collect(nodes_data_cache: NodesDataCache) -> Result<Self> {
+    pub fn collect(nodes_data_cache: NodesDataCache, pal: &impl Pal) -> Result<Self> {
         let bv_root = bv_root();
         let mut sys = System::new_all();
         // We need to refresh twice:
@@ -112,7 +113,8 @@ impl HostMetrics {
             )
             .map(|disk| disk.total_space() - disk.available_space())
             .ok_or_else(|| anyhow!("Cannot get used disk space"))?
-                + utils::used_disk_space_correction(&bv_root, &nodes_data_cache)
+                + pal
+                    .used_disk_space_correction(&nodes_data_cache)
                     .with_context(|| "failed to get used_disk_space_correction")?,
             used_ips: nodes_data_cache
                 .into_iter()
@@ -173,19 +175,4 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
     api_with_retry!(client, client.update(update.clone()))?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_host_info_collect() {
-        assert!(HostInfo::collect().is_ok());
-    }
-
-    #[test]
-    fn test_host_metrics_collect() {
-        assert!(HostMetrics::collect(Default::default()).is_ok());
-    }
 }

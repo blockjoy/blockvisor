@@ -11,11 +11,13 @@ use std::{path::PathBuf, time::Duration};
 
 #[tonic_rpc::tonic_rpc(bincode)]
 pub trait Babel {
+    /// Get installed version of babel.
+    fn get_version() -> String;
     /// Initial Babel setup that must be run on node startup Mount data directory.
     fn setup_babel(context: NodeContext, config: BabelConfig);
     /// Get maximum time it may take to gracefully shutdown babel with all running jobs.
     fn get_babel_shutdown_timeout() -> Duration;
-    /// Try gracefully shutdown babel before node stop/restart. In particular it gracefully shutdown all jobs.
+    /// Try gracefully shutdown babel before node stop/restart. In particular, it gracefully shut down all jobs.
     /// All `Running` jobs will be shutdown and won't start again until node is started again.
     fn shutdown_babel();
     /// Setup firewall according to given configuration.

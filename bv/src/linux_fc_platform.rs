@@ -2,18 +2,21 @@
 use crate::{
     config,
     config::SharedConfig,
-    firecracker_machine, linux_platform, node_connection,
+    firecracker_machine,
+    firecracker_machine::FC_BIN_NAME,
+    linux_platform, node_connection,
     node_data::NodeData,
     nodes_manager::NodesDataCache,
     pal::{AvailableResources, NetInterface, Pal},
     services,
     services::blockchain::DATA_FILE,
-    utils, BV_VAR_PATH,
+    utils,
 };
 use async_trait::async_trait;
 use bv_utils::cmd::run_cmd;
 use core::fmt;
-use eyre::{anyhow, Result};
+use eyre::{Context, Result};
+use filesize::PathExt;
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,7 +24,8 @@ use std::{
     net::IpAddr,
     path::{Path, PathBuf},
 };
-use sysinfo::{DiskExt, System, SystemExt};
+use sysinfo::Pid;
+use tracing::debug;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -127,32 +131,39 @@ impl Pal for LinuxFcPlatform {
         firecracker_machine::attach(&self.0.bv_root, node_data).await
     }
 
+    fn get_vm_pids(&self) -> Result<Vec<Pid>> {
+        utils::get_all_processes_pids(FC_BIN_NAME)
+    }
+
+    fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid> {
+        Ok(utils::get_process_pid(FC_BIN_NAME, &vm_id.to_string())?)
+    }
+
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
         firecracker_machine::build_vm_data_path(&self.0.bv_root, id)
     }
 
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        let (available_mem_size_mb, available_vcpu_count) = nodes_data_cache.iter().fold(
-            (sys.total_memory() / 1_000_000, sys.cpus().len()),
-            |(available_mem_size_mb, available_vcpu_count), (_, data)| {
-                (
-                    available_mem_size_mb - data.requirements.mem_size_mb,
-                    available_vcpu_count - data.requirements.vcpu_count,
-                )
-            },
-        );
-        let available_disk_space =
-            bv_utils::system::find_disk_by_path(&sys, &self.0.bv_root.join(BV_VAR_PATH))
-                .map(|disk| disk.available_space())
-                .ok_or_else(|| anyhow!("Cannot get available disk space"))?
-                - utils::used_disk_space_correction(&self.0.bv_root, nodes_data_cache)?;
-        Ok(AvailableResources {
-            vcpu_count: available_vcpu_count,
-            mem_size_mb: available_mem_size_mb,
-            disk_size_gb: available_disk_space / 1_000_000_000,
-        })
+        self.0.available_resources(
+            nodes_data_cache,
+            self.used_disk_space_correction(nodes_data_cache)?,
+        )
+    }
+
+    fn used_disk_space_correction(&self, nodes_data_cache: &NodesDataCache) -> Result<u64> {
+        let mut correction = 0;
+        for (id, data) in nodes_data_cache {
+            let data_img_path = self.build_vm_data_path(*id).join(DATA_FILE);
+            let actual_data_size = data_img_path
+                .size_on_disk()
+                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
+            let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
+            debug!("id: {id}; declared: {declared_data_size}; actual: {actual_data_size}");
+            if declared_data_size > actual_data_size {
+                correction += declared_data_size - actual_data_size;
+            }
+        }
+        Ok(correction)
     }
 
     type RecoveryBackoff = linux_platform::RecoveryBackoff;

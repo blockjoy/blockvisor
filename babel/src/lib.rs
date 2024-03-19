@@ -1,78 +1,39 @@
 pub mod async_pid_watch;
+pub mod babel;
 pub mod babel_service;
 pub mod babelsup_service;
 pub mod checksum;
+pub mod chroot_platform;
 pub mod compression;
 pub mod download_job;
+pub mod fc_platform;
 pub mod job_runner;
 pub mod jobs;
 pub mod jobs_manager;
 pub mod log_buffer;
 pub mod logs_service;
+pub mod pal;
 pub mod run_sh_job;
 pub mod supervisor;
 pub mod ufw_wrapper;
 pub mod upload_job;
 pub mod utils;
 
-use async_trait::async_trait;
-use babel_api::babel::NodeContext;
-use babel_api::metadata::{BabelConfig, RamdiskConfiguration};
-use bv_utils::rpc::{RPC_CONNECT_TIMEOUT, RPC_REQUEST_TIMEOUT};
+use babel_api::metadata::BabelConfig;
 use eyre::{Context, Result};
 use std::path::Path;
 use tokio::fs;
-use tonic::{
-    codegen::InterceptedService,
-    transport::{Channel, Endpoint, Uri},
-};
+use tonic::{codegen::InterceptedService, transport::Channel};
 use tracing::info;
 
 pub const BABEL_LOGS_UDS_PATH: &str = "/var/lib/babel/logs.socket";
 pub const JOBS_MONITOR_UDS_PATH: &str = "/var/lib/babel/jobs_monitor.socket";
-const VSOCK_HOST_CID: u32 = 2;
-const VSOCK_ENGINE_PORT: u32 = 40;
+const NODE_ENV_FILE_PATH: &str = "/var/lib/babel/node_env";
+const POST_SETUP_SCRIPT: &str = "/var/lib/babel/post_setup.sh";
 
 pub type BabelEngineClient = babel_api::babel::babel_engine_client::BabelEngineClient<
     InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>,
 >;
-
-/// Trait that allows to inject custom babel_engine implementation.
-pub trait BabelEngineConnector {
-    fn connect(&self) -> BabelEngineClient;
-}
-
-pub struct VSockConnector;
-
-impl BabelEngineConnector for VSockConnector {
-    fn connect(&self) -> BabelEngineClient {
-        babel_api::babel::babel_engine_client::BabelEngineClient::with_interceptor(
-            Endpoint::from_static("http://[::]:50052")
-                .connect_timeout(RPC_CONNECT_TIMEOUT)
-                .connect_with_connector_lazy(tower::service_fn(move |_: Uri| {
-                    tokio_vsock::VsockStream::connect(VSOCK_HOST_CID, VSOCK_ENGINE_PORT)
-                })),
-            bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
-        )
-    }
-}
-
-/// Trait that allows to inject custom PAL implementation.
-#[async_trait]
-pub trait BabelPal {
-    async fn mount_data_drive(&self, data_directory_mount_point: &str) -> Result<()>;
-    async fn umount_data_drive(
-        &self,
-        data_directory_mount_point: &str,
-        fuser_kill: bool,
-    ) -> Result<()>;
-    async fn is_data_drive_mounted(&self, data_directory_mount_point: &str) -> Result<bool>;
-    async fn set_node_context(&self, node_context: NodeContext) -> Result<()>;
-    async fn set_swap_file(&self, swap_size_mb: u64, swap_file_location: &str) -> Result<()>;
-    async fn is_swap_file_set(&self, swap_size_mb: u64, swap_file_location: &str) -> Result<bool>;
-    async fn set_ram_disks(&self, ram_disks: Option<Vec<RamdiskConfiguration>>) -> Result<()>;
-    async fn is_ram_disks_set(&self, ram_disks: Option<Vec<RamdiskConfiguration>>) -> Result<bool>;
-}
 
 pub async fn load_config(path: &Path) -> Result<BabelConfig> {
     info!("Loading babel configuration at {}", path.to_string_lossy());
@@ -81,7 +42,7 @@ pub async fn load_config(path: &Path) -> Result<BabelConfig> {
     )?)
 }
 
-pub async fn apply_babel_config<P: BabelPal>(pal: &P, config: &BabelConfig) -> Result<()> {
+pub async fn apply_babel_config<P: pal::BabelPal>(pal: &P, config: &BabelConfig) -> Result<()> {
     pal.set_ram_disks(config.ramdisks.clone())
         .await
         .with_context(|| "failed to add ram disks")?;
@@ -99,7 +60,10 @@ pub async fn apply_babel_config<P: BabelPal>(pal: &P, config: &BabelConfig) -> R
     Ok(())
 }
 
-pub async fn is_babel_config_applied<P: BabelPal>(pal: &P, config: &BabelConfig) -> Result<bool> {
+pub async fn is_babel_config_applied<P: pal::BabelPal>(
+    pal: &P,
+    config: &BabelConfig,
+) -> Result<bool> {
     Ok(pal
         .is_swap_file_set(config.swap_size_mb, &config.swap_file_location)
         .await

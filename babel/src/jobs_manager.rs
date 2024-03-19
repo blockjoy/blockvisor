@@ -9,16 +9,15 @@ use crate::{
     babel_service::JobRunnerLock,
     jobs,
     jobs::{Job, JobState, JobsData, JobsRegistry, CONFIG_SUBDIR, STATUS_SUBDIR},
-    utils::{find_processes, gracefully_terminate_process},
-    BabelEngineConnector,
+    pal::BabelEngineConnector,
 };
 use async_trait::async_trait;
 use babel_api::engine::{
     JobConfig, JobInfo, JobProgress, JobStatus, JobsInfo, RestartPolicy,
     DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
-use bv_utils::run_flag::RunFlag;
-use bv_utils::with_retry;
+use bv_utils::{run_flag::RunFlag, system::find_processes};
+use bv_utils::{system::gracefully_terminate_process, with_retry};
 use eyre::{bail, Context, ContextCompat, Report, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
 use std::{collections::HashMap, fs, fs::read_dir, path::Path, sync::Arc, time::Duration};
@@ -203,7 +202,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         let jobs = &mut self.jobs_registry.lock().await.jobs;
         for (name, job) in jobs {
             if let JobState::Active(pid) = &mut job.state {
-                terminate_job(name, pid, &job.config)?;
+                terminate_job(name, *pid, &job.config)?;
                 // job_runner process has been stopped, but job should be restarted on next jobs manager startup
                 job.state = JobState::Inactive(JobStatus::Running);
             }
@@ -302,7 +301,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         if let Some(job) = jobs_context.jobs.get_mut(name) {
             match &mut job.state {
                 JobState::Active(pid) => {
-                    terminate_job(name, pid, &job.config)?;
+                    terminate_job(name, *pid, &job.config)?;
                     job.state = JobState::Inactive(JobStatus::Stopped);
                 }
                 JobState::Inactive(status) => {
@@ -371,7 +370,7 @@ fn build_job_info(job: &Job, progress: Option<JobProgress>) -> JobInfo {
     }
 }
 
-fn terminate_job(name: &str, pid: &Pid, config: &JobConfig) -> Result<()> {
+fn terminate_job(name: &str, pid: Pid, config: &JobConfig) -> Result<()> {
     let shutdown_timeout = Duration::from_secs(
         config
             .shutdown_timeout_secs
@@ -673,10 +672,11 @@ fn deps_finished(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::{self, kill_all_processes};
+    use crate::utils;
     use assert_fs::TempDir;
     use babel_api::engine::{JobType, PosixSignal, RestartConfig};
     use bv_tests_utils::rpc::TestServer;
+    use bv_utils::system::find_processes;
     use std::io::Write;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -759,7 +759,7 @@ mod tests {
         }
 
         fn kill_job(&self, name: &str) {
-            kill_all_processes(
+            bv_utils::system::kill_all_processes(
                 &self.test_job_runner_path.to_owned().to_string_lossy(),
                 &[name],
                 Duration::from_secs(60),

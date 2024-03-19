@@ -13,6 +13,7 @@ use std::{
     net::IpAddr,
     path::{Path, PathBuf},
 };
+use sysinfo::Pid;
 use tonic::{codegen::InterceptedService, transport::Channel};
 use uuid::Uuid;
 
@@ -75,10 +76,18 @@ pub trait Pal {
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine>;
+    /// Get all VMs associated process ids.
+    fn get_vm_pids(&self) -> Result<Vec<Pid>>;
+    /// Get process id associated with given VM.
+    fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid>;
+
     /// Build path to VM data directory, a place where kernel and other VM related data are stored.
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
     /// Get available resources, but take into account requirements declared by nodes.
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources>;
+    /// Calculate used disk space value correction. Regarding sparse files used for data images, used
+    /// disk space need manual correction that include declared data image size.
+    fn used_disk_space_correction(&self, nodes_data_cache: &NodesDataCache) -> Result<u64>;
 
     /// Type representing recovery backoff counter.
     type RecoveryBackoff: RecoverBackoff + Debug;
@@ -138,6 +147,8 @@ pub trait NodeConnection {
     async fn test(&mut self) -> Result<()>;
     /// Get reference to BabelSup rpc client. Try to reestablish connection if it's necessary.
     async fn babel_client(&mut self) -> Result<&mut BabelClient>;
+    /// Path to UDS where BabelEngine should listen for messages form Babel.
+    fn engine_socket_path(&self) -> &Path;
 }
 
 #[derive(Debug, PartialEq, Clone)]

@@ -149,8 +149,11 @@ where
         _request: Request<()>,
     ) -> Result<Response<hosts::HostMetrics>, Status> {
         Ok(Response::new(
-            hosts::HostMetrics::collect(self.nodes_manager.nodes_data_cache().await)
-                .map_err(|e| Status::unknown(format!("{e:#}")))?,
+            hosts::HostMetrics::collect(
+                self.nodes_manager.nodes_data_cache().await,
+                self.nodes_manager.pal(),
+            )
+            .map_err(|e| Status::unknown(format!("{e:#}")))?,
         ))
     }
 

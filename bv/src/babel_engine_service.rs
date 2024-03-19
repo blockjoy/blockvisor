@@ -1,6 +1,4 @@
-use crate::{
-    babel_engine::NodeInfo, config::SharedConfig, firecracker_machine::VSOCK_PATH, services,
-};
+use crate::{babel_engine::NodeInfo, config::SharedConfig, services};
 use async_trait::async_trait;
 use babel_api::engine::DownloadManifest;
 use std::path::PathBuf;
@@ -11,8 +9,6 @@ use tonic::{
     {Request, Response, Status},
 };
 use tracing::{debug, error, warn};
-
-const BABEL_ENGINE_PORT: u32 = 40;
 
 struct BabelEngineService {
     node_info: NodeInfo,
@@ -63,14 +59,13 @@ pub struct BabelEngineServer {
 }
 
 pub async fn start_server(
-    vm_data_path: PathBuf,
+    engine_socket_path: PathBuf,
     node_info: NodeInfo,
     config: SharedConfig,
 ) -> eyre::Result<BabelEngineServer> {
-    let socket_path = vm_data_path.join(format!("{VSOCK_PATH}_{BABEL_ENGINE_PORT}"));
     let engine_service = BabelEngineService { node_info, config };
-    let _ = fs::remove_file(&socket_path).await;
-    let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(socket_path)?);
+    let _ = fs::remove_file(&engine_socket_path).await;
+    let uds_stream = UnixListenerStream::new(tokio::net::UnixListener::bind(engine_socket_path)?);
     let (tx, rx) = tokio::sync::oneshot::channel();
     Ok(BabelEngineServer {
         handle: tokio::spawn(

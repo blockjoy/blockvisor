@@ -49,7 +49,7 @@ impl<T: AsyncTimer + Send> RunShJob<T> {
         // Check if there are no remnant child process after previous run.
         // If so, just kill it.
         let (cmd, args) = utils::bv_shell(&self.sh_body);
-        utils::kill_all_processes(
+        bv_utils::system::kill_all_processes(
             cmd,
             args.iter()
                 .map(|item| item.as_str())
@@ -88,7 +88,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
                             .await?;
                     } else {
                         info!("Job runner requested to stop, killing job '{name}'");
-                        utils::kill_all_processes(
+                        bv_utils::system::kill_all_processes(
                             cmd_name,
                             args.as_slice(),
                             self.shutdown_timeout,

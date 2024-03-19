@@ -1,5 +1,6 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
+use blockvisord::firecracker_machine::FC_BIN_NAME;
 use blockvisord::nodes_manager::NodesDataCache;
 use blockvisord::pal::{AvailableResources, RecoverBackoff};
 use blockvisord::{
@@ -10,7 +11,7 @@ use blockvisord::{
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
     services::{self, blockchain::IMAGES_DIR, kernel::KERNELS_DIR, ApiInterceptor, AuthToken},
-    BV_VAR_PATH,
+    utils, BV_VAR_PATH,
 };
 use bv_utils::{cmd::run_cmd, rpc::DefaultTimeout, run_flag::RunFlag};
 use eyre::Result;
@@ -24,6 +25,7 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
     time::Duration,
 };
+use sysinfo::Pid;
 use tokio::{task::JoinHandle, time::sleep};
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -334,6 +336,14 @@ impl Pal for DummyPlatform {
         firecracker_machine::attach(&self.bv_root, node_data).await
     }
 
+    fn get_vm_pids(&self) -> Result<Vec<Pid>> {
+        utils::get_all_processes_pids(FC_BIN_NAME)
+    }
+
+    fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid> {
+        Ok(utils::get_process_pid(FC_BIN_NAME, &vm_id.to_string())?)
+    }
+
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
         firecracker_machine::build_vm_data_path(&self.bv_root, id)
     }
@@ -347,6 +357,10 @@ impl Pal for DummyPlatform {
             mem_size_mb: 4096,
             disk_size_gb: 10,
         })
+    }
+
+    fn used_disk_space_correction(&self, _nodes_data_cache: &NodesDataCache) -> Result<u64> {
+        Ok(0)
     }
 
     type RecoveryBackoff = DummyBackoff;

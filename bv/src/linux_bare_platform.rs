@@ -1,24 +1,35 @@
+use crate::bare_machine::CHROOT_DIR;
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
-    bare_machine, config,
+    bare_machine,
+    bare_machine::BABEL_BIN_NAME,
+    config,
     config::SharedConfig,
     linux_platform,
+    node_connection::RPC_REQUEST_TIMEOUT,
     node_data::NodeData,
     nodes_manager::NodesDataCache,
-    pal::{AvailableResources, BabelClient, NetInterface, NodeConnection, Pal},
-    services, utils, BV_VAR_PATH,
+    pal,
+    pal::{AvailableResources, NetInterface, NodeConnection, Pal},
+    services, utils,
 };
 use async_trait::async_trait;
+use bv_utils::with_retry;
 use core::fmt;
-use eyre::{anyhow, Result};
+use eyre::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use std::{
     net::IpAddr,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
-use sysinfo::{DiskExt, System, SystemExt};
+use sysinfo::Pid;
+use tracing::debug;
 use uuid::Uuid;
+
+const ENGINE_SOCKET_NAME: &str = "engine.socket";
+const BABEL_SOCKET_NAME: &str = "babel.socket";
 
 #[derive(Debug)]
 pub struct LinuxBarePlatform(linux_platform::LinuxPlatform);
@@ -95,7 +106,7 @@ impl Pal for LinuxBarePlatform {
 
     type NodeConnection = BareNodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        BareNodeConnection::new(&self.build_vm_data_path(node_id))
+        BareNodeConnection::new(bare_machine::build_vm_data_path(self.bv_root(), node_id))
     }
 
     type VirtualMachine = bare_machine::BareMachine;
@@ -104,45 +115,57 @@ impl Pal for LinuxBarePlatform {
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        bare_machine::create(&self.bv_root, node_data).await
+        bare_machine::new(&self.bv_root, node_data, self.babel_path.clone())
+            .await?
+            .create()
+            .await
     }
 
     async fn attach_vm(
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        bare_machine::attach(&self.bv_root, node_data).await
+        bare_machine::new(&self.bv_root, node_data, self.babel_path.clone())
+            .await?
+            .attach()
+            .await
+    }
+
+    fn get_vm_pids(&self) -> Result<Vec<Pid>> {
+        utils::get_all_processes_pids(BABEL_BIN_NAME)
+    }
+
+    fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid> {
+        Ok(utils::get_process_pid(BABEL_BIN_NAME, &vm_id.to_string())?)
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
-        self.bv_root
-            .join(BV_VAR_PATH)
-            .join("bare")
-            .join(id.to_string())
+        bare_machine::build_vm_data_path(self.bv_root(), id)
     }
 
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        let (available_mem_size_mb, available_vcpu_count) = nodes_data_cache.iter().fold(
-            (sys.total_memory() / 1_000_000, sys.cpus().len()),
-            |(available_mem_size_mb, available_vcpu_count), (_, data)| {
-                (
-                    available_mem_size_mb - data.requirements.mem_size_mb,
-                    available_vcpu_count - data.requirements.vcpu_count,
-                )
-            },
-        );
-        let available_disk_space =
-            bv_utils::system::find_disk_by_path(&sys, &self.bv_root.join(BV_VAR_PATH))
-                .map(|disk| disk.available_space())
-                .ok_or_else(|| anyhow!("Cannot get available disk space"))?
-                - utils::used_disk_space_correction(&self.bv_root, nodes_data_cache)?;
-        Ok(AvailableResources {
-            vcpu_count: available_vcpu_count,
-            mem_size_mb: available_mem_size_mb,
-            disk_size_gb: available_disk_space / 1_000_000_000,
-        })
+        self.0.available_resources(
+            nodes_data_cache,
+            self.used_disk_space_correction(nodes_data_cache)?,
+        )
+    }
+
+    fn used_disk_space_correction(&self, nodes_data_cache: &NodesDataCache) -> Result<u64> {
+        let mut correction = 0;
+        for (id, data) in nodes_data_cache {
+            let data_img_path = self
+                .build_vm_data_path(*id)
+                .join(bare_machine::CHROOT_DIR)
+                .join(babel_api::engine::DATA_DRIVE_MOUNT_POINT);
+            let actual_data_size = fs_extra::dir::get_size(&data_img_path)
+                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
+            let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
+            debug!("id: {id}; declared: {declared_data_size}; actual: {actual_data_size}");
+            if declared_data_size > actual_data_size {
+                correction += declared_data_size - actual_data_size;
+            }
+        }
+        Ok(correction)
     }
 
     type RecoveryBackoff = linux_platform::RecoveryBackoff;
@@ -196,45 +219,91 @@ impl fmt::Display for LinuxNetInterface {
 }
 
 #[derive(Debug)]
-pub struct BareNodeConnection {}
+enum NodeConnectionState {
+    Closed,
+    Broken,
+    Babel(pal::BabelClient),
+}
+
+#[derive(Debug)]
+pub struct BareNodeConnection {
+    babel_socket_path: PathBuf,
+    engine_socket_path: PathBuf,
+    state: NodeConnectionState,
+}
 
 impl BareNodeConnection {
-    fn new(_vm_path: &Path) -> Self {
-        Self {}
+    fn new(vm_path: PathBuf) -> Self {
+        Self {
+            babel_socket_path: vm_path.join(CHROOT_DIR).join(BABEL_SOCKET_NAME),
+            engine_socket_path: vm_path.join(CHROOT_DIR).join(ENGINE_SOCKET_NAME),
+            state: NodeConnectionState::Closed,
+        }
     }
 }
 
 #[async_trait]
 impl NodeConnection for BareNodeConnection {
     async fn setup(&mut self) -> Result<()> {
-        todo!()
+        self.attach().await
     }
 
     async fn attach(&mut self) -> Result<()> {
-        todo!()
+        self.state = NodeConnectionState::Babel(
+            babel_api::babel::babel_client::BabelClient::with_interceptor(
+                bv_utils::rpc::build_socket_channel(&self.babel_socket_path),
+                bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+            ),
+        );
+        Ok(())
     }
 
     fn close(&mut self) {
-        todo!()
+        self.state = NodeConnectionState::Closed;
     }
 
     fn is_closed(&self) -> bool {
-        todo!()
+        matches!(self.state, NodeConnectionState::Closed)
     }
 
     fn mark_broken(&mut self) {
-        todo!()
+        self.state = NodeConnectionState::Broken;
     }
 
     fn is_broken(&self) -> bool {
-        todo!()
+        matches!(self.state, NodeConnectionState::Broken)
     }
 
     async fn test(&mut self) -> Result<()> {
-        todo!()
+        let mut client = babel_api::babel::babel_client::BabelClient::with_interceptor(
+            bv_utils::rpc::build_socket_channel(&self.babel_socket_path),
+            bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+        );
+        with_retry!(client.get_version(()))?;
+        // update connection state (otherwise it still may be seen as broken)
+        self.state = NodeConnectionState::Babel(client);
+        Ok(())
     }
 
-    async fn babel_client(&mut self) -> Result<&mut BabelClient> {
-        todo!()
+    async fn babel_client(&mut self) -> Result<&mut pal::BabelClient> {
+        match &mut self.state {
+            NodeConnectionState::Closed => {
+                bail!("node connection is closed")
+            }
+            NodeConnectionState::Babel { .. } => {}
+            NodeConnectionState::Broken => {
+                debug!("Reconnecting to babel");
+                self.attach().await?;
+            }
+        };
+        if let NodeConnectionState::Babel(client) = &mut self.state {
+            Ok(client)
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn engine_socket_path(&self) -> &Path {
+        &self.engine_socket_path
     }
 }

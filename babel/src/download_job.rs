@@ -5,9 +5,10 @@
 use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
+    fc_platform,
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
     jobs::{load_job_data, save_job_data},
-    BabelEngineConnector, VSockConnector,
+    pal::BabelEngineConnector,
 };
 use async_trait::async_trait;
 use babel_api::engine::{
@@ -555,7 +556,7 @@ impl DestinationsIter {
         if iter.is_empty() {
             let err_msg = "corrupted manifest - this is internal BV error, manifest shall be already validated";
             error!(err_msg);
-            let mut client = VSockConnector.connect();
+            let mut client = fc_platform::VSockConnector.connect();
             let _ = with_retry!(client.bv_error(err_msg.to_string()));
             bail!("corrupted manifest - expected at least one destination file in chunk");
         }

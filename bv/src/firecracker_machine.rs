@@ -13,6 +13,7 @@ use eyre::{bail, Result};
 use firec::{config::JailerMode, Machine, MachineState};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use sysinfo::PidExt;
 use uuid::Uuid;
 
 pub const FC_BIN_NAME: &str = "firecracker";
@@ -44,7 +45,9 @@ pub async fn attach(
         machine: Some(
             Machine::connect(
                 create_config(bv_root, node_data).await?,
-                get_process_pid(FC_BIN_NAME, &node_data.id.to_string()).ok(),
+                get_process_pid(FC_BIN_NAME, &node_data.id.to_string())
+                    .ok()
+                    .map(|pid| pid.as_u32()),
             )
             .await,
         ),

@@ -439,7 +439,8 @@ where
                 .await;
 
             let now = Instant::now();
-            match HostMetrics::collect(nodes_manager.nodes_data_cache().await) {
+            match HostMetrics::collect(nodes_manager.nodes_data_cache().await, nodes_manager.pal())
+            {
                 Ok(metrics) => {
                     if let Ok(mut client) = Self::connect_metrics_service(&config).await {
                         metrics.set_all_gauges();

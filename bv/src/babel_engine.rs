@@ -82,7 +82,6 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         api_config: SharedConfig,
         plugin_builder: F,
         plugin_data_path: PathBuf,
-        vm_data_path: PathBuf,
     ) -> Result<Self> {
         let (node_tx, node_rx) = tokio::sync::mpsc::channel(16);
         let engine = Engine {
@@ -92,8 +91,12 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             plugin_data_path: plugin_data_path.clone(),
         };
         let server = Some(
-            babel_engine_service::start_server(vm_data_path, node_info.clone(), api_config.clone())
-                .await?,
+            babel_engine_service::start_server(
+                node_connection.engine_socket_path().to_path_buf(),
+                node_info.clone(),
+                api_config.clone(),
+            )
+            .await?,
         );
         let plugin = plugin_builder(engine)?;
         let mut babel_engine = Self {
@@ -757,6 +760,7 @@ mod tests {
         #[allow(clippy::type_complexity)]
         #[tonic::async_trait]
         impl babel_api::babel::babel_server::Babel for BabelService {
+            async fn get_version(&self, _request: Request<()>) -> Result<Response<String>, Status>;
             async fn setup_babel(
                 &self,
                 request: Request<(babel_api::babel::NodeContext, BabelConfig)>,
@@ -931,6 +935,7 @@ mod tests {
 
     struct TestConnection {
         client: BabelClient,
+        socket: PathBuf,
     }
 
     #[allow(clippy::diverging_sub_expression)]
@@ -963,6 +968,10 @@ mod tests {
         async fn babel_client(&mut self) -> Result<&mut BabelClient> {
             Ok(&mut self.client)
         }
+
+        fn engine_socket_path(&self) -> &Path {
+            &self.socket
+        }
     }
 
     /// Common staff to setup for all tests like sut (BabelEngine in that case),
@@ -984,6 +993,7 @@ mod tests {
                     test_channel(&tmp_root),
                     bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
                 ),
+                socket: vm_data_path.join("engine.socket"),
             };
             let engine = BabelEngine::new(
                 NodeInfo {
@@ -1009,7 +1019,6 @@ mod tests {
                 ),
                 |engine| Ok(DummyPlugin { engine }),
                 data_path.clone(),
-                vm_data_path,
             )
             .await?;
 

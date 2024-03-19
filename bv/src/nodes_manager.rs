@@ -3,7 +3,6 @@ use crate::{
     command_failed,
     commands::{self, into_internal, Error},
     config::SharedConfig,
-    firecracker_machine::FC_BIN_NAME,
     node::Node,
     node_context::build_registry_dir,
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
@@ -13,7 +12,7 @@ use crate::{
         blockchain::{self, BlockchainService, BABEL_PLUGIN_NAME},
         kernel,
     },
-    utils, BV_VAR_PATH,
+    BV_VAR_PATH,
 };
 use babel_api::engine::JobsInfo;
 use babel_api::{
@@ -654,6 +653,10 @@ impl<P: Pal + Debug> NodesManager<P> {
             .collect()
     }
 
+    pub fn pal(&self) -> &P {
+        &self.pal
+    }
+
     async fn load_data(registry_path: &Path) -> Result<State> {
         info!(
             "Reading nodes common config file: {}",
@@ -678,7 +681,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let mut nodes = HashMap::new();
         let mut node_ids = HashMap::new();
         let mut node_data_cache = HashMap::new();
-        let mut fc_processes_to_check = utils::get_all_processes_pids(FC_BIN_NAME)?;
+        let mut fc_processes_to_check = pal.get_vm_pids()?;
         let mut dir = read_dir(registry_dir)
             .await
             .context("failed to read nodes registry dir")?;
@@ -705,7 +708,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                     // remove FC pid from list of all discovered FC pids
                     // in the end of load this list should be empty
                     if node.status() == NodeStatus::Running {
-                        let node_pid = utils::get_process_pid(FC_BIN_NAME, &node.id().to_string())?;
+                        let node_pid = pal.get_vm_pid(node.id())?;
                         fc_processes_to_check.retain(|p| p != &node_pid);
                     }
                     // insert node and its info into internal data structures
@@ -862,6 +865,7 @@ mod tests {
             blockchain::ROOT_FS_FILE,
             kernel::KERNELS_DIR,
         },
+        utils,
     };
     use assert_fs::TempDir;
     use bv_tests_utils::start_test_server;
@@ -1122,7 +1126,7 @@ mod tests {
             .return_once(move |_| Ok(vm_mock));
         pal.expect_create_node_connection()
             .with(predicate::eq(id))
-            .return_once(|_| MockTestNodeConnection::new());
+            .return_once(dummy_connection_mock);
     }
 
     fn add_create_node_fail_vm_expectations(
@@ -1589,7 +1593,7 @@ mod tests {
         let mut pal = test_env.default_pal();
         pal.expect_create_node_connection()
             .with(predicate::eq(node_data.id))
-            .returning(|_| MockTestNodeConnection::new());
+            .returning(dummy_connection_mock);
         pal.expect_attach_vm()
             .with(predicate::eq(node_data.clone()))
             .returning(|_| {
@@ -1599,12 +1603,14 @@ mod tests {
             });
         pal.expect_create_node_connection()
             .with(predicate::eq(invalid_node_data.id))
-            .returning(|_| MockTestNodeConnection::new());
+            .returning(dummy_connection_mock);
         pal.expect_attach_vm()
             .with(predicate::eq(invalid_node_data.clone()))
             .returning(|_| {
                 bail!("failed to attach");
             });
+        pal.expect_get_vm_pids()
+            .return_once(|| Ok(Default::default()));
         let config = default_config(test_env.tmp_root.clone());
         let nodes = NodesManager::load(pal, config).await?;
         assert_eq!(1, nodes.nodes_list().await.len());
@@ -1911,6 +1917,8 @@ mod tests {
                 .once()
                 .in_sequence(&mut seq)
                 .returning(|| false);
+            mock.expect_engine_socket_path()
+                .return_const(Default::default());
             mock
         });
 

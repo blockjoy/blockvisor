@@ -1,16 +1,12 @@
-use babel_api::engine::{FileLocation, PosixSignal};
-use bv_utils::{
-    exp_backoff_timeout, run_flag::RunFlag, system::is_process_running, timer::AsyncTimer,
-};
+use babel_api::engine::FileLocation;
+use bv_utils::{exp_backoff_timeout, run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{bail, Context, ContextCompat};
 use futures::StreamExt;
 use nu_glob::Pattern;
 use std::{
-    collections::HashMap,
     path::Path,
     time::{Duration, Instant},
 };
-use sysinfo::{Pid, PidExt, Process, ProcessExt, ProcessRefreshKind, Signal, System, SystemExt};
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
@@ -19,7 +15,6 @@ use tokio_stream::Stream;
 use tonic::Status;
 
 const ENV_BV_USER: &str = "BV_USER";
-const PROCESS_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 /// User to run sh commands and long running jobs
 fn bv_user() -> Option<String> {
@@ -38,88 +33,6 @@ pub fn bv_shell(body: &str) -> (&str, Vec<String>) {
     } else {
         ("sh", vec!["-c".to_owned(), body.to_owned()])
     }
-}
-
-/// Kill all processes that match `cmd` and passed `args`.
-pub fn kill_all_processes(cmd: &str, args: &[&str], timeout: Duration, signal: PosixSignal) {
-    let mut sys = System::new();
-    sys.refresh_processes();
-    let ps = sys.processes();
-
-    let procs = find_processes(cmd, args, ps);
-    let now = Instant::now();
-    for (_, proc) in procs {
-        kill_process_tree(proc, ps, now, timeout, into_sysinfo_signal(signal));
-    }
-}
-
-/// Kill process and all its descendents.
-fn kill_process_tree(
-    proc: &Process,
-    ps: &HashMap<Pid, Process>,
-    now: Instant,
-    timeout: Duration,
-    signal: Signal,
-) {
-    // Better to kill parent first, since it may implement some child restart mechanism.
-    // Try to interrupt the process, and kill it after timeout in case it has not finished.
-    proc.kill_with(signal);
-    while is_process_running(proc.pid().as_u32()) {
-        if now.elapsed() > timeout {
-            proc.kill();
-            proc.wait();
-            break;
-        }
-        std::thread::sleep(PROCESS_CHECK_INTERVAL)
-    }
-    let children = ps.iter().filter(|(_, p)| p.parent() == Some(proc.pid()));
-    for (_, child) in children {
-        kill_process_tree(child, ps, now, timeout, signal);
-    }
-}
-
-pub fn gracefully_terminate_process(pid: &Pid, timeout: Duration) -> bool {
-    let mut sys = System::new();
-    if !sys.refresh_process_specifics(*pid, ProcessRefreshKind::new()) {
-        return true;
-    }
-    if let Some(proc) = sys.process(*pid) {
-        proc.kill_with(Signal::Term);
-        let now = std::time::Instant::now();
-        while is_process_running(pid.as_u32()) {
-            if now.elapsed() < timeout {
-                std::thread::sleep(Duration::from_secs(1))
-            } else {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-/// Find all processes that match `cmd` and passed `args`.
-pub fn find_processes<'a>(
-    cmd: &'a str,
-    args: &'a [&'a str],
-    ps: &'a HashMap<Pid, Process>,
-) -> impl Iterator<Item = (&'a Pid, &'a Process)> {
-    ps.iter().filter(move |(_, process)| {
-        let proc_call = process
-            .cmd()
-            .iter()
-            .map(|item| item.as_str())
-            .collect::<Vec<_>>();
-        if let Some(proc_cmd) = proc_call.first() {
-            // first element is cmd, rest are arguments
-            (cmd == *proc_cmd && *args == proc_call[1..])
-            // if not a binary, but a script (with shebang) is executed,
-            // then the process looks like: /bin/sh ./lalala.sh,
-            // so first element is shebang, second is cmd, rest are arguments
-            || (proc_call.len() > 1 && cmd == proc_call[1] && *args == proc_call[2..])
-        } else {
-            false
-        }
-    })
 }
 
 /// Restart backoff procedure helper.
@@ -231,7 +144,7 @@ pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::utils::Binary, S
         .truncate(true)
         .open(bin_path)
         .await
-        .with_context(|| "failed to open binary file")?;
+        .with_context(|| format!("failed to open binary file '{}'", bin_path.display()))?;
     let mut writer = BufWriter::new(file);
     let mut expected_checksum = None;
     while let Some(part) = stream.next().await {
@@ -265,47 +178,6 @@ pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::utils::Binary, S
         );
     }
     Ok(checksum)
-}
-
-fn into_sysinfo_signal(posix: PosixSignal) -> Signal {
-    match posix {
-        PosixSignal::SIGABRT => Signal::Abort,
-        PosixSignal::SIGALRM => Signal::Alarm,
-        PosixSignal::SIGBUS => Signal::Bus,
-        PosixSignal::SIGCHLD => Signal::Child,
-        PosixSignal::SIGCLD => Signal::Child,
-        PosixSignal::SIGCONT => Signal::Continue,
-        PosixSignal::SIGEMT => Signal::Trap,
-        PosixSignal::SIGFPE => Signal::FloatingPointException,
-        PosixSignal::SIGHUP => Signal::Hangup,
-        PosixSignal::SIGILL => Signal::Illegal,
-        PosixSignal::SIGINFO => Signal::Power,
-        PosixSignal::SIGINT => Signal::Interrupt,
-        PosixSignal::SIGIO => Signal::IO,
-        PosixSignal::SIGIOT => Signal::IOT,
-        PosixSignal::SIGKILL => Signal::Kill,
-        PosixSignal::SIGPIPE => Signal::Pipe,
-        PosixSignal::SIGPOLL => Signal::Poll,
-        PosixSignal::SIGPROF => Signal::Profiling,
-        PosixSignal::SIGPWR => Signal::Power,
-        PosixSignal::SIGQUIT => Signal::Quit,
-        PosixSignal::SIGSEGV => Signal::Segv,
-        PosixSignal::SIGSTOP => Signal::Stop,
-        PosixSignal::SIGTSTP => Signal::TSTP,
-        PosixSignal::SIGSYS => Signal::Sys,
-        PosixSignal::SIGTERM => Signal::Term,
-        PosixSignal::SIGTRAP => Signal::Trap,
-        PosixSignal::SIGTTIN => Signal::TTIN,
-        PosixSignal::SIGTTOU => Signal::TTOU,
-        PosixSignal::SIGUNUSED => Signal::Sys,
-        PosixSignal::SIGURG => Signal::Urgent,
-        PosixSignal::SIGUSR1 => Signal::User1,
-        PosixSignal::SIGUSR2 => Signal::User2,
-        PosixSignal::SIGVTALRM => Signal::VirtualAlarm,
-        PosixSignal::SIGXCPU => Signal::XCPU,
-        PosixSignal::SIGXFSZ => Signal::XFSZ,
-        PosixSignal::SIGWINCH => Signal::Winch,
-    }
 }
 
 /// Prepare list of all source files, recursively walking down the source directory.
@@ -343,13 +215,15 @@ pub fn sources_list(
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::BabelEngineConnector;
+    use crate::pal::BabelEngineConnector;
     use assert_fs::TempDir;
+    use babel_api::engine::PosixSignal;
     use babel_api::{babel::babel_engine_client::BabelEngineClient, engine::DownloadManifest};
     use eyre::Result;
     use mockall::mock;
     use std::path::PathBuf;
     use std::{fs, io::Write, os::unix::fs::OpenOptionsExt};
+    use sysinfo::{Pid, PidExt};
     use tokio::process::Command;
     use tonic::codegen::InterceptedService;
     use tonic::{transport::Channel, Request, Response, Status};
@@ -432,14 +306,14 @@ pub mod tests {
         let child = cmd.spawn()?;
         let pid = child.id().unwrap();
         wait_for_process(&ctrl_file).await;
-        kill_all_processes(
+        bv_utils::system::kill_all_processes(
             &cmd_path.to_string_lossy(),
             &["a", "b", "c"],
             Duration::from_secs(3),
             PosixSignal::SIGTERM,
         );
         tokio::time::timeout(Duration::from_secs(60), async {
-            while is_process_running(pid) {
+            while bv_utils::system::is_process_running(Pid::from_u32(pid)) {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         })

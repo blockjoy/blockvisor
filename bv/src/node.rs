@@ -108,7 +108,6 @@ impl<P: Pal> MaybeNode<P> {
                 api_config,
                 |engine| RhaiPlugin::new(&script, engine),
                 self.context.plugin_data.clone(),
-                self.context.vm_data_dir.clone(),
             )
             .await,
             self
@@ -206,7 +205,6 @@ impl<P: Pal + Debug> Node<P> {
             api_config,
             |engine| RhaiPlugin::new(&script, engine),
             context.plugin_data.clone(),
-            context.vm_data_dir.clone(),
         )
         .await?;
         let recovery_backoff = pal.create_recovery_backoff();
@@ -626,6 +624,7 @@ pub mod tests {
         str::FromStr,
         time::Duration,
     };
+    use sysinfo::Pid;
     use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
     pub const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
@@ -748,6 +747,7 @@ pub mod tests {
             fn is_broken(&self) -> bool;
             async fn test(&mut self) -> Result<()>;
             async fn babel_client<'a>(&'a mut self) -> Result<&'a mut BabelClient>;
+            fn engine_socket_path(&self) -> &Path;
         }
     }
 
@@ -805,8 +805,11 @@ pub mod tests {
                 &self,
                 node_data: &NodeData<DummyNet>,
             ) -> Result<MockTestVM>;
+            fn get_vm_pids(&self) -> Result<Vec<Pid>>;
+            fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid>;
             fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
             fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
+            fn used_disk_space_correction(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<u64>;
 
             type RecoveryBackoff = DummyBackoff;
             fn create_recovery_backoff(&self) -> DummyBackoff;
@@ -819,6 +822,7 @@ pub mod tests {
         #[allow(clippy::type_complexity)]
         #[tonic::async_trait]
         impl babel_api::babel::babel_server::Babel for TestBabelService {
+            async fn get_version(&self, _request: Request<()>) -> Result<Response<String>, Status>;
             async fn setup_babel(
                 &self,
                 request: Request<(babel_api::babel::NodeContext, BabelConfig)>,
@@ -887,6 +891,13 @@ pub mod tests {
                 _request: Request<u32>,
             ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
         }
+    }
+
+    pub fn dummy_connection_mock(_id: Uuid) -> MockTestNodeConnection {
+        let mut mock = MockTestNodeConnection::new();
+        mock.expect_engine_socket_path()
+            .return_const(Default::default());
+        mock
     }
 
     pub fn default_config(bv_root: PathBuf) -> SharedConfig {
@@ -1024,7 +1035,7 @@ pub mod tests {
 
         pal.expect_create_node_connection()
             .with(predicate::eq(node_data.id))
-            .return_once(|_| MockTestNodeConnection::new());
+            .return_once(dummy_connection_mock);
         let mut seq = Sequence::new();
         pal.expect_create_vm()
             .with(predicate::eq(node_data.clone()))
@@ -1103,12 +1114,14 @@ pub mod tests {
                 let tmp_root = test_tmp_root.clone();
                 mock.expect_babel_client()
                     .return_once(move || Ok(test_babel_client(&tmp_root)));
+                mock.expect_engine_socket_path()
+                    .return_const(Default::default());
                 mock
             });
         pal.expect_create_node_connection()
             .with(predicate::eq(failed_vm_node_data.id))
             .once()
-            .returning(move |_| MockTestNodeConnection::new());
+            .returning(dummy_connection_mock);
         pal.expect_create_node_connection()
             .with(predicate::eq(missing_babel_node_data.id))
             .once()
@@ -1117,6 +1130,8 @@ pub mod tests {
                 mock.expect_attach().return_once(|| Ok(()));
                 mock.expect_close().return_once(|| ());
                 mock.expect_is_closed().return_once(|| true);
+                mock.expect_engine_socket_path()
+                    .return_const(Default::default());
                 mock
             });
         pal.expect_create_node_connection()
@@ -1127,6 +1142,8 @@ pub mod tests {
                 mock.expect_attach().return_once(|| Ok(()));
                 mock.expect_close().return_once(|| ());
                 mock.expect_is_closed().return_once(|| true);
+                mock.expect_engine_socket_path()
+                    .return_const(Default::default());
                 mock
             });
         pal.expect_attach_vm()
@@ -1268,6 +1285,8 @@ pub mod tests {
             mock.expect_babel_client()
                 .returning(move || Ok(test_babel_client(&tmp_root)));
             mock.expect_mark_broken().return_once(|| ());
+            mock.expect_engine_socket_path()
+                .return_const(Default::default());
             mock
         });
         pal.expect_create_vm().return_once(|_| {
@@ -1481,6 +1500,8 @@ pub mod tests {
             mock.expect_mark_broken().return_once(|| ());
             // force stop node in failed state
             mock.expect_close().return_once(|| ());
+            mock.expect_engine_socket_path()
+                .return_const(Default::default());
             mock
         });
         pal.expect_create_vm().return_once(|_| {
@@ -1585,6 +1606,8 @@ pub mod tests {
             mock.expect_babel_client()
                 .returning(move || Ok(test_babel_client(&tmp_root)));
             mock.expect_mark_broken().return_once(|| ());
+            mock.expect_engine_socket_path()
+                .return_const(Default::default());
             mock
         });
         pal.expect_create_vm().return_once(|_| {
@@ -1679,6 +1702,8 @@ pub mod tests {
             mock.expect_babel_client()
                 .returning(move || Ok(test_babel_client(&tmp_root)));
             mock.expect_mark_broken().return_once(|| ());
+            mock.expect_engine_socket_path()
+                .return_const(Default::default());
             mock
         });
         pal.expect_create_vm().return_once(|_| {

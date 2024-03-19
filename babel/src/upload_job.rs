@@ -6,8 +6,8 @@ use crate::{
     compression::{Coder, NoCoder, ZstdEncoder},
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
     jobs::{load_job_data, save_job_data},
+    pal::BabelEngineConnector,
     utils::sources_list,
-    BabelEngineConnector,
 };
 use async_trait::async_trait;
 use babel_api::{

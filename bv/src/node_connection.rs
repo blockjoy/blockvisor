@@ -15,6 +15,7 @@ use tokio::{
 use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::{debug, info};
 
+const BABEL_ENGINE_PORT: u32 = 40;
 pub const BABEL_SUP_VSOCK_PORT: u32 = 41;
 pub const BABEL_VSOCK_PORT: u32 = 42;
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
@@ -30,7 +31,7 @@ const SUPERVISOR_CONFIG: SupervisorConfig = SupervisorConfig {
 };
 
 #[derive(Debug)]
-pub enum NodeConnectionState {
+enum NodeConnectionState {
     Closed,
     Broken,
     Babel(pal::BabelClient),
@@ -39,7 +40,8 @@ pub enum NodeConnectionState {
 
 #[derive(Debug)]
 pub struct NodeConnection {
-    socket_path: PathBuf,
+    babel_socket_path: PathBuf,
+    engine_socket_path: PathBuf,
     babel_path: PathBuf,
     state: NodeConnectionState,
 }
@@ -47,7 +49,8 @@ pub struct NodeConnection {
 /// Creates new closed connection instance.
 pub fn new(vm_data_path: &Path, babel_path: PathBuf) -> NodeConnection {
     NodeConnection {
-        socket_path: vm_data_path.join(VSOCK_PATH),
+        babel_socket_path: vm_data_path.join(VSOCK_PATH),
+        engine_socket_path: vm_data_path.join(format!("{VSOCK_PATH}_{BABEL_ENGINE_PORT}")),
         state: NodeConnectionState::Closed,
         babel_path,
     }
@@ -71,7 +74,7 @@ impl NodeConnection {
     /// It also initializes that connection by sending the opening message. Therefore, if this
     /// function succeeds the connection is guaranteed to be writeable at the moment of returning.
     async fn open(&mut self, max_delay: Duration) -> Result<()> {
-        let mut client = connect_babelsup(&self.socket_path, max_delay).await?;
+        let mut client = connect_babelsup(&self.babel_socket_path, max_delay).await?;
         let babelsup_version = with_retry!(client.get_version(()))?.into_inner();
         info!("Connected to babelsup {babelsup_version}");
         self.state = NodeConnectionState::BabelSup(client);
@@ -87,7 +90,7 @@ impl NodeConnection {
             NodeConnectionState::Babel { .. } | NodeConnectionState::Broken => {
                 debug!("Reconnecting to babelsup");
                 self.state = NodeConnectionState::BabelSup(
-                    connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?,
+                    connect_babelsup(&self.babel_socket_path, CONNECTION_SWITCH_TIMEOUT).await?,
                 );
             }
             NodeConnectionState::BabelSup { .. } => {}
@@ -131,7 +134,8 @@ impl pal::NodeConnection for NodeConnection {
     }
 
     async fn test(&mut self) -> Result<()> {
-        let mut client = connect_babelsup(&self.socket_path, CONNECTION_SWITCH_TIMEOUT).await?;
+        let mut client =
+            connect_babelsup(&self.babel_socket_path, CONNECTION_SWITCH_TIMEOUT).await?;
         with_retry!(client.get_version(()))?;
         // update connection state (otherwise it still may be seen as broken)
         self.state = NodeConnectionState::BabelSup(client);
@@ -150,7 +154,7 @@ impl pal::NodeConnection for NodeConnection {
                 self.state = NodeConnectionState::Babel(
                     babel_api::babel::babel_client::BabelClient::with_interceptor(
                         create_channel(
-                            &self.socket_path,
+                            &self.babel_socket_path,
                             BABEL_VSOCK_PORT,
                             CONNECTION_SWITCH_TIMEOUT,
                         )
@@ -165,6 +169,10 @@ impl pal::NodeConnection for NodeConnection {
         } else {
             unreachable!()
         }
+    }
+
+    fn engine_socket_path(&self) -> &Path {
+        &self.engine_socket_path
     }
 }
 
