@@ -227,8 +227,8 @@ pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::utils::Binary, S
     let file = OpenOptions::new()
         .write(true)
         .mode(0o770)
-        .append(false)
         .create(true)
+        .truncate(true)
         .open(bin_path)
         .await
         .with_context(|| "failed to open binary file")?;
@@ -396,6 +396,7 @@ pub mod tests {
         let _ = fs::remove_file(path);
         let mut babel = fs::OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .mode(0o770)
             .open(path)

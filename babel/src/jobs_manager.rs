@@ -789,6 +789,7 @@ mod tests {
             // create dummy status file to make sure it is removed after start
             let mut status_file = fs::OpenOptions::new()
                 .create(true)
+                .truncate(true)
                 .write(true)
                 .open(&status_path)?;
             writeln!(status_file, "empty")?;
@@ -822,6 +823,7 @@ mod tests {
             // create dummy status file to make sure it is removed after start
             let mut status_file = fs::OpenOptions::new()
                 .create(true)
+                .truncate(true)
                 .write(true)
                 .open(&status_path)?;
             writeln!(status_file, "empty")?;
@@ -964,6 +966,7 @@ mod tests {
             // create invalid config file to make sure it won't crash load and is removed after
             let mut invalid_config = fs::OpenOptions::new()
                 .create(true)
+                .truncate(true)
                 .write(true)
                 .open(&invalid_config_path)?;
             writeln!(invalid_config, "gibberish")?;

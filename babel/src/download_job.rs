@@ -677,6 +677,7 @@ impl Writer {
                 // file not opened yet
                 let file = File::options()
                     .create(true)
+                    .truncate(false)
                     .write(true)
                     .open(absolute_path)?;
                 if !data.is_empty() {

@@ -276,6 +276,7 @@ mod tests {
             // create dummy installer that will touch control file
             let mut installer = fs::OpenOptions::new()
                 .create(true)
+                .truncate(true)
                 .write(true)
                 .mode(0o770)
                 .open(bundle_path.join(installer::INSTALLER_BIN))

@@ -636,7 +636,11 @@ mod tests {
     }
 
     fn touch_file(path: &PathBuf) -> std::io::Result<fs::File> {
-        fs::OpenOptions::new().create(true).write(true).open(path)
+        fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)
     }
 
     /// Common staff to setup for all tests like sut (installer in that case),
@@ -948,6 +952,7 @@ mod tests {
             // create dummy installer that will touch test file as a proof it was called
             let mut backup_installer = fs::OpenOptions::new()
                 .create(true)
+                .truncate(true)
                 .write(true)
                 .mode(0o770)
                 .open(installer.paths.backup.join(INSTALLER_BIN))?;

@@ -132,6 +132,7 @@ mod tests {
         {
             let mut cmd_file = fs::OpenOptions::new()
                 .create(true)
+                .truncate(true)
                 .write(true)
                 .mode(0o770)
                 .open(&cmd_path)?;
