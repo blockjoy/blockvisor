@@ -9,7 +9,7 @@ fn application_status() {
         host: `${global::POLYGON_RPC_URL}`,
         method: "eth_blockNumber",
         params: [],
-        headers: #{"Content-Type" : "application/json"},
+        headers: [["Content-Type", "application/json"]],
       });
     if res.status_code != 200 {
        "delinquent";
@@ -23,7 +23,7 @@ fn height(){
         host: `${global::POLYGON_RPC_URL}`,
         method: "eth_blockNumber",
         params: [],
-        headers: #{"Content-Type" : "application/json"},
+        headers: [["Content-Type", "application/json"]],
     }).expect(200).result)
 }
 
@@ -32,7 +32,7 @@ fn block_age(){
         host: `${global::POLYGON_RPC_URL}`,
         method: "eth_getBlockByNumber",
         params: ["latest", false],
-        headers: #{"Content-Type" : "application/json"},
+        headers: [["Content-Type", "application/json"]],
       }).expect(200);
     return 0;
 }

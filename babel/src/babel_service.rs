@@ -10,10 +10,11 @@ use babel_api::{
 };
 use eyre::{anyhow, ContextCompat, Result};
 use nu_glob::{Pattern, PatternError};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::RequestBuilder;
 use serde_json::json;
+use std::str::FromStr;
 use std::{
-    collections::HashMap,
     mem,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -432,11 +433,15 @@ fn estimate_nb_of_chunks(source: PathBuf, exclude: Vec<Pattern>) -> Result<u32> 
 /// Then send it and translates result into `HttpResponse`.
 async fn send_http_request(
     mut req_builder: RequestBuilder,
-    headers: Option<HashMap<String, String>>,
+    headers: Option<Vec<(String, String)>>,
     timeout: Result<Duration>,
 ) -> Result<HttpResponse> {
     if let Some(headers) = headers {
-        req_builder = req_builder.headers((&headers).try_into()?);
+        let mut headers_map = HeaderMap::new();
+        for (key, value) in headers {
+            headers_map.insert(HeaderName::from_str(&key)?, HeaderValue::from_str(&value)?);
+        }
+        req_builder = req_builder.headers(headers_map);
     }
     if let Ok(timeout) = timeout {
         req_builder = req_builder.timeout(timeout);
@@ -458,7 +463,6 @@ mod tests {
     use futures::StreamExt;
     use mockall::*;
     use serde_json::json;
-    use std::collections::HashMap;
     use std::env::temp_dir;
     use std::path::Path;
     use tonic::transport::Channel;
@@ -626,10 +630,10 @@ mod tests {
                 host: server.url(),
                 method: "info_get".to_string(),
                 params: Some("{\"chain\": \"x\"}".to_string()),
-                headers: Some(HashMap::from_iter([(
+                headers: Some(vec![(
                     "custom_header".to_string(),
                     "some value".to_string(),
-                )])),
+                )]),
             }))
             .await?
             .into_inner();
@@ -658,10 +662,10 @@ mod tests {
         let output = service
             .run_rest(Request::new(RestRequest {
                 url: format!("{}/items", server.url()),
-                headers: Some(HashMap::from_iter([(
+                headers: Some(vec![(
                     "custom_header".to_string(),
                     "some value".to_string(),
-                )])),
+                )]),
             }))
             .await?
             .into_inner();

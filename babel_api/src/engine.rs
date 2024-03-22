@@ -236,7 +236,7 @@ pub struct JrpcRequest {
     /// In jPRC it could be either Array (for positional parameters), or Object (for named ones)
     pub params: Option<String>,
     /// Extra HTTP headers to be added to the request.
-    pub headers: Option<HashMap<String, String>>,
+    pub headers: Option<Vec<(String, String)>>,
 }
 
 /// REST request
@@ -245,7 +245,7 @@ pub struct RestRequest {
     /// This is the url of the rest endpoint.
     pub url: String,
     /// Extra HTTP headers to be added to request.
-    pub headers: Option<HashMap<String, String>>,
+    pub headers: Option<Vec<(String, String)>>,
 }
 
 /// Long running job configuration

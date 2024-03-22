@@ -1,3 +1,4 @@
+use crate::engine::RestRequest;
 use crate::plugin_config::Service;
 use crate::{
     engine::{self, Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, ShResponse},
@@ -12,7 +13,8 @@ use rhai::{
     Dynamic, FnPtr, Map, AST,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
+use std::collections::HashMap;
+use std::{path::Path, sync::Arc, time::Duration};
 use tracing::Level;
 
 const DOWNLOAD_JOB_NAME: &str = "download";
@@ -179,18 +181,20 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         self.rhai_engine
             .register_fn("run_rest", move |req: Dynamic, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
+                let req = into_rhai_result(from_dynamic::<BareRestRequest>(&req)?.try_into())?;
                 into_rhai_result(
                     babel_engine
-                        .run_rest(from_dynamic(&req)?, Some(Duration::from_secs(timeout)))
+                        .run_rest(req, Some(Duration::from_secs(timeout)))
                         .map(DressedHttpResponse::from),
                 )
             });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_rest", move |req: Dynamic| {
+                let req = into_rhai_result(from_dynamic::<BareRestRequest>(&req)?.try_into())?;
                 into_rhai_result(
                     babel_engine
-                        .run_rest(from_dynamic(&req)?, None)
+                        .run_rest(req, None)
                         .map(DressedHttpResponse::from),
                 )
             });
@@ -490,12 +494,13 @@ fn into_rhai_result<T>(result: Result<T>) -> std::result::Result<T, Box<rhai::Ev
 /// It allows any `Dynamic` object to be set as params. Then `rhai_plugin` takes care of json
 /// serialization of `Map` or `Array`, since `babel_engine` expect params to be already
 /// serialized to json string.
+/// It also adds backward compatibility for headers.
 #[derive(Deserialize)]
 pub struct BareJrpcRequest {
     pub host: String,
     pub method: String,
     pub params: Option<Dynamic>,
-    pub headers: Option<HashMap<String, String>>,
+    pub headers: Option<Dynamic>,
 }
 
 impl TryInto<JrpcRequest> for BareJrpcRequest {
@@ -512,11 +517,61 @@ impl TryInto<JrpcRequest> for BareJrpcRequest {
             }
             None => None,
         };
+        let headers = match self.headers {
+            Some(value) => {
+                if value.is_array() {
+                    Some(from_dynamic::<Vec<(String, String)>>(&value)?)
+                } else if value.is_map() {
+                    Some(
+                        from_dynamic::<HashMap<String, String>>(&value)?
+                            .into_iter()
+                            .collect(),
+                    )
+                } else {
+                    bail!("unsupported jrpc headers type")
+                }
+            }
+            None => None,
+        };
         Ok(JrpcRequest {
             host: self.host,
             method: self.method,
             params,
-            headers: self.headers,
+            headers,
+        })
+    }
+}
+
+/// Backward compatibility structure that represents `RestRequest` from Rhai script perspective.
+#[derive(Deserialize)]
+pub struct BareRestRequest {
+    pub url: String,
+    pub headers: Option<Dynamic>,
+}
+
+impl TryInto<RestRequest> for BareRestRequest {
+    type Error = Error;
+
+    fn try_into(self) -> std::result::Result<RestRequest, Self::Error> {
+        let headers = match self.headers {
+            Some(value) => {
+                if value.is_array() {
+                    Some(from_dynamic::<Vec<(String, String)>>(&value)?)
+                } else if value.is_map() {
+                    Some(
+                        from_dynamic::<HashMap<String, String>>(&value)?
+                            .into_iter()
+                            .collect(),
+                    )
+                } else {
+                    bail!("unsupported jrpc headers type")
+                }
+            }
+            None => None,
+        };
+        Ok(RestRequest {
+            url: self.url,
+            headers,
         })
     }
 }
@@ -623,6 +678,7 @@ mod tests {
     use crate::plugin_config::{AlternativeDownload, InitJob};
     use eyre::bail;
     use mockall::*;
+    use std::collections::HashMap;
 
     mock! {
         #[derive(Debug)]
@@ -781,13 +837,13 @@ mod tests {
         stop_job("test_job_name");
         out += "|" + job_info("test_job_name");
         out += "|" + get_jobs();
-        out += "|" + run_jrpc(#{host: "host", method: "method", headers: #{"custom_header": "header value"}}).expect(200).key;
+        out += "|" + run_jrpc(#{host: "host", method: "method", headers: [["custom_header", "header value"]]}).expect(200).key;
         out += "|" + run_jrpc(#{host: "host", method: "method", params: #{"chain": "x"}}, 1).expect(|code| code >= 200).param;
         out += "|" + run_jrpc(#{host: "host", method: "method", params: ["positional", "args", "array"]}, 1).body;
         let http_out = run_rest(#{url: "url"});
         out += "|" + http_out.body;
         out += "|" + http_out.status_code;
-        out += "|" + run_rest(#{url: "url", headers: #{"another-header": "another value"}}, 2).body;
+        out += "|" + run_rest(#{url: "url", headers: [["another-header", "another value"]]}, 2).body;
         out += "|" + run_sh("body").unwrap();
         let sh_out = run_sh("body", 3);
         out += "|" + sh_out.stderr;
@@ -902,10 +958,10 @@ mod tests {
                     host: "host".to_string(),
                     method: "method".to_string(),
                     params: None,
-                    headers: Some(HashMap::from_iter([(
+                    headers: Some(vec![(
                         "custom_header".to_string(),
                         "header value".to_string(),
-                    )])),
+                    )]),
                 }),
                 predicate::eq(None),
             )
@@ -969,10 +1025,10 @@ mod tests {
             .with(
                 predicate::eq(RestRequest {
                     url: "url".to_string(),
-                    headers: Some(HashMap::from_iter([(
+                    headers: Some(vec![(
                         "another-header".to_string(),
                         "another value".to_string(),
-                    )])),
+                    )]),
                 }),
                 predicate::eq(Some(Duration::from_secs(2))),
             )

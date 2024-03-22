@@ -176,7 +176,7 @@ fn application_status() {
     let result = run_jrpc(#{
             host: global::API_HOST,
             method: "health.health",
-            headers: #{"content-type": "application/json"}
+            headers: [["content-type", "application/json"]]
         }).expect(200);
 
     if result.healthy != "false" || result.result.checks.bootstrapped.error == "subnets not bootstrapped" {

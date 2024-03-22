@@ -437,10 +437,10 @@ fn test_plugin_config() -> eyre::Result<()> {
                 host: "http://localhost:4467/".to_string(),
                 method: "health.health".to_string(),
                 params: None,
-                headers: Some(HashMap::from_iter(vec![(
+                headers: Some(vec![(
                     "content-type".to_string(),
                     "application/json".to_string(),
-                )])),
+                )]),
             }),
             predicate::eq(None),
         )

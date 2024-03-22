@@ -125,7 +125,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
   // [optional] Params structure in form of Dynamic object that is serializable into JSON.
   params: Dynamic,
   // [optional] Extra HTTP headers to be added to request.
-  headers: Map
+  headers: HeadersMap
 }
 ```
 - `run_jrpc(request, timeout)` - Same as above, but with custom request timeout (in seconds).
@@ -135,7 +135,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
   // This is the url of the rest endpoint.
   url: String,
   // [optional] Extra HTTP headers to be added to request.
-  headers: Map
+  headers: HeadersMap
 }
 ```
 - `run_rest(request, timeout)` - Same as above, but with custom request timeout (in seconds).
@@ -267,7 +267,7 @@ that can be used to add custom HTTP headers to the request.
 ```
 let data = #{host: "localhost:8154",
              method: "getBlockByNumber",
-             headers: #{"content-type": "application/json"}
+             headers: [["content-type", "application/json"]]
             };
 run_jrpc(data);
 ```
@@ -282,7 +282,7 @@ that can be used to add params to the request.
 let data = #{host: "localhost:8154",
              method: "getBlockByNumber",
              params: #{"chain": "x"},
-             headers: #{"content-type": "application/json"}
+             headers: [["content-type", "application/json"]]
             };
 run_jrpc(data);
 ```

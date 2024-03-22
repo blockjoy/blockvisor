@@ -908,14 +908,14 @@ mod tests {
                     host: name.to_string(),
                     method: param.to_string(),
                     params: None,
-                    headers: Some(HashMap::from_iter([(param.to_string(), name.to_string())])),
+                    headers: Some(vec![(param.to_string(), name.to_string())]),
                 },
                 None,
             )?;
             self.engine.run_rest(
                 RestRequest {
                     url: name.to_string(),
-                    headers: Some(HashMap::from_iter([(param.to_string(), name.to_string())])),
+                    headers: Some(vec![(param.to_string(), name.to_string())]),
                 },
                 None,
             )?;
@@ -1110,11 +1110,7 @@ mod tests {
                 let req = req.get_ref();
                 req.host == "custom_name"
                     && req.method == "param"
-                    && req.headers
-                        == Some(HashMap::from_iter([(
-                            "param".to_string(),
-                            "custom_name".to_string(),
-                        )]))
+                    && req.headers == Some(vec![("param".to_string(), "custom_name".to_string())])
             })
             .return_once(|_| {
                 Ok(Response::new(HttpResponse {
@@ -1127,11 +1123,7 @@ mod tests {
             .withf(|req| {
                 let req = req.get_ref();
                 req.url == "custom_name"
-                    && req.headers
-                        == Some(HashMap::from_iter([(
-                            "param".to_string(),
-                            "custom_name".to_string(),
-                        )]))
+                    && req.headers == Some(vec![("param".to_string(), "custom_name".to_string())])
             })
             .return_once(|req| {
                 Ok(Response::new(HttpResponse {
