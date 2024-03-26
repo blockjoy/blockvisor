@@ -19,7 +19,7 @@ pub trait Babel {
     fn get_babel_shutdown_timeout() -> Duration;
     /// Try gracefully shutdown babel before node stop/restart. In particular, it gracefully shut down all jobs.
     /// All `Running` jobs will be shutdown and won't start again until node is started again.
-    fn shutdown_babel();
+    fn shutdown_babel(force: bool);
     /// Setup firewall according to given configuration.
     fn setup_firewall(config: firewall::Config);
     /// Check if JobRunner binary exists and its checksum match expected.

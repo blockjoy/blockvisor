@@ -1,4 +1,3 @@
-use crate::jobs::JobsContext;
 /// Jobs Manager consists of three parts:
 /// .1 Client - allow asynchronously request operations on jobs (like start, stop and get info)
 ///             and other interactions with `Manager`
@@ -7,15 +6,17 @@ use crate::jobs::JobsContext;
 use crate::{
     async_pid_watch::AsyncPidWatch,
     babel_service::JobRunnerLock,
-    jobs,
-    jobs::{Job, JobState, JobsData, JobsRegistry, CONFIG_SUBDIR, STATUS_SUBDIR},
+    jobs::{
+        self, Job, JobState, JobsContext, JobsData, JobsRegistry, CONFIG_SUBDIR, STATUS_SUBDIR,
+    },
     pal::BabelEngineConnector,
 };
 use async_trait::async_trait;
 use babel_api::engine::{
-    JobConfig, JobInfo, JobProgress, JobStatus, JobsInfo, RestartPolicy,
+    JobConfig, JobInfo, JobProgress, JobStatus, JobsInfo, PosixSignal, RestartPolicy,
     DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
+use bv_utils::system::kill_all_processes;
 use bv_utils::{run_flag::RunFlag, system::find_processes};
 use bv_utils::{system::gracefully_terminate_process, with_retry};
 use eyre::{bail, Context, ContextCompat, Report, Result};
@@ -148,7 +149,7 @@ async fn load_jobs(
 pub trait JobsManagerClient {
     async fn startup(&self) -> Result<()>;
     async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
-    async fn shutdown(&self) -> Result<()>;
+    async fn shutdown(&self, force: bool) -> Result<()>;
     async fn list(&self) -> Result<JobsInfo>;
     async fn create(&self, name: &str, config: JobConfig) -> Result<()>;
     async fn start(&self, name: &str) -> Result<()>;
@@ -195,14 +196,27 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         total_timeout
     }
 
-    async fn shutdown(&self) -> Result<()> {
+    async fn shutdown(&self, force: bool) -> Result<()> {
         info!("Shutdown jobs manager - set state to 'Shutdown'");
         // ignore send error since jobs_manager may be already stopped
         let _ = self.jobs_manager_state_tx.send(JobsManagerState::Shutdown);
         let jobs = &mut self.jobs_registry.lock().await.jobs;
         for (name, job) in jobs {
             if let JobState::Active(pid) = &mut job.state {
-                terminate_job(name, *pid, &job.config)?;
+                if force {
+                    kill_all_processes(
+                        &self.job_runner_bin_path,
+                        &[&name],
+                        Duration::from_secs(
+                            job.config
+                                .shutdown_timeout_secs
+                                .unwrap_or(DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS),
+                        ),
+                        PosixSignal::SIGTERM,
+                    );
+                } else {
+                    terminate_job(name, *pid, &job.config)?;
+                }
                 // job_runner process has been stopped, but job should be restarted on next jobs manager startup
                 job.state = JobState::Inactive(JobStatus::Running);
             }
@@ -1043,7 +1057,7 @@ mod tests {
             JobStatus::Running,
             test_env.client.info("test_job").await?.status
         );
-        test_env.client.shutdown().await?;
+        test_env.client.shutdown(false).await?;
 
         monitor_handle.await?;
 

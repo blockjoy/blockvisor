@@ -771,7 +771,7 @@ mod tests {
             ) -> Result<Response<Duration>, Status>;
             async fn shutdown_babel(
                 &self,
-                request: Request<()>,
+                request: Request<bool>,
             ) -> Result<Response<()>, Status>;
             async fn setup_firewall(
                 &self,

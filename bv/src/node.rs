@@ -323,13 +323,12 @@ impl<P: Pal + Debug> Node<P> {
         if self.status() == NodeStatus::Stopped {
             return Ok(());
         }
-        if !force {
-            let babel_client = self.babel_engine.node_connection.babel_client().await?;
-            let timeout = with_retry!(babel_client.get_babel_shutdown_timeout(()))?.into_inner();
-            with_retry!(
-                babel_client.shutdown_babel(with_timeout((), timeout + RPC_REQUEST_TIMEOUT))
-            )
-            .with_context(|| "Failed to gracefully shutdown babel and background jobs")?;
+        if let Err(err) = self.shutdown_babel(force).await {
+            if force {
+                warn!("force babel shutdown failed: {err:#}");
+            } else {
+                bail!("{err:#}")
+            }
         }
         self.babel_engine.node_connection.close();
         self.data.started_at = None;
@@ -495,6 +494,14 @@ impl<P: Pal + Debug> Node<P> {
             }
             NodeStatus::Busy => unreachable!(),
         }
+        Ok(())
+    }
+
+    async fn shutdown_babel(&mut self, force: bool) -> Result<()> {
+        let babel_client = self.babel_engine.node_connection.babel_client().await?;
+        let timeout = with_retry!(babel_client.get_babel_shutdown_timeout(()))?.into_inner();
+        with_retry!(babel_client.shutdown_babel(with_timeout(force, timeout + RPC_REQUEST_TIMEOUT)))
+            .with_context(|| "Failed to gracefully shutdown babel and background jobs")?;
         Ok(())
     }
 
@@ -840,7 +847,7 @@ pub mod tests {
             ) -> Result<Response<Duration>, Status>;
             async fn shutdown_babel(
                 &self,
-                request: Request<()>,
+                request: Request<bool>,
             ) -> Result<Response<()>, Status>;
             async fn setup_firewall(
                 &self,
@@ -1564,6 +1571,18 @@ pub mod tests {
             .returning(|_| Ok(Response::new(Duration::from_secs(1))));
         babel_mock
             .expect_shutdown_babel()
+            .withf(|req| !req.get_ref())
+            .times(4)
+            .in_sequence(&mut seq)
+            .returning(|_| Err(Status::internal("can't stop babel")));
+        babel_mock
+            .expect_get_babel_shutdown_timeout()
+            .once()
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(Response::new(Duration::from_secs(1))));
+        babel_mock
+            .expect_shutdown_babel()
+            .withf(|req| *req.get_ref())
             .times(4)
             .in_sequence(&mut seq)
             .returning(|_| Err(Status::internal("can't stop babel")));

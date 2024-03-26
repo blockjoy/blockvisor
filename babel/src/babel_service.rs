@@ -116,9 +116,10 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         ))
     }
 
-    async fn shutdown_babel(&self, _request: Request<()>) -> Result<Response<()>, Status> {
+    async fn shutdown_babel(&self, request: Request<bool>) -> Result<Response<()>, Status> {
+        let force = request.into_inner();
         self.jobs_manager
-            .shutdown()
+            .shutdown(force)
             .await
             .map_err(|err| Status::internal(format!("failed to shutdown jobs_manger: {err:#}")))?;
 
@@ -483,7 +484,7 @@ mod tests {
         impl JobsManagerClient for JobsManager {
             async fn startup(&self) -> Result<()>;
             async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
-            async fn shutdown(&self) -> Result<()>;
+            async fn shutdown(&self, force: bool) -> Result<()>;
             async fn list(&self) -> Result<JobsInfo>;
             async fn create(&self, name: &str, config: JobConfig) -> Result<()>;
             async fn start(&self, name: &str) -> Result<()>;
