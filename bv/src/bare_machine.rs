@@ -19,6 +19,7 @@ use uuid::Uuid;
 const BARE_NODES_DIR: &str = "bare";
 pub const CHROOT_DIR: &str = "os";
 const DATA_DIR: &str = "data";
+const JOURNAL_DIR: &str = "/run/systemd/journal";
 pub const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -104,6 +105,8 @@ impl BareMachine {
             .chroot_dir
             .join(DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
         fs::create_dir_all(&data_dir).await?;
+        let journal_dir = self.chroot_dir.join(JOURNAL_DIR.trim_start_matches('/'));
+        fs::create_dir_all(&journal_dir).await?;
 
         if !is_mounted(&proc_dir).await? {
             mount([
@@ -133,6 +136,15 @@ impl BareMachine {
             ])
             .await?;
             mounted.push(data_dir)
+        }
+        if !is_mounted(&journal_dir).await? {
+            mount([
+                OsStr::new("--bind"),
+                OsStr::new(JOURNAL_DIR),
+                &journal_dir.clone().into_os_string(),
+            ])
+            .await?;
+            mounted.push(journal_dir)
         }
         Ok(self)
     }

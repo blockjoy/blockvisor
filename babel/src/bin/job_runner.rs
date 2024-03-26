@@ -10,7 +10,7 @@ use bv_utils::{logging::setup_logging, rpc::RPC_REQUEST_TIMEOUT, run_flag::RunFl
 use eyre::{anyhow, bail};
 use std::{env, fs, time::Duration};
 use tokio::join;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Logs are forwarded asap to log server, so we don't need big buffer, only to buffer logs during some
 /// temporary log server unavailability (e.g. while updating).
@@ -31,7 +31,9 @@ async fn main() -> eyre::Result<()> {
     if args.count() != 0 {
         bail!("Invalid number of arguments! Expected only one argument: unique job name.");
     }
-    setup_logging()?;
+    if let Err(err) = setup_logging() {
+        warn!("failed to setup logging: {err:#}");
+    }
     info!(
         "Starting {} {} ...",
         env!("CARGO_BIN_NAME"),
