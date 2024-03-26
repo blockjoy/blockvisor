@@ -101,6 +101,10 @@ impl pal::VirtualMachine for FirecrackerMachine {
         }
         Ok(())
     }
+
+    async fn detach(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 async fn create_config(

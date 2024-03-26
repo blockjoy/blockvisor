@@ -171,6 +171,8 @@ pub trait VirtualMachine {
     async fn force_shutdown(&mut self) -> Result<()>;
     /// Start the VM.
     async fn start(&mut self) -> Result<()>;
+    /// Detach the VM.
+    async fn detach(&mut self) -> Result<()>;
 }
 
 pub trait RecoverBackoff {

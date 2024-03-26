@@ -19,7 +19,7 @@ use babel_api::{
 };
 use bv_utils::{cmd::run_cmd, rpc::with_timeout, with_retry};
 use chrono::Utc;
-use eyre::{bail, Context, Report, Result};
+use eyre::{anyhow, bail, Context, Report, Result};
 use std::{fmt::Debug, path::Path, sync::Arc, time::Duration};
 use tokio::{fs, time::Instant};
 use tracing::{debug, error, info, instrument, warn};
@@ -398,7 +398,13 @@ impl<P: Pal + Debug> Node<P> {
     /// Updates OS image for VM.
     #[instrument(skip(self))]
     pub async fn upgrade(&mut self, image: &NodeImage) -> commands::Result<()> {
-        let need_to_restart = self.status() == NodeStatus::Running;
+        let status = self.status();
+        if status == NodeStatus::Failed {
+            return Err(commands::Error::Internal(anyhow!(
+                "can't upgrade node in Failed state"
+            )));
+        }
+        let need_to_restart = status == NodeStatus::Running;
         if need_to_restart {
             if self
                 .babel_engine
@@ -413,7 +419,7 @@ impl<P: Pal + Debug> Node<P> {
             }
             self.stop(false).await?;
         }
-
+        self.machine.detach().await?;
         self.copy_os_image(image).await?;
 
         let (script, metadata) = self.context.copy_and_check_plugin(image).await?;
@@ -762,6 +768,7 @@ pub mod tests {
             async fn shutdown(&mut self) -> Result<()>;
             async fn force_shutdown(&mut self) -> Result<()>;
             async fn start(&mut self) -> Result<()>;
+            async fn detach(&mut self) -> Result<()>;
         }
     }
 

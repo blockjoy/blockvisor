@@ -3,7 +3,7 @@ use crate::services::blockchain::ROOT_FS_FILE;
 use crate::utils::{get_process_pid, GetProcessIdError};
 use crate::{node_data::NodeData, pal, BV_VAR_PATH};
 use async_trait::async_trait;
-use babel_api::engine::PosixSignal;
+use babel_api::engine::{PosixSignal, DATA_DRIVE_MOUNT_POINT};
 use bv_utils::cmd::run_cmd;
 use bv_utils::system::{gracefully_terminate_process, is_process_running, kill_all_processes};
 use eyre::{anyhow, bail, Result};
@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 const BARE_NODES_DIR: &str = "bare";
 pub const CHROOT_DIR: &str = "os";
+const DATA_DIR: &str = "data";
 pub const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -33,9 +34,8 @@ pub struct BareMachine {
     bv_root: PathBuf,
     vm_dir: PathBuf,
     babel_path: PathBuf,
-    chroot_dev_dir: PathBuf,
-    chroot_proc_dir: PathBuf,
     chroot_dir: PathBuf,
+    data_dir: PathBuf,
     os_img_path: PathBuf,
     vm_id: Uuid,
 }
@@ -48,6 +48,8 @@ pub async fn new(
     let vm_dir = build_vm_data_path(bv_root, node_data.id);
     let chroot_dir = vm_dir.join(CHROOT_DIR);
     fs::create_dir_all(&chroot_dir).await?;
+    let data_dir = vm_dir.join(DATA_DIR);
+    fs::create_dir_all(&data_dir).await?;
     let os_img_path = vm_dir.join(ROOT_FS_FILE);
     if !os_img_path.exists() {
         fs::copy(
@@ -61,9 +63,8 @@ pub async fn new(
         bv_root: bv_root.to_path_buf(),
         vm_dir,
         babel_path,
-        chroot_proc_dir: chroot_dir.join("proc"),
-        chroot_dev_dir: chroot_dir.join("dev"),
         chroot_dir,
+        data_dir,
         os_img_path,
         vm_id: node_data.id,
     })
@@ -71,10 +72,6 @@ pub async fn new(
 
 impl BareMachine {
     pub async fn create(self) -> Result<Self> {
-        self.attach().await
-    }
-
-    pub async fn attach(self) -> Result<Self> {
         if !is_mounted(&self.chroot_dir).await? {
             mount([
                 self.os_img_path.clone().into_os_string(),
@@ -82,28 +79,47 @@ impl BareMachine {
             ])
             .await?;
         }
-        if !is_mounted(&self.chroot_proc_dir).await? {
+        let proc_dir = self.chroot_dir.join("proc");
+        let dev_dir = self.chroot_dir.join("dev");
+        let data_dir = self
+            .chroot_dir
+            .join(DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
+
+        if !is_mounted(&proc_dir).await? {
             mount([
                 OsStr::new("-t"),
                 OsStr::new("proc"),
                 OsStr::new("proc"),
-                &self.chroot_proc_dir.clone().into_os_string(),
+                &proc_dir.into_os_string(),
             ])
             .await?;
         }
-        if !is_mounted(&self.chroot_dev_dir).await? {
+        if !is_mounted(&dev_dir).await? {
             mount([
                 OsStr::new("-o"),
                 OsStr::new("bind"),
                 &self.bv_root.join("dev").into_os_string(),
-                &self.chroot_dev_dir.clone().into_os_string(),
+                &dev_dir.into_os_string(),
             ])
             .await?;
         }
-        if self.stop_babel(false)? {
-            self.start_babel()?;
+        if !is_mounted(&data_dir).await? {
+            mount([
+                OsStr::new("--bind"),
+                &self.data_dir.clone().into_os_string(),
+                &data_dir.into_os_string(),
+            ])
+            .await?;
         }
         Ok(self)
+    }
+
+    pub async fn attach(self) -> Result<Self> {
+        let vm = self.create().await?;
+        if vm.stop_babel(false)? {
+            vm.start_babel()?;
+        }
+        Ok(vm)
     }
 
     fn stop_babel(&self, force: bool) -> Result<bool> {
@@ -149,6 +165,28 @@ impl BareMachine {
         cmd.spawn()?;
         Ok(())
     }
+
+    async fn umount_all(&mut self) -> Result<()> {
+        let chroot_dir = self.chroot_dir.to_string_lossy();
+        let chroot_dir = chroot_dir.trim_end_matches('/');
+        let mount_points = run_cmd("df", ["--all", "--output=target"])
+            .await
+            .map_err(|err| anyhow!("can't check if root fs is mounted, df: {err:#}"))?;
+        let mut mount_points = mount_points
+            .split_whitespace()
+            .filter(|mount_point| mount_point.starts_with(chroot_dir))
+            .collect::<Vec<_>>();
+        mount_points.sort_by_key(|k| std::cmp::Reverse(k.len()));
+        if !mount_points.is_empty() {
+            let _ = run_cmd("fuser", ["-km", chroot_dir]).await;
+            for mount_point in mount_points {
+                run_cmd("umount", [mount_point])
+                    .await
+                    .map_err(|err| anyhow!("failed to umount {mount_point}: {err:#}"))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 async fn is_mounted(path: &Path) -> Result<bool> {
@@ -188,24 +226,7 @@ impl pal::VirtualMachine for BareMachine {
         if self.shutdown().await.is_err() {
             self.force_shutdown().await?;
         }
-        let chroot_dir = self.chroot_dir.to_string_lossy();
-        let chroot_dir = chroot_dir.trim_end_matches('/');
-        let mount_points = run_cmd("df", ["--all", "--output=target"])
-            .await
-            .map_err(|err| anyhow!("can't check if root fs is mounted, df: {err:#}"))?;
-        let mut mount_points = mount_points
-            .split_whitespace()
-            .filter(|mount_point| mount_point.starts_with(chroot_dir))
-            .collect::<Vec<_>>();
-        mount_points.sort_by_key(|k| std::cmp::Reverse(k.len()));
-        if !mount_points.is_empty() {
-            let _ = run_cmd("fuser", ["-km", chroot_dir]).await;
-            for mount_point in mount_points {
-                run_cmd("umount", [mount_point])
-                    .await
-                    .map_err(|err| anyhow!("failed to umount {mount_point}: {err:#}"))?;
-            }
-        }
+        self.umount_all().await?;
         if self.vm_dir.exists() {
             fs::remove_dir_all(&self.vm_dir).await?;
         }
@@ -224,5 +245,9 @@ impl pal::VirtualMachine for BareMachine {
 
     async fn start(&mut self) -> Result<()> {
         self.start_babel()
+    }
+
+    async fn detach(&mut self) -> Result<()> {
+        self.umount_all().await
     }
 }

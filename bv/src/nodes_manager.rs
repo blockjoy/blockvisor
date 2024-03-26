@@ -1666,6 +1666,7 @@ mod tests {
         };
         let mut vm_mock = MockTestVM::new();
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
+        vm_mock.expect_detach().return_once(|| Ok(()));
         add_create_node_expectations(&mut pal, 1, node_id, node_config.clone(), vm_mock);
         pal.expect_available_resources()
             .withf(move |req| 1 == req.len() as u32)

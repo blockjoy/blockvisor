@@ -1,16 +1,15 @@
-use crate::bare_machine::CHROOT_DIR;
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
     bare_machine,
     bare_machine::BABEL_BIN_NAME,
+    bare_machine::CHROOT_DIR,
     config,
     config::SharedConfig,
     linux_platform,
     node_connection::RPC_REQUEST_TIMEOUT,
     node_data::NodeData,
     nodes_manager::NodesDataCache,
-    pal,
-    pal::{AvailableResources, NetInterface, NodeConnection, Pal},
+    pal::{self, AvailableResources, NetInterface, NodeConnection, Pal},
     services, utils,
 };
 use async_trait::async_trait;
