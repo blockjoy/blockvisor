@@ -40,6 +40,7 @@ impl pal::BabelServer for UdsServer {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct UdsConnector;
 
 impl pal::BabelEngineConnector for UdsConnector {

@@ -5,7 +5,6 @@
 use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
-    fc_platform,
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
     jobs::{load_job_data, save_job_data},
     pal::BabelEngineConnector,
@@ -80,21 +79,25 @@ pub fn remove_remnants(manifest: DownloadManifest, destination_dir: &Path) -> Re
     Ok(())
 }
 
-pub struct DownloadJob<T> {
-    downloader: Downloader,
+pub struct DownloadJob<T, C> {
+    downloader: Downloader<C>,
     restart_policy: RestartPolicy,
     timer: T,
 }
 
-struct Downloader {
+struct Downloader<C> {
+    connector: C,
     manifest: DownloadManifest,
     destination_dir: PathBuf,
     config: TransferConfig,
 }
 
-impl<T: AsyncTimer + Send> DownloadJob<T> {
+impl<T: AsyncTimer + Send, C: BabelEngineConnector + Copy + Send + Sync + 'static>
+    DownloadJob<T, C>
+{
     pub fn new(
         timer: T,
+        connector: C,
         manifest: DownloadManifest,
         destination_dir: PathBuf,
         restart_policy: RestartPolicy,
@@ -102,6 +105,7 @@ impl<T: AsyncTimer + Send> DownloadJob<T> {
     ) -> Result<Self> {
         Ok(Self {
             downloader: Downloader {
+                connector,
                 manifest,
                 destination_dir,
                 config,
@@ -117,7 +121,9 @@ impl<T: AsyncTimer + Send> DownloadJob<T> {
 }
 
 #[async_trait]
-impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
+impl<T: AsyncTimer + Send, C: BabelEngineConnector + Copy + Send + Sync + 'static> JobRunnerImpl
+    for DownloadJob<T, C>
+{
     /// Run and restart downloader until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
@@ -145,7 +151,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for DownloadJob<T> {
     }
 }
 
-impl Downloader {
+impl<C: BabelEngineConnector + Copy + Send + Sync + 'static> Downloader<C> {
     async fn download(&mut self, mut run: RunFlag) -> Result<()> {
         let completed_path = self.config.archive_jobs_meta_dir.join(COMPLETED_FILENAME);
         if completed_path.exists() {
@@ -163,6 +169,7 @@ impl Downloader {
         );
 
         let mut downloaders = ParallelChunkDownloaders::new(
+            self.connector,
             parallel_downloaders_run.clone(),
             tx,
             downloaded_chunks,
@@ -316,7 +323,8 @@ fn required_disk_space(
     Ok(manifest.total_size - downloaded_bytes)
 }
 
-struct ParallelChunkDownloaders<'a> {
+struct ParallelChunkDownloaders<'a, C> {
+    connector: C,
     run: RunFlag,
     tx: mpsc::Sender<ChunkData>,
     downloaded_chunks: HashSet<String>,
@@ -326,8 +334,9 @@ struct ParallelChunkDownloaders<'a> {
     connection_pool: ConnectionPool,
 }
 
-impl<'a> ParallelChunkDownloaders<'a> {
+impl<'a, C: BabelEngineConnector + Copy + Send + Sync + 'static> ParallelChunkDownloaders<'a, C> {
     fn new(
+        connector: C,
         run: RunFlag,
         tx: mpsc::Sender<ChunkData>,
         downloaded_chunks: HashSet<String>,
@@ -336,6 +345,7 @@ impl<'a> ParallelChunkDownloaders<'a> {
     ) -> Self {
         let connection_pool = Arc::new(Semaphore::new(config.max_connections));
         Self {
+            connector,
             run,
             tx,
             downloaded_chunks,
@@ -356,6 +366,7 @@ impl<'a> ParallelChunkDownloaders<'a> {
                 continue;
             }
             let downloader = ChunkDownloader::new(
+                self.connector,
                 chunk.clone(),
                 self.tx.clone(),
                 self.config.clone(),
@@ -386,7 +397,8 @@ enum ChunkData {
     },
 }
 
-struct ChunkDownloader {
+struct ChunkDownloader<C> {
+    connector: C,
     chunk: Chunk,
     tx: mpsc::Sender<ChunkData>,
     client: reqwest::Client,
@@ -394,14 +406,16 @@ struct ChunkDownloader {
     connection_pool: ConnectionPool,
 }
 
-impl ChunkDownloader {
+impl<C: BabelEngineConnector> ChunkDownloader<C> {
     fn new(
+        connector: C,
         chunk: Chunk,
         tx: mpsc::Sender<ChunkData>,
         config: TransferConfig,
         connection_pool: ConnectionPool,
     ) -> Self {
         Self {
+            connector,
             chunk,
             tx,
             client: reqwest::Client::new(),
@@ -440,16 +454,17 @@ impl ChunkDownloader {
         .with_context(|| format!("chunk '{}' download failed", self.chunk.key))
     }
 
-    async fn download_chunk<C: checksum::Checksum, D: Coder>(
+    async fn download_chunk<S: checksum::Checksum, D: Coder>(
         &self,
         mut run: RunFlag,
         mut decoder: D,
-        mut digest: C,
-        expected_checksum: &C::Bytes,
+        mut digest: S,
+        expected_checksum: &S::Bytes,
     ) -> Result<()> {
         let chunk_size = usize::try_from(self.chunk.size)?;
         let mut pos = 0;
-        let mut destination = DestinationsIter::new(self.chunk.destinations.clone()).await?;
+        let mut destination =
+            DestinationsIter::new(self.chunk.destinations.clone(), &self.connector).await?;
         while pos < chunk_size {
             if let Some(res) = run
                 .select(self.download_part_with_retry(pos, chunk_size))
@@ -552,11 +567,14 @@ impl ChunkDownloader {
 struct DestinationsIter(Vec<FileLocation>);
 
 impl DestinationsIter {
-    async fn new(mut iter: Vec<FileLocation>) -> Result<Self> {
+    async fn new(
+        mut iter: Vec<FileLocation>,
+        connector: &impl BabelEngineConnector,
+    ) -> Result<Self> {
         if iter.is_empty() {
             let err_msg = "corrupted manifest - this is internal BV error, manifest shall be already validated";
             error!(err_msg);
-            let mut client = fc_platform::VSockConnector.connect();
+            let mut client = connector.connect();
             let _ = with_retry!(client.bv_error(err_msg.to_string()));
             bail!("corrupted manifest - expected at least one destination file in chunk");
         }
@@ -707,6 +725,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chroot_platform::UdsConnector;
     use crate::compression::ZstdEncoder;
     use assert_fs::TempDir;
     use babel_api::engine::{Checksum, RestartConfig};
@@ -749,9 +768,10 @@ mod tests {
     }
 
     impl TestEnv {
-        fn download_job(&self, manifest: DownloadManifest) -> DownloadJob<SysTimer> {
+        fn download_job(&self, manifest: DownloadManifest) -> DownloadJob<SysTimer, UdsConnector> {
             DownloadJob {
                 downloader: Downloader {
+                    connector: UdsConnector,
                     manifest,
                     destination_dir: self.dest_dir.clone(),
                     config: TransferConfig {

@@ -1,3 +1,6 @@
+use babel::chroot_platform::UdsConnector;
+use babel::pal::BabelEngineConnector;
+use babel::pal_config::PalConfig;
 use babel::{
     download_job::DownloadJob, fc_platform::VSockConnector, job_runner::TransferConfig, jobs,
     log_buffer::LogBuffer, run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH,
@@ -39,7 +42,16 @@ async fn main() -> eyre::Result<()> {
         env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
     );
+    match babel::pal_config::load().await? {
+        PalConfig::Fc => run_job(job_name, VSockConnector).await,
+        PalConfig::Chroot => run_job(job_name, UdsConnector).await,
+    }
+}
 
+async fn run_job(
+    job_name: String,
+    connector: impl BabelEngineConnector + Copy + Send + Sync + 'static,
+) -> eyre::Result<()> {
     let mut run = RunFlag::run_until_ctrlc();
 
     let job_config = jobs::load_config(&jobs::config_file_path(
@@ -81,6 +93,7 @@ async fn main() -> eyre::Result<()> {
             let compression = manifest.compression;
             DownloadJob::new(
                 bv_utils::timer::SysTimer,
+                connector,
                 manifest,
                 destination.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
                 job_config.restart,
@@ -105,7 +118,7 @@ async fn main() -> eyre::Result<()> {
         } => {
             UploadJob::new(
                 bv_utils::timer::SysTimer,
-                VSockConnector,
+                connector,
                 manifest.ok_or(anyhow!("missing UploadManifest"))?,
                 source.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
                 exclude.unwrap_or_default(),

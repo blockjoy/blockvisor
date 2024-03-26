@@ -1,3 +1,4 @@
+use babel::pal_config::PalConfig;
 use bv_utils::logging::setup_logging;
 use std::{env, os::unix::fs};
 use tracing::info;
@@ -14,6 +15,7 @@ async fn main() -> eyre::Result<()> {
     if let Some(chroot_dir) = args.nth(1) {
         fs::chroot(chroot_dir)?;
         env::set_current_dir("/")?;
+        babel::pal_config::save(PalConfig::Chroot).await?;
         babel::babel::run(babel::chroot_platform::Pal).await
     } else {
         babel::babel::run(babel::fc_platform::Pal).await

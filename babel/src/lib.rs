@@ -13,6 +13,7 @@ pub mod jobs_manager;
 pub mod log_buffer;
 pub mod logs_service;
 pub mod pal;
+pub mod pal_config;
 pub mod run_sh_job;
 pub mod supervisor;
 pub mod ufw_wrapper;

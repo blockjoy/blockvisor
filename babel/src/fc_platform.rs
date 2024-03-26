@@ -40,6 +40,7 @@ impl pal::BabelServer for VSockServer {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct VSockConnector;
 
 impl pal::BabelEngineConnector for VSockConnector {
