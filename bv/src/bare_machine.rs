@@ -72,44 +72,67 @@ pub async fn new(
 
 impl BareMachine {
     pub async fn create(self) -> Result<Self> {
+        let mut mounted = vec![];
+        let vm = self.try_create(&mut mounted).await;
+        if vm.is_err() {
+            for mount_point in mounted {
+                let mount_point = mount_point.to_string_lossy().to_string();
+                if let Err(err) = run_cmd("umount", [&mount_point]).await {
+                    error!("after create failed, can't umount {mount_point}: {err:#}")
+                }
+            }
+        }
+        vm
+    }
+
+    async fn try_create(self, mounted: &mut Vec<PathBuf>) -> Result<Self> {
         if !is_mounted(&self.chroot_dir).await? {
             mount([
                 self.os_img_path.clone().into_os_string(),
                 self.chroot_dir.clone().into_os_string(),
             ])
             .await?;
+            mounted.push(self.chroot_dir.clone());
         }
         let proc_dir = self.chroot_dir.join("proc");
         let dev_dir = self.chroot_dir.join("dev");
         let data_dir = self
             .chroot_dir
             .join(DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
+        fs::create_dir_all(&data_dir).await?;
+        let data_dir = self
+            .chroot_dir
+            .join(DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
+        fs::create_dir_all(&data_dir).await?;
 
         if !is_mounted(&proc_dir).await? {
             mount([
                 OsStr::new("-t"),
                 OsStr::new("proc"),
                 OsStr::new("proc"),
-                &proc_dir.into_os_string(),
+                &proc_dir.clone().into_os_string(),
             ])
             .await?;
+            mounted.push(proc_dir)
         }
         if !is_mounted(&dev_dir).await? {
             mount([
                 OsStr::new("-o"),
                 OsStr::new("bind"),
                 &self.bv_root.join("dev").into_os_string(),
-                &dev_dir.into_os_string(),
+                &dev_dir.clone().into_os_string(),
             ])
             .await?;
+            mounted.push(dev_dir)
         }
         if !is_mounted(&data_dir).await? {
             mount([
                 OsStr::new("--bind"),
                 &self.data_dir.clone().into_os_string(),
-                &data_dir.into_os_string(),
+                &data_dir.clone().into_os_string(),
             ])
             .await?;
+            mounted.push(data_dir)
         }
         Ok(self)
     }
