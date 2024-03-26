@@ -135,7 +135,13 @@ impl Pal for LinuxBarePlatform {
     }
 
     fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid> {
-        Ok(utils::get_process_pid(BABEL_BIN_NAME, &vm_id.to_string())?)
+        Ok(utils::get_process_pid(
+            BABEL_BIN_NAME,
+            &self
+                .build_vm_data_path(vm_id)
+                .join(CHROOT_DIR)
+                .to_string_lossy(),
+        )?)
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
