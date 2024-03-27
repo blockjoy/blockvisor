@@ -16,12 +16,13 @@ pub struct ClusterData {
 
 pub async fn start_server(config: &Config) -> Result<Option<ClusterData>> {
     if let Some(cluster_id) = &config.cluster_id {
+        let port = config.cluster_port.unwrap_or(DEFAULT_GOSSIP_PORT);
         let seed_nodes = config
             .cluster_seed_urls
             .clone()
             .ok_or_else(|| anyhow!("cluster_seed_urls not set"))?;
-        let listen_addr = format!("0.0.0.0:{DEFAULT_GOSSIP_PORT}");
-        let public_addr = format!("{}:{DEFAULT_GOSSIP_PORT}", get_ip_address(&config.iface)?);
+        let listen_addr = format!("0.0.0.0:{port}");
+        let public_addr = format!("{}:{port}", get_ip_address(&config.iface)?);
         let chitchat_id = ChitchatId::new(config.id.clone(), 0, public_addr.parse()?);
 
         let chitchat_config = ChitchatConfig {

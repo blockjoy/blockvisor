@@ -20,7 +20,6 @@ use crate::{
 use bv_utils::run_flag::RunFlag;
 use eyre::{Context, Result};
 use metrics::{register_counter, Counter};
-use metrics_exporter_prometheus::PrometheusBuilder;
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     fmt::Debug,
@@ -104,12 +103,6 @@ where
             }
         }
         let self_updater_future = self_updater.run(run.clone());
-
-        // setup metrics endpoint
-        let builder = PrometheusBuilder::new();
-        builder
-            .install()
-            .unwrap_or_else(|e| error!("Cannot create Prometheus endpoint: {e:#}"));
 
         let cmds_connector = self.pal.create_commands_stream_connector(&self.config);
         let nodes_manager = NodesManager::load(self.pal, self.config.clone()).await?;

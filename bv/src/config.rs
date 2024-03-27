@@ -115,6 +115,8 @@ pub struct Config {
     pub iface: String,
     /// Host's cluster id
     pub cluster_id: Option<String>,
+    /// Cluster gossip listen port
+    pub cluster_port: Option<u32>,
     /// Addresses of the seed nodes for cluster discovery and announcements
     pub cluster_seed_urls: Option<Vec<String>>,
 }
