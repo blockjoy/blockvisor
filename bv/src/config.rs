@@ -89,6 +89,13 @@ impl SharedConfig {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum PalConfig {
+    LinuxFc,
+    LinuxBare,
+}
+
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct Config {
     /// Host uuid
@@ -119,6 +126,8 @@ pub struct Config {
     pub cluster_port: Option<u32>,
     /// Addresses of the seed nodes for cluster discovery and announcements
     pub cluster_seed_urls: Option<Vec<String>>,
+    /// Platform Abstraction Layer to be used by host
+    pub pal: Option<PalConfig>,
 }
 
 impl Config {

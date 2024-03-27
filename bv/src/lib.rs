@@ -1,6 +1,6 @@
 pub mod babel_engine;
 pub mod babel_engine_service;
-mod bare_machine;
+pub mod bare_machine;
 pub mod blockvisord;
 pub mod bv;
 pub mod cli;
@@ -21,7 +21,6 @@ pub mod node_data;
 pub mod node_metrics;
 pub mod nodes_manager;
 pub mod pal;
-pub mod pal_config;
 pub mod pretty_table;
 pub mod self_updater;
 pub mod services;

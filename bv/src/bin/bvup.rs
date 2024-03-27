@@ -66,6 +66,10 @@ pub struct CmdArgs {
     #[clap(long = "skip-download")]
     pub skip_download: bool,
 
+    /// Use Firecracker platform
+    #[clap(long)]
+    use_fc: bool,
+
     /// Skip all [y/N] prompts.
     #[clap(short, long)]
     yes: bool,
@@ -190,6 +194,11 @@ async fn main() -> Result<()> {
                 .blockvisor_port
                 .unwrap_or_else(config::default_blockvisor_port),
             iface: cmd_args.bridge_ifa,
+            pal: if cmd_args.use_fc {
+                Some(config::PalConfig::LinuxFc)
+            } else {
+                Some(config::PalConfig::LinuxBare)
+            },
             ..Default::default()
         };
         api_config.save(&bv_root).await?;

@@ -1,6 +1,7 @@
+use blockvisord::linux_platform::bv_root;
 use blockvisord::{
     config, config::SharedConfig, internal_server, nodes_manager::NodesManager, pal::Pal,
-    pal_config, set_bv_status, ServiceStatus,
+    set_bv_status, ServiceStatus,
 };
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::Result;
@@ -19,15 +20,14 @@ async fn main() -> Result<()> {
     );
     set_bv_status(ServiceStatus::Ok).await;
 
-    match pal_config::PalConfig::load().await? {
-        pal_config::PalConfig::LinuxFc => {
+    let config = config::Config::load(&bv_root()).await?;
+    match config.pal.as_ref().unwrap_or(&config::PalConfig::LinuxFc) {
+        config::PalConfig::LinuxFc => {
             let pal = blockvisord::linux_fc_platform::LinuxFcPlatform::new().await?;
-            let config = config::Config::load(pal.bv_root()).await?;
             run_server(config, pal).await?;
         }
-        pal_config::PalConfig::LinuxBare => {
+        config::PalConfig::LinuxBare => {
             let pal = blockvisord::linux_bare_platform::LinuxBarePlatform::new().await?;
-            let config = config::Config::load(pal.bv_root()).await?;
             run_server(config, pal).await?;
         }
     }
