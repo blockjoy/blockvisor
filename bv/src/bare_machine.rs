@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use babel_api::engine::{PosixSignal, DATA_DRIVE_MOUNT_POINT};
 use bv_utils::cmd::run_cmd;
 use bv_utils::system::{gracefully_terminate_process, is_process_running, kill_all_processes};
+use bv_utils::with_retry;
 use eyre::{anyhow, bail, Result};
 use std::ffi::OsStr;
 use std::fmt::Debug;
@@ -22,6 +23,8 @@ const DATA_DIR: &str = "data";
 const JOURNAL_DIR: &str = "/run/systemd/journal";
 pub const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
+const UMOUNT_RETRY_MAX: u32 = 2;
+const UMOUNT_BACKOFF_BASE_MS: u64 = 1000;
 
 pub fn build_vm_data_path(bv_root: &Path, id: Uuid) -> PathBuf {
     bv_root
@@ -78,7 +81,11 @@ impl BareMachine {
         if vm.is_err() {
             for mount_point in mounted {
                 let mount_point = mount_point.to_string_lossy().to_string();
-                if let Err(err) = run_cmd("umount", [&mount_point]).await {
+                if let Err(err) = with_retry!(
+                    run_cmd("umount", [&mount_point]),
+                    UMOUNT_RETRY_MAX,
+                    UMOUNT_BACKOFF_BASE_MS
+                ) {
                     error!("after create failed, can't umount {mount_point}: {err:#}")
                 }
             }
@@ -215,9 +222,12 @@ impl BareMachine {
         if !mount_points.is_empty() {
             let _ = run_cmd("fuser", ["-km", chroot_dir]).await;
             for mount_point in mount_points {
-                run_cmd("umount", [mount_point])
-                    .await
-                    .map_err(|err| anyhow!("failed to umount {mount_point}: {err:#}"))?;
+                with_retry!(
+                    run_cmd("umount", [mount_point]),
+                    UMOUNT_RETRY_MAX,
+                    UMOUNT_BACKOFF_BASE_MS
+                )
+                .map_err(|err| anyhow!("failed to umount {mount_point}: {err:#}"))?;
             }
         }
         Ok(())
