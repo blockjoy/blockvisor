@@ -78,7 +78,9 @@ pub fn get_all_processes_pids(process_name: &str) -> Result<Vec<Pid>> {
     sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::everything()));
     Ok(sys
         .processes_by_name(process_name)
-        .filter(|&process| process.status() != sysinfo::ProcessStatus::Zombie)
+        .filter(|&process| {
+            process.status() != sysinfo::ProcessStatus::Zombie && process.name() == process_name
+        })
         .map(|process| process.pid())
         .collect())
 }

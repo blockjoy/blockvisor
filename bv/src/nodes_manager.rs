@@ -681,7 +681,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let mut nodes = HashMap::new();
         let mut node_ids = HashMap::new();
         let mut node_data_cache = HashMap::new();
-        let mut fc_processes_to_check = pal.get_vm_pids()?;
+        let mut vm_processes = vec![];
         let mut dir = read_dir(registry_dir)
             .await
             .context("failed to read nodes registry dir")?;
@@ -708,8 +708,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                     // remove FC pid from list of all discovered FC pids
                     // in the end of load this list should be empty
                     if node.status() == NodeStatus::Running {
-                        let node_pid = pal.get_vm_pid(node.id())?;
-                        fc_processes_to_check.retain(|p| p != &node_pid);
+                        vm_processes.push(pal.get_vm_pid(node.id())?);
                     }
                     // insert node and its info into internal data structures
                     let id = node.id();
@@ -741,8 +740,10 @@ impl<P: Pal + Debug> NodesManager<P> {
             };
         }
         // check if we run some unmanaged FC processes on the host
-        for pid in fc_processes_to_check {
-            error!("Process with id {pid} is not managed by BV");
+        for pid in pal.get_vm_pids()? {
+            if !vm_processes.contains(&pid) {
+                error!("Process with id {pid} is not managed by BV");
+            }
         }
 
         Ok((nodes, node_ids, node_data_cache))
