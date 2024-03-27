@@ -5,6 +5,7 @@ use blockvisord::{
     linux_platform::bv_root,
     self_updater,
     services::api::pb,
+    services::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT},
     utils, BV_VAR_PATH,
 };
 use bv_utils::{
@@ -13,6 +14,7 @@ use bv_utils::{
 };
 use clap::{crate_version, ArgGroup, Parser};
 use eyre::{anyhow, bail, Context, Result};
+use tonic::transport::Endpoint;
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]
@@ -69,7 +71,7 @@ pub struct CmdArgs {
     yes: bool,
 }
 
-/// Simple host init tool. It provision host with PROVISION_TOKEN then download and install latest bv bundle.
+/// Simple host init tool. It provisions host with PROVISION_TOKEN then download and install latest bv bundle.
 #[tokio::main]
 async fn main() -> Result<()> {
     let bv_root = bv_root();
@@ -164,9 +166,12 @@ async fn main() -> Result<()> {
             managed_by: Some(pb::ManagedBy::Automatic.into()),
         };
 
-        let mut client =
-            pb::host_service_client::HostServiceClient::connect(cmd_args.blockjoy_api_url.clone())
-                .await?;
+        let mut client = pb::host_service_client::HostServiceClient::connect(
+            Endpoint::from_shared(cmd_args.blockjoy_api_url.clone())?
+                .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+                .timeout(DEFAULT_REQUEST_TIMEOUT),
+        )
+        .await?;
 
         let host = client.create(create).await?.into_inner();
 

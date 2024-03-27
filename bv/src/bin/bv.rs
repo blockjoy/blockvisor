@@ -4,11 +4,13 @@ use blockvisord::{
     config::{Config, SharedConfig, CONFIG_PATH},
     internal_server,
     linux_platform::bv_root,
+    services::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT},
 };
 use bv_utils::cmd::run_cmd;
 use clap::Parser;
 use eyre::{bail, Result};
 use tokio::time::{sleep, Duration};
+use tonic::transport::Endpoint;
 
 const BLOCKVISOR_STATUS_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 const BLOCKVISOR_START_TIMEOUT: Duration = Duration::from_secs(5);
@@ -84,6 +86,11 @@ async fn main() -> Result<()> {
 }
 
 async fn service_info(url: String) -> Result<String> {
-    let mut client = internal_server::service_client::ServiceClient::connect(url).await?;
+    let mut client = internal_server::service_client::ServiceClient::connect(
+        Endpoint::from_shared(url)?
+            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+            .timeout(DEFAULT_REQUEST_TIMEOUT),
+    )
+    .await?;
     Ok(client.info(()).await?.into_inner())
 }

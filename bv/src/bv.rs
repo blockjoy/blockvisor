@@ -1,4 +1,3 @@
-use crate::linux_fc_platform::LinuxFcPlatform;
 use crate::{
     cli::{
         ChainCommand, ClusterCommand, HostCommand, ImageCommand, JobCommand, NodeCommand,
@@ -8,6 +7,7 @@ use crate::{
     hosts::{self, HostInfo},
     internal_server,
     internal_server::NodeCreateRequest,
+    linux_fc_platform::LinuxFcPlatform,
     linux_platform::bv_root,
     node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeImage, NodeStatus},
@@ -21,6 +21,7 @@ use crate::{
 };
 use babel_api::engine::JobStatus;
 use bv_utils::cmd::{ask_confirm, run_cmd};
+use bv_utils::rpc::RPC_CONNECT_TIMEOUT;
 use cli_table::print_stdout;
 use eyre::{anyhow, bail, Context, Result};
 use std::{
@@ -30,6 +31,7 @@ use std::{
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
+use tonic::transport::Endpoint;
 use tonic::{transport::Channel, Code};
 use uuid::Uuid;
 
@@ -585,7 +587,10 @@ impl DerefMut for NodeClient {
 impl NodeClient {
     async fn new(url: String) -> Result<Self> {
         Ok(Self {
-            client: internal_server::service_client::ServiceClient::connect(url).await?,
+            client: internal_server::service_client::ServiceClient::connect(
+                Endpoint::from_shared(url)?.connect_timeout(RPC_CONNECT_TIMEOUT),
+            )
+            .await?,
         })
     }
 
