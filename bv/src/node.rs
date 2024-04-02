@@ -418,6 +418,7 @@ impl<P: Pal + Debug> Node<P> {
             }
             self.stop(false).await?;
         }
+        self.babel_engine.stop_server().await?;
         self.machine.detach().await?;
         self.copy_os_image(image).await?;
 
@@ -432,6 +433,7 @@ impl<P: Pal + Debug> Node<P> {
         self.data.initialized = false;
         self.data.save(&self.context.registry).await?;
         self.machine = self.pal.attach_vm(&self.data).await?;
+        self.babel_engine.start_server().await?;
 
         if need_to_restart {
             self.start().await?;

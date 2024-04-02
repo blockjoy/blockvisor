@@ -116,6 +116,20 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(babel_engine)
     }
 
+    pub async fn start_server(&mut self) -> Result<()> {
+        if self.server.is_none() {
+            self.server = Some(
+                babel_engine_service::start_server(
+                    self.node_connection.engine_socket_path().to_path_buf(),
+                    self.node_info.clone(),
+                    self.api_config.clone(),
+                )
+                .await?,
+            );
+        }
+        Ok(())
+    }
+
     pub async fn stop_server(&mut self) -> Result<()> {
         if let Some(server) = self.server.take() {
             server.stop().await?;
