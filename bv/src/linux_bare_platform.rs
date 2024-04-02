@@ -161,7 +161,7 @@ impl Pal for LinuxBarePlatform {
             let data_img_path = self
                 .build_vm_data_path(*id)
                 .join(bare_machine::CHROOT_DIR)
-                .join(babel_api::engine::DATA_DRIVE_MOUNT_POINT);
+                .join(babel_api::engine::DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
             let actual_data_size = fs_extra::dir::get_size(&data_img_path)
                 .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
             let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
