@@ -56,7 +56,6 @@ fn test_bvup_unknown_provision_token() {
         .args(["--ip-gateway", "216.18.214.193"])
         .args(["--ip-range-from", "216.18.214.195"])
         .args(["--ip-range-to", "216.18.214.206"])
-        .args(["--use-fc"])
         .args(["--yes"])
         .env("BV_ROOT", tmp_dir.as_os_str())
         .assert()
@@ -109,7 +108,6 @@ async fn test_bvup() {
             .args(["--ip-gateway", "216.18.214.193"])
             .args(["--ip-range-from", "216.18.214.195"])
             .args(["--ip-range-to", "216.18.214.206"])
-            .args(["--use-fc"])
             .args(["--yes"])
             .env("BV_ROOT", tmp_dir.as_os_str())
             .assert()
@@ -209,7 +207,6 @@ async fn test_bv_service_e2e() {
         .args(["--region", "europe-bosnia-number-1"]) // this region will be auto-created in API
         .args(["--api", url])
         .args(["--mqtt", mqtt])
-        .args(["--use-fc"])
         .args(["--yes"])
         .assert()
         .success()
