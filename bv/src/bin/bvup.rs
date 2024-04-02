@@ -14,6 +14,9 @@ use bv_utils::{
 };
 use clap::{crate_version, ArgGroup, Parser};
 use eyre::{anyhow, bail, Context, Result};
+use ipnet::Ipv4AddrRange;
+use std::net::Ipv4Addr;
+use std::str::FromStr;
 use tonic::transport::Endpoint;
 
 #[derive(Parser, Debug)]
@@ -105,12 +108,27 @@ async fn main() -> Result<()> {
             .ok_or_else(|| anyhow!("Failed to resolve `gateway` address"))?;
         let range_from = cmd_args
             .ip_range_from
-            .or(net.ip_from)
+            .as_ref()
+            .or(net.ip_from.as_ref())
             .ok_or_else(|| anyhow!("Failed to resolve `from` address"))?;
         let range_to = cmd_args
             .ip_range_to
-            .or(net.ip_to)
+            .as_ref()
+            .or(net.ip_to.as_ref())
             .ok_or_else(|| anyhow!("Failed to resolve `to` address"))?;
+        let ips = if cmd_args.use_fc
+            || (cmd_args.ip_range_from.is_some() && cmd_args.ip_range_to.is_some())
+        {
+            Ipv4AddrRange::new(
+                Ipv4Addr::from_str(range_from)?,
+                Ipv4Addr::from_str(range_to)?,
+            )
+            .map(|ip| ip.to_string())
+            .filter(|item| *item != ip && *item != gateway)
+            .collect()
+        } else {
+            vec![ip.clone()]
+        };
 
         let host_info = HostInfo::collect()?;
         let cpu_count = host_info
@@ -140,8 +158,7 @@ async fn main() -> Result<()> {
             "MQTT url:            {:>16}",
             cmd_args.blockjoy_mqtt_url.as_deref().unwrap_or("(auto)")
         );
-        println!("Network IP from:     {:>16}", &range_from);
-        println!("Network IP to:       {:>16}", &range_to);
+        println!("Network IPs:         {:>16?}", &ips);
         println!("IP address:          {:>16}", &ip);
         println!("Gateway IP address:  {:>16}", &gateway);
 
@@ -161,13 +178,12 @@ async fn main() -> Result<()> {
             os_version: host_info.os_version,
             ip_addr: ip,
             ip_gateway: gateway,
-            ip_range_from: range_from,
-            ip_range_to: range_to,
             org_id: None,
             region: cmd_args.region,
             billing_amount: None,
             vmm_mountpoint: Some(format!("{}", bv_root.join(BV_VAR_PATH).to_string_lossy())),
             managed_by: Some(pb::ManagedBy::Automatic.into()),
+            ips,
         };
 
         let mut client = pb::host_service_client::HostServiceClient::connect(

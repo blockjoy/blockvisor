@@ -355,6 +355,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     rules: rules.clone(),
                     properties: properties.clone(),
                     network: "test".to_string(),
+                    org_id: "org-id".to_string(),
                 })),
             })),
             // create with same node id
@@ -371,6 +372,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     rules: rules.clone(),
                     properties: properties.clone(),
                     network: "test".to_string(),
+                    org_id: "org-id".to_string(),
                 })),
             })),
             // create with same node name
@@ -387,6 +389,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     rules: rules.clone(),
                     properties: properties.clone(),
                     network: "test".to_string(),
+                    org_id: "org-id".to_string(),
                 })),
             })),
             // delete - this one should not be executed since previous one is expected to fail
@@ -411,6 +414,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     rules: rules.clone(),
                     properties: properties.clone(),
                     network: "test".to_string(),
+                    org_id: "org-id".to_string(),
                 })),
             })),
         ],
@@ -429,6 +433,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     rules: rules.clone(),
                     properties: properties.clone(),
                     network: "test".to_string(),
+                    org_id: "org-id".to_string(),
                 })),
             })),
         ],
@@ -447,6 +452,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                     rules: rules.clone(),
                     properties: properties.clone(),
                     network: "test".to_string(),
+                    org_id: "org-id".to_string(),
                 })),
             })),
         ],
@@ -510,6 +516,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                         ips: Some("invalid_ip".to_string()),
                         ports: vec![8080],
                     }],
+                    org_id: "org-id".to_string(),
                 })),
             })),
         ],
@@ -520,6 +527,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 host_id: host_id.clone(),
                 command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
                     rules: rules.into_iter().cycle().take(129).collect(),
+                    org_id: "org-id".to_string(),
                 })),
             })),
         ],
@@ -537,6 +545,7 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                         ips: Some("192.168.0.1/24".to_string()),
                         ports: vec![8080, 8000],
                     }],
+                    org_id: "org-id".to_string(),
                 })),
             })),
             // delete

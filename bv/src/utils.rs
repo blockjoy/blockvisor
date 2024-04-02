@@ -236,16 +236,13 @@ pub fn next_available_ip(net_params: &NetParams, used: &[String]) -> Result<Stri
 fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Result<NetParams> {
     let mut routes: Vec<IpRoute> = serde_json::from_str(routes_json_str)?;
     routes.retain(|r| r.dev == ifa_name);
-    if routes.len() != 2 {
-        bail!("Routes count for `{ifa_name}` not equal to 2");
-    }
 
     let mut params = NetParams::default();
     for route in routes {
         if route.dst == "default" {
             // Host gateway IP address
             params.gateway = route.gateway;
-        } else {
+        } else if route.prefsrc.is_some() {
             // IP range available for VMs
             let cidr = Ipv4Cidr::from_str(&route.dst)
                 .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
