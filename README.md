@@ -4,10 +4,12 @@ The service that runs on the host systems and is responsible for provisioning an
 
 ## How to release a new version
 1. Make sure you have installed:
-   - `git-conventional-commits`: `npm install --global git-conventional-commits`
+   - `git-conventional-commits`: `nvm install node; npm install --global git-conventional-commits`
    - `cargo-release`: `cargo install cargo-release`
 2. Run `cargo release --execute $(git-conventional-commits version)` 
 3. CI `publish` workflow will then build a bundle and create a new GH release
+4. Bundle is automatically deployed on DEV environment. When bundle is tested and ready to promote
+on PROD environment, use `make promote-prod` (requires `AWS_ACCOUNT_ID, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION` env variable set). 
 
 ## Host Setup
 
@@ -39,7 +41,7 @@ git submodule update --init --recursive
 - `error` - internal BV error (potential bug) or nonrecoverable error that requires manual actions;
 error should rise alert
 - `warn` - abnormal events that BV is capable to handle, e.g. networking issues, node recovery;
-may be caused by external errors, but BV should recover when external system get to normal
+may be caused by external errors, but BV should recover when external system get back to normal
 - `info` - main actions with minimum context, e.g. node created;
 avoid for frequently recurring actions like sending node status
 - `debug` - Detailed actions flow with variables, include recurring actions like sending node status;

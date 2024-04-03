@@ -85,3 +85,9 @@ ci-clean:
 	rm -rf /var/lib/blockvisor/nodes/
 	rm -f /var/lib/blockvisor/nodes.json
 	for i in $$(seq 1 100); do ip link delete bv$$i type tuntap; done || true
+
+promote-prod:
+	BV_VERSION=$$(cargo metadata --format-version=1 --no-deps | jq -caM '.packages[] | select(.name == "blockvisord") | .version' | tr -d '"'); \
+	aws --endpoint-url https://$${AWS_ACCOUNT_ID}.r2.cloudflarestorage.com/ s3 cp \
+                s3://bundle-dev/$${BV_VERSION}/bvd-bundle.tgz \
+                s3://bundle-prod/$${BV_VERSION}/bvd-bundle.tgz
