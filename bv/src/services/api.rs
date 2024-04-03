@@ -283,6 +283,7 @@ async fn process_node_command<P: Pal + Debug>(
                             properties,
                             network: args.network,
                             standalone: false,
+                            org_id: args.org_id,
                         },
                     )
                     .await?;
@@ -318,7 +319,7 @@ async fn process_node_command<P: Pal + Debug>(
                 API_UPGRADE_COUNTER.increment(1);
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
-            Command::Update(pb::NodeUpdate { rules, .. }) => {
+            Command::Update(pb::NodeUpdate { rules, org_id }) => {
                 nodes_manager
                     .update(
                         node_id,
@@ -326,6 +327,7 @@ async fn process_node_command<P: Pal + Debug>(
                             .into_iter()
                             .map(|rule| rule.try_into())
                             .collect::<Result<Vec<_>>>()?,
+                        org_id,
                     )
                     .await?;
                 API_UPDATE_COUNTER.increment(1);

@@ -131,6 +131,7 @@ impl pal::BabelPal for Pal {
              NODE_ID={}\n\
              NODE_NAME={}\n\
              NODE_TYPE={}\n\
+             ORG_ID={}\n\
              BLOCKCHAIN_TYPE={}\n\
              NODE_VERSION={}\n\
              NODE_IP={}\n\
@@ -142,6 +143,7 @@ impl pal::BabelPal for Pal {
             node_context.node_id,
             node_context.node_name,
             node_context.node_type,
+            node_context.org_id,
             node_context.protocol,
             node_context.node_version,
             node_context.ip,

@@ -86,6 +86,7 @@ pub struct NodeConfig {
     pub properties: NodeProperties,
     pub network: String,
     pub standalone: bool,
+    pub org_id: String,
 }
 
 #[derive(Error, Debug)]
@@ -252,6 +253,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             standalone: config.standalone,
             has_pending_update: false,
             restarting: false,
+            org_id: config.org_id,
         };
 
         let node = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
@@ -384,7 +386,12 @@ impl<P: Pal + Debug> NodesManager<P> {
     }
 
     #[instrument(skip(self))]
-    pub async fn update(&self, id: Uuid, rules: Vec<firewall::Rule>) -> commands::Result<()> {
+    pub async fn update(
+        &self,
+        id: Uuid,
+        rules: Vec<firewall::Rule>,
+        org_id: String,
+    ) -> commands::Result<()> {
         check_user_firewall_rules(&rules)?;
         let nodes = self.nodes.read().await;
         let mut node = nodes
@@ -392,7 +399,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             .ok_or_else(|| Error::NodeNotFound(id))?
             .write()
             .await;
-        node.update(rules).await
+        node.update(rules, org_id).await
     }
 
     #[instrument(skip(self))]
@@ -1212,6 +1219,7 @@ mod tests {
             network: config.network,
             standalone: config.standalone,
             restarting: false,
+            org_id: Default::default(),
         }
     }
 
@@ -1231,6 +1239,7 @@ mod tests {
             properties: Default::default(),
             network: "test".to_string(),
             standalone: true,
+            org_id: Default::default(),
         };
         let mut vm_mock = MockTestVM::new();
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
@@ -1256,6 +1265,7 @@ mod tests {
             properties: Default::default(),
             network: "test".to_string(),
             standalone: false,
+            org_id: Default::default(),
         };
         let mut vm_mock = MockTestVM::new();
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
@@ -1278,6 +1288,7 @@ mod tests {
             properties: Default::default(),
             network: "test".to_string(),
             standalone: false,
+            org_id: Default::default(),
         };
         add_create_node_fail_vm_expectations(
             &mut pal,
@@ -1369,6 +1380,7 @@ mod tests {
                         properties: Default::default(),
                         network: "test".to_string(),
                         standalone: true,
+                        org_id: Default::default(),
                     }
                 )
                 .await
@@ -1389,6 +1401,7 @@ mod tests {
                         properties: Default::default(),
                         network: "test".to_string(),
                         standalone: true,
+                        org_id: Default::default(),
                     }
                 )
                 .await
@@ -1409,6 +1422,7 @@ mod tests {
                         properties: Default::default(),
                         network: "test".to_string(),
                         standalone: true,
+                        org_id: Default::default(),
                     }
                 )
                 .await
@@ -1439,6 +1453,7 @@ mod tests {
                         properties: Default::default(),
                         network: "test".to_string(),
                         standalone: true,
+                        org_id: Default::default(),
                     }
                 )
                 .await
@@ -1462,7 +1477,7 @@ mod tests {
                         rules: vec![],
                         properties: Default::default(),
                         network: "test".to_string(),
-                        standalone: true,
+                        standalone: true,org_id: Default::default(),
                     }
                 )
                 .await
@@ -1483,6 +1498,7 @@ mod tests {
                         properties: Default::default(),
                         network: "invalid".to_string(),
                         standalone: true,
+                        org_id: Default::default(),
                     }
                 )
                 .await
@@ -1563,6 +1579,7 @@ mod tests {
             network: "test".to_string(),
             standalone: false,
             restarting: false,
+            org_id: Default::default(),
         };
         fs::create_dir_all(pal.build_vm_data_path(node_data.id)).await?;
 
@@ -1644,6 +1661,7 @@ mod tests {
             properties: Default::default(),
             network: "test".to_string(),
             standalone: true,
+            org_id: Default::default(),
         };
         let new_image = NodeImage {
             protocol: "testing".to_string(),
@@ -1861,6 +1879,7 @@ mod tests {
             properties: Default::default(),
             network: "test".to_string(),
             standalone: true,
+            org_id: Default::default(),
         };
 
         pal.expect_available_resources()

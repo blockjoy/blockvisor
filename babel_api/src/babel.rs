@@ -131,4 +131,6 @@ pub struct NodeContext {
     pub bv_name: String,
     /// API url used by BV.
     pub bv_api_url: String,
+    /// Unique id of the organisation associated with node.
+    pub org_id: String,
 }

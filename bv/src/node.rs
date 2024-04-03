@@ -290,6 +290,7 @@ impl<P: Pal + Debug> Node<P> {
             bv_id: self.bv_context.id.clone(),
             bv_name: self.bv_context.name.clone(),
             bv_api_url: self.bv_context.url.clone(),
+            org_id: self.data.org_id.clone(),
         };
         with_retry!(
             babel_client.setup_babel((node_context.clone(), self.metadata.babel_config.clone()))
@@ -380,8 +381,13 @@ impl<P: Pal + Debug> Node<P> {
         self.data.network_interface.delete().await
     }
 
-    pub async fn update(&mut self, rules: Vec<firewall::Rule>) -> commands::Result<()> {
+    pub async fn update(
+        &mut self,
+        rules: Vec<firewall::Rule>,
+        org_id: String,
+    ) -> commands::Result<()> {
         self.data.firewall_rules = rules;
+        self.data.org_id = org_id;
         let result = if self.status() == NodeStatus::Running {
             let result = self.setup_firewall_rules().await.map_err(into_internal);
             self.data.has_pending_update = result.is_err();
@@ -1005,6 +1011,7 @@ pub mod tests {
                 network: "test".to_string(),
                 standalone: true,
                 restarting: false,
+                org_id: Default::default(),
             }
         }
 
@@ -1411,6 +1418,7 @@ pub mod tests {
             bv_id: node.bv_context.id.clone(),
             bv_name: node.bv_context.name.clone(),
             bv_api_url: node.bv_context.url.clone(),
+            org_id: node.data.org_id.clone(),
         };
         let expected_config = node.metadata.babel_config.clone();
         babel_mock
@@ -1665,14 +1673,17 @@ pub mod tests {
 
         assert!(node.data.firewall_rules.is_empty());
         assert!(node
-            .update(vec![firewall::Rule {
-                name: "test rule".to_string(),
-                action: firewall::Action::Allow,
-                direction: firewall::Direction::Out,
-                protocol: None,
-                ips: None,
-                ports: vec![],
-            }])
+            .update(
+                vec![firewall::Rule {
+                    name: "test rule".to_string(),
+                    action: firewall::Action::Allow,
+                    direction: firewall::Direction::Out,
+                    protocol: None,
+                    ips: None,
+                    ports: vec![],
+                }],
+                "org_id".to_string()
+            )
             .await
             .unwrap_err()
             .to_string()
@@ -1683,14 +1694,17 @@ pub mod tests {
         test_env.assert_node_data_saved(&node.data).await;
 
         node.data.has_pending_update = false;
-        node.update(vec![firewall::Rule {
-            name: "new test rule".to_string(),
-            action: firewall::Action::Allow,
-            direction: firewall::Direction::Out,
-            protocol: None,
-            ips: None,
-            ports: vec![],
-        }])
+        node.update(
+            vec![firewall::Rule {
+                name: "new test rule".to_string(),
+                action: firewall::Action::Allow,
+                direction: firewall::Direction::Out,
+                protocol: None,
+                ips: None,
+                ports: vec![],
+            }],
+            "org_id".to_string(),
+        )
         .await?;
         assert_eq!(1, node.data.firewall_rules.len());
         assert_eq!(
