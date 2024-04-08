@@ -79,8 +79,9 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
             match cmd.spawn() {
                 Ok(mut child) => {
                     info!("Spawned job '{name}'");
-                    self.log_buffer
-                        .attach(name, child.stdout.take(), child.stderr.take());
+                    let log_handle =
+                        self.log_buffer
+                            .attach(name, child.stdout.take(), child.stderr.take());
                     if let Some(exit_status) = run.select(child.wait()).await {
                         let message = format!("Job '{name}' finished with {exit_status:?}");
                         backoff
@@ -95,6 +96,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
                             self.shutdown_signal,
                         );
                     }
+                    let _ = log_handle.await;
                 }
                 Err(err) => {
                     backoff
