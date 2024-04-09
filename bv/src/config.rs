@@ -94,6 +94,7 @@ impl SharedConfig {
 pub enum PalConfig {
     LinuxFc,
     LinuxBare,
+    LinuxApptainer { extra_args: Option<Vec<String>> },
 }
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]

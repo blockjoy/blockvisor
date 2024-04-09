@@ -1,4 +1,3 @@
-/// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
     config,
     config::SharedConfig,

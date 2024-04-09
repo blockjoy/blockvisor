@@ -12,9 +12,12 @@ async fn main() -> eyre::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
     let mut args = env::args();
-    if let Some(chroot_dir) = args.nth(1) {
-        fs::chroot(chroot_dir)?;
-        env::set_current_dir("/")?;
+    if let Some(arg) = args.nth(1).as_deref() {
+        if arg == "--chroot" {
+            let chroot_dir = args.next().expect("missing chroot directory");
+            fs::chroot(chroot_dir)?;
+            env::set_current_dir("/")?;
+        }
         babel::pal_config::save(PalConfig::Chroot).await?;
         babel::babel::run(babel::chroot_platform::Pal).await
     } else {

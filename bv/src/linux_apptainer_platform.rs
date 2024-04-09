@@ -1,7 +1,7 @@
 use crate::{
-    bare_machine,
-    bare_machine::BABEL_BIN_NAME,
-    bare_machine::CHROOT_DIR,
+    apptainer_machine,
+    apptainer_machine::BABEL_BIN_NAME,
+    apptainer_machine::CHROOT_DIR,
     config,
     config::SharedConfig,
     linux_platform,
@@ -30,40 +30,46 @@ const ENGINE_SOCKET_NAME: &str = "engine.socket";
 const BABEL_SOCKET_NAME: &str = "babel.socket";
 
 #[derive(Debug)]
-pub struct LinuxBarePlatform(linux_platform::LinuxPlatform);
+pub struct LinuxApptainerPlatform {
+    base: linux_platform::LinuxPlatform,
+    extra_args: Option<Vec<String>>,
+}
 
-impl Deref for LinuxBarePlatform {
+impl Deref for LinuxApptainerPlatform {
     type Target = linux_platform::LinuxPlatform;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.base
     }
 }
 
-impl DerefMut for LinuxBarePlatform {
+impl DerefMut for LinuxApptainerPlatform {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.base
     }
 }
 
-impl LinuxBarePlatform {
-    pub async fn new() -> Result<Self> {
-        Ok(Self(linux_platform::LinuxPlatform::new().await?))
+impl LinuxApptainerPlatform {
+    pub async fn new(extra_args: Option<Vec<String>>) -> Result<Self> {
+        Ok(Self {
+            base: linux_platform::LinuxPlatform::new().await?,
+            extra_args,
+        })
     }
 }
 
 #[async_trait]
-impl Pal for LinuxBarePlatform {
+impl Pal for LinuxApptainerPlatform {
     fn bv_root(&self) -> &Path {
-        self.0.bv_root.as_path()
+        self.base.bv_root.as_path()
     }
 
     fn babel_path(&self) -> &Path {
-        self.0.babel_path.as_path()
+        self.base.babel_path.as_path()
     }
 
     fn job_runner_path(&self) -> &Path {
-        self.0.job_runner_path.as_path()
+        self.base.job_runner_path.as_path()
     }
 
     type NetInterface = LinuxNetInterface;
@@ -104,29 +110,42 @@ impl Pal for LinuxBarePlatform {
 
     type NodeConnection = BareNodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        BareNodeConnection::new(bare_machine::build_vm_data_path(self.bv_root(), node_id))
+        BareNodeConnection::new(apptainer_machine::build_vm_data_path(
+            self.bv_root(),
+            node_id,
+        ))
     }
 
-    type VirtualMachine = bare_machine::BareMachine;
+    type VirtualMachine = apptainer_machine::ApptainerMachine;
 
     async fn create_vm(
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        bare_machine::new(&self.bv_root, node_data, self.babel_path.clone())
-            .await?
-            .create()
-            .await
+        apptainer_machine::new(
+            &self.bv_root,
+            node_data,
+            self.babel_path.clone(),
+            self.extra_args.clone(),
+        )
+        .await?
+        .create()
+        .await
     }
 
     async fn attach_vm(
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        bare_machine::new(&self.bv_root, node_data, self.babel_path.clone())
-            .await?
-            .attach()
-            .await
+        apptainer_machine::new(
+            &self.bv_root,
+            node_data,
+            self.babel_path.clone(),
+            self.extra_args.clone(),
+        )
+        .await?
+        .attach()
+        .await
     }
 
     fn get_vm_pids(&self) -> Result<Vec<Pid>> {
@@ -144,11 +163,11 @@ impl Pal for LinuxBarePlatform {
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
-        bare_machine::build_vm_data_path(self.bv_root(), id)
+        apptainer_machine::build_vm_data_path(self.bv_root(), id)
     }
 
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
-        self.0.available_resources(
+        self.base.available_resources(
             nodes_data_cache,
             self.used_disk_space_correction(nodes_data_cache)?,
         )
@@ -159,7 +178,7 @@ impl Pal for LinuxBarePlatform {
         for (id, data) in nodes_data_cache {
             let data_img_path = self
                 .build_vm_data_path(*id)
-                .join(bare_machine::CHROOT_DIR)
+                .join(apptainer_machine::CHROOT_DIR)
                 .join(babel_api::engine::DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
             let actual_data_size = fs_extra::dir::get_size(&data_img_path)
                 .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;

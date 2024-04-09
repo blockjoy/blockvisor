@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
 use tokio::process::Command;
+use tokio::time::sleep;
 use tracing::{debug, error};
 use uuid::Uuid;
 
@@ -23,8 +24,11 @@ const DATA_DIR: &str = "data";
 const JOURNAL_DIR: &str = "/run/systemd/journal";
 pub const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
+const BABEL_START_TIMEOUT: Duration = Duration::from_secs(3);
 const UMOUNT_RETRY_MAX: u32 = 2;
 const UMOUNT_BACKOFF_BASE_MS: u64 = 1000;
+const BABEL_BIN_PATH: &str = "/usr/bin/babel";
+const APPTAINER_BIN_NAME: &str = "apptainer";
 
 pub fn build_vm_data_path(bv_root: &Path, id: Uuid) -> PathBuf {
     bv_root
@@ -34,21 +38,24 @@ pub fn build_vm_data_path(bv_root: &Path, id: Uuid) -> PathBuf {
 }
 
 #[derive(Debug)]
-pub struct BareMachine {
-    bv_root: PathBuf,
+pub struct ApptainerMachine {
     vm_dir: PathBuf,
     babel_path: PathBuf,
     chroot_dir: PathBuf,
     data_dir: PathBuf,
     os_img_path: PathBuf,
     vm_id: Uuid,
+    vm_name: String,
+    requirements: babel_api::metadata::Requirements,
+    extra_args: Option<Vec<String>>,
 }
 
 pub async fn new(
     bv_root: &Path,
     node_data: &NodeData<impl pal::NetInterface>,
     babel_path: PathBuf,
-) -> Result<BareMachine> {
+    extra_args: Option<Vec<String>>,
+) -> Result<ApptainerMachine> {
     let vm_dir = build_vm_data_path(bv_root, node_data.id);
     let chroot_dir = vm_dir.join(CHROOT_DIR);
     fs::create_dir_all(&chroot_dir).await?;
@@ -63,18 +70,20 @@ pub async fn new(
         )
         .await?;
     }
-    Ok(BareMachine {
-        bv_root: bv_root.to_path_buf(),
+    Ok(ApptainerMachine {
         vm_dir,
         babel_path,
         chroot_dir,
         data_dir,
         os_img_path,
         vm_id: node_data.id,
+        vm_name: node_data.name.clone(),
+        requirements: node_data.requirements.clone(),
+        extra_args,
     })
 }
 
-impl BareMachine {
+impl ApptainerMachine {
     pub async fn create(self) -> Result<Self> {
         let mut mounted = vec![];
         let vm = self.try_create(&mut mounted).await;
@@ -102,64 +111,13 @@ impl BareMachine {
             .await?;
             mounted.push(self.chroot_dir.clone());
         }
-        let proc_dir = self.chroot_dir.join("proc");
-        let dev_dir = self.chroot_dir.join("dev");
-        let data_dir = self
-            .chroot_dir
-            .join(DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
-        fs::create_dir_all(&data_dir).await?;
-        let data_dir = self
-            .chroot_dir
-            .join(DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
-        fs::create_dir_all(&data_dir).await?;
-        let journal_dir = self.chroot_dir.join(JOURNAL_DIR.trim_start_matches('/'));
-        fs::create_dir_all(&journal_dir).await?;
-
-        if !is_mounted(&proc_dir).await? {
-            mount([
-                OsStr::new("-t"),
-                OsStr::new("proc"),
-                OsStr::new("proc"),
-                &proc_dir.clone().into_os_string(),
-            ])
-            .await?;
-            mounted.push(proc_dir)
-        }
-        if !is_mounted(&dev_dir).await? {
-            mount([
-                OsStr::new("-o"),
-                OsStr::new("bind"),
-                &self.bv_root.join("dev").into_os_string(),
-                &dev_dir.clone().into_os_string(),
-            ])
-            .await?;
-            mounted.push(dev_dir)
-        }
-        if !is_mounted(&data_dir).await? {
-            mount([
-                OsStr::new("--bind"),
-                &self.data_dir.clone().into_os_string(),
-                &data_dir.clone().into_os_string(),
-            ])
-            .await?;
-            mounted.push(data_dir)
-        }
-        if !is_mounted(&journal_dir).await? {
-            mount([
-                OsStr::new("--bind"),
-                OsStr::new(JOURNAL_DIR),
-                &journal_dir.clone().into_os_string(),
-            ])
-            .await?;
-            mounted.push(journal_dir)
-        }
         Ok(self)
     }
 
     pub async fn attach(self) -> Result<Self> {
         let vm = self.create().await?;
         if vm.stop_babel(false)? {
-            vm.start_babel()?;
+            vm.start_babel().await?;
         }
         Ok(vm)
     }
@@ -171,7 +129,7 @@ impl BareMachine {
                 debug!("babel for {} has PID={}", self.vm_id, pid);
                 if force {
                     kill_all_processes(
-                        &self.babel_path.to_string_lossy(),
+                        BABEL_BIN_NAME,
                         &[&self.chroot_dir.to_string_lossy()],
                         BABEL_KILL_TIMEOUT,
                         PosixSignal::SIGTERM,
@@ -199,13 +157,46 @@ impl BareMachine {
         }
     }
 
-    fn start_babel(&self) -> Result<()> {
+    async fn start_babel(&self) -> Result<()> {
         debug!("start_babel for {}", self.vm_id);
         // start babel in chroot
-        let mut cmd = Command::new(&self.babel_path);
-        cmd.arg("--chroot");
+        fs::copy(
+            &self.babel_path,
+            self.chroot_dir.join(BABEL_BIN_PATH.trim_start_matches('/')),
+        )
+        .await?;
+        let mut cmd = Command::new(APPTAINER_BIN_NAME);
+        cmd.args([
+            "exec",
+            "--writable",
+            "--bind",
+            JOURNAL_DIR,
+            "--bind",
+            &format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT),
+            "--hostname",
+            &self.vm_name.replace('_', "-"),
+            "--cpus",
+            &format!("{}", self.requirements.vcpu_count),
+            "--memory",
+            &format!("{}", self.requirements.mem_size_mb * 1_000_000),
+        ]);
+        if let Some(extra_args) = self.extra_args.as_ref() {
+            cmd.args(extra_args);
+        }
+        cmd.arg(&self.chroot_dir);
+        cmd.arg(BABEL_BIN_NAME);
         cmd.arg(&self.chroot_dir);
         cmd.spawn()?;
+        let start = std::time::Instant::now();
+        while let Err(GetProcessIdError::NotFound) =
+            get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy())
+        {
+            if start.elapsed() < BABEL_START_TIMEOUT {
+                sleep(Duration::from_millis(100)).await;
+            } else {
+                bail!("babel start timeout expired")
+            }
+        }
         Ok(())
     }
 
@@ -260,7 +251,7 @@ where
 }
 
 #[async_trait]
-impl pal::VirtualMachine for BareMachine {
+impl pal::VirtualMachine for ApptainerMachine {
     fn state(&self) -> pal::VmState {
         match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
             Ok(_) => pal::VmState::RUNNING,
@@ -290,7 +281,7 @@ impl pal::VirtualMachine for BareMachine {
     }
 
     async fn start(&mut self) -> Result<()> {
-        self.start_babel()
+        self.start_babel().await
     }
 
     async fn detach(&mut self) -> Result<()> {

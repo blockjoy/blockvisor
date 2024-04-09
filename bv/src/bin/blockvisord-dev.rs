@@ -30,6 +30,13 @@ async fn main() -> Result<()> {
             let pal = blockvisord::linux_bare_platform::LinuxBarePlatform::new().await?;
             run_server(config, pal).await?;
         }
+        config::PalConfig::LinuxApptainer { extra_args } => {
+            let pal = blockvisord::linux_apptainer_platform::LinuxApptainerPlatform::new(
+                extra_args.clone(),
+            )
+            .await?;
+            run_server(config, pal).await?;
+        }
     }
 
     info!("Stopping...");
