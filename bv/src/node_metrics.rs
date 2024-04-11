@@ -50,6 +50,7 @@ impl Metrics {
                 || m.consensus.is_some()
                 || m.application_status.is_some()
                 || m.sync_status.is_some()
+                || !m.jobs.is_empty()
         })
     }
 }
