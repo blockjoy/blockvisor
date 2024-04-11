@@ -97,7 +97,10 @@ async fn test_bv_cmd_jobs() -> Result<()> {
     test_env.bv_run(&["node", "job", vm_id, "stop", "upload"], "");
 
     println!("job info");
-    test_env.bv_run(&["node", "job", vm_id, "info", "upload"], "status: Stopped");
+    test_env.bv_run(
+        &["node", "job", vm_id, "info", "upload"],
+        "status:           Stopped",
+    );
 
     println!("start job");
     test_env.bv_run(&["node", "job", vm_id, "start", "upload"], "");
@@ -106,7 +109,7 @@ async fn test_bv_cmd_jobs() -> Result<()> {
     let start = std::time::Instant::now();
     while let Err(err) = test_env.try_bv_run(
         &["node", "job", vm_id, "info", "upload"],
-        "status: Finished {\n        exit_code: Some(\n            0,\n        ),\n        message: \"\",\n    }",
+        "status:           Finished with exit code 0",
     ) {
         if start.elapsed() < Duration::from_secs(120) {
             std::thread::sleep(Duration::from_secs(1));
@@ -213,7 +216,10 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
     println!("check jobs after node upgrade");
-    test_env.bv_run(&["node", "job", vm_id, "info", "echo"], "status: Running");
+    test_env.bv_run(
+        &["node", "job", vm_id, "info", "echo"],
+        "status:           Running",
+    );
 
     println!("delete started node");
     test_env.bv_run(&["node", "delete", vm_id], "Deleted node");

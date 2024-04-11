@@ -398,7 +398,7 @@ fn check_upload_and_download(node_id: &str) {
     let start = std::time::Instant::now();
     while let Err(err) = test_env::try_bv_run(
         &["node", "job", node_id, "info", "upload"],
-        "status: Finished {\n        exit_code: Some(\n            0,\n        ),\n        message: \"\",\n    }",
+        "status:           Finished with exit code 0\nprogress:         9 / 9 chunks\nrestart_count:    0\nupgrade_blocking: true\nlogs:             <empty>",
         None,
     ) {
         if start.elapsed() < Duration::from_secs(120) {
@@ -425,7 +425,7 @@ fn check_upload_and_download(node_id: &str) {
     let start = std::time::Instant::now();
     while let Err(err) = test_env::try_bv_run(
         &["node", "job", node_id, "info", "download"],
-        "status: Finished {\n        exit_code: Some(\n            0,\n        ),\n        message: \"\",\n    }",
+        "status:           Finished with exit code 0\nprogress:         9 / 9 chunks\nrestart_count:    0\nupgrade_blocking: true\nlogs:             <empty>",
         None,
     ) {
         if start.elapsed() < Duration::from_secs(120) {
@@ -438,7 +438,7 @@ fn check_upload_and_download(node_id: &str) {
     println!("check download progress");
     test_env::bv_run(
         &["node", "job", node_id, "info", "download"],
-        "total: 9,\n            current: 9,",
+        "progress:         9 / 9 chunks",
         None,
     );
 

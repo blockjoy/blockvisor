@@ -234,7 +234,46 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 }
                 JobCommand::Info { name } => {
                     let info = client.get_node_job_info((id, name)).await?.into_inner();
-                    println!("{info:#?}");
+
+                    let status = match info.status {
+                        JobStatus::Pending => "Pending".to_string(),
+                        JobStatus::Running => "Running".to_string(),
+                        JobStatus::Finished {
+                            exit_code: Some(exit_code),
+                            message,
+                        } if message.is_empty() => format!("Finished with exit code {exit_code}"),
+                        JobStatus::Finished {
+                            exit_code: Some(exit_code),
+                            message,
+                        } => format!("Finished with exit code {exit_code} and message `{message}`"),
+                        JobStatus::Finished {
+                            exit_code: None,
+                            message,
+                        } if message.is_empty() => "Finished".to_string(),
+                        JobStatus::Finished {
+                            exit_code: None,
+                            message,
+                        } => format!("Finished with message `{message}`"),
+                        JobStatus::Stopped => "Stopped".to_string(),
+                    };
+                    let progress = info
+                        .progress
+                        .map(|prog| format!("{} / {} {}", prog.current, prog.total, prog.message))
+                        .unwrap_or_else(|| "<empty>".to_string());
+
+                    println!("status:           {}", status);
+                    println!("progress:         {}", progress);
+                    println!("restart_count:    {}", info.restart_count);
+                    println!("upgrade_blocking: {}", info.upgrade_blocking);
+                    print!("logs:             ");
+                    if info.logs.is_empty() {
+                        println!("<empty>");
+                    } else {
+                        println!();
+                        for log in info.logs {
+                            println!("{log}")
+                        }
+                    }
                 }
             }
         }
