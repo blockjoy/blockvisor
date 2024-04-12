@@ -484,3 +484,32 @@ impl fmt::Debug for UploadManifest {
         write!(f, "UploadManifest(slots: [{:?}, ...])", self.slots.first())
     }
 }
+
+impl fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JobStatus::Pending => write!(f, "Pending"),
+            JobStatus::Running => write!(f, "Running"),
+            JobStatus::Finished {
+                exit_code: Some(exit_code),
+                message,
+            } if message.is_empty() => write!(f, "Finished with exit code {exit_code}"),
+            JobStatus::Finished {
+                exit_code: Some(exit_code),
+                message,
+            } => write!(
+                f,
+                "Finished with exit code {exit_code} and message `{message}`"
+            ),
+            JobStatus::Finished {
+                exit_code: None,
+                message,
+            } if message.is_empty() => write!(f, "Finished"),
+            JobStatus::Finished {
+                exit_code: None,
+                message,
+            } => write!(f, "Finished with message `{message}`"),
+            JobStatus::Stopped => write!(f, "Stopped"),
+        }
+    }
+}

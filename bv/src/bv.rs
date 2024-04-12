@@ -211,7 +211,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     if !jobs.is_empty() {
                         println!("{:<30} STATUS", "NAME");
                         for (name, info) in jobs {
-                            println!("{name:<30} {status:?}", status = info.status);
+                            println!("{name:<30} {status}", status = info.status);
                         }
                     }
                 }
@@ -235,33 +235,12 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 JobCommand::Info { name } => {
                     let info = client.get_node_job_info((id, name)).await?.into_inner();
 
-                    let status = match info.status {
-                        JobStatus::Pending => "Pending".to_string(),
-                        JobStatus::Running => "Running".to_string(),
-                        JobStatus::Finished {
-                            exit_code: Some(exit_code),
-                            message,
-                        } if message.is_empty() => format!("Finished with exit code {exit_code}"),
-                        JobStatus::Finished {
-                            exit_code: Some(exit_code),
-                            message,
-                        } => format!("Finished with exit code {exit_code} and message `{message}`"),
-                        JobStatus::Finished {
-                            exit_code: None,
-                            message,
-                        } if message.is_empty() => "Finished".to_string(),
-                        JobStatus::Finished {
-                            exit_code: None,
-                            message,
-                        } => format!("Finished with message `{message}`"),
-                        JobStatus::Stopped => "Stopped".to_string(),
-                    };
                     let progress = info
                         .progress
                         .map(|prog| format!("{} / {} {}", prog.current, prog.total, prog.message))
                         .unwrap_or_else(|| "<empty>".to_string());
 
-                    println!("status:           {}", status);
+                    println!("status:           {}", info.status);
                     println!("progress:         {}", progress);
                     println!("restart_count:    {}", info.restart_count);
                     println!("upgrade_blocking: {}", info.upgrade_blocking);
@@ -370,7 +349,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 println!("Jobs:");
                 for (name, mut info) in metrics.jobs {
                     println!("  - \"{name}\"");
-                    println!("    Status: {:?}", info.status);
+                    println!("    Status: {}", info.status);
                     println!("    Restarts: {}", info.restart_count);
                     if let Some(progress) = info.progress {
                         println!(
