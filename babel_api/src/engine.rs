@@ -561,3 +561,15 @@ impl fmt::Display for JobStatus {
         }
     }
 }
+
+impl fmt::Display for JobProgress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            current,
+            total,
+            message,
+        } = self;
+        let progress = *current as f32 * 100.0 / *total as f32;
+        write!(f, "{progress:.2}% ({current}/{total} {message})")
+    }
+}
