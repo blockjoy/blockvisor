@@ -258,13 +258,10 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 JobCommand::Info { name } => {
                     let info = client.get_node_job_info((id, name)).await?.into_inner();
 
-                    let progress = info
-                        .progress
-                        .map(|prog| format!("{} / {} {}", prog.current, prog.total, prog.message))
-                        .unwrap_or_else(|| "<empty>".to_string());
-
                     println!("status:           {}", info.status);
-                    println!("progress:         {}", progress);
+                    if let Some(progress) = info.progress {
+                        println!("progress:         {}", progress);
+                    }
                     println!("restart_count:    {}", info.restart_count);
                     println!("upgrade_blocking: {}", info.upgrade_blocking);
                     print!("logs:             ");
@@ -389,10 +386,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     println!("    Status:         {}", info.status);
                     println!("    Restarts:       {}", info.restart_count);
                     if let Some(progress) = info.progress {
-                        println!(
-                            "    Progress:       {}/{} {}",
-                            progress.current, progress.total, progress.message
-                        );
+                        println!("    Progress:       {}", progress);
                     }
                     if !info.logs.is_empty() {
                         if info.logs.len() > 7 {
