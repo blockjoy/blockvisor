@@ -341,11 +341,11 @@ pub enum ImageCommand {
         image_id: String,
 
         /// Debian version
-        #[clap(long, default_value = "focal")]
+        #[clap(long, default_value = "jammy")]
         debian_version: String,
 
         /// Size of image disk for image, in GB
-        #[clap(long, default_value = "10")]
+        #[clap(long, default_value = "20")]
         rootfs_size: u64,
     },
 
