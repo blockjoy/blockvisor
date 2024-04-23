@@ -259,7 +259,7 @@ where
                 let mut updates = vec![];
                 for (id, node) in nodes_manager.nodes_list().await.iter() {
                     if let Ok(node) = node.try_read() {
-                        let status = node.status();
+                        let status = node.status().await;
                         let image = node.data.image.clone();
                         updates.push((node.id(), status, image));
                     } else {
@@ -320,7 +320,7 @@ where
                         // don't send updates for standalone nodes
                         continue;
                     }
-                    let status = node.status();
+                    let status = node.status().await;
                     let maybe_address = if status == NodeStatus::Running
                         && node.babel_engine.has_capability("address")
                     {

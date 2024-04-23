@@ -1,3 +1,4 @@
+use crate::config::ApptainerConfig;
 use crate::{
     apptainer_machine,
     apptainer_machine::BABEL_BIN_NAME,
@@ -12,11 +13,14 @@ use crate::{
     services, utils,
 };
 use async_trait::async_trait;
+use bv_utils::cmd::run_cmd;
 use bv_utils::with_retry;
+use cidr_utils::cidr::Ipv4Cidr;
 use core::fmt;
-use eyre::{bail, Context, Result};
+use eyre::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::str::FromStr;
 use std::{
     net::IpAddr,
     ops::{Deref, DerefMut},
@@ -32,7 +36,9 @@ const BABEL_SOCKET_NAME: &str = "babel.socket";
 #[derive(Debug)]
 pub struct LinuxApptainerPlatform {
     base: linux_platform::LinuxPlatform,
-    extra_args: Option<Vec<String>>,
+    bridge_ip: IpAddr,
+    mask_bits: u8,
+    config: ApptainerConfig,
 }
 
 impl Deref for LinuxApptainerPlatform {
@@ -50,10 +56,24 @@ impl DerefMut for LinuxApptainerPlatform {
 }
 
 impl LinuxApptainerPlatform {
-    pub async fn new(extra_args: Option<Vec<String>>) -> Result<Self> {
+    pub async fn new(iface: &str, config: ApptainerConfig) -> Result<Self> {
+        let routes = run_cmd("ip", ["--json", "route"]).await?;
+        let mut routes: Vec<crate::utils::IpRoute> = serde_json::from_str(&routes)?;
+        routes.retain(|r| r.dev == iface);
+        let route = routes
+            .into_iter()
+            .find(|route| {
+                route.dst != "default" && route.prefsrc.is_some() && route.protocol == "kernel"
+            })
+            .ok_or(anyhow!("can't find {iface} ip in routing table"))?;
+        let cidr = Ipv4Cidr::from_str(&route.dst)
+            .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
+
         Ok(Self {
             base: linux_platform::LinuxPlatform::new().await?,
-            extra_args,
+            bridge_ip: IpAddr::from_str(&route.prefsrc.unwrap())?, // can safely unwrap here
+            mask_bits: cidr.get_bits(),
+            config,
         })
     }
 }
@@ -124,9 +144,11 @@ impl Pal for LinuxApptainerPlatform {
     ) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
+            self.bridge_ip,
+            self.mask_bits,
             node_data,
             self.babel_path.clone(),
-            self.extra_args.clone(),
+            self.config.clone(),
         )
         .await?
         .create()
@@ -139,9 +161,11 @@ impl Pal for LinuxApptainerPlatform {
     ) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
+            self.bridge_ip,
+            self.mask_bits,
             node_data,
             self.babel_path.clone(),
-            self.extra_args.clone(),
+            self.config.clone(),
         )
         .await?
         .attach()

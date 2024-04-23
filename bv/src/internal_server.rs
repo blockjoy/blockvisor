@@ -526,7 +526,7 @@ where
         node_lock: &RwLock<Node<P>>,
     ) -> eyre::Result<NodeDisplayInfo> {
         Ok(if let Ok(node) = node_lock.try_read() {
-            let status = node.status();
+            let status = node.status().await;
             NodeDisplayInfo {
                 id: node.data.id,
                 name: node.data.name.clone(),

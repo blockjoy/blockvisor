@@ -84,7 +84,7 @@ pub async fn collect_metrics<P: Pal + Debug + 'static>(
             match n.try_write() {
                 Err(_) => None,
                 Ok(mut node) => {
-                    if node.status() == NodeStatus::Running && !node.data.standalone {
+                    if node.status().await == NodeStatus::Running && !node.data.standalone {
                         collect_metric(&mut node.babel_engine)
                             .await
                             .map(|metric| (node.id(), metric))

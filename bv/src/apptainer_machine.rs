@@ -1,3 +1,4 @@
+use crate::config::ApptainerConfig;
 use crate::services::blockchain;
 use crate::services::blockchain::ROOT_FS_FILE;
 use crate::utils::{get_process_pid, GetProcessIdError};
@@ -10,6 +11,7 @@ use bv_utils::with_retry;
 use eyre::{anyhow, bail, Result};
 use std::ffi::OsStr;
 use std::fmt::Debug;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
@@ -46,15 +48,20 @@ pub struct ApptainerMachine {
     os_img_path: PathBuf,
     vm_id: Uuid,
     vm_name: String,
+    ip: IpAddr,
+    mask_bits: u8,
+    gateway: IpAddr,
     requirements: babel_api::metadata::Requirements,
-    extra_args: Option<Vec<String>>,
+    config: ApptainerConfig,
 }
 
 pub async fn new(
     bv_root: &Path,
+    gateway: IpAddr,
+    mask_bits: u8,
     node_data: &NodeData<impl pal::NetInterface>,
     babel_path: PathBuf,
-    extra_args: Option<Vec<String>>,
+    config: ApptainerConfig,
 ) -> Result<ApptainerMachine> {
     let vm_dir = build_vm_data_path(bv_root, node_data.id);
     let chroot_dir = vm_dir.join(CHROOT_DIR);
@@ -70,6 +77,7 @@ pub async fn new(
         )
         .await?;
     }
+    let ip = *node_data.network_interface.ip();
     Ok(ApptainerMachine {
         vm_dir,
         babel_path,
@@ -78,8 +86,11 @@ pub async fn new(
         os_img_path,
         vm_id: node_data.id,
         vm_name: node_data.name.clone(),
+        ip,
+        mask_bits,
+        gateway,
         requirements: node_data.requirements.clone(),
-        extra_args,
+        config,
     })
 }
 
@@ -110,13 +121,20 @@ impl ApptainerMachine {
             ])
             .await?;
             mounted.push(self.chroot_dir.clone());
+            fs::create_dir_all(
+                self.chroot_dir
+                    .join(DATA_DRIVE_MOUNT_POINT.trim_start_matches('/')),
+            )
+            .await?;
+            fs::create_dir_all(self.chroot_dir.join(JOURNAL_DIR.trim_start_matches('/'))).await?;
         }
         Ok(self)
     }
 
     pub async fn attach(self) -> Result<Self> {
         let vm = self.create().await?;
-        if vm.stop_babel(false)? {
+        if vm.is_container_running().await? {
+            vm.stop_babel(false)?;
             vm.start_babel().await?;
         }
         Ok(vm)
@@ -157,8 +175,64 @@ impl ApptainerMachine {
         }
     }
 
+    async fn is_container_running(&self) -> Result<bool> {
+        Ok(run_cmd(APPTAINER_BIN_NAME, ["instance", "list"])
+            .await?
+            .contains(&format!("{}", self.vm_id)))
+    }
+
+    async fn stop_container(&self) -> Result<()> {
+        if self.is_container_running().await? {
+            run_cmd(
+                APPTAINER_BIN_NAME,
+                ["instance", "stop", &format!("{}", self.vm_id)],
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn start_container(&self) -> Result<()> {
+        if !self.is_container_running().await? {
+            let mut args = vec![
+                "instance".to_string(),
+                "run".to_string(),
+                "--writable".to_string(),
+                "--bind".to_string(),
+                JOURNAL_DIR.to_owned(),
+                "--bind".to_string(),
+                format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT),
+                "--hostname".to_string(),
+                self.vm_name.replace('_', "-"),
+            ];
+            if self.config.cpu_limit {
+                args.push("--cpus".to_string());
+                args.push(format!("{}", self.requirements.vcpu_count));
+            }
+            if self.config.memory_limit {
+                args.push("--memory".to_string());
+                args.push(format!("{}", self.requirements.mem_size_mb * 1_000_000));
+            }
+            if !self.config.host_network {
+                args.append(&mut vec![
+                    "--net".to_string(),
+                    "--network".to_string(),
+                    "bridge".to_string(),
+                    "--network-args".to_string(),
+                    format!("IP={}/{};GATEWAY={}", self.ip, self.mask_bits, self.gateway),
+                ]);
+            }
+            if let Some(extra_args) = self.config.extra_args.as_ref() {
+                args.append(&mut extra_args.clone());
+            }
+            args.push(self.chroot_dir.to_string_lossy().to_string());
+            args.push(format!("{}", self.vm_id));
+            run_cmd(APPTAINER_BIN_NAME, args).await?;
+        }
+        Ok(())
+    }
+
     async fn start_babel(&self) -> Result<()> {
-        debug!("start_babel for {}", self.vm_id);
         // start babel in chroot
         fs::copy(
             &self.babel_path,
@@ -168,24 +242,11 @@ impl ApptainerMachine {
         let mut cmd = Command::new(APPTAINER_BIN_NAME);
         cmd.args([
             "exec",
-            "--writable",
-            "--bind",
-            JOURNAL_DIR,
-            "--bind",
-            &format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT),
-            "--hostname",
-            &self.vm_name.replace('_', "-"),
-            "--cpus",
-            &format!("{}", self.requirements.vcpu_count),
-            "--memory",
-            &format!("{}", self.requirements.mem_size_mb * 1_000_000),
+            &format!("instance://{}", self.vm_id),
+            BABEL_BIN_NAME,
+            &self.chroot_dir.to_string_lossy(),
         ]);
-        if let Some(extra_args) = self.extra_args.as_ref() {
-            cmd.args(extra_args);
-        }
-        cmd.arg(&self.chroot_dir);
-        cmd.arg(BABEL_BIN_NAME);
-        cmd.arg(&self.chroot_dir);
+        debug!("start_babel for {}: '{:?}'", self.vm_id, cmd);
         cmd.spawn()?;
         let start = std::time::Instant::now();
         while let Err(GetProcessIdError::NotFound) =
@@ -252,9 +313,9 @@ where
 
 #[async_trait]
 impl pal::VirtualMachine for ApptainerMachine {
-    fn state(&self) -> pal::VmState {
-        match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
-            Ok(_) => pal::VmState::RUNNING,
+    async fn state(&self) -> pal::VmState {
+        match self.is_container_running().await {
+            Ok(true) => pal::VmState::RUNNING,
             _ => pal::VmState::SHUTOFF,
         }
     }
@@ -272,15 +333,18 @@ impl pal::VirtualMachine for ApptainerMachine {
 
     async fn shutdown(&mut self) -> Result<()> {
         self.stop_babel(false)?;
+        self.stop_container().await?;
         Ok(())
     }
 
     async fn force_shutdown(&mut self) -> Result<()> {
         self.stop_babel(true)?;
+        self.stop_container().await?;
         Ok(())
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.start_container().await?;
         self.start_babel().await
     }
 

@@ -4,6 +4,7 @@ use crate::src::utils::{
 };
 use assert_cmd::Command;
 use assert_fs::TempDir;
+use blockvisord::config::{ApptainerConfig, PalConfig};
 use blockvisord::node_data::NodeData;
 use blockvisord::{
     config::Config,
@@ -218,8 +219,17 @@ async fn test_bv_service_e2e() {
     println!("read host id");
     let config_path = "/etc/blockvisor.json";
     let config = fs::read_to_string(config_path).unwrap();
-    let config: Config = serde_json::from_str(&config).unwrap();
-    let host_id = config.id;
+    let mut config: Config = serde_json::from_str(&config).unwrap();
+    let host_id = config.id.clone();
+    config.pal = Some(PalConfig::LinuxApptainer(ApptainerConfig {
+        extra_args: Some(vec!["--dns".to_owned(), "1.1.1.1,8.8.8.8".to_owned()]),
+        host_network: true,
+        cpu_limit: true,
+        memory_limit: true,
+    }));
+    let config = serde_json::to_string(&config).unwrap();
+    tokio::fs::write(config_path, config).await.unwrap();
+
     println!("got host id: {host_id}");
 
     println!("start blockvisor");

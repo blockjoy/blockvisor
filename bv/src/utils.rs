@@ -198,11 +198,12 @@ pub fn ip_to_mac(ip: &Ipv4Addr) -> String {
 
 /// Struct to capture output of linux `ip --json route` command
 #[derive(Deserialize, Serialize, Debug)]
-struct IpRoute {
-    dst: String,
-    gateway: Option<String>,
-    dev: String,
-    prefsrc: Option<String>,
+pub struct IpRoute {
+    pub dst: String,
+    pub gateway: Option<String>,
+    pub dev: String,
+    pub prefsrc: Option<String>,
+    pub protocol: String,
 }
 
 #[derive(Default, Debug, PartialEq)]

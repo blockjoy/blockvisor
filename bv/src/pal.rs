@@ -162,7 +162,7 @@ pub enum VmState {
 #[async_trait]
 pub trait VirtualMachine {
     /// Checks the VM actual state
-    fn state(&self) -> VmState;
+    async fn state(&self) -> VmState;
     /// Deletes the VM, cleaning up all associated resources.
     async fn delete(&mut self) -> Result<()>;
     /// Request for graceful shutdown of the VM.

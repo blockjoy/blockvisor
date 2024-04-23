@@ -30,9 +30,10 @@ async fn main() -> Result<()> {
             let pal = blockvisord::linux_bare_platform::LinuxBarePlatform::new().await?;
             run_server(config, pal).await?;
         }
-        config::PalConfig::LinuxApptainer { extra_args } => {
+        config::PalConfig::LinuxApptainer(apptainer_config) => {
             let pal = blockvisord::linux_apptainer_platform::LinuxApptainerPlatform::new(
-                extra_args.clone(),
+                &config.iface,
+                apptainer_config.clone(),
             )
             .await?;
             run_server(config, pal).await?;

@@ -410,7 +410,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             .ok_or_else(|| Error::NodeNotFound(id))?
             .read()
             .await;
-        Ok(node.status())
+        Ok(node.status().await)
     }
 
     #[instrument(skip(self))]
@@ -436,7 +436,7 @@ impl<P: Pal + Debug> NodesManager<P> {
         let nodes_lock = self.nodes.read().await;
         for (id, node_lock) in nodes_lock.iter() {
             if let Ok(mut node) = node_lock.try_write() {
-                if node.status() == NodeStatus::Failed
+                if node.status().await == NodeStatus::Failed
                     && node.expected_status() != NodeStatus::Failed
                 {
                     if let Err(e) = node.recover().await {
@@ -714,7 +714,7 @@ impl<P: Pal + Debug> NodesManager<P> {
                 Ok(node) => {
                     // remove FC pid from list of all discovered FC pids
                     // in the end of load this list should be empty
-                    if node.status() == NodeStatus::Running {
+                    if node.status().await == NodeStatus::Running {
                         vm_processes.push(pal.get_vm_pid(node.id())?);
                     }
                     // insert node and its info into internal data structures

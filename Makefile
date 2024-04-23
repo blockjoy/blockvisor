@@ -76,6 +76,7 @@ reinstall:
 ci-clean:
 	bv node rm --all --yes || true
 	bv stop || true
+	apptainer instance stop -a || true
 	pkill -9 babel || true
 	pkill -9 babel_job_runner || true
 	umount -A --recursive /var/lib/blockvisor/bare/*/os || true

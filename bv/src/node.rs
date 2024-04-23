@@ -175,7 +175,7 @@ impl<P: Pal + Debug> Node<P> {
 
         let mut node_conn = pal.create_node_connection(node_id);
         let machine = pal.attach_vm(&data).await?;
-        if machine.state() == pal::VmState::RUNNING {
+        if machine.state().await == pal::VmState::RUNNING {
             debug!("connecting to babel ...");
             // Since this is the startup phase it doesn't make sense to wait a long time
             // for the nodes to come online. For that reason we restrict the allowed delay
@@ -226,8 +226,8 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     /// Returns the actual status of the node.
-    pub fn status(&self) -> NodeStatus {
-        let machine_status = match self.machine.state() {
+    pub async fn status(&self) -> NodeStatus {
+        let machine_status = match self.machine.state().await {
             pal::VmState::RUNNING => NodeStatus::Running,
             pal::VmState::SHUTOFF => NodeStatus::Stopped,
         };
@@ -255,7 +255,7 @@ impl<P: Pal + Debug> Node<P> {
     /// Starts the node.
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
-        let status = self.status();
+        let status = self.status().await;
         if status == NodeStatus::Failed && self.expected_status() == NodeStatus::Stopped {
             bail!("can't start node which is not stopped properly");
         }
@@ -264,7 +264,7 @@ impl<P: Pal + Debug> Node<P> {
             return Ok(());
         }
 
-        if self.machine.state() == pal::VmState::SHUTOFF {
+        if self.machine.state().await == pal::VmState::SHUTOFF {
             self.data.network_interface.remaster().await?;
             self.machine.start().await?;
         }
@@ -321,7 +321,7 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(self))]
     pub async fn stop(&mut self, force: bool) -> Result<()> {
         self.save_expected_status(NodeStatus::Stopped).await?;
-        if self.status() == NodeStatus::Stopped {
+        if self.status().await == NodeStatus::Stopped {
             return Ok(());
         }
         if let Err(err) = self.shutdown_babel(force).await {
@@ -334,7 +334,7 @@ impl<P: Pal + Debug> Node<P> {
         self.babel_engine.node_connection.close();
         self.data.started_at = None;
         self.data.save(&self.context.registry).await?;
-        match self.machine.state() {
+        match self.machine.state().await {
             pal::VmState::SHUTOFF => {}
             pal::VmState::RUNNING => {
                 if let Err(err) = self.machine.shutdown().await {
@@ -346,7 +346,7 @@ impl<P: Pal + Debug> Node<P> {
                 }
                 let start = Instant::now();
                 loop {
-                    match self.machine.state() {
+                    match self.machine.state().await {
                         pal::VmState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
                             debug!("VM not shutdown yet, will retry");
                             tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
@@ -388,7 +388,7 @@ impl<P: Pal + Debug> Node<P> {
     ) -> commands::Result<()> {
         self.data.firewall_rules = rules;
         self.data.org_id = org_id;
-        let result = if self.status() == NodeStatus::Running {
+        let result = if self.status().await == NodeStatus::Running {
             let result = self.setup_firewall_rules().await.map_err(into_internal);
             self.data.has_pending_update = result.is_err();
             result
@@ -403,7 +403,7 @@ impl<P: Pal + Debug> Node<P> {
     /// Updates OS image for VM.
     #[instrument(skip(self))]
     pub async fn upgrade(&mut self, image: &NodeImage) -> commands::Result<()> {
-        let status = self.status();
+        let status = self.status().await;
         if status == NodeStatus::Failed {
             return Err(commands::Error::Internal(anyhow!(
                 "can't upgrade node in Failed state"
@@ -465,7 +465,7 @@ impl<P: Pal + Debug> Node<P> {
         let id = self.id();
         match self.data.expected_status {
             NodeStatus::Running => {
-                if self.machine.state() == pal::VmState::SHUTOFF
+                if self.machine.state().await == pal::VmState::SHUTOFF
                     || self.data.has_pending_update
                     || !self.data.initialized
                 {
@@ -778,7 +778,7 @@ pub mod tests {
 
         #[async_trait]
         impl VirtualMachine for TestVM {
-            fn state(&self) -> VmState;
+            async fn state(&self) -> VmState;
             async fn delete(&mut self) -> Result<()>;
             async fn shutdown(&mut self) -> Result<()>;
             async fn force_shutdown(&mut self) -> Result<()>;
@@ -1254,7 +1254,7 @@ pub mod tests {
 
         fs::create_dir_all(pal.build_vm_data_path(missing_babel_node_data_id)).await?;
         let node = Node::attach(pal.clone(), config.clone(), missing_babel_node_data).await?;
-        assert_eq!(NodeStatus::Failed, node.status());
+        assert_eq!(NodeStatus::Failed, node.status().await);
 
         fs::create_dir_all(pal.build_vm_data_path(missing_job_runner_node_data_id)).await?;
         fs::write(&test_env.tmp_root.join("babel"), "dummy babel")
@@ -1266,7 +1266,7 @@ pub mod tests {
             missing_job_runner_node_data.clone(),
         )
         .await?;
-        assert_eq!(NodeStatus::Failed, node.status());
+        assert_eq!(NodeStatus::Failed, node.status().await);
 
         fs::create_dir_all(pal.build_vm_data_path(node_data_id)).await?;
         fs::write(&test_env.tmp_root.join("job_runner"), "dummy job_runner")

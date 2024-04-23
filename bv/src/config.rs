@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
 use sysinfo::{System, SystemExt};
 use tokio::{fs, time::timeout};
-use tracing::{debug, info};
+use tracing::debug;
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.json";
 pub const DEFAULT_BRIDGE_IFACE: &str = "bvbr0";
@@ -94,7 +94,15 @@ impl SharedConfig {
 pub enum PalConfig {
     LinuxFc,
     LinuxBare,
-    LinuxApptainer { extra_args: Option<Vec<String>> },
+    LinuxApptainer(ApptainerConfig),
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ApptainerConfig {
+    pub extra_args: Option<Vec<String>>,
+    pub host_network: bool,
+    pub cpu_limit: bool,
+    pub memory_limit: bool,
 }
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
@@ -134,7 +142,7 @@ pub struct Config {
 impl Config {
     pub async fn load(bv_root: &Path) -> Result<Config> {
         let path = bv_root.join(CONFIG_PATH);
-        info!("Reading host config: {}", path.display());
+        debug!("Reading host config: {}", path.display());
         let config = fs::read_to_string(&path)
             .await
             .with_context(|| format!("failed to read host config: {}", path.display()))?;
@@ -148,7 +156,7 @@ impl Config {
         let parent = path.parent().unwrap();
         debug!("Ensuring config dir is present: {}", parent.display());
         fs::create_dir_all(parent).await?;
-        info!("Writing host config: {}", path.display());
+        debug!("Writing host config: {}", path.display());
         let config = serde_json::to_string(&self)?;
         fs::write(path, &*config).await?;
         Ok(())
@@ -156,7 +164,7 @@ impl Config {
 
     pub async fn remove(bv_root: &Path) -> Result<()> {
         let path = bv_root.join(CONFIG_PATH);
-        info!("Removing host config: {}", path.display());
+        debug!("Removing host config: {}", path.display());
         fs::remove_file(path).await?;
         Ok(())
     }

@@ -64,7 +64,7 @@ pub fn build_vm_data_path(bv_root: &Path, id: Uuid) -> PathBuf {
 
 #[async_trait]
 impl pal::VirtualMachine for FirecrackerMachine {
-    fn state(&self) -> pal::VmState {
+    async fn state(&self) -> pal::VmState {
         self.machine
             .as_ref()
             .map(|machine| match machine.state() {

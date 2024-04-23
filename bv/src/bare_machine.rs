@@ -261,7 +261,7 @@ where
 
 #[async_trait]
 impl pal::VirtualMachine for BareMachine {
-    fn state(&self) -> pal::VmState {
+    async fn state(&self) -> pal::VmState {
         match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
             Ok(_) => pal::VmState::RUNNING,
             _ => pal::VmState::SHUTOFF,

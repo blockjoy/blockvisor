@@ -2,7 +2,7 @@ use eyre::Result;
 use std::{ffi::OsStr, io::BufRead};
 use thiserror::Error;
 use tokio::process::Command;
-use tracing::info;
+use tracing::debug;
 
 #[derive(Error, Debug)]
 pub enum CmdError {
@@ -28,7 +28,7 @@ where
 {
     let mut command = Command::new(cmd);
     command.args(args);
-    info!("Running command: `{:?}`", command);
+    debug!("Running command: `{:?}`", command);
     let output = command
         .output()
         .await
