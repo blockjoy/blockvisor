@@ -1,3 +1,4 @@
+use blockvisord::config::ApptainerConfig;
 use blockvisord::{
     config,
     config::{Config, SharedConfig},
@@ -213,7 +214,12 @@ async fn main() -> Result<()> {
             pal: if cmd_args.use_fc {
                 Some(config::PalConfig::LinuxFc)
             } else {
-                Some(config::PalConfig::LinuxBare)
+                Some(config::PalConfig::LinuxApptainer(ApptainerConfig {
+                    extra_args: Some(vec!["--dns".to_owned(), "1.1.1.1,8.8.8.8".to_owned()]),
+                    host_network: false,
+                    cpu_limit: true,
+                    memory_limit: true,
+                }))
             },
             ..Default::default()
         };
