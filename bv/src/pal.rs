@@ -157,6 +157,8 @@ pub enum VmState {
     SHUTOFF,
     /// Machine is running
     RUNNING,
+    /// Machine is in invalid state - not stopped, but not fully functioning.
+    INVALID,
 }
 
 #[async_trait]
@@ -171,8 +173,10 @@ pub trait VirtualMachine {
     async fn force_shutdown(&mut self) -> Result<()>;
     /// Start the VM.
     async fn start(&mut self) -> Result<()>;
-    /// Detach the VM.
-    async fn detach(&mut self) -> Result<()>;
+    /// Release the VM and all associated resources.
+    async fn release(&mut self) -> Result<()>;
+    /// Try recover VM that is in INVALID state.
+    async fn recover(&mut self) -> Result<()>;
 }
 
 pub trait RecoverBackoff {
@@ -181,4 +185,5 @@ pub trait RecoverBackoff {
     fn start_failed(&mut self) -> bool;
     fn stop_failed(&mut self) -> bool;
     fn reconnect_failed(&mut self) -> bool;
+    fn vm_recovery_failed(&mut self) -> bool;
 }

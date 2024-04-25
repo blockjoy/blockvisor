@@ -264,7 +264,8 @@ impl pal::VirtualMachine for BareMachine {
     async fn state(&self) -> pal::VmState {
         match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
             Ok(_) => pal::VmState::RUNNING,
-            _ => pal::VmState::SHUTOFF,
+            Err(GetProcessIdError::NotFound) => pal::VmState::SHUTOFF,
+            Err(GetProcessIdError::MoreThanOne) => pal::VmState::INVALID,
         }
     }
 
@@ -293,7 +294,17 @@ impl pal::VirtualMachine for BareMachine {
         self.start_babel()
     }
 
-    async fn detach(&mut self) -> Result<()> {
+    async fn release(&mut self) -> Result<()> {
         self.umount_all().await
+    }
+
+    async fn recover(&mut self) -> Result<()> {
+        kill_all_processes(
+            &self.babel_path.to_string_lossy(),
+            &[&self.chroot_dir.to_string_lossy()],
+            BABEL_KILL_TIMEOUT,
+            PosixSignal::SIGTERM,
+        );
+        self.start_babel()
     }
 }

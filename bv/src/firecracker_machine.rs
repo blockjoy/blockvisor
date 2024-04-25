@@ -102,7 +102,11 @@ impl pal::VirtualMachine for FirecrackerMachine {
         Ok(())
     }
 
-    async fn detach(&mut self) -> Result<()> {
+    async fn release(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn recover(&mut self) -> Result<()> {
         Ok(())
     }
 }

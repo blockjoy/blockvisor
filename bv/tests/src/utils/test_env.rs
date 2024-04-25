@@ -319,7 +319,7 @@ impl Pal for DummyPlatform {
         )
     }
 
-    type VirtualMachine = firecracker_machine::FirecrackerMachine;
+    type VirtualMachine = firecracker_machine::FirecrackerMachine; // TODO MJR
 
     async fn create_vm(
         &self,
@@ -438,6 +438,7 @@ pub struct DummyBackoff {
     reconnect: u32,
     stop: u32,
     start: u32,
+    vm: u32,
 }
 
 impl RecoverBackoff for DummyBackoff {
@@ -456,5 +457,10 @@ impl RecoverBackoff for DummyBackoff {
     fn reconnect_failed(&mut self) -> bool {
         self.reconnect += 1;
         self.reconnect >= 1
+    }
+
+    fn vm_recovery_failed(&mut self) -> bool {
+        self.vm += 1;
+        self.vm >= 1
     }
 }

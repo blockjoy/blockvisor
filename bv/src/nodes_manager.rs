@@ -773,7 +773,7 @@ where
                 .await
             {
                 Ok(node) => {
-                    // remove FC pid from list of all discovered FC pids
+                    // remove VM pid from list of all discovered VM pids
                     // in the end of load this list should be empty
                     if node.status().await == NodeStatus::Running {
                         vm_processes.push(pal.get_vm_pid(node.id())?);
@@ -810,7 +810,7 @@ where
         // check if we run some unmanaged FC processes on the host
         for pid in pal.get_vm_pids()? {
             if !vm_processes.contains(&pid) {
-                error!("Process with id {pid} is not managed by BV");
+                error!("VM with pid {pid} is not managed by BV");
             }
         }
 
@@ -1732,7 +1732,7 @@ mod tests {
         };
         let mut vm_mock = MockTestVM::new();
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
-        vm_mock.expect_detach().return_once(|| Ok(()));
+        vm_mock.expect_release().return_once(|| Ok(()));
         add_create_node_expectations(&mut pal, 1, node_id, node_config.clone(), vm_mock);
         pal.expect_available_resources()
             .withf(move |req| 1 == req.len() as u32)

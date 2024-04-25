@@ -86,12 +86,15 @@ const MAX_STOP_TRIES: u32 = 3;
 const STOP_RECOVERY_BACKOFF_BASE_MS: u64 = 45_000;
 const MAX_RECONNECT_TRIES: u32 = 3;
 const RECONNECT_RECOVERY_BACKOFF_BASE_MS: u64 = 5_000;
+const MAX_VM_TRIES: u32 = 3;
+const VM_RECOVERY_BACKOFF_BASE_MS: u64 = 1_000;
 
 #[derive(Debug, Default)]
 pub struct RecoveryBackoff {
     reconnect: u32,
     stop: u32,
     start: u32,
+    vm: u32,
     backoff_time: Option<Instant>,
 }
 
@@ -124,6 +127,12 @@ impl pal::RecoverBackoff for RecoveryBackoff {
         self.update_backoff_time(RECONNECT_RECOVERY_BACKOFF_BASE_MS, self.reconnect);
         self.reconnect += 1;
         self.reconnect >= MAX_RECONNECT_TRIES
+    }
+
+    fn vm_recovery_failed(&mut self) -> bool {
+        self.update_backoff_time(VM_RECOVERY_BACKOFF_BASE_MS, self.vm);
+        self.vm += 1;
+        self.vm >= MAX_VM_TRIES
     }
 }
 

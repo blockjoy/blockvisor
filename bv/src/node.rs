@@ -247,6 +247,7 @@ impl<P: Pal + Debug> Node<P> {
         let machine_status = match self.machine.state().await {
             pal::VmState::RUNNING => NodeStatus::Running,
             pal::VmState::SHUTOFF => NodeStatus::Stopped,
+            pal::VmState::INVALID => NodeStatus::Failed,
         };
         if machine_status == self.data.expected_status {
             if machine_status == NodeStatus::Running // node is running, but 
@@ -354,7 +355,7 @@ impl<P: Pal + Debug> Node<P> {
         self.data.save(&self.context.registry).await?;
         match self.machine.state().await {
             pal::VmState::SHUTOFF => {}
-            pal::VmState::RUNNING => {
+            pal::VmState::RUNNING | pal::VmState::INVALID => {
                 if let Err(err) = self.machine.shutdown().await {
                     warn!("Graceful shutdown failed: {err:#}");
                     self.machine
@@ -364,15 +365,13 @@ impl<P: Pal + Debug> Node<P> {
                 }
                 let start = Instant::now();
                 loop {
-                    match self.machine.state().await {
-                        pal::VmState::RUNNING if start.elapsed() < NODE_STOP_TIMEOUT => {
-                            debug!("VM not shutdown yet, will retry");
-                            tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
-                        }
-                        pal::VmState::RUNNING => {
-                            bail!("VM shutdown timeout");
-                        }
-                        pal::VmState::SHUTOFF => break,
+                    if pal::VmState::SHUTOFF == self.machine.state().await {
+                        break;
+                    } else if start.elapsed() < NODE_STOP_TIMEOUT {
+                        debug!("VM not shutdown yet, will retry");
+                        tokio::time::sleep(NODE_STOPPED_CHECK_INTERVAL).await;
+                    } else {
+                        bail!("VM shutdown timeout");
                     }
                 }
             }
@@ -443,7 +442,7 @@ impl<P: Pal + Debug> Node<P> {
             }
             self.stop(false).await?;
         }
-        self.machine.detach().await?;
+        self.machine.release().await?;
         self.copy_os_image(image).await?;
 
         let (script, metadata) = self.context.copy_and_check_plugin(image).await?;
@@ -482,11 +481,14 @@ impl<P: Pal + Debug> Node<P> {
         let id = self.id();
         match self.data.expected_status {
             NodeStatus::Running => {
-                if self.machine.state().await == pal::VmState::SHUTOFF
+                let vm_state = self.machine.state().await;
+                if vm_state == pal::VmState::SHUTOFF
                     || self.data.has_pending_update
                     || !self.data.initialized
                 {
                     self.started_node_recovery().await?;
+                } else if vm_state == pal::VmState::INVALID {
+                    self.vm_recovery().await?;
                 } else {
                     self.node_connection_recovery().await?;
                 }
@@ -569,20 +571,40 @@ impl<P: Pal + Debug> Node<P> {
         if let Err(e) = self.babel_engine.node_connection.test().await {
             warn!("Recovery: reconnect to node with ID `{id}` failed: {e:#}");
             if self.recovery_backoff.reconnect_failed() {
-                info!("Recovery: restart broken node with ID `{id}`");
-                if let Err(e) = self.restart(true).await {
-                    warn!("Recovery: restart node with ID `{id}` failed: {e:#}");
-                    if self.recovery_backoff.stop_failed() {
-                        error!("Recovery: retries count exceeded, mark as failed: {e:#}");
-                        self.save_expected_status(NodeStatus::Failed).await?;
-                    }
-                } else {
-                    self.post_recovery();
-                }
+                self.recover_by_restart().await?;
             }
         } else if self.babel_engine.node_connection.is_closed() {
             // node wasn't fully started so proceed with other stuff
             self.started_node_recovery().await?;
+        } else {
+            self.post_recovery();
+        }
+        Ok(())
+    }
+
+    async fn vm_recovery(&mut self) -> Result<()> {
+        let id = self.id();
+        info!("Recovery: fix broken node VM with ID `{id}`");
+        if let Err(e) = self.machine.recover().await {
+            warn!("Recovery: VM with ID `{id}` recovery failed: {e:#}");
+            if self.recovery_backoff.vm_recovery_failed() {
+                self.recover_by_restart().await?;
+            }
+        } else {
+            self.post_recovery();
+        }
+        Ok(())
+    }
+
+    async fn recover_by_restart(&mut self) -> Result<()> {
+        let id = self.id();
+        info!("Recovery: restart broken node with ID `{id}`");
+        if let Err(e) = self.restart(true).await {
+            warn!("Recovery: restart node with ID `{id}` failed: {e:#}");
+            if self.recovery_backoff.stop_failed() {
+                error!("Recovery: retries count exceeded, mark as failed: {e:#}");
+                self.save_expected_status(NodeStatus::Failed).await?;
+            }
         } else {
             self.post_recovery();
         }
@@ -712,6 +734,7 @@ pub mod tests {
         reconnect: u32,
         stop: u32,
         start: u32,
+        vm: u32,
     }
 
     impl RecoverBackoff for DummyBackoff {
@@ -730,6 +753,11 @@ pub mod tests {
         fn reconnect_failed(&mut self) -> bool {
             self.reconnect += 1;
             self.reconnect >= 3
+        }
+
+        fn vm_recovery_failed(&mut self) -> bool {
+            self.vm += 1;
+            self.vm >= 3
         }
     }
 
@@ -801,7 +829,8 @@ pub mod tests {
             async fn shutdown(&mut self) -> Result<()>;
             async fn force_shutdown(&mut self) -> Result<()>;
             async fn start(&mut self) -> Result<()>;
-            async fn detach(&mut self) -> Result<()>;
+            async fn release(&mut self) -> Result<()>;
+            async fn recover(&mut self) -> Result<()>;
         }
     }
 
