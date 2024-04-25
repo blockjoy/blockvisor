@@ -222,6 +222,34 @@ const PLUGIN_CONFIG = #{
             //max_retries: 3,
         //},
     //},
+    /// [optional] post-download action
+    //post_download: #{
+        /// list of sh commands to be executed after download
+        //commands: [
+            //`echo downloaded`,
+        //],
+        /// list of sh jobs (long running tasks), to be started after download
+        //jobs: [
+            //#{
+                //name: "post_download_job",
+                //run_sh: `echo restoreDB`,
+            //}
+        //]
+    //},
+    /// [optional] pre-upload action
+    //pre_upload: #{
+        /// list of sh commands to be executed before upload
+        //commands: [
+            //`echo uploading`,
+        //],
+        /// list of sh jobs (long running tasks), to be started before upload
+        //jobs: [
+            //#{
+                //name: "pre_upload_job",
+                //run_sh: `echo dumpDB`,
+            //}
+        //]
+    //},
     /// [optional] upload configuration
     /// built-in upload can be manually triggered with `bv node run upload`
     upload: #{

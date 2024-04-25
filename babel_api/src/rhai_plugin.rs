@@ -1,5 +1,5 @@
 use crate::engine::RestRequest;
-use crate::plugin_config::Service;
+use crate::plugin_config::{Actions, Service};
 use crate::{
     engine::{self, Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, ShResponse},
     metadata::{check_metadata, BlockchainMetadata},
@@ -291,6 +291,31 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             .with_context(|| format!("Rhai function '{name}' returned error"))
     }
 
+    fn run_actions(&self, actions: Option<Actions>, needs: Vec<String>) -> Result<Vec<String>> {
+        let mut jobs = vec![];
+        if let Some(actions) = actions {
+            for command in actions.commands {
+                let resp = self.babel_engine.run_sh(&command, None)?;
+                if resp.exit_code != 0 {
+                    bail!("init command '{command}' failed with exit_code: {resp:?}")
+                }
+            }
+            for mut job in actions.jobs {
+                let name = job.name.clone();
+                if let Some(job_needs) = job.needs.as_mut() {
+                    job_needs.append(&mut needs.clone())
+                } else {
+                    job.needs = Some(needs.clone());
+                }
+                self.create_and_start_job(&name, plugin_config::build_job_config(job))?;
+                jobs.push(name);
+            }
+            Ok(jobs)
+        } else {
+            Ok(needs)
+        }
+    }
+
     fn start_services(&self, services: Vec<Service>, needs: Vec<String>) -> Result<()> {
         for service in services {
             let name = service.name.clone();
@@ -359,20 +384,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             }
         } else {
             let config: PluginConfig = self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?;
-            let mut init_jobs = vec![];
-            if let Some(init_config) = config.init {
-                for command in init_config.commands {
-                    let resp = self.babel_engine.run_sh(&command, None)?;
-                    if resp.exit_code != 0 {
-                        bail!("init command '{command}' failed with exit_code: {resp:?}")
-                    }
-                }
-                for job in init_config.jobs {
-                    let name = job.name.clone();
-                    self.create_and_start_job(&name, plugin_config::build_init_job_config(job))?;
-                    init_jobs.push(name);
-                }
-            }
+            let init_jobs = self.run_actions(config.init, vec![])?;
             if let Err(err) = self.create_and_start_job(
                 DOWNLOAD_JOB_NAME,
                 plugin_config::build_download_job_config(config.download, init_jobs.clone()),
@@ -389,7 +401,9 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                     bail!("Download failed with no alternative provided: {err:#}");
                 }
             }
-            self.start_services(config.services, vec![DOWNLOAD_JOB_NAME.to_string()])?;
+            let post_download_jobs =
+                self.run_actions(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
+            self.start_services(config.services, post_download_jobs)?;
             Ok(())
         }
     }
@@ -412,9 +426,10 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             for service in &config.services {
                 self.babel_engine.stop_job(&service.name)?;
             }
+            let pre_upload_jobs = self.run_actions(config.pre_upload, vec![])?;
             self.create_and_start_job(
                 UPLOAD_JOB_NAME,
-                plugin_config::build_upload_job_config(config.upload),
+                plugin_config::build_upload_job_config(config.upload, pre_upload_jobs),
             )?;
             self.start_services(config.services, vec![UPLOAD_JOB_NAME.to_string()])?;
             Ok(())
@@ -675,7 +690,7 @@ mod tests {
     use crate::metadata::{
         firewall, BabelConfig, NetConfiguration, NetType, RamdiskConfiguration, Requirements,
     };
-    use crate::plugin_config::{AlternativeDownload, InitJob};
+    use crate::plugin_config::{AlternativeDownload, Job};
     use eyre::bail;
     use mockall::*;
     use std::collections::HashMap;
@@ -1205,9 +1220,31 @@ mod tests {
                         run_sh: `echo A`,
                     },
                 ],
+                pre_upload: #{
+                    commands: [
+                        `echo pre_upload_cmd`,
+                    ],
+                    jobs: [
+                        #{
+                            name: "pre_upload_job",
+                            run_sh: `echo pre_upload_job`,
+                            needs: ["some"],
+                        }
+                    ]
+                },
             };
             "#;
         let mut babel = MockBabelEngine::new();
+        babel
+            .expect_run_sh()
+            .with(predicate::eq("echo pre_upload_cmd"), predicate::eq(None))
+            .return_once(|_, _| {
+                Ok(ShResponse {
+                    exit_code: 0,
+                    stdout: "".to_string(),
+                    stderr: "".to_string(),
+                })
+            });
         babel
             .expect_stop_job()
             .with(predicate::eq("blockchain_service"))
@@ -1215,8 +1252,31 @@ mod tests {
         babel
             .expect_create_job()
             .with(
+                predicate::eq("pre_upload_job"),
+                predicate::eq(plugin_config::build_job_config(Job {
+                    name: "pre_upload_job".to_string(),
+                    run_sh: "echo pre_upload_job".to_string(),
+                    restart: None,
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: Some(vec!["some".to_string()]),
+                })),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("pre_upload_job"))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
                 predicate::eq(UPLOAD_JOB_NAME),
-                predicate::eq(plugin_config::build_upload_job_config(None)),
+                predicate::eq(plugin_config::build_upload_job_config(
+                    None,
+                    vec!["pre_upload_job".to_string()],
+                )),
             )
             .once()
             .returning(|_, _| Ok(()));
@@ -1272,6 +1332,18 @@ mod tests {
                 alternative_download: #{
                     run_sh: `alternative download`,
                 },
+                post_download: #{
+                    commands: [
+                        `echo post_download_cmd`,
+                    ],
+                    jobs: [
+                        #{
+                            name: "post_download_job",
+                            run_sh: `echo post_download_job`,
+                            needs: ["some"],
+                        }
+                    ]
+                },
                 services: [
                     #{
                         name: "blockchain_service",
@@ -1292,16 +1364,26 @@ mod tests {
                 })
             });
         babel
+            .expect_run_sh()
+            .with(predicate::eq("echo post_download_cmd"), predicate::eq(None))
+            .return_once(|_, _| {
+                Ok(ShResponse {
+                    exit_code: 0,
+                    stdout: "".to_string(),
+                    stderr: "".to_string(),
+                })
+            });
+        babel
             .expect_create_job()
             .with(
                 predicate::eq("init_job"),
-                predicate::eq(plugin_config::build_init_job_config(InitJob {
+                predicate::eq(plugin_config::build_job_config(Job {
                     name: "init_job".to_string(),
                     run_sh: "echo init_job".to_string(),
                     restart: None,
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
-                    needs: None,
+                    needs: Some(vec![]),
                 })),
             )
             .once()
@@ -1344,6 +1426,26 @@ mod tests {
         babel
             .expect_create_job()
             .with(
+                predicate::eq("post_download_job"),
+                predicate::eq(plugin_config::build_job_config(Job {
+                    name: "post_download_job".to_string(),
+                    run_sh: "echo post_download_job".to_string(),
+                    restart: None,
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: Some(vec!["some".to_string(), DOWNLOAD_JOB_NAME.to_string()]),
+                })),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("post_download_job"))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
                 predicate::eq("blockchain_service"),
                 predicate::eq(plugin_config::build_service_job_config(
                     Service {
@@ -1353,7 +1455,7 @@ mod tests {
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                     },
-                    vec![DOWNLOAD_JOB_NAME.to_string()],
+                    vec!["post_download_job".to_string()],
                 )),
             )
             .once()

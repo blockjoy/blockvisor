@@ -196,6 +196,28 @@ fn test_plugin_config() -> eyre::Result<()> {
                 stderr: Default::default(),
             })
         });
+    babel
+        .expect_run_sh()
+        .with(predicate::eq("echo downloaded"), predicate::eq(None))
+        .once()
+        .returning(|_, _| {
+            Ok(ShResponse {
+                exit_code: 0,
+                stdout: Default::default(),
+                stderr: Default::default(),
+            })
+        });
+    babel
+        .expect_run_sh()
+        .with(predicate::eq("echo uploading"), predicate::eq(None))
+        .once()
+        .returning(|_, _| {
+            Ok(ShResponse {
+                exit_code: 0,
+                stdout: Default::default(),
+                stderr: Default::default(),
+            })
+        });
 
     babel
         .expect_create_job()
@@ -277,6 +299,26 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel
         .expect_create_job()
         .with(
+            predicate::eq("post_download_job"),
+            predicate::eq(JobConfig {
+                job_type: babel_api::engine::JobType::RunSh("echo restoreDB".to_string()),
+                restart: babel_api::engine::RestartPolicy::Never,
+                shutdown_timeout_secs: None,
+                shutdown_signal: None,
+                needs: Some(vec!["download".to_string()]),
+            }),
+        )
+        .once()
+        .returning(|_, _| Ok(()));
+    babel
+        .expect_start_job()
+        .with(predicate::eq("post_download_job"))
+        .once()
+        .returning(|_| Ok(()));
+
+    babel
+        .expect_create_job()
+        .with(
             predicate::eq("blockchain_service_a"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::RunSh(
@@ -289,7 +331,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 }),
                 shutdown_timeout_secs: Some(120),
                 shutdown_signal: Some(babel_api::engine::PosixSignal::SIGINT),
-                needs: Some(vec!["download".to_string()]),
+                needs: Some(vec!["post_download_job".to_string()]),
             }),
         )
         .once()
@@ -315,7 +357,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 }),
                 shutdown_timeout_secs: None,
                 shutdown_signal: None,
-                needs: Some(vec!["download".to_string()]),
+                needs: Some(vec!["post_download_job".to_string()]),
             }),
         )
         .once()
@@ -336,6 +378,27 @@ fn test_plugin_config() -> eyre::Result<()> {
         .with(predicate::eq("blockchain_service_b"))
         .once()
         .returning(|_| Ok(()));
+
+    babel
+        .expect_create_job()
+        .with(
+            predicate::eq("pre_upload_job"),
+            predicate::eq(JobConfig {
+                job_type: babel_api::engine::JobType::RunSh("echo dumpDB".to_string()),
+                restart: babel_api::engine::RestartPolicy::Never,
+                shutdown_timeout_secs: None,
+                shutdown_signal: None,
+                needs: Some(vec![]),
+            }),
+        )
+        .once()
+        .returning(|_, _| Ok(()));
+    babel
+        .expect_start_job()
+        .with(predicate::eq("pre_upload_job"))
+        .once()
+        .returning(|_| Ok(()));
+
     babel
         .expect_create_job()
         .with(
@@ -363,7 +426,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 }),
                 shutdown_timeout_secs: None,
                 shutdown_signal: None,
-                needs: None,
+                needs: Some(vec!["pre_upload_job".to_string()]),
             }),
         )
         .once()

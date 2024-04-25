@@ -25,12 +25,13 @@ const NET =  global::NETS[node_params().NETWORK];
 
 const BABEL_VERSION = "0.9.0";
 const PLUGIN_CONFIG = #{
+    /// node init actions.
     init: #{
         /// list of sh commands to be executed first
         commands: [
             `mkdir -p /opt/netdata/var/cache/netdata`,
         ],
-        /// list of sh jobs (long running tasks), to be starten then
+        /// list of sh jobs (long running tasks), to be started then
         jobs: [
             #{
                 /// Unique job name.
@@ -122,6 +123,34 @@ const PLUGIN_CONFIG = #{
             backoff_base_ms: 10000,
             max_retries: 3,
         },
+    },
+    /// [optional] post-download action
+    post_download: #{
+        /// list of sh commands to be executed after download
+        commands: [
+            `echo downloaded`,
+        ],
+        /// list of sh jobs (long running tasks), to be started after download
+        jobs: [
+            #{
+                name: "post_download_job",
+                run_sh: `echo restoreDB`,
+            }
+        ]
+    },
+    /// [optional] pre-upload action
+    pre_upload: #{
+        /// list of sh commands to be executed before upload
+        commands: [
+            `echo uploading`,
+        ],
+        /// list of sh jobs (long running tasks), to be started before upload
+        jobs: [
+            #{
+                name: "pre_upload_job",
+                run_sh: `echo dumpDB`,
+            }
+        ]
     },
     /// [optional] upload configuration
     /// built-in upload can be manually triggered with `bv node run upload`

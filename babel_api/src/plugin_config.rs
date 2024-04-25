@@ -4,24 +4,28 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PluginConfig {
-    /// Node init configuration.
-    pub init: Option<Init>,
-    /// Listo of blockchain services.
+    /// Node init actions.
+    pub init: Option<Actions>,
+    /// List of blockchain services.
     pub services: Vec<Service>,
     /// Download configuration.
     pub download: Option<Download>,
     /// Alternative download configuration.
     pub alternative_download: Option<AlternativeDownload>,
-    /// Upnload configuration.
+    /// List of post-download actions.
+    pub post_download: Option<Actions>,
+    /// List of pre-upload actions.
+    pub pre_upload: Option<Actions>,
+    /// Upload configuration.
     pub upload: Option<Upload>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Init {
+pub struct Actions {
     /// List of sh commands to be executed first.
     pub commands: Vec<String>,
     /// List of long-running tasks (aka jobs) that must be finished before blockchain services start.
-    pub jobs: Vec<InitJob>,
+    pub jobs: Vec<Job>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -35,7 +39,7 @@ pub enum RestartPolicy {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct InitJob {
+pub struct Job {
     /// Unique job name.
     pub name: String,
     /// Sh script body.
@@ -119,19 +123,19 @@ pub enum Compression {
     ZSTD(i32),
 }
 
-pub fn build_init_job_config(init_job: InitJob) -> JobConfig {
+pub fn build_job_config(job: Job) -> JobConfig {
     JobConfig {
-        job_type: JobType::RunSh(init_job.run_sh),
-        restart: init_job
+        job_type: JobType::RunSh(job.run_sh),
+        restart: job
             .restart
             .map(|restart| match restart {
                 RestartPolicy::Never => engine::RestartPolicy::Never,
                 RestartPolicy::OnFailure(config) => engine::RestartPolicy::OnFailure(config),
             })
             .unwrap_or(engine::RestartPolicy::Never),
-        shutdown_timeout_secs: init_job.shutdown_timeout_secs,
-        shutdown_signal: init_job.shutdown_signal,
-        needs: init_job.needs,
+        shutdown_timeout_secs: job.shutdown_timeout_secs,
+        shutdown_signal: job.shutdown_signal,
+        needs: job.needs,
     }
 }
 
@@ -203,7 +207,7 @@ pub fn build_service_job_config(service: Service, needs: Vec<String>) -> JobConf
     }
 }
 
-pub fn build_upload_job_config(value: Option<Upload>) -> JobConfig {
+pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<String>) -> JobConfig {
     const DEFAULT_RESTART_CONFIG: RestartConfig = RestartConfig {
         backoff_timeout_ms: 600_000,
         backoff_base_ms: 500,
@@ -232,7 +236,7 @@ pub fn build_upload_job_config(value: Option<Upload>) -> JobConfig {
             ),
             shutdown_timeout_secs: None,
             shutdown_signal: None,
-            needs: None,
+            needs: Some(pre_upload_jobs),
         }
     } else {
         JobConfig {
@@ -250,7 +254,7 @@ pub fn build_upload_job_config(value: Option<Upload>) -> JobConfig {
             restart: engine::RestartPolicy::OnFailure(DEFAULT_RESTART_CONFIG),
             shutdown_timeout_secs: None,
             shutdown_signal: None,
-            needs: None,
+            needs: Some(pre_upload_jobs),
         }
     }
 }

@@ -39,7 +39,9 @@ See [example](examples/metadata.rhai) with comments for more details.
  - node initialization process
  - download job configuration
  - alternative download command
+ - post-download actions
  - configuration for background services, to be run on the node
+ - pre-upload actions
  - upload job configuration
 
 See [example](examples/plugin_config.rhai) with comments for more details.

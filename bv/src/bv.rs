@@ -1032,7 +1032,7 @@ mod tests {
                     restart: babel_api::engine::RestartPolicy::Never,
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
-                    needs: None,
+                    needs: Some(vec![]),
                 }),
             )
             .once()
@@ -1161,7 +1161,7 @@ mod tests {
                     }),
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
-                    needs: None,
+                    needs: Some(vec![]),
                 }),
             )
             .once()
