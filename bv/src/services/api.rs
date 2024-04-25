@@ -95,10 +95,17 @@ async fn connect_command_service(
     client
 }
 
-pub async fn get_and_process_pending_commands<P: Pal + Debug>(
+pub async fn get_and_process_pending_commands<P>(
     config: &SharedConfig,
     nodes_manager: Arc<NodesManager<P>>,
-) {
+) where
+    P: Pal + Send + Sync + Debug + 'static,
+    P::NetInterface: Send + Sync + Clone,
+    P::NodeConnection: Send + Sync,
+    P::ApiServiceConnector: Send + Sync,
+    P::VirtualMachine: Send + Sync,
+    P::RecoveryBackoff: Send + Sync + 'static,
+{
     let service = CommandsService { config };
     if let Some(commands) = service.get_pending_commands().await {
         if let Err(err) = service
@@ -144,11 +151,19 @@ impl<'a> CommandsService<'a> {
         }
     }
 
-    async fn process_commands<P: Pal + Debug>(
+    async fn process_commands<P>(
         &self,
         commands: Vec<pb::Command>,
         nodes_manager: Arc<NodesManager<P>>,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        P: Pal + Send + Sync + Debug + 'static,
+        P::NetInterface: Send + Sync + Clone,
+        P::NodeConnection: Send + Sync,
+        P::ApiServiceConnector: Send + Sync,
+        P::VirtualMachine: Send + Sync,
+        P::RecoveryBackoff: Send + Sync + 'static,
+    {
         info!("Processing {} commands", commands.len());
         for command in commands {
             info!("Processing command: {command:?}");
@@ -248,10 +263,18 @@ impl<'a> CommandsService<'a> {
     }
 }
 
-async fn process_node_command<P: Pal + Debug>(
+async fn process_node_command<P>(
     nodes_manager: Arc<NodesManager<P>>,
     node_command: pb::NodeCommand,
-) -> commands::Result<()> {
+) -> commands::Result<()>
+where
+    P: Pal + Send + Sync + Debug + 'static,
+    P::NetInterface: Send + Sync + Clone,
+    P::NodeConnection: Send + Sync,
+    P::ApiServiceConnector: Send + Sync,
+    P::VirtualMachine: Send + Sync,
+    P::RecoveryBackoff: Send + Sync + 'static,
+{
     let node_id = Uuid::from_str(&node_command.node_id).map_err(|err| anyhow!(err))?;
     let now = Instant::now();
     match node_command.command {

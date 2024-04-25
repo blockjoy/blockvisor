@@ -492,10 +492,12 @@ where
 
 impl<P> State<P>
 where
-    P: 'static + Debug + Pal + Send + Sync,
-    P::NetInterface: 'static + Send + Sync,
-    P::NodeConnection: 'static + Send + Sync,
-    P::VirtualMachine: 'static + Send + Sync,
+    P: Pal + Send + Sync + Debug + 'static,
+    P::NetInterface: Send + Sync + Clone,
+    P::NodeConnection: Send + Sync,
+    P::ApiServiceConnector: Send + Sync,
+    P::VirtualMachine: Send + Sync,
+    P::RecoveryBackoff: Send + Sync + 'static,
 {
     async fn is_standalone_node(&self, id: Uuid) -> eyre::Result<bool, Status> {
         Ok(self.dev_mode

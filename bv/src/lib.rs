@@ -24,6 +24,7 @@ pub mod node_metrics;
 pub mod nodes_manager;
 pub mod pal;
 pub mod pretty_table;
+pub mod scheduler;
 pub mod self_updater;
 pub mod services;
 pub mod utils;

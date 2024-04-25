@@ -160,8 +160,8 @@ where
             host_metrics_future,
             self_updater_future
         );
-        nodes_manager.detach().await;
         info!("Stopping...");
+        Arc::into_inner(nodes_manager).unwrap().detach().await;
         self.config.read().await.save(&self.config.bv_root).await?;
         Ok(())
     }

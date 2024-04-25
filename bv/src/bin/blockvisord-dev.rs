@@ -39,8 +39,6 @@ async fn main() -> Result<()> {
             run_server(config, pal).await?;
         }
     }
-
-    info!("Stopping...");
     Ok(())
 }
 
@@ -61,12 +59,12 @@ where
     let nodes = NodesManager::load(pal, config.clone()).await?;
     let nodes = Arc::new(nodes);
 
-    Ok(Server::builder()
+    Server::builder()
         .max_concurrent_streams(1)
         .add_service(internal_server::service_server::ServiceServer::new(
             internal_server::State {
                 config,
-                nodes_manager: nodes,
+                nodes_manager: nodes.clone(),
                 cluster: Arc::new(None),
                 dev_mode: true,
             },
@@ -75,5 +73,8 @@ where
             tokio_stream::wrappers::TcpListenerStream::new(listener),
             run.wait(),
         )
-        .await?)
+        .await?;
+    info!("Stopping...");
+    Arc::into_inner(nodes).unwrap().detach().await;
+    Ok(())
 }

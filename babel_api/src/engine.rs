@@ -62,6 +62,9 @@ pub trait Engine {
 
     /// Handle logs from plugin.
     fn log(&self, level: Level, message: &str);
+
+    /// Schedule function call according to given cron like schedule.
+    fn schedule_fn(&self, function_name: &str, function_param: &str, schedule: &str) -> Result<()>;
 }
 
 /// Structure describing where decompressed data shall be written to and how many bytes.

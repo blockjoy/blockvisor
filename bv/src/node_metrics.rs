@@ -74,9 +74,15 @@ impl DerefMut for Metrics {
 /// be efficient, but since we are dealing with a virtual socket the latency is very low, in the
 /// hundres of nanoseconds. Furthermore, we require unique access to the node to query a metric, so
 /// sequentially is easier to program.
-pub async fn collect_metrics<P: Pal + Debug + 'static>(
-    nodes_manager: Arc<NodesManager<P>>,
-) -> Metrics {
+pub async fn collect_metrics<P>(nodes_manager: Arc<NodesManager<P>>) -> Metrics
+where
+    P: Pal + Send + Sync + Debug + 'static,
+    P::NetInterface: Send + Sync + Clone,
+    P::NodeConnection: Send + Sync,
+    P::ApiServiceConnector: Send + Sync,
+    P::VirtualMachine: Send + Sync,
+    P::RecoveryBackoff: Send + Sync + 'static,
+{
     let nodes_lock = nodes_manager.nodes_list().await;
     let metrics_fut: Vec<_> = nodes_lock
         .values()

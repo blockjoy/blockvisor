@@ -1,4 +1,3 @@
-use crate::services::blockchain::ROOT_FS_FILE;
 use crate::{
     command_failed,
     commands::{self, into_internal, Error},
@@ -8,15 +7,18 @@ use crate::{
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     node_metrics,
     pal::{NetInterface, Pal},
+    scheduler,
+    scheduler::{Scheduled, Scheduler},
+    services::blockchain::ROOT_FS_FILE,
     services::{
         blockchain::{self, BlockchainService, BABEL_PLUGIN_NAME},
         kernel,
     },
     BV_VAR_PATH,
 };
-use babel_api::engine::JobsInfo;
 use babel_api::{
     engine::JobInfo,
+    engine::JobsInfo,
     metadata::{firewall, BlockchainMetadata, Requirements},
     rhai_plugin,
 };
@@ -32,10 +34,10 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use tokio::sync::RwLockReadGuard;
+use tokio::sync::mpsc;
 use tokio::{
     fs::{self, read_dir},
-    sync::RwLock,
+    sync::{RwLock, RwLockReadGuard},
 };
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
@@ -50,7 +52,8 @@ pub fn build_registry_filename(bv_root: &Path) -> PathBuf {
 #[derive(Debug)]
 pub struct NodesManager<P: Pal + Debug> {
     api_config: SharedConfig,
-    nodes: RwLock<HashMap<Uuid, RwLock<Node<P>>>>,
+    nodes: Arc<RwLock<HashMap<Uuid, RwLock<Node<P>>>>>,
+    scheduler: Scheduler,
     node_data_cache: RwLock<HashMap<Uuid, NodeDataCache>>,
     node_ids: RwLock<HashMap<String, Uuid>>,
     state: RwLock<State>,
@@ -61,7 +64,7 @@ pub struct NodesManager<P: Pal + Debug> {
 /// Container with some shallow information about the node
 ///
 /// This information is [mostly] immutable, and we can cache it for
-/// easier access in case some node is locked and we cannot access
+/// easier access in case some node is locked, and we cannot access
 /// it's actual data right away
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeDataCache {
@@ -102,9 +105,45 @@ pub enum BabelError {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 struct State {
     machine_index: u32,
+    #[serde(default)]
+    pub scheduled_tasks: Vec<Scheduled>,
 }
 
-impl<P: Pal + Debug> NodesManager<P> {
+impl State {
+    async fn load(registry_path: &Path) -> Result<Self> {
+        info!(
+            "Reading nodes common config file: {}",
+            registry_path.display()
+        );
+        let config = fs::read_to_string(&registry_path)
+            .await
+            .context("failed to read nodes registry")?;
+        serde_json::from_str(&config).context("failed to parse nodes registry")
+    }
+
+    async fn save(&self, registry_path: &Path) -> Result<()> {
+        info!(
+            "Writing nodes common config file: {}",
+            registry_path.display()
+        );
+        let config = serde_json::to_string(self).map_err(into_internal)?;
+        fs::write(registry_path, config)
+            .await
+            .map_err(into_internal)?;
+
+        Ok(())
+    }
+}
+
+impl<P> NodesManager<P>
+where
+    P: Pal + Send + Sync + Debug + 'static,
+    P::NetInterface: Send + Sync + Clone,
+    P::NodeConnection: Send + Sync,
+    P::ApiServiceConnector: Send + Sync,
+    P::VirtualMachine: Send + Sync,
+    P::RecoveryBackoff: Send + Sync + 'static,
+{
     pub async fn load(pal: P, api_config: SharedConfig) -> Result<Self> {
         let bv_root = pal.bv_root();
         let registry_dir = build_registry_dir(bv_root);
@@ -115,41 +154,67 @@ impl<P: Pal + Debug> NodesManager<P> {
         }
         let registry_path = build_registry_filename(bv_root);
         let pal = Arc::new(pal);
+        let nodes = Arc::new(RwLock::new(HashMap::new()));
         Ok(if registry_path.exists() {
-            let data = Self::load_data(&registry_path).await?;
-            let (nodes, node_ids, node_data_cache) =
-                Self::load_nodes(pal.clone(), api_config.clone(), &registry_dir).await?;
-
+            let data = State::load(&registry_path).await?;
+            let scheduler = Scheduler::start(
+                &data.scheduled_tasks,
+                scheduler::NodeTaskHandler(nodes.clone()),
+            );
+            let (loaded_nodes, node_ids, node_data_cache) = Self::load_nodes(
+                pal.clone(),
+                api_config.clone(),
+                &registry_dir,
+                scheduler.tx(),
+            )
+            .await?;
+            *nodes.write().await = loaded_nodes;
             Self {
                 api_config,
                 state: RwLock::new(data),
-                nodes: RwLock::new(nodes),
+                nodes,
+                scheduler,
                 node_ids: RwLock::new(node_ids),
                 node_data_cache: RwLock::new(node_data_cache),
                 registry_path,
                 pal,
             }
         } else {
+            let scheduler = Scheduler::start(&[], scheduler::NodeTaskHandler(nodes.clone()));
             let nodes = Self {
                 api_config,
-                state: RwLock::new(State { machine_index: 0 }),
-                nodes: Default::default(),
+                state: RwLock::new(State {
+                    machine_index: 0,
+                    scheduled_tasks: vec![],
+                }),
+                nodes,
+                scheduler,
                 node_ids: Default::default(),
                 node_data_cache: Default::default(),
                 registry_path,
                 pal,
             };
-            nodes.save_state().await?;
+            nodes.state.read().await.save(&nodes.registry_path).await?;
             nodes
         })
     }
 
-    pub async fn detach(&self) {
+    pub async fn detach(self) {
         let nodes_lock = self.nodes.read().await;
         for (id, node) in nodes_lock.iter() {
-            if let Err(err) = node.write().await.babel_engine.stop_server().await {
-                warn!("error while stopping babel engine server for node {id}: {err:#}")
+            if let Err(err) = node.write().await.detach().await {
+                warn!("error while detaching node {id}: {err:#}")
             }
+        }
+        match self.scheduler.stop().await {
+            Ok(tasks) => {
+                let mut state = self.state.write().await;
+                state.scheduled_tasks = tasks;
+                if let Err(err) = state.save(&self.registry_path).await {
+                    error!("error saving nodes state: {err:#}");
+                }
+            }
+            Err(err) => error!("error stopping scheduler: {err:#}"),
         }
     }
 
@@ -256,7 +321,13 @@ impl<P: Pal + Debug> NodesManager<P> {
             org_id: config.org_id,
         };
 
-        let node = Node::create(self.pal.clone(), self.api_config.clone(), node_data).await?;
+        let node = Node::create(
+            self.pal.clone(),
+            self.api_config.clone(),
+            node_data,
+            self.scheduler.tx(),
+        )
+        .await?;
         self.nodes.write().await.insert(id, RwLock::new(node));
         node_ids.insert(config.name, id);
         self.node_data_cache
@@ -664,21 +735,11 @@ impl<P: Pal + Debug> NodesManager<P> {
         &self.pal
     }
 
-    async fn load_data(registry_path: &Path) -> Result<State> {
-        info!(
-            "Reading nodes common config file: {}",
-            registry_path.display()
-        );
-        let config = fs::read_to_string(&registry_path)
-            .await
-            .context("failed to read nodes registry")?;
-        serde_json::from_str(&config).context("failed to parse nodes registry")
-    }
-
     async fn load_nodes(
         pal: Arc<P>,
         api_config: SharedConfig,
         registry_dir: &Path,
+        tx: mpsc::Sender<Scheduled>,
     ) -> Result<(
         HashMap<Uuid, RwLock<Node<P>>>,
         HashMap<String, Uuid>,
@@ -707,7 +768,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             }
             match NodeData::load(&path)
                 .and_then(|data| async {
-                    Node::attach(pal.clone(), api_config.clone(), data).await
+                    Node::attach(pal.clone(), api_config.clone(), data, tx.clone()).await
                 })
                 .await
             {
@@ -756,20 +817,6 @@ impl<P: Pal + Debug> NodesManager<P> {
         Ok((nodes, node_ids, node_data_cache))
     }
 
-    async fn save_state(&self) -> Result<()> {
-        // We only save the common data file. The individual node data files save themselves.
-        info!(
-            "Writing nodes common config file: {}",
-            self.registry_path.display()
-        );
-        let config = serde_json::to_string(&*self.state.read().await).map_err(into_internal)?;
-        fs::write(&self.registry_path, &*config)
-            .await
-            .map_err(into_internal)?;
-
-        Ok(())
-    }
-
     /// Create and return the next network interface using machine index
     async fn create_network_interface(
         &self,
@@ -786,7 +833,7 @@ impl<P: Pal + Debug> NodesManager<P> {
             .create_net_interface(machine_index, ip, gateway, &self.api_config)
             .await
             .context(format!("failed to create VM bridge bv{}", machine_index))?;
-        let res = self.save_state().await;
+        let res = self.state.read().await.save(&self.registry_path).await;
         if res.is_err() {
             if let Err(err) = iface.delete().await {
                 error!("Can't delete network interface after unsuccessful node create: {err:#}");

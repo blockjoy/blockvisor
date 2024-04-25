@@ -13,8 +13,9 @@ use crate::{
     config::SharedConfig,
     node_connection::RPC_REQUEST_TIMEOUT,
     node_data::{NodeImage, NodeProperties},
-    pal::BabelClient,
-    pal::NodeConnection,
+    pal::{BabelClient, NodeConnection},
+    scheduler,
+    scheduler::Task,
     services,
 };
 use babel_api::{
@@ -34,8 +35,10 @@ use std::{
     fmt::Debug,
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
     time::Duration,
 };
+use tokio::sync::mpsc;
 use tonic::Status;
 use tracing::{debug, error, info, instrument, trace, warn, Level};
 use uuid::Uuid;
@@ -69,9 +72,11 @@ pub struct BabelEngine<N, P> {
     api_config: SharedConfig,
     plugin: P,
     plugin_data_path: PathBuf,
-    node_rx: tokio::sync::mpsc::Receiver<NodeRequest>,
-    node_tx: tokio::sync::mpsc::Sender<NodeRequest>,
+    engine_rx: mpsc::Receiver<EngineRequest>,
+    engine_tx: mpsc::Sender<EngineRequest>,
     server: Option<BabelEngineServer>,
+    scheduler_tx: mpsc::Sender<scheduler::Scheduled>,
+
     capabilities: Vec<String>,
 }
 
@@ -82,22 +87,15 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         api_config: SharedConfig,
         plugin_builder: F,
         plugin_data_path: PathBuf,
+        scheduler_tx: mpsc::Sender<scheduler::Scheduled>,
     ) -> Result<Self> {
-        let (node_tx, node_rx) = tokio::sync::mpsc::channel(16);
+        let (engine_tx, engine_rx) = mpsc::channel(16);
         let engine = Engine {
             node_id: node_info.node_id,
-            tx: node_tx.clone(),
+            tx: engine_tx.clone(),
             params: node_info.properties.clone(),
             plugin_data_path: plugin_data_path.clone(),
         };
-        let server = Some(
-            babel_engine_service::start_server(
-                node_connection.engine_socket_path().to_path_buf(),
-                node_info.clone(),
-                api_config.clone(),
-            )
-            .await?,
-        );
         let plugin = plugin_builder(engine)?;
         let mut babel_engine = Self {
             node_info,
@@ -105,9 +103,10 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             api_config,
             plugin,
             plugin_data_path,
-            node_rx,
-            node_tx,
-            server,
+            engine_rx,
+            engine_tx,
+            server: None,
+            scheduler_tx,
             capabilities: Default::default(),
         };
         babel_engine.capabilities = babel_engine
@@ -116,7 +115,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(babel_engine)
     }
 
-    pub async fn start_server(&mut self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         if self.server.is_none() {
             self.server = Some(
                 babel_engine_service::start_server(
@@ -130,7 +129,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(())
     }
 
-    pub async fn stop_server(&mut self) -> Result<()> {
+    pub async fn stop(&mut self) -> Result<()> {
         if let Some(server) = self.server.take() {
             server.stop().await?;
         }
@@ -143,7 +142,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     ) -> Result<()> {
         let engine = Engine {
             node_id: self.node_info.node_id,
-            tx: self.node_tx.clone(),
+            tx: self.engine_tx.clone(),
             params: self.node_info.properties.clone(),
             plugin_data_path: self.plugin_data_path.clone(),
         };
@@ -298,7 +297,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     /// Clone plugin, move it to separate thread and call given function `f` on it.
-    /// In parallel it run `node_request_handler` until function on plugin is done.
+    /// In parallel, it runs `node_request_handler` until function on plugin is done.
     async fn on_plugin<T: Send + 'static, F: FnOnce(P) -> Result<T> + Send + 'static>(
         &mut self,
         f: F,
@@ -312,23 +311,23 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 run.stop();
                 res
             }),
-            self.node_request_handler(handler_run)
+            self.engine_request_handler(handler_run)
         );
         resp?.with_context(|| format!("node_id={}", self.node_info.node_id))
     }
 
     /// Listen for `NodeRequest`'s, handle them and send results back to plugin.
-    async fn node_request_handler(&mut self, mut run: RunFlag) {
+    async fn engine_request_handler(&mut self, mut run: RunFlag) {
         while run.load() {
-            if let Some(req) = run.select(self.node_rx.recv()).await.flatten() {
-                self.handle_node_req(req).await;
+            if let Some(req) = run.select(self.engine_rx.recv()).await.flatten() {
+                self.handle_engine_req(req).await;
             }
         }
     }
 
-    async fn handle_node_req(&mut self, req: NodeRequest) {
+    async fn handle_engine_req(&mut self, req: EngineRequest) {
         match req {
-            NodeRequest::RunSh {
+            EngineRequest::RunSh {
                 body,
                 timeout,
                 response_tx,
@@ -343,7 +342,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::RunRest {
+            EngineRequest::RunRest {
                 req,
                 timeout,
                 response_tx,
@@ -358,7 +357,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::RunJrpc {
+            EngineRequest::RunJrpc {
                 req,
                 timeout,
                 response_tx,
@@ -373,20 +372,20 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::CreateJob {
+            EngineRequest::CreateJob {
                 job_name,
                 job_config,
                 response_tx,
             } => {
                 let _ = response_tx.send(self.handle_create_job(job_name, job_config).await);
             }
-            NodeRequest::StartJob {
+            EngineRequest::StartJob {
                 job_name,
                 response_tx,
             } => {
                 let _ = response_tx.send(self.handle_start_job(job_name).await);
             }
-            NodeRequest::StopJob {
+            EngineRequest::StopJob {
                 job_name,
                 response_tx,
             } => {
@@ -397,7 +396,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::JobInfo {
+            EngineRequest::JobInfo {
                 job_name,
                 response_tx,
             } => {
@@ -408,7 +407,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::GetJobs { response_tx } => {
+            EngineRequest::GetJobs { response_tx } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_retry!(babel_client.get_jobs(()))
                         .map_err(|err| self.handle_connection_errors(err))
@@ -416,7 +415,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            NodeRequest::RenderTemplate {
+            EngineRequest::RenderTemplate {
                 template,
                 output,
                 params,
@@ -432,6 +431,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     .map(|v| v.into_inner()),
                     Err(err) => Err(err),
                 });
+            }
+            EngineRequest::ScheduleFnCall(task) => {
+                let _ = self.scheduler_tx.send(task).await;
             }
         }
     }
@@ -560,7 +562,7 @@ async fn stop_job(client: &mut BabelClient, job_name: &str) -> Result<(), tonic:
 #[derive(Debug, Clone)]
 pub struct Engine {
     node_id: Uuid,
-    tx: tokio::sync::mpsc::Sender<NodeRequest>,
+    tx: mpsc::Sender<EngineRequest>,
     params: NodeProperties,
     plugin_data_path: PathBuf,
 }
@@ -568,7 +570,7 @@ pub struct Engine {
 type ResponseTx<T> = tokio::sync::oneshot::Sender<T>;
 
 #[derive(Debug)]
-enum NodeRequest {
+enum EngineRequest {
     CreateJob {
         job_name: String,
         job_config: JobConfig,
@@ -610,12 +612,13 @@ enum NodeRequest {
         params: String,
         response_tx: ResponseTx<Result<()>>,
     },
+    ScheduleFnCall(scheduler::Scheduled),
 }
 
 impl babel_api::engine::Engine for Engine {
     fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::CreateJob {
+        self.tx.blocking_send(EngineRequest::CreateJob {
             job_name: job_name.to_string(),
             job_config,
             response_tx,
@@ -625,7 +628,7 @@ impl babel_api::engine::Engine for Engine {
 
     fn start_job(&self, job_name: &str) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::StartJob {
+        self.tx.blocking_send(EngineRequest::StartJob {
             job_name: job_name.to_string(),
             response_tx,
         })?;
@@ -634,7 +637,7 @@ impl babel_api::engine::Engine for Engine {
 
     fn stop_job(&self, job_name: &str) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::StopJob {
+        self.tx.blocking_send(EngineRequest::StopJob {
             job_name: job_name.to_string(),
             response_tx,
         })?;
@@ -643,7 +646,7 @@ impl babel_api::engine::Engine for Engine {
 
     fn job_info(&self, job_name: &str) -> Result<JobInfo> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::JobInfo {
+        self.tx.blocking_send(EngineRequest::JobInfo {
             job_name: job_name.to_string(),
             response_tx,
         })?;
@@ -653,13 +656,14 @@ impl babel_api::engine::Engine for Engine {
     fn get_jobs(&self) -> Result<JobsInfo> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx
-            .blocking_send(NodeRequest::GetJobs { response_tx })?;
+            .blocking_send(EngineRequest::GetJobs { response_tx })?;
         response_rx.blocking_recv()?
     }
 
     fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse> {
+        debug!("run_jrpc: {req:?}");
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::RunJrpc {
+        self.tx.blocking_send(EngineRequest::RunJrpc {
             req,
             timeout,
             response_tx,
@@ -669,7 +673,7 @@ impl babel_api::engine::Engine for Engine {
 
     fn run_rest(&self, req: RestRequest, timeout: Option<Duration>) -> Result<HttpResponse> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::RunRest {
+        self.tx.blocking_send(EngineRequest::RunRest {
             req,
             timeout,
             response_tx,
@@ -679,7 +683,7 @@ impl babel_api::engine::Engine for Engine {
 
     fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<ShResponse> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::RunSh {
+        self.tx.blocking_send(EngineRequest::RunSh {
             body: body.to_string(),
             timeout,
             response_tx,
@@ -699,7 +703,7 @@ impl babel_api::engine::Engine for Engine {
 
     fn render_template(&self, template: &Path, output: &Path, params: &str) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(NodeRequest::RenderTemplate {
+        self.tx.blocking_send(EngineRequest::RenderTemplate {
             template: template.to_path_buf(),
             output: output.to_path_buf(),
             params: params.to_string(),
@@ -728,6 +732,19 @@ impl babel_api::engine::Engine for Engine {
             Level::DEBUG => debug!("node_id: {}|{message}", self.node_id),
             Level::TRACE => trace!("node_id: {}|{message}", self.node_id),
         }
+    }
+
+    fn schedule_fn(&self, function_name: &str, function_param: &str, schedule: &str) -> Result<()> {
+        Ok(self
+            .tx
+            .blocking_send(EngineRequest::ScheduleFnCall(scheduler::Scheduled {
+                node_id: self.node_id,
+                schedule: cron::Schedule::from_str(schedule)?,
+                task: Task::PluginFnCall {
+                    name: function_name.to_string(),
+                    param: function_param.to_string(),
+                },
+            }))?)
     }
 }
 
@@ -942,6 +959,8 @@ mod tests {
                 Path::new(param),
                 &serde_json::to_string(&self.engine.node_params())?,
             )?;
+            self.engine
+                .schedule_fn("scheduled_fn", "scheduled_param", "1 * * * * * *")?;
             self.engine.save_data("custom plugin data")?;
             self.engine.load_data()
         }
@@ -994,6 +1013,7 @@ mod tests {
     struct TestEnv {
         data_path: PathBuf,
         engine: BabelEngine<TestConnection, DummyPlugin>,
+        rx: mpsc::Receiver<scheduler::Scheduled>,
         _async_panic_checker: utils::tests::AsyncPanicChecker,
     }
 
@@ -1009,6 +1029,7 @@ mod tests {
                 ),
                 socket: vm_data_path.join("engine.socket"),
             };
+            let (tx, rx) = mpsc::channel(16);
             let engine = BabelEngine::new(
                 NodeInfo {
                     node_id: Uuid::new_v4(),
@@ -1033,12 +1054,14 @@ mod tests {
                 ),
                 |engine| Ok(DummyPlugin { engine }),
                 data_path.clone(),
+                tx,
             )
             .await?;
 
             Ok(Self {
                 data_path,
                 engine,
+                rx,
                 _async_panic_checker: Default::default(),
             })
         }
@@ -1227,6 +1250,15 @@ mod tests {
             "custom plugin data",
             test_env.engine.call_method("custom_name", "param").await?
         );
+        let expected_task = scheduler::Scheduled {
+            node_id: test_env.engine.node_info.node_id,
+            schedule: cron::Schedule::from_str("1 * * * * * *").unwrap(),
+            task: Task::PluginFnCall {
+                name: "scheduled_fn".to_string(),
+                param: "scheduled_param".to_string(),
+            },
+        };
+        assert_eq!(expected_task, test_env.rx.try_recv().unwrap());
         assert_eq!(
             "custom plugin data",
             fs::read_to_string(test_env.data_path)?
