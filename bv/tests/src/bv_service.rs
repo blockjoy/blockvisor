@@ -329,15 +329,18 @@ async fn test_bv_service_e2e() {
         .await
         .unwrap();
 
-    println!("list node, should be auto-upgraded");
-    let start = std::time::Instant::now();
-    while node_version(&auto_updated_node_id).await != NEW_IMAGE_VERSION {
-        if start.elapsed() < Duration::from_secs(300) {
-            sleep(Duration::from_secs(1)).await;
-        } else {
-            panic!("timeout expired")
-        }
-    }
+    // Note(luuk): nodes no longer auto upgrade by default when a new version
+    // is created. One day we will add a endpoint to do this and we can
+    // reintroduce this test.
+    // println!("list node, should be auto-upgraded");
+    // let start = std::time::Instant::now();
+    // while node_version(&auto_updated_node_id).await != NEW_IMAGE_VERSION {
+    //     if start.elapsed() < Duration::from_secs(300) {
+    //         sleep(Duration::from_secs(1)).await;
+    //     } else {
+    //         panic!("timeout expired")
+    //     }
+    // }
 
     check_upload_and_download(&auto_updated_node_id);
 
