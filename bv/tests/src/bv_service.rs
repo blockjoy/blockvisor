@@ -318,7 +318,7 @@ async fn test_bv_service_e2e() {
     client
         .add_version(with_auth(
             pb::BlockchainServiceAddVersionRequest {
-                id: blockchain.id.clone(),
+                blockchain_id: blockchain.id.clone(),
                 version: NEW_IMAGE_VERSION.to_string(),
                 description: None,
                 node_type: common::NodeType::Validator.into(),
