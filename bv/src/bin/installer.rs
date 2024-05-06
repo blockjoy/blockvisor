@@ -38,7 +38,7 @@ impl installer::BvService for SystemCtl {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    setup_logging()?;
+    setup_logging();
 
     let installer = Installer::new(SysTimer, SystemCtl, &bv_root()).await?;
     if let Err(err) = installer.run().await {

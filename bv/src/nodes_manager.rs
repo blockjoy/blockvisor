@@ -673,7 +673,7 @@ where
             available.vcpu_count += tol.vcpu_count;
         }
 
-        // take into account additional copy of os.img made by firec while creating vm
+        // take into account additional copy of os.img made while creating vm
         let os_image_size_gb =
             blockchain::get_image_download_folder_path(self.pal.bv_root(), image)
                 .join(ROOT_FS_FILE)
@@ -683,7 +683,10 @@ where
                 / 1_000_000_000;
         if requirements.disk_size_gb + os_image_size_gb > available.disk_size_gb {
             command_failed!(Error::Internal(anyhow!(
-                "Not enough disk space to allocate for the node"
+                "Not enough disk space to allocate for the node: required={}+{}, available={}",
+                requirements.disk_size_gb,
+                os_image_size_gb,
+                available.disk_size_gb
             )));
         }
         if requirements.mem_size_mb > available.mem_size_mb {

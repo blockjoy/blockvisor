@@ -1,22 +1,26 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
-use blockvisord::firecracker_machine::FC_BIN_NAME;
+use blockvisord::apptainer_machine::{BABEL_BIN_NAME, CHROOT_DIR};
+use blockvisord::config::ApptainerConfig;
+use blockvisord::linux_apptainer_platform::BareNodeConnection;
 use blockvisord::nodes_manager::NodesDataCache;
 use blockvisord::pal::{AvailableResources, RecoverBackoff};
 use blockvisord::{
+    apptainer_machine,
     blockvisord::BlockvisorD,
     config::{Config, SharedConfig},
-    firecracker_machine,
     node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
     services::{self, blockchain::IMAGES_DIR, kernel::KERNELS_DIR, ApiInterceptor, AuthToken},
     utils, BV_VAR_PATH,
 };
-use bv_utils::{cmd::run_cmd, rpc::DefaultTimeout, run_flag::RunFlag};
+use bv_utils::logging::setup_logging;
+use bv_utils::{rpc::DefaultTimeout, run_flag::RunFlag};
 use eyre::Result;
 use predicates::prelude::predicate;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::{
     fs,
     net::IpAddr,
@@ -30,8 +34,7 @@ use tokio::{task::JoinHandle, time::sleep};
 use tonic::transport::Channel;
 use uuid::Uuid;
 
-/// Global integration tests token. All tests (that may run in parallel) share common FS and net
-/// devices space (tap devices which are created by Firecracker during tests). Each test shall pick
+/// Global integration tests token. All tests (that may run in parallel) share common FS. Each test shall pick
 /// its own token that can be then used to create unique bv_root and net device names, so tests
 /// won't collide.
 pub static TEST_TOKEN: AtomicU32 = AtomicU32::new(0);
@@ -70,7 +73,7 @@ impl TestEnv {
             vars_path.join(KERNELS_DIR),
         )?;
         fs::create_dir_all(bv_root.join("usr"))?;
-        // link to /usr/bin where firecracker and jailer is expected
+        // link to /usr/bin where apptainer is expected
         std::os::unix::fs::symlink(
             Path::new("/").join("usr").join("bin"),
             bv_root.join("usr").join("bin"),
@@ -85,6 +88,7 @@ impl TestEnv {
     }
 
     pub async fn new() -> Result<Self> {
+        setup_logging();
         let api_config = Config {
             id: "host_id".to_owned(),
             name: "host_name".to_string(),
@@ -133,6 +137,16 @@ impl TestEnv {
 
     pub async fn wait_for_running_node(&self, vm_id: &str, timeout: Duration) {
         wait_for_node_status(vm_id, "Running", timeout, Some(&self.bv_root)).await
+    }
+
+    pub async fn wait_for_job_status(
+        &self,
+        vm_id: &str,
+        job: &str,
+        status: &str,
+        timeout: Duration,
+    ) {
+        wait_for_job_status(vm_id, job, status, timeout, Some(&self.bv_root)).await
     }
 
     pub async fn wait_for_node_fail(&self, vm_id: &str, timeout: Duration) {
@@ -258,6 +272,24 @@ pub async fn wait_for_node_status(
     }
 }
 
+pub async fn wait_for_job_status(
+    vm_id: &str,
+    job: &str,
+    status: &str,
+    timeout: Duration,
+    bv_root: Option<&Path>,
+) {
+    println!("wait for {status} '{job}' job");
+    let start = std::time::Instant::now();
+    while let Err(err) = try_bv_run(&["node", "job", vm_id, "info", job], status, bv_root) {
+        if start.elapsed() < timeout {
+            sleep(Duration::from_secs(1)).await;
+        } else {
+            panic!("timeout expired: {err:#}")
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct DummyPlatform {
     pub(crate) bv_root: PathBuf,
@@ -290,8 +322,6 @@ impl Pal for DummyPlatform {
         _config: &SharedConfig,
     ) -> Result<Self::NetInterface> {
         let name = format!("bv{}t{}", index, self.token);
-        // remove remnants after failed tests if any
-        let _ = run_cmd("ip", ["link", "delete", &name, "type", "tuntap"]).await;
         Ok(DummyNet { name, ip, gateway })
     }
 
@@ -310,42 +340,76 @@ impl Pal for DummyPlatform {
         DummyApiConnector
     }
 
-    type NodeConnection = blockvisord::node_connection::NodeConnection;
-
+    type NodeConnection = BareNodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        blockvisord::node_connection::new(
-            &self.build_vm_data_path(node_id),
-            self.babel_path.clone(),
-        )
+        BareNodeConnection::new(apptainer_machine::build_vm_data_path(
+            &self.bv_root,
+            node_id,
+        ))
     }
 
-    type VirtualMachine = firecracker_machine::FirecrackerMachine; // TODO MJR
+    type VirtualMachine = apptainer_machine::ApptainerMachine;
 
     async fn create_vm(
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        blockvisord::linux_fc_platform::prepare_data_image(&self.bv_root, node_data).await?;
-        firecracker_machine::create(&self.bv_root, node_data).await
+        apptainer_machine::new(
+            &self.bv_root,
+            IpAddr::from_str("216.18.214.90")?,
+            24,
+            node_data,
+            self.babel_path.clone(),
+            ApptainerConfig {
+                extra_args: None,
+                host_network: true,
+                cpu_limit: true,
+                memory_limit: true,
+            },
+        )
+        .await?
+        .create()
+        .await
     }
 
     async fn attach_vm(
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine> {
-        firecracker_machine::attach(&self.bv_root, node_data).await
+        apptainer_machine::new(
+            &self.bv_root,
+            IpAddr::from_str("216.18.214.90")?,
+            24,
+            node_data,
+            self.babel_path.clone(),
+            ApptainerConfig {
+                extra_args: None,
+                host_network: true,
+                cpu_limit: true,
+                memory_limit: true,
+            },
+        )
+        .await?
+        .attach()
+        .await
     }
 
     fn get_vm_pids(&self) -> Result<Vec<Pid>> {
-        utils::get_all_processes_pids(FC_BIN_NAME)
+        utils::get_all_processes_pids(BABEL_BIN_NAME)
     }
 
     fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid> {
-        Ok(utils::get_process_pid(FC_BIN_NAME, &vm_id.to_string())?)
+        Ok(utils::get_process_pid(
+            BABEL_BIN_NAME,
+            &self
+                .build_vm_data_path(vm_id)
+                .join(CHROOT_DIR)
+                .to_string_lossy(),
+        )?)
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
-        firecracker_machine::build_vm_data_path(&self.bv_root, id)
+        apptainer_machine::build_vm_data_path(&self.bv_root, id)
     }
 
     fn available_resources(

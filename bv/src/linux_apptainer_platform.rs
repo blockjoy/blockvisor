@@ -280,7 +280,7 @@ pub struct BareNodeConnection {
 }
 
 impl BareNodeConnection {
-    fn new(vm_path: PathBuf) -> Self {
+    pub fn new(vm_path: PathBuf) -> Self {
         Self {
             babel_socket_path: vm_path.join(CHROOT_DIR).join(BABEL_SOCKET_NAME),
             engine_socket_path: vm_path.join(CHROOT_DIR).join(ENGINE_SOCKET_NAME),

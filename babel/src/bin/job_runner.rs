@@ -13,7 +13,7 @@ use bv_utils::{logging::setup_logging, rpc::RPC_REQUEST_TIMEOUT, run_flag::RunFl
 use eyre::{anyhow, bail};
 use std::{env, fs, time::Duration};
 use tokio::join;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 /// Logs are forwarded asap to log server, so we don't need big buffer, only to buffer logs during some
 /// temporary log server unavailability (e.g. while updating).
@@ -25,6 +25,12 @@ const DEFAULT_MAX_RUNNERS: usize = 8;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    setup_logging();
+    info!(
+        "Starting {} {} ...",
+        env!("CARGO_BIN_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
     // use `setsid()` to make sure job runner won't be killed when babel is stopped with SIGINT
     let _ = nix::unistd::setsid();
     let mut args = env::args();
@@ -34,14 +40,6 @@ async fn main() -> eyre::Result<()> {
     if args.count() != 0 {
         bail!("Invalid number of arguments! Expected only one argument: unique job name.");
     }
-    if let Err(err) = setup_logging() {
-        warn!("failed to setup logging: {err:#}");
-    }
-    info!(
-        "Starting {} {} ...",
-        env!("CARGO_BIN_NAME"),
-        env!("CARGO_PKG_VERSION")
-    );
     match babel::pal_config::load().await? {
         PalConfig::Fc => run_job(job_name, VSockConnector).await,
         PalConfig::Chroot => run_job(job_name, UdsConnector).await,
@@ -166,8 +164,7 @@ async fn run_log_handler(
 
     while log_run.load() {
         if let Some(Ok(log)) = log_run.select(log_rx.recv()).await {
-            while let Err(err) = client.send_log(log.clone()).await {
-                debug!("send_log failed with: {err:#}");
+            while client.send_log(log.clone()).await.is_err() {
                 // try to send log every 1s - log server may be temporarily unavailable
                 log_run.select(tokio::time::sleep(LOG_RETRY_INTERVAL)).await;
                 if !log_run.load() {

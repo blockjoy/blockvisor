@@ -6,7 +6,7 @@ After=syslog.target network.target network-online.target
 Requires=tmux.service
 
 [Service]
-Environment="RUST_LOG=info,firec=trace"
+Environment="RUST_LOG=info,blockvisor=debug,babel=debug"
 ExecStart=/usr/bin/blockvisord
 Restart=always
 KillMode=process

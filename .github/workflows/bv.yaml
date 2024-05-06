@@ -34,7 +34,7 @@ jobs:
       - name: Build and Reinstall
         run: |
           make ci-clean
-          make reinstall
+          RUST_LOG="warn" make reinstall
           export AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}
           export AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}
           export AWS_REGION=us-east-1
@@ -82,7 +82,7 @@ jobs:
           export AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}
           export AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}
           export AWS_ACCOUNT_ID=${{ secrets.R2_ACCOUNT_ID }}
-          cargo test -p blockvisord -- --test-threads=9
+          RUST_LOG="warn" cargo test -p blockvisord -- --test-threads=9
       - name: Shutdown test env
         if: always()
         run: >
@@ -111,7 +111,7 @@ jobs:
           override: true
       - name: Test
         run: >
-          cargo test -p babel -p bv_utils
+          RUST_LOG="warn" cargo test -p babel -p bv_utils
 
   protocols_tests:
     name: Protocols Tests
@@ -136,7 +136,7 @@ jobs:
           override: true
       - name: Test
         run: >
-          cargo test -p babel_api
+          RUST_LOG="warn" cargo test -p babel_api
 
   lints:
     name: Lints

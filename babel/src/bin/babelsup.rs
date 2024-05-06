@@ -19,7 +19,7 @@ const VSOCK_SUPERVISOR_PORT: u32 = 41;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    setup_logging()?;
+    setup_logging();
     info!(
         "Starting {} {} ...",
         env!("CARGO_BIN_NAME"),

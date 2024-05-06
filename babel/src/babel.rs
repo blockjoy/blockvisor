@@ -91,9 +91,9 @@ where
         // make sure to stop manager gracefully
         // in case of abnormal server shutdown
         run.stop();
-        manager_handle.await?;
-        let _ = log_service_handle.await;
     }
+    manager_handle.await?;
+    let _ = log_service_handle.await;
     res
 }
 

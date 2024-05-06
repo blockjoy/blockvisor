@@ -6,8 +6,8 @@ use crate::src::utils::{
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::{
+    apptainer_machine::BABEL_BIN_NAME,
     config::{Config, SharedConfig},
-    firecracker_machine::FC_BIN_NAME,
     nodes_manager::NodesManager,
     services,
     services::api::{self, common, pb},
@@ -132,41 +132,6 @@ async fn test_bv_cmd_jobs() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
-async fn test_bv_cmd_logs() -> Result<()> {
-    let mut test_env = TestEnv::new().await?;
-    test_env.run_blockvisord(RunFlag::default()).await?;
-    println!("create a node");
-    let (vm_id, _) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
-    println!("create vm_id: {vm_id}");
-
-    println!("start node");
-    test_env.bv_run(&["node", "start", vm_id], "Started node");
-
-    println!("wait for logs");
-    let start = std::time::Instant::now();
-    while let Err(err) = test_env.try_bv_run(
-        &["node", "logs", vm_id],
-        "Testing entry_point not configured, but parametrized with anything!",
-    ) {
-        if start.elapsed() < Duration::from_secs(15) {
-            sleep(Duration::from_secs(1)).await;
-        } else {
-            panic!("timeout expired: {err:#}")
-        }
-    }
-
-    println!("get babel logs");
-    test_env.bv_run(
-        &["node", "babel-logs", "-m", "256", vm_id],
-        "Reading job config file: /var/lib/babel/jobs/config/echo.cfg",
-    );
-
-    println!("stop started node");
-    test_env.bv_run(&["node", "stop", vm_id], "Stopped node");
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
     let mut run = RunFlag::default();
@@ -186,6 +151,9 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
 
     println!("restart stopped node");
     test_env.bv_run(&["node", "start", vm_id], "Started node");
+    test_env
+        .wait_for_job_status(vm_id, "echo", "Running", Duration::from_secs(5))
+        .await;
 
     println!("query metrics");
     test_env.bv_run(&["node", "metrics", vm_id], "In consensus:          false");
@@ -241,7 +209,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     println!("list running node");
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
-    let process_id = utils::get_process_pid(FC_BIN_NAME, vm_id).unwrap();
+    let process_id = utils::get_process_pid(BABEL_BIN_NAME, vm_id).unwrap();
     println!("impolitely kill node with process id {process_id}");
     run_cmd("kill", ["-9", &process_id.to_string()])
         .await
@@ -303,7 +271,7 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
     let test_env = TestEnv::new().await?;
     let host_id = Uuid::new_v4().to_string();
