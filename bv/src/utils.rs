@@ -55,7 +55,7 @@ pub enum GetProcessIdError {
 pub fn get_process_pid(process_name: &str, cmd: &str) -> Result<Pid, GetProcessIdError> {
     let mut sys = System::new();
     debug!("Retrieving pid for process `{process_name}` and cmd like `{cmd}`");
-    sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::everything()));
+    sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()));
     let processes: Vec<_> = sys
         .processes_by_name(process_name)
         .filter(|&process| {
@@ -75,7 +75,7 @@ pub fn get_process_pid(process_name: &str, cmd: &str) -> Result<Pid, GetProcessI
 pub fn get_all_processes_pids(process_name: &str) -> Result<Vec<Pid>> {
     let mut sys = System::new();
     debug!("Retrieving pids for processes of `{process_name}`");
-    sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::everything()));
+    sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()));
     Ok(sys
         .processes_by_name(process_name)
         .filter(|&process| {

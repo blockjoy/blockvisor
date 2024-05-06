@@ -38,7 +38,7 @@ use tonic::transport::{Channel, Server};
 use tracing::{debug, error, info, warn};
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
-const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+const RECOVERY_CHECK_INTERVAL: Duration = Duration::from_secs(15);
 const INFO_UPDATE_INTERVAL: Duration = Duration::from_secs(30);
 const CLUSTER_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 

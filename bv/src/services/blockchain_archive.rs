@@ -114,7 +114,7 @@ pub async fn retrieve_upload_manifest(
             },
             // let make timeout proportional to number of slots
             // it is expected that 1000 of slots should be downloaded in lest thant 5s
-            services::DEFAULT_REQUEST_TIMEOUT + Duration::from_secs(slots as u64 / 200),
+            services::DEFAULT_API_REQUEST_TIMEOUT + Duration::from_secs(slots as u64 / 200),
         ))
     )
     .with_context(|| {

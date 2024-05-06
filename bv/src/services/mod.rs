@@ -16,8 +16,8 @@ pub mod blockchain_archive;
 pub mod kernel;
 pub mod mqtt;
 
-pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEFAULT_API_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEFAULT_API_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub const TOKEN_EXPIRED_MESSAGE: &str = "TOKEN_EXPIRED";
 lazy_static::lazy_static! {
     pub static ref NON_RETRIABLE: Vec<tonic::Code> = vec![tonic::Code::Unauthenticated, tonic::Code::InvalidArgument,
@@ -62,7 +62,7 @@ pub async fn request_refresh_token(
 ) -> Result<pb::AuthServiceRefreshResponse, Status> {
     let channel = Endpoint::from_str(url)
         .map_err(|err| Status::internal(format!("{err:#}")))?
-        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .connect_timeout(DEFAULT_API_CONNECT_TIMEOUT)
         .connect_lazy();
     let req = pb::AuthServiceRefreshRequest {
         token: token.to_string(),
@@ -70,7 +70,7 @@ pub async fn request_refresh_token(
     };
     let mut client = pb::auth_service_client::AuthServiceClient::with_interceptor(
         channel,
-        DefaultTimeout(DEFAULT_REQUEST_TIMEOUT),
+        DefaultTimeout(DEFAULT_API_REQUEST_TIMEOUT),
     );
 
     Ok(with_retry!(client.refresh(req.clone()))?.into_inner())
@@ -156,13 +156,13 @@ where
     let url = config.read().await.blockjoy_api_url;
     let endpoint = Endpoint::from_str(&url)
         .map_err(|err| Status::internal(format!("{err:#}")))?
-        .connect_timeout(DEFAULT_CONNECT_TIMEOUT);
+        .connect_timeout(DEFAULT_API_CONNECT_TIMEOUT);
     let channel = Endpoint::connect_lazy(&endpoint);
     Ok(with_interceptor(
         channel,
         ApiInterceptor(
             config.token().await?,
-            DefaultTimeout(DEFAULT_REQUEST_TIMEOUT),
+            DefaultTimeout(DEFAULT_API_REQUEST_TIMEOUT),
         ),
     ))
 }

@@ -5,7 +5,7 @@ use blockvisord::{
     linux_platform::bv_root,
     self_updater,
     services::api::pb,
-    services::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT},
+    services::{DEFAULT_API_CONNECT_TIMEOUT, DEFAULT_API_REQUEST_TIMEOUT},
     utils, BV_VAR_PATH,
 };
 use bv_utils::{
@@ -188,8 +188,8 @@ async fn main() -> Result<()> {
 
         let mut client = pb::host_service_client::HostServiceClient::connect(
             Endpoint::from_shared(cmd_args.blockjoy_api_url.clone())?
-                .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-                .timeout(DEFAULT_REQUEST_TIMEOUT),
+                .connect_timeout(DEFAULT_API_CONNECT_TIMEOUT)
+                .timeout(DEFAULT_API_REQUEST_TIMEOUT),
         )
         .await?;
 

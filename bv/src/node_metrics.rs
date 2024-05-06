@@ -112,9 +112,24 @@ pub async fn collect_metric<N: NodeConnection>(
 ) -> Option<Metric> {
     let application_status = timeout(babel_engine.application_status()).await.ok();
     match application_status {
-        Some(ApplicationStatus::Initializing)
-        | Some(ApplicationStatus::Downloading)
-        | Some(ApplicationStatus::Uploading) => None,
+        None | Some(ApplicationStatus::Downloading) | Some(ApplicationStatus::Uploading) => {
+            let jobs = timeout(babel_engine.get_jobs())
+                .await
+                .ok()
+                .unwrap_or_default();
+
+            Some(Metric {
+                // these are expected in every chain
+                height: None,
+                block_age: None,
+                staking_status: None,
+                consensus: None,
+                application_status,
+                sync_status: None,
+                jobs,
+            })
+        }
+        Some(ApplicationStatus::Initializing) => None,
         _ => {
             let height = match babel_engine.has_capability("height") {
                 true => timeout(babel_engine.height()).await.ok(),
