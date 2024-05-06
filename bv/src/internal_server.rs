@@ -722,15 +722,24 @@ where
         )
         .await
         .with_context(|| "error connecting to api")?;
-        let blockchains = blockchain_client
-            .list(pb::BlockchainServiceListRequest { org_id: None })
+        let mut blockchains = blockchain_client
+            .list(pb::BlockchainServiceListRequest {
+                org_ids: vec![],
+                offset: 0,
+                limit: 16,
+                search: Some(pb::BlockchainSearch {
+                    operator: common::SearchOperator::And.into(),
+                    id: None,
+                    name: Some(protocol.clone()),
+                }),
+                sort: vec![],
+            })
             .await
             .with_context(|| "can't fetch blockchains list")?
             .into_inner();
         Ok(blockchains
             .blockchains
-            .into_iter()
-            .find(|blockchain| blockchain.name.to_lowercase() == protocol)
+            .pop()
             .ok_or(anyhow!("blockchain id not found for {protocol}"))?
             .id)
     }

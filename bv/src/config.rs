@@ -73,7 +73,7 @@ impl SharedConfig {
                     ))
                 })??;
 
-                write_lock.token = resp.token.clone();
+                write_lock.token.clone_from(&resp.token);
                 write_lock.refresh_token = resp.refresh;
                 resp.token
             };

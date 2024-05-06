@@ -206,7 +206,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
                 if force {
                     kill_all_processes(
                         &self.job_runner_bin_path,
-                        &[&name],
+                        &[name],
                         Duration::from_secs(
                             job.config
                                 .shutdown_timeout_secs
