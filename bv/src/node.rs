@@ -1531,9 +1531,7 @@ pub mod tests {
         let server = test_env.start_server(babel_mock).await;
         node.data.initialized = false;
         let start_err = format!("{:#}", node.start().await.unwrap_err());
-        assert!(start_err.starts_with(
-            "node_id=4931bafa-92d9-4521-9fc6-a77eee047530: Rhai function 'init' returned error:"
-        ));
+        assert!(start_err.starts_with(r#"node_id=4931bafa-92d9-4521-9fc6-a77eee047530: status: Internal, message: "error on init""#));
         assert_eq!(NodeStatus::Failed, node.data.expected_status);
         assert!(!node.data.initialized);
         assert_eq!(None, node.data.started_at);

@@ -401,14 +401,19 @@ fn parse_out_node_id(image: &str, std_out: String) -> String {
 }
 
 fn check_upload_and_download(node_id: &str) {
+    println!("cleanup previous download if any");
+    sh_inside(
+        node_id,
+        "rm -rf /blockjoy/.babel_jobs; rm -rf /blockjoy/blockchain_data/*",
+    );
     println!("create dummy blockchain data");
-    sh_inside(node_id,"mkdir -p /blockjoy/miner/data/sub /blockjoy/miner/data/some_subdir && touch /blockjoy/miner/data/.gitignore /blockjoy/miner/data/some_subdir/something_to_ignore.txt /blockjoy/miner/data/empty_file");
-    sh_inside(node_id,"head -c 43210 < /dev/urandom > /blockjoy/miner/data/file_a && head -c 654321 < /dev/urandom > /blockjoy/miner/data/file_b && head -c 432 < /dev/urandom > /blockjoy/miner/data/file_c && head -c 257 < /dev/urandom > /blockjoy/miner/data/sub/file_d && head -c 128 < /dev/urandom > /blockjoy/miner/data/sub/file_e && head -c 43210 < /dev/urandom > /blockjoy/miner/data/some_subdir/any.bak");
-    let sha_a = sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_a");
-    let sha_b = sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_b");
-    let sha_c = sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_c");
-    let sha_d = sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_d");
-    let sha_e = sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_e");
+    sh_inside(node_id,"mkdir -p /blockjoy/blockchain_data/sub /blockjoy/blockchain_data/some_subdir && touch /blockjoy/blockchain_data/.gitignore /blockjoy/blockchain_data/some_subdir/something_to_ignore.txt /blockjoy/blockchain_data/empty_file");
+    sh_inside(node_id,"head -c 43210 < /dev/urandom > /blockjoy/blockchain_data/file_a && head -c 654321 < /dev/urandom > /blockjoy/blockchain_data/file_b && head -c 432 < /dev/urandom > /blockjoy/blockchain_data/file_c && head -c 257 < /dev/urandom > /blockjoy/blockchain_data/sub/file_d && head -c 128 < /dev/urandom > /blockjoy/blockchain_data/sub/file_e && head -c 43210 < /dev/urandom > /blockjoy/blockchain_data/some_subdir/any.bak");
+    let sha_a = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_a");
+    let sha_b = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_b");
+    let sha_c = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_c");
+    let sha_d = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/sub/file_d");
+    let sha_e = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/sub/file_e");
 
     println!("start upload job");
     test_env::bv_run(&["node", "run", "upload", node_id], "", None);
@@ -430,7 +435,7 @@ fn check_upload_and_download(node_id: &str) {
     println!("cleanup blockchain data");
     sh_inside(
         node_id,
-        "rm -rf /blockjoy/miner/data/* /blockjoy/miner/data/.gitignore",
+        "rm -rf /blockjoy/blockchain_data/* /blockjoy/blockchain_data/.gitignore",
     );
 
     println!("start download job");
@@ -464,35 +469,35 @@ fn check_upload_and_download(node_id: &str) {
     println!("verify downloaded data");
     assert_eq!(
         sha_a.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_a").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_a").trim()
     );
     assert_eq!(
         sha_b.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_b").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_b").trim()
     );
     assert_eq!(
         sha_c.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/miner/data/file_c").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_c").trim()
     );
     assert_eq!(
         sha_d.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_d").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/sub/file_d").trim()
     );
     assert_eq!(
         sha_e.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/miner/data/sub/file_e").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/sub/file_e").trim()
     );
     sh_inside(
         node_id,
-        "if [ -f /blockjoy/miner/data/.gitignore ]; then exit 1; fi",
+        "if [ -f /blockjoy/blockchain_data/.gitignore ]; then exit 1; fi",
     );
     sh_inside(
         node_id,
-        "if [ -f /blockjoy/miner/data/some_subdir/something_to_ignore.txt ]; then exit 1; fi",
+        "if [ -f /blockjoy/blockchain_data/some_subdir/something_to_ignore.txt ]; then exit 1; fi",
     );
     sh_inside(
         node_id,
-        "if [ ! -f /blockjoy/miner/data/empty_file ]; then exit 1; fi",
+        "if [ ! -f /blockjoy/blockchain_data/empty_file ]; then exit 1; fi",
     );
 }
 

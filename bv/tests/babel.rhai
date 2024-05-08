@@ -57,32 +57,64 @@ const METADATA = #{
 
 const API_HOST = "http://localhost:4467/";
 
-fn init(keys) {
-    let res = run_sh("echo 'noop for testing'");
-    if res.exit_code != 0  {
-        throw res;
-    }
-    let param = sanitize_sh_param(node_params().TESTING_PARAM);
-    create_job("upload", #{
-        job_type: #{
-            run_sh: "echo dummy_upload",
-        },
-        restart: "never",
-        shutdown_signal: "SIGINT",
-    });
-    create_job("echo", #{
-        job_type: #{
-            run_sh: "echo \"Testing entry_point not configured, but parametrized with " + param + "!\"",
-        },
-        restart: #{
-            always: #{
+const BABEL_VERSION = "0.9.0";
+const PLUGIN_CONFIG = #{
+    init: #{
+        commands: [
+            `echo 'noop for testing'`,
+        ],
+        jobs: [
+            #{
+                name: "upload",
+                run_sh: "echo dummy_upload",
+            },
+        ],
+    },
+    services: [
+        #{
+            name: "echo",
+            run_sh: "echo \"Testing entry_point not configured, but parametrized with " + sanitize_sh_param(node_params().TESTING_PARAM) + "!\"",
+            restart_config: #{
                 backoff_timeout_ms: 60000,
                 backoff_base_ms: 10000,
             },
+            shutdown_signal: "SIGINT",
         },
-        shutdown_signal: "SIGINT",
-    });
-    start_job("echo");
+    ],
+    download: #{
+        restart_config: #{
+            backoff_timeout_ms: 60000,
+            backoff_base_ms: 100,
+            max_retries: 1,
+        },
+    },
+    alternative_download: #{
+        run_sh: `echo alternative_download`,
+    },
+    upload: #{
+        exclude: [
+            "**/something_to_ignore.*",
+            ".gitignore",
+            "some_subdir/*.bak",
+        ],
+        compression: #{
+            ZSTD: 5,
+        },
+        number_of_chunks: 9,
+        url_expires_secs: 900,
+        data_version: 1,
+        restart_config: #{
+            backoff_timeout_ms: 60000,
+            backoff_base_ms: 100,
+            max_retries: 1,
+        },
+    },
+};
+
+/// Returns blockchain application status.
+/// SHALL be implemented
+fn application_status() {
+    "broadcasting"
 }
 
 fn height() {
@@ -105,16 +137,16 @@ fn consensus() {
     false
 }
 
-fn application_status() {
-    "broadcasting"
-}
-
 fn sync_status() {
     "synced"
 }
 
 fn staking_status() {
     "staking"
+}
+
+fn info(param) {
+    param
 }
 
 fn stop_babelsup(param) {
@@ -136,22 +168,10 @@ fn disable_babelsup(param) {
     run_sh("systemctl disable babelsup").stdout
 }
 
-fn info(param) {
-    let info;
-    try {
-        info = load_data()
-    } catch {
-        info = parse_json(run_jrpc(#{ host: global::API_HOST, method: "info_summary"}).body).result.to_string();
-        save_data(info);
-    };
-    info
-}
-
 fn download(param) {
     start_job("download", #{
         job_type: #{
             download: #{
-                destination: "/blockjoy/miner/data",
             }
         },
         restart: #{
@@ -172,35 +192,6 @@ fn sh_inside(param) {
         throw res.stderr;
     }
     res.stdout
-}
-
-fn upload(param) {
-    start_job("upload", #{
-        job_type: #{
-            upload: #{
-                source: "/blockjoy/miner/data",
-                exclude: [
-                    "**/something_to_ignore*",
-                    ".gitignore",
-                    "some_subdir/*.bak",
-                ],
-                compression: #{
-                    ZSTD: 5,
-                },
-                number_of_chunks: 9,
-                url_expires_secs: 900,
-                data_version: 1,
-            }
-        },
-        restart: #{
-            on_failure: #{
-                backoff_timeout_ms: 600000,
-                backoff_base_ms: 100,
-                max_retries: 1,
-            },
-        },
-    });
-    "Upload started!"
 }
 
 fn start_progress_job(name) {
