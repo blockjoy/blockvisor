@@ -1044,6 +1044,10 @@ mod tests {
             .returning(|_| Ok(()));
 
         babel
+            .expect_is_download_completed()
+            .once()
+            .returning(|| Ok(false));
+        babel
             .expect_create_job()
             .with(
                 predicate::eq("download"),

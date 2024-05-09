@@ -65,6 +65,9 @@ pub trait Engine {
 
     /// Schedule function call according to given cron like schedule.
     fn schedule_fn(&self, function_name: &str, function_param: &str, schedule: &str) -> Result<()>;
+
+    /// Checks if blockchain data has been already downloaded.
+    fn is_download_completed(&self) -> Result<bool>;
 }
 
 /// Structure describing where decompressed data shall be written to and how many bytes.

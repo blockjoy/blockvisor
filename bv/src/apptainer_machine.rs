@@ -242,6 +242,7 @@ impl ApptainerMachine {
         let mut cmd = Command::new(APPTAINER_BIN_NAME);
         cmd.args([
             "exec",
+            "--pid",
             &format!("instance://{}", self.vm_id),
             BABEL_BIN_NAME,
             &self.chroot_dir.to_string_lossy(),

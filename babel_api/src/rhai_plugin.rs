@@ -392,25 +392,29 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
         } else {
             let config: PluginConfig = self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?;
             let init_jobs = self.run_actions(config.init, vec![])?;
-            if let Err(err) = self.create_and_start_job(
-                DOWNLOAD_JOB_NAME,
-                plugin_config::build_download_job_config(config.download, init_jobs.clone()),
-            ) {
-                if let Some(alternative_download) = config.alternative_download {
-                    self.create_and_start_job(
-                        DOWNLOAD_JOB_NAME,
-                        plugin_config::build_alternative_download_job_config(
-                            alternative_download,
-                            init_jobs,
-                        ),
-                    )?;
-                } else {
-                    bail!("Download failed with no alternative provided: {err:#}");
+            if let Ok(true) = self.babel_engine.is_download_completed() {
+                self.start_services(config.services, init_jobs)?;
+            } else {
+                if let Err(err) = self.create_and_start_job(
+                    DOWNLOAD_JOB_NAME,
+                    plugin_config::build_download_job_config(config.download, init_jobs.clone()),
+                ) {
+                    if let Some(alternative_download) = config.alternative_download {
+                        self.create_and_start_job(
+                            DOWNLOAD_JOB_NAME,
+                            plugin_config::build_alternative_download_job_config(
+                                alternative_download,
+                                init_jobs,
+                            ),
+                        )?;
+                    } else {
+                        bail!("Download failed with no alternative provided: {err:#}");
+                    }
                 }
+                let post_download_jobs =
+                    self.run_actions(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
+                self.start_services(config.services, post_download_jobs)?;
             }
-            let post_download_jobs =
-                self.run_actions(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
-            self.start_services(config.services, post_download_jobs)?;
             Ok(())
         }
     }
@@ -727,6 +731,7 @@ mod tests {
             fn load_data(&self) -> Result<String>;
             fn log(&self, level: Level, message: &str);
             fn schedule_fn(&self, function_name: &str, function_param: &str, schedule: &str) -> Result<()>;
+            fn is_download_completed(&self) -> Result<bool>;
         }
     }
 
@@ -1401,6 +1406,10 @@ mod tests {
             .with(predicate::eq("init_job"))
             .once()
             .returning(|_| Ok(()));
+        babel
+            .expect_is_download_completed()
+            .once()
+            .returning(|| Ok(false));
         babel
             .expect_create_job()
             .with(

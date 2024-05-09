@@ -6,6 +6,7 @@ use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
     job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
+    jobs,
     jobs::{load_job_data, save_job_data},
     pal::BabelEngineConnector,
 };
@@ -53,6 +54,12 @@ pub fn cleanup_job(meta_dir: &Path, destination_dir: &Path) -> Result<()> {
         remove_manifest(&manifest_path)?;
     }
     Ok(())
+}
+
+pub fn is_download_completed() -> bool {
+    jobs::ARCHIVE_JOBS_META_DIR
+        .join(COMPLETED_FILENAME)
+        .exists()
 }
 
 pub fn remove_manifest(parts_path: &Path) -> Result<()> {

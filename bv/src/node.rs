@@ -949,6 +949,10 @@ pub mod tests {
                 &self,
                 request: Request<(PathBuf, Option<Vec<String>>)>,
             ) -> Result<Response<u32>, Status>;
+            async fn is_download_completed(
+                &self,
+                request: Request<()>,
+            ) -> Result<Response<bool>, Status>;
             type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
             async fn get_logs(
                 &self,
@@ -1535,7 +1539,7 @@ pub mod tests {
             .returning(|_| Err(Status::internal("error on init")));
         babel_mock
             .expect_run_sh()
-            .once()
+            .times(2)
             .in_sequence(&mut seq)
             .returning(|_| {
                 Ok(Response::new(ShResponse {
@@ -1544,6 +1548,9 @@ pub mod tests {
                     stderr: "".to_string(),
                 }))
             });
+        babel_mock
+            .expect_is_download_completed()
+            .returning(|_| Ok(Response::new(true)));
         babel_mock
             .expect_start_job()
             .returning(|_| Ok(Response::new(())));

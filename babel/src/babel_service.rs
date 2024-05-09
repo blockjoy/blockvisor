@@ -1,5 +1,6 @@
 use crate::{
-    apply_babel_config, jobs_manager::JobsManagerClient, pal::BabelPal, utils, utils::sources_list,
+    apply_babel_config, download_job::is_download_completed, jobs_manager::JobsManagerClient,
+    pal::BabelPal, utils, utils::sources_list,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -299,6 +300,10 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
                 Status::internal(format!("failed to calculate data size: {err:#}"))
             })?,
         ))
+    }
+
+    async fn is_download_completed(&self, _request: Request<()>) -> Result<Response<bool>, Status> {
+        Ok(Response::new(is_download_completed()))
     }
 
     type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;

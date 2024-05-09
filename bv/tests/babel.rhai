@@ -62,6 +62,7 @@ const PLUGIN_CONFIG = #{
     init: #{
         commands: [
             `echo 'noop for testing'`,
+            `mkdir -p /blockjoy/.babel_jobs/ && touch /blockjoy/.babel_jobs/download.completed`,
         ],
         jobs: [
             #{
@@ -81,16 +82,6 @@ const PLUGIN_CONFIG = #{
             shutdown_signal: "SIGINT",
         },
     ],
-    download: #{
-        restart_config: #{
-            backoff_timeout_ms: 60000,
-            backoff_base_ms: 100,
-            max_retries: 1,
-        },
-    },
-    alternative_download: #{
-        run_sh: `echo alternative_download`,
-    },
     upload: #{
         exclude: [
             "**/something_to_ignore.*",

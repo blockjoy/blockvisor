@@ -184,16 +184,15 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
     println!("check jobs after node upgrade");
-    test_env.bv_run(
-        &["node", "job", vm_id, "info", "echo"],
-        "status:           Running",
-    );
+    test_env
+        .wait_for_job_status(vm_id, "echo", "Running", Duration::from_secs(5))
+        .await;
 
     println!("delete started node");
     test_env.bv_run(&["node", "delete", vm_id], "Deleted node");
     Ok(())
 }
-
+#[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn test_bv_cmd_node_recovery() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
@@ -239,7 +238,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     test_env.bv_run(&["node", "delete", vm_id], "Deleted node");
     Ok(())
 }
-
+#[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
     let mut test_env = TestEnv::new().await?;

@@ -435,6 +435,14 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             EngineRequest::ScheduleFnCall(task) => {
                 let _ = self.scheduler_tx.send(task).await;
             }
+            EngineRequest::IsDownloadCompleted { response_tx } => {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
+                    Ok(babel_client) => with_retry!(babel_client.is_download_completed(()))
+                        .map_err(|err| self.handle_connection_errors(err))
+                        .map(|v| v.into_inner()),
+                    Err(err) => Err(err),
+                });
+            }
         }
     }
 
@@ -457,6 +465,21 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         mut job_config: JobConfig,
     ) -> std::result::Result<(), Error> {
         let babel_client = self.node_connection.babel_client().await?;
+        if let JobType::Download { .. } = &job_config.job_type {
+            if with_retry!(babel_client.is_download_completed(()))
+                .with_context(|| "is_download_completed")?
+                .into_inner()
+            {
+                // create dummy download job if data are already there
+                job_config = JobConfig {
+                    job_type: JobType::RunSh("echo download_completed".to_string()),
+                    restart: babel_api::engine::RestartPolicy::Never,
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: None,
+                };
+            }
+        }
         match &mut job_config.job_type {
             JobType::Download { manifest, .. } => {
                 if manifest.is_none() {
@@ -613,6 +636,9 @@ enum EngineRequest {
         response_tx: ResponseTx<Result<()>>,
     },
     ScheduleFnCall(scheduler::Scheduled),
+    IsDownloadCompleted {
+        response_tx: ResponseTx<Result<bool>>,
+    },
 }
 
 impl babel_api::engine::Engine for Engine {
@@ -746,6 +772,13 @@ impl babel_api::engine::Engine for Engine {
                 },
             }))?)
     }
+
+    fn is_download_completed(&self) -> Result<bool> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .blocking_send(EngineRequest::IsDownloadCompleted { response_tx })?;
+        response_rx.blocking_recv()?
+    }
 }
 
 /// If the character is allowed, escapes a character into something we can use for a
@@ -852,6 +885,10 @@ mod tests {
                 &self,
                 request: Request<(PathBuf, Option<Vec<String>>)>,
             ) -> Result<Response<u32>, Status>;
+            async fn is_download_completed(
+                &self,
+                request: Request<()>,
+            ) -> Result<Response<bool>, Status>;
             type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
             async fn get_logs(
                 &self,

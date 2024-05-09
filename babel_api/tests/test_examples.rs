@@ -240,6 +240,10 @@ fn test_plugin_config() -> eyre::Result<()> {
         .with(predicate::eq("init_job"))
         .once()
         .returning(|_| Ok(()));
+    babel
+        .expect_is_download_completed()
+        .once()
+        .returning(|| Ok(false));
 
     babel
         .expect_create_job()
