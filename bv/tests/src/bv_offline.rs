@@ -17,6 +17,7 @@ use bv_utils::{cmd::run_cmd, run_flag::RunFlag, system::is_process_running};
 use eyre::{bail, Result};
 use std::{net::ToSocketAddrs, sync::Arc};
 use tokio::{
+    fs,
     sync::Mutex,
     time::{sleep, Duration},
 };
@@ -192,7 +193,7 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     test_env.bv_run(&["node", "delete", vm_id], "Deleted node");
     Ok(())
 }
-#[ignore]
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn test_bv_cmd_node_recovery() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
@@ -208,8 +209,17 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     println!("list running node");
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
-    let process_id = utils::get_process_pid(BABEL_BIN_NAME, vm_id).unwrap();
-    println!("impolitely kill node with process id {process_id}");
+    let process_id = utils::get_process_pid(
+        BABEL_BIN_NAME,
+        &blockvisord::apptainer_machine::build_vm_data_path(
+            &test_env.bv_root,
+            Uuid::parse_str(vm_id).unwrap(),
+        )
+        .join(blockvisord::apptainer_machine::CHROOT_DIR)
+        .to_string_lossy(),
+    )
+    .unwrap();
+    println!("kill babel - break node");
     run_cmd("kill", ["-9", &process_id.to_string()])
         .await
         .unwrap();
@@ -224,9 +234,10 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
         .wait_for_running_node(vm_id, Duration::from_secs(60))
         .await;
 
-    println!("stop babelsup - break node");
-    // it may fail because it stop babalsup so ignore result
-    let _ = test_env.try_bv_run(&["node", "run", "stop_babelsup", vm_id], "");
+    println!("stop container - break node");
+    run_cmd("apptainer", ["instance", "stop", vm_id])
+        .await
+        .unwrap();
 
     println!("list running node before recovery");
     test_env.bv_run(&["node", "status", vm_id], "Failed");
@@ -238,11 +249,17 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     test_env.bv_run(&["node", "delete", vm_id], "Deleted node");
     Ok(())
 }
-#[ignore]
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
-    test_env.run_blockvisord(RunFlag::default()).await?;
+    let mut pal = test_env.build_dummy_platform();
+    let babel_link = test_env.bv_root.join("babel");
+    fs::symlink(&pal.babel_path, &babel_link).await.unwrap();
+    pal.babel_path.clone_from(&babel_link);
+    test_env
+        .run_blockvisord_with_pal(RunFlag::default(), pal)
+        .await?;
 
     println!("create a node");
     let (vm_id, _) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
@@ -254,10 +271,21 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
     println!("list running node");
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
-    println!("disable and stop babelsup - permanently break node");
-    test_env.bv_run(&["node", "run", "disable_babelsup", vm_id], "");
-    // it may fail because it stops babalsup so ignore result
-    let _ = test_env.try_bv_run(&["node", "run", "stop_babelsup", vm_id], "");
+    println!("break babel - permanently break node");
+    fs::remove_file(babel_link).await.unwrap();
+    let vm_rootfs = blockvisord::apptainer_machine::build_vm_data_path(
+        &test_env.bv_root,
+        Uuid::parse_str(vm_id).unwrap(),
+    )
+    .join(blockvisord::apptainer_machine::CHROOT_DIR);
+    let process_id = utils::get_process_pid(BABEL_BIN_NAME, &vm_rootfs.to_string_lossy()).unwrap();
+    run_cmd("kill", ["-9", &process_id.to_string()])
+        .await
+        .unwrap();
+    // wait until process is actually killed
+    while is_process_running(process_id) {
+        sleep(Duration::from_millis(10)).await;
+    }
 
     println!("list running node before recovery");
     test_env.bv_run(&["node", "status", vm_id], "Failed");

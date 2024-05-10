@@ -140,25 +140,6 @@ fn info(param) {
     param
 }
 
-fn stop_babelsup(param) {
-    run_sh("systemctl stop babelsup");
-    for line in run_sh("ps -e|grep babel").stdout.split("\n") {
-        let parts = line.split();
-        if !parts.is_empty() {
-            let pid = parts[0];
-            pid.trim();
-            if !pid.is_empty() {
-                run_sh("kill -9 " + pid);
-            }
-        }
-    }
-    ""
-}
-
-fn disable_babelsup(param) {
-    run_sh("systemctl disable babelsup").stdout
-}
-
 fn download(param) {
     start_job("download", #{
         job_type: #{

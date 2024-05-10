@@ -117,11 +117,16 @@ impl TestEnv {
     }
 
     pub async fn run_blockvisord(&mut self, run: RunFlag) -> Result<JoinHandle<Result<()>>> {
-        let blockvisord = BlockvisorD::new(
-            self.build_dummy_platform(),
-            Config::load(&self.bv_root).await?,
-        )
-        .await?;
+        self.run_blockvisord_with_pal(run, self.build_dummy_platform())
+            .await
+    }
+
+    pub async fn run_blockvisord_with_pal(
+        &mut self,
+        run: RunFlag,
+        pal: DummyPlatform,
+    ) -> Result<JoinHandle<Result<()>>> {
+        let blockvisord = BlockvisorD::new(pal, Config::load(&self.bv_root).await?).await?;
         self.api_config.blockvisor_port = blockvisord.local_addr()?.port();
         self.api_config.save(&self.bv_root).await?;
         Ok(tokio::spawn(blockvisord.run(run)))

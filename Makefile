@@ -82,11 +82,8 @@ ci-clean:
 	umount -A --recursive /var/lib/blockvisor/bare/*/os || true
 	umount -A --recursive /tmp/*/var/lib/blockvisor/bare/*/os || true
 	rm -rf /var/lib/blockvisor/bare/
-	pkill -9 firecracker || true
-	rm -rf /var/lib/blockvisor/firecracker/
 	rm -rf /var/lib/blockvisor/nodes/
 	rm -f /var/lib/blockvisor/nodes.json
-	for i in $$(seq 1 100); do ip link delete bv$$i type tuntap; done || true
 
 new-release:
 	cargo release --execute $$(git-conventional-commits version)
