@@ -618,13 +618,13 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Copy OS drive into chroot location.
     async fn copy_os_image(&self, image: &NodeImage) -> Result<()> {
-        let root_fs_path = blockchain::get_image_download_folder_path(&self.context.bv_root, image)
+        let source_path = blockchain::get_image_download_folder_path(&self.context.bv_root, image)
             .join(ROOT_FS_FILE);
-
-        let data_dir = &self.context.vm_data_dir;
-        fs::create_dir_all(data_dir).await?;
-
-        run_cmd("cp", [root_fs_path.as_os_str(), data_dir.as_os_str()]).await?;
+        let os_img_path = &self.context.vm_data_dir.join(ROOT_FS_FILE);
+        if os_img_path.exists() {
+            fs::remove_file(os_img_path).await?;
+        }
+        run_cmd("cp", [source_path.as_os_str(), os_img_path.as_os_str()]).await?;
 
         Ok(())
     }
