@@ -77,15 +77,15 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         request: Request<(NodeContext, BabelConfig)>,
     ) -> Result<Response<()>, Status> {
         let (context, config) = request.into_inner();
-        self.pal
-            .set_node_context(context)
-            .await
-            .map_err(|err| Status::internal(format!("failed to setup hostname with: {err:#}")))?;
 
         apply_babel_config(&self.pal, &config)
             .await
             .map_err(|err| Status::internal(anyhow!("{err:#}").to_string()))?;
         self.save_babel_conf(&config).await?;
+        self.pal
+            .set_node_context(context)
+            .await
+            .map_err(|err| Status::internal(format!("failed to setup hostname with: {err:#}")))?;
 
         let mut state = self.state.lock().await;
         if let BabelServiceState::NotReady(_) = state.deref() {
