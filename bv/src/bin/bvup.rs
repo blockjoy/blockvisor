@@ -234,11 +234,15 @@ async fn main() -> Result<()> {
 
         let mut updater =
             self_updater::new(bv_utils::timer::SysTimer, &bv_root, &api_config).await?;
-        let bundle_id = updater
-            .get_latest()
+        let version = updater
+            .get_versions()
             .await?
-            .ok_or_else(|| anyhow!("No bv bundle found"))?;
-        updater.download_and_install(bundle_id).await?;
+            .pop()
+            .ok_or_else(|| anyhow!("No bv bundle found"))?
+            .to_string();
+        updater
+            .download_and_install(pb::BundleIdentifier { version })
+            .await?;
     }
     Ok(())
 }

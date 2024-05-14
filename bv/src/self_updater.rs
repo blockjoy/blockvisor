@@ -5,7 +5,6 @@ use crate::{
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
 use eyre::{anyhow, Context, Result};
 use std::{
-    cmp::Ordering,
     env,
     path::{Path, PathBuf},
     time::Duration,
@@ -69,42 +68,50 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector + Clone> SelfUpdater<T, C> 
     }
 
     pub async fn check_for_update(&mut self) -> Result<()> {
-        if let Some(latest_bundle) = self
-            .get_latest()
+        let mut versions = self
+            .get_versions()
             .await
-            .with_context(|| "cannot get latest version")?
-        {
-            let latest_version = latest_bundle.version.clone();
-            debug!("Latest version of BV is `{latest_version}`");
-            if let Ordering::Greater =
-                utils::semver_cmp(&latest_version, &self.latest_installed_version)
+            .with_context(|| "cannot get latest versions")?;
+        let installed_version = semver::Version::parse(&self.latest_installed_version)?;
+        while let Some(version) = versions.pop() {
+            let v_str = version.to_string();
+            if version.major == installed_version.major
+                && version > installed_version
+                && !self.is_blacklisted(&v_str).await?
             {
-                if !self.is_blacklisted(&latest_version).await? {
-                    self.download_and_install(latest_bundle).await?;
-                    self.latest_installed_version = latest_version;
-                }
+                debug!("Found new versions of BV: `{v_str}`");
+                self.download_and_install(pb::BundleIdentifier {
+                    version: v_str.clone(),
+                })
+                .await?;
+                self.latest_installed_version = v_str;
             }
         }
 
         Ok(())
     }
 
-    pub async fn get_latest(&mut self) -> Result<Option<pb::BundleIdentifier>> {
+    pub async fn get_versions(&mut self) -> Result<Vec<semver::Version>> {
         let mut client = services::ApiClient::build(
             self.bundles.clone(),
             pb::bundle_service_client::BundleServiceClient::with_interceptor,
         )
         .await
         .with_context(|| "cannot connect to bundle service")?;
-        let mut resp: pb::BundleServiceListBundleVersionsResponse = api_with_retry!(
+        let resp: pb::BundleServiceListBundleVersionsResponse = api_with_retry!(
             client,
             client.list_bundle_versions(pb::BundleServiceListBundleVersionsRequest {})
         )
         .with_context(|| "cannot list bundle versions")?
         .into_inner();
-        resp.identifiers
-            .sort_by(|a, b| utils::semver_cmp(&b.version, &a.version));
-        Ok(resp.identifiers.first().cloned())
+        let mut versions = resp
+            .identifiers
+            .into_iter()
+            .map(|bundle_id| semver::Version::parse(&bundle_id.version))
+            .collect::<Result<Vec<_>, _>>()
+            .with_context(|| "invalid version format, expected semver")?;
+        versions.sort();
+        Ok(versions)
     }
 
     async fn is_blacklisted(&self, version: &str) -> Result<bool> {
@@ -311,15 +318,21 @@ mod tests {
         .ok();
     }
 
+    fn next_version() -> String {
+        let mut current = semver::Version::parse(CURRENT_VERSION).unwrap();
+        current.minor += 1;
+        current.to_string()
+    }
+
     #[tokio::test]
-    async fn test_get_latest() -> Result<()> {
+    async fn test_get_versions() -> Result<()> {
         let mut test_env = TestEnv::new().await?;
         let bundle_id = pb::BundleIdentifier {
             version: "3.2.1".to_string(),
         };
 
         // no server
-        let _ = test_env.updater.get_latest().await.unwrap_err();
+        let _ = test_env.updater.get_versions().await.unwrap_err();
 
         let mut bundles_mock = MockTestBundleService::new();
         bundles_mock
@@ -351,10 +364,17 @@ mod tests {
             });
         let bundle_server = test_env.start_test_server(bundles_mock);
 
-        assert_eq!(None, test_env.updater.get_latest().await.unwrap());
         assert_eq!(
-            Some(bundle_id),
-            test_env.updater.get_latest().await.unwrap()
+            Vec::<semver::Version>::default(),
+            test_env.updater.get_versions().await.unwrap()
+        );
+        assert_eq!(
+            vec![
+                semver::Version::parse("0.1.2").unwrap(),
+                semver::Version::parse("1.2.3").unwrap(),
+                semver::Version::parse("3.2.1").unwrap(),
+            ],
+            test_env.updater.get_versions().await.unwrap()
         );
         bundle_server.assert().await;
         Ok(())
@@ -364,7 +384,7 @@ mod tests {
     async fn test_download_failed() -> Result<()> {
         let mut test_env = TestEnv::new().await?;
         let bundle_id = pb::BundleIdentifier {
-            version: "3.2.1".to_string(),
+            version: next_version(),
         };
         let mut server = mockito::Server::new();
 
@@ -416,7 +436,7 @@ mod tests {
         let mut test_env = TestEnv::new().await?;
         let ctrl_file_path = test_env.tmp_root.join("ctrl_file");
         let bundle_id = pb::BundleIdentifier {
-            version: "3.2.1".to_string(),
+            version: next_version(),
         };
         let mut server = mockito::Server::new();
 
@@ -457,7 +477,7 @@ mod tests {
     async fn test_check_for_update() -> Result<()> {
         let mut test_env = TestEnv::new().await?;
         let ctrl_file_path = test_env.tmp_root.join("ctrl_file");
-        let bundle_version = "3.2.1".to_string();
+        let bundle_version = next_version();
         let bundle_id = pb::BundleIdentifier {
             version: bundle_version.clone(),
         };
@@ -522,7 +542,7 @@ mod tests {
     async fn test_check_for_update_blacklisted() -> Result<()> {
         let mut test_env = TestEnv::new().await?;
         let bundle_id = pb::BundleIdentifier {
-            version: "3.2.1".to_string(),
+            version: next_version(),
         };
         test_env.blacklist_version(&bundle_id.version).await?;
 
