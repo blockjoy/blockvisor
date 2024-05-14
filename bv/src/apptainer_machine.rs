@@ -2,7 +2,7 @@ use crate::config::ApptainerConfig;
 use crate::services::blockchain;
 use crate::services::blockchain::ROOT_FS_FILE;
 use crate::utils::{get_process_pid, GetProcessIdError};
-use crate::{node_data::NodeData, pal, BV_VAR_PATH};
+use crate::{node_context, node_data::NodeData, pal};
 use async_trait::async_trait;
 use babel_api::engine::{PosixSignal, DATA_DRIVE_MOUNT_POINT};
 use bv_utils::cmd::run_cmd;
@@ -20,7 +20,6 @@ use tokio::time::sleep;
 use tracing::{debug, error};
 use uuid::Uuid;
 
-const BARE_NODES_DIR: &str = "bare";
 pub const CHROOT_DIR: &str = "os";
 const DATA_DIR: &str = "data";
 const JOURNAL_DIR: &str = "/run/systemd/journal";
@@ -31,13 +30,6 @@ const UMOUNT_RETRY_MAX: u32 = 2;
 const UMOUNT_BACKOFF_BASE_MS: u64 = 1000;
 const BABEL_BIN_PATH: &str = "/usr/bin/babel";
 const APPTAINER_BIN_NAME: &str = "apptainer";
-
-pub fn build_vm_data_path(bv_root: &Path, id: Uuid) -> PathBuf {
-    bv_root
-        .join(BV_VAR_PATH)
-        .join(BARE_NODES_DIR)
-        .join(id.to_string())
-}
 
 #[derive(Debug)]
 pub struct ApptainerMachine {
@@ -63,7 +55,7 @@ pub async fn new(
     babel_path: PathBuf,
     config: ApptainerConfig,
 ) -> Result<ApptainerMachine> {
-    let vm_dir = build_vm_data_path(bv_root, node_data.id);
+    let vm_dir = node_context::build_node_dir(bv_root, node_data.id);
     let chroot_dir = vm_dir.join(CHROOT_DIR);
     fs::create_dir_all(&chroot_dir).await?;
     let data_dir = vm_dir.join(DATA_DIR);

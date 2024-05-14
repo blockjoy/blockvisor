@@ -9,6 +9,7 @@ use blockvisord::{
     apptainer_machine,
     blockvisord::BlockvisorD,
     config::{Config, SharedConfig},
+    node_context,
     node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
@@ -347,10 +348,7 @@ impl Pal for DummyPlatform {
 
     type NodeConnection = BareNodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        BareNodeConnection::new(apptainer_machine::build_vm_data_path(
-            &self.bv_root,
-            node_id,
-        ))
+        BareNodeConnection::new(node_context::build_node_dir(&self.bv_root, node_id))
     }
 
     type VirtualMachine = apptainer_machine::ApptainerMachine;
@@ -414,7 +412,7 @@ impl Pal for DummyPlatform {
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
-        apptainer_machine::build_vm_data_path(&self.bv_root, id)
+        node_context::build_node_dir(&self.bv_root, id)
     }
 
     fn available_resources(

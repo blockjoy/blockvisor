@@ -19,6 +19,13 @@ pub fn build_registry_dir(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_DIR)
 }
 
+pub fn build_node_dir(bv_root: &Path, id: Uuid) -> PathBuf {
+    bv_root
+        .join(BV_VAR_PATH)
+        .join(REGISTRY_CONFIG_DIR)
+        .join(id.to_string())
+}
+
 #[derive(Debug)]
 pub struct NodeContext {
     pub bv_root: PathBuf,

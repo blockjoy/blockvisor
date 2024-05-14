@@ -7,6 +7,7 @@ use crate::{
     config::SharedConfig,
     linux_platform,
     node_connection::RPC_REQUEST_TIMEOUT,
+    node_context,
     node_data::NodeData,
     nodes_manager::NodesDataCache,
     pal::{self, AvailableResources, NetInterface, NodeConnection, Pal},
@@ -130,10 +131,7 @@ impl Pal for LinuxApptainerPlatform {
 
     type NodeConnection = BareNodeConnection;
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection {
-        BareNodeConnection::new(apptainer_machine::build_vm_data_path(
-            self.bv_root(),
-            node_id,
-        ))
+        BareNodeConnection::new(node_context::build_node_dir(self.bv_root(), node_id))
     }
 
     type VirtualMachine = apptainer_machine::ApptainerMachine;
@@ -187,7 +185,7 @@ impl Pal for LinuxApptainerPlatform {
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
-        apptainer_machine::build_vm_data_path(self.bv_root(), id)
+        node_context::build_node_dir(self.bv_root(), id)
     }
 
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
@@ -202,7 +200,7 @@ impl Pal for LinuxApptainerPlatform {
         for (id, data) in nodes_data_cache {
             let data_img_path = self
                 .build_vm_data_path(*id)
-                .join(apptainer_machine::CHROOT_DIR)
+                .join(CHROOT_DIR)
                 .join(babel_api::engine::DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
             let actual_data_size = fs_extra::dir::get_size(&data_img_path)
                 .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;

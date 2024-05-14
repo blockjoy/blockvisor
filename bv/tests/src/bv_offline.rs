@@ -211,7 +211,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
 
     let process_id = utils::get_process_pid(
         BABEL_BIN_NAME,
-        &blockvisord::apptainer_machine::build_vm_data_path(
+        &blockvisord::node_context::build_node_dir(
             &test_env.bv_root,
             Uuid::parse_str(vm_id).unwrap(),
         )
@@ -273,7 +273,7 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
 
     println!("break babel - permanently break node");
     fs::remove_file(babel_link).await.unwrap();
-    let vm_rootfs = blockvisord::apptainer_machine::build_vm_data_path(
+    let vm_rootfs = blockvisord::node_context::build_node_dir(
         &test_env.bv_root,
         Uuid::parse_str(vm_id).unwrap(),
     )
