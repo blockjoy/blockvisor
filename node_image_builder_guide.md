@@ -9,7 +9,7 @@ While this guide will describe the steps needed to create an image from scratch,
 it is recommended to use the bv image clone feature if the new blockchain requires similar configurations as an existing one
 whose image is readily available.
 
-Across this guide, we will refer to the physical machines as HOSTS that will run our different blockchain Firecracker MicroVM which we call NODES.
+Across this guide, we will refer to the physical machines as HOSTS that will run our different blockchain Apptainer containers which we call NODES.
 
 ### Before you start
 It is recommended to familiarize with rest of documentation, to get a feel of the concepts, and where the important files are on the hosts and nodes:
@@ -107,12 +107,12 @@ __HINT 4__: When using standard (not `dev`) BV bundle, it is recommended to use 
 while adding support for a new node. All commands, run on a node created in standalone mode, will bypass the API.
 Hence, node won't be visible for the API, as it would normally be.
 
-__HINT 5__: Once created node is started, `tmux` can be used, to modify rootfs and install/update blockchain specific software.
-<br>Adding below alias to your `~/.bashrc` will allow you to quickly attach `tmux` to it (don't forget to install `jq` first):
+__HINT 5__: Once created node is started, `apptainer shell` can be used, to modify rootfs and install/update blockchain specific software.
+<br>Adding below alias to your `~/.bashrc` will allow you to quickly attach  to it (don't forget to install `jq` first):
 ```
-alias tma='tmux attach -t $(cat .bv-workspace |jq .active_node.name| xargs)'
+alias node_shell='apptainer shell instance://$(cat .bv-workspace |jq .active_node.id| xargs)'
 ```
-Now doing `tma` in your workspace folder will attach you to the active node's tmux.
+Now doing `node_shell` in your workspace folder will run active node shell.
 
 #### Example
 ```
@@ -134,7 +134,7 @@ First you need to provision the binaries and configurations needed for the block
 Below steps should be considered generic and suitable for any blockchain:
 - Identify the documentation for the project you're trying to add support for.
 - Discern what kind of node you want to add as different types of nodes will imply different approaches (Light/Full/Archive).
-- Use `tmux` to attach to the node and go through the blockchain specific installation as you would normally do on any machine.
+- Use `apptainer shell` to attach to the node and go through the blockchain specific installation as you would normally do on any machine.
 - Ensure all the binaries recommended in the documentation are compiled/installed properly on the node.
 - Look through the documentation and try to find any Blockchain provided snapshots;
 especially when running archive nodes, it can take weeks to sync a node to the tip of the chain

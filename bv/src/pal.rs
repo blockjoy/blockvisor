@@ -55,7 +55,7 @@ pub trait Pal {
     /// Attach to already created VM instance.
     async fn attach_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine>;
 
-    /// Build path to VM data directory, a place where kernel and other VM related data are stored.
+    /// Build path to VM data directory, a place where rootfs and other VM related data are stored.
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
     /// Get available resources, but take into account requirements declared by nodes.
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources>;

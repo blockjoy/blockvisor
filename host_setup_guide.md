@@ -14,7 +14,7 @@ BV doesn't require any particular linux distribution, but it is recommended to u
 
 BV should work with any kernel version `>=4.14` and `<6.0.0`, but it is recommended to use at lease `5.10.0`.
 
-### Install BV CLI Dependencies
+### Install BV Dependencies
 
 Beside standard linux tool available in all distributions, BV requires following CLI tools to be available:
 
@@ -23,7 +23,6 @@ Beside standard linux tool available in all distributions, BV requires following
 - `fallocate`
 - `debootstrap`
 - `systemctl`
-- `tmux`
 - `ip`
 - `mkfs.ext4`
 
@@ -31,16 +30,20 @@ For _Ubuntu_ based distributions:
 
 ```shell
 apt update
-apt install pigz debootstrap tmux util-linux e2fsprogs chrony
+apt install pigz debootstrap util-linux e2fsprogs chrony
 ```
+
+### Install Apptainer
+
+See [Installing Apptainer](https://apptainer.org/docs/admin/main/installation.html#install-ubuntu-packages)
+Required version is 1.3.0
+In case of any issues, try to build apptainer [from sources](https://apptainer.org/docs/admin/main/installation.html#install-from-source). 
 
 ### Network Setup
 
-Since BV uses Firecracker to run blockchain nodes, it requires bridge interface to be configured. 
+BV uses Apptainer to run blockchain nodes, it requires bridge interface to be configured. 
 If bridge interface name is different thant default `bvbr0`, then it must be explicitly passed to `bvup`
 when provisioning(see `bvup --help` for more details).
-
-See [firecracker docs](https://github.com/firecracker-microvm/firecracker/blob/main/docs/network-setup.md#advanced-setting-up-a-bridge-interface) for more details on network setup.
 
 **Example:**
 
@@ -102,8 +105,9 @@ by setting the following field in `/etc/blockvisor.json` config file:
 "update_check_interval_secs": null
 ```
 
-Remember to restart BV service to apply new settings:
+Remember to stop BV service before changing config file:
 ```shell
 bv stop
+... modify /etc/blockvisor.json ...
 bv start
 ```

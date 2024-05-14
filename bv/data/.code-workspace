@@ -95,8 +95,8 @@
 				"type": "f5anything"
 			},
 			{
-				"command": "tmux attach -t $(cat .bv-workspace |jq .active_node.name| xargs)",
-				"name": "node attach tmux",
+				"command": "apptainer shell instance://$(cat .bv-workspace |jq .active_node.id| xargs)",
+				"name": "node shell",
 				"request": "launch",
 				"type": "f5anything"
 			},

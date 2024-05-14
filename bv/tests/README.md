@@ -16,7 +16,7 @@ so they are marked as `[serial]`.
 
 ### Test Environment
 - it is expected that `babel` binary is built wit `make build-release` 
-- tmux, firecracker, and jailer are installed
+- apptainer is installed
 - `testing/validator/0.0.[1-2]` images are downloaded to `/var/lib/blockvisor/images`
 - separate `BV_ROOT` is created for each test in `std::env::temp_dir()`,
  it can be overridden by `BV_TEMP` env variable,
