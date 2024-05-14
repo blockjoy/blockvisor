@@ -153,8 +153,9 @@ To make implementation of Babel Plugin interface possible, BV provides following
   `params` is expected to be Map object serializable to JSON.
   It assumes that file pointed by `template` argument exists.
   File pointed by `output` path will be overwritten if exists.
-- `schedule(name, param, schedule)` - Schedule Rhai function with given `name` and `param`, according to cron-compatible `schedule` string.
 - `node_params()` - Get node params as key-value map.
+- `add_task(task_name, schedule, function_name, function_param)` - Schedule Rhai function with given `function_name` and `function_param` (optional), according to cron-compatible `schedule` string.
+- `delete_task(task_name)` - Delete previously scheduled task.
 - `save_data(value)` - Save plugin data to persistent storage. It takes string as argument. `to_json` can be used for more complex structures.
 - `load_data()` - Load plugin data from persistent storage. Returns string (as it was passed to `save_data`).
 - `DATA_DRIVE_MOUNT_POINT` - Globally available constant, containing absolute path to directory where data drive is mounted.

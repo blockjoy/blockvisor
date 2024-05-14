@@ -28,7 +28,14 @@ mock! {
         fn save_data(&self, value: &str) -> Result<()>;
         fn load_data(&self) -> Result<String>;
         fn log(&self, level: tracing::Level, message: &str);
-        fn schedule_fn(&self, function_name: &str, function_param: &str, schedule: &str) -> Result<()>;
+        fn add_task(
+            &self,
+            task_name: &str,
+            schedule: &str,
+            function_name: &str,
+            function_param: &str,
+        ) -> Result<()>;
+        fn delete_task(&self, task_name: &str) -> Result<()>;
         fn is_download_completed(&self) -> Result<bool>;
     }
 }

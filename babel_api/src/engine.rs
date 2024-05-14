@@ -63,8 +63,16 @@ pub trait Engine {
     /// Handle logs from plugin.
     fn log(&self, level: Level, message: &str);
 
-    /// Schedule function call according to given cron like schedule.
-    fn schedule_fn(&self, function_name: &str, function_param: &str, schedule: &str) -> Result<()>;
+    /// Schedule periodic function call according to given cron like schedule.
+    fn add_task(
+        &self,
+        task_name: &str,
+        schedule: &str,
+        function_name: &str,
+        function_param: &str,
+    ) -> Result<()>;
+    /// Delete previously scheduled task.
+    fn delete_task(&self, task_name: &str) -> Result<()>;
 
     /// Checks if blockchain data has been already downloaded.
     fn is_download_completed(&self) -> Result<bool>;

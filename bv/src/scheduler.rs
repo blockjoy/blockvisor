@@ -62,12 +62,19 @@ pub enum Task {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scheduled {
     pub node_id: Uuid,
+    pub name: String,
     #[serde(
         deserialize_with = "from_cron_string",
         serialize_with = "to_crone_string"
     )]
     pub schedule: Schedule,
     pub task: Task,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Action {
+    Add(Scheduled),
+    Delete(String),
 }
 
 fn to_crone_string<S>(s: &Schedule, serializer: S) -> Result<S::Ok, S::Error>
@@ -88,7 +95,7 @@ where
 pub struct Scheduler {
     handle: tokio::task::JoinHandle<Vec<Scheduled>>,
     run: RunFlag,
-    tx: mpsc::Sender<Scheduled>,
+    tx: mpsc::Sender<Action>,
 }
 
 impl Debug for Scheduler {
@@ -99,7 +106,7 @@ impl Debug for Scheduler {
 
 async fn worker(
     mut run: RunFlag,
-    mut rx: mpsc::Receiver<Scheduled>,
+    mut rx: mpsc::Receiver<Action>,
     handler: impl TaskHandler,
     mut tasks: Vec<(DateTime<TZ>, Scheduled)>,
 ) -> Vec<Scheduled> {
@@ -132,21 +139,26 @@ async fn worker(
         tasks = remaining_tasks;
         if let Some(ttn) = ttn {
             select!(
-                task = rx.recv() => {
-                    if let Some(task) = task {
-                        // new task arrived
-                        tasks.push((TZ::now(), task));
+                action = rx.recv() => {
+                    if let Some(action) = action {
+                        handle_action(&mut tasks, action);
                     }
                 }
                 _ = tokio::time::sleep(ttn) => {}
                 _ = run.wait() => {}
             );
-        } else if let Some(task) = run.select(rx.recv()).await.flatten() {
-            // new task arrived
-            tasks.push((TZ::now(), task));
+        } else if let Some(action) = run.select(rx.recv()).await.flatten() {
+            handle_action(&mut tasks, action);
         }
     }
     tasks.into_iter().map(|(_, task)| task).collect()
+}
+
+fn handle_action(tasks: &mut Vec<(DateTime<TZ>, Scheduled)>, action: Action) {
+    match action {
+        Action::Add(task) => tasks.push((TZ::now(), task)),
+        Action::Delete(name) => tasks.retain(|(_, task)| task.name != name),
+    };
 }
 
 impl Scheduler {
@@ -167,7 +179,7 @@ impl Scheduler {
         Ok(self.handle.await?)
     }
 
-    pub fn tx(&self) -> mpsc::Sender<Scheduled> {
+    pub fn tx(&self) -> mpsc::Sender<Action> {
         self.tx.clone()
     }
 }

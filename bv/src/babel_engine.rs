@@ -75,7 +75,7 @@ pub struct BabelEngine<N, P> {
     engine_rx: mpsc::Receiver<EngineRequest>,
     engine_tx: mpsc::Sender<EngineRequest>,
     server: Option<BabelEngineServer>,
-    scheduler_tx: mpsc::Sender<scheduler::Scheduled>,
+    scheduler_tx: mpsc::Sender<scheduler::Action>,
 
     capabilities: Vec<String>,
 }
@@ -87,7 +87,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         api_config: SharedConfig,
         plugin_builder: F,
         plugin_data_path: PathBuf,
-        scheduler_tx: mpsc::Sender<scheduler::Scheduled>,
+        scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let (engine_tx, engine_rx) = mpsc::channel(16);
         let engine = Engine {
@@ -432,8 +432,14 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            EngineRequest::ScheduleFnCall(task) => {
-                let _ = self.scheduler_tx.send(task).await;
+            EngineRequest::AddTask(task) => {
+                let _ = self.scheduler_tx.send(scheduler::Action::Add(task)).await;
+            }
+            EngineRequest::DeleteTask(task) => {
+                let _ = self
+                    .scheduler_tx
+                    .send(scheduler::Action::Delete(task))
+                    .await;
             }
             EngineRequest::IsDownloadCompleted { response_tx } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
@@ -635,7 +641,8 @@ enum EngineRequest {
         params: String,
         response_tx: ResponseTx<Result<()>>,
     },
-    ScheduleFnCall(scheduler::Scheduled),
+    AddTask(scheduler::Scheduled),
+    DeleteTask(String),
     IsDownloadCompleted {
         response_tx: ResponseTx<Result<bool>>,
     },
@@ -760,17 +767,30 @@ impl babel_api::engine::Engine for Engine {
         }
     }
 
-    fn schedule_fn(&self, function_name: &str, function_param: &str, schedule: &str) -> Result<()> {
+    fn add_task(
+        &self,
+        task_name: &str,
+        schedule: &str,
+        function_name: &str,
+        function_param: &str,
+    ) -> Result<()> {
         Ok(self
             .tx
-            .blocking_send(EngineRequest::ScheduleFnCall(scheduler::Scheduled {
+            .blocking_send(EngineRequest::AddTask(scheduler::Scheduled {
                 node_id: self.node_id,
+                name: task_name.to_string(),
                 schedule: cron::Schedule::from_str(schedule)?,
                 task: Task::PluginFnCall {
                     name: function_name.to_string(),
                     param: function_param.to_string(),
                 },
             }))?)
+    }
+
+    fn delete_task(&self, task_name: &str) -> Result<()> {
+        Ok(self
+            .tx
+            .blocking_send(EngineRequest::DeleteTask(task_name.to_string()))?)
     }
 
     fn is_download_completed(&self) -> Result<bool> {
@@ -996,8 +1016,13 @@ mod tests {
                 Path::new(param),
                 &serde_json::to_string(&self.engine.node_params())?,
             )?;
-            self.engine
-                .schedule_fn("scheduled_fn", "scheduled_param", "1 * * * * * *")?;
+            self.engine.add_task(
+                "task_name",
+                "1 * * * * * *",
+                "scheduled_fn",
+                "scheduled_param",
+            )?;
+            self.engine.delete_task("task_name")?;
             self.engine.save_data("custom plugin data")?;
             self.engine.load_data()
         }
@@ -1050,7 +1075,7 @@ mod tests {
     struct TestEnv {
         data_path: PathBuf,
         engine: BabelEngine<TestConnection, DummyPlugin>,
-        rx: mpsc::Receiver<scheduler::Scheduled>,
+        rx: mpsc::Receiver<scheduler::Action>,
         _async_panic_checker: utils::tests::AsyncPanicChecker,
     }
 
@@ -1116,7 +1141,7 @@ mod tests {
     }
 
     #[allow(clippy::cmp_owned)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_async_bridge_to_babel() -> Result<()> {
         let mut babel_mock = MockBabelService::new();
         // from init
@@ -1287,15 +1312,20 @@ mod tests {
             "custom plugin data",
             test_env.engine.call_method("custom_name", "param").await?
         );
-        let expected_task = scheduler::Scheduled {
+        let expected_action = scheduler::Action::Add(scheduler::Scheduled {
             node_id: test_env.engine.node_info.node_id,
+            name: "task_name".to_string(),
             schedule: cron::Schedule::from_str("1 * * * * * *").unwrap(),
             task: Task::PluginFnCall {
                 name: "scheduled_fn".to_string(),
                 param: "scheduled_param".to_string(),
             },
-        };
-        assert_eq!(expected_task, test_env.rx.try_recv().unwrap());
+        });
+        assert_eq!(expected_action, test_env.rx.try_recv().unwrap());
+        assert_eq!(
+            scheduler::Action::Delete("task_name".to_string()),
+            test_env.rx.try_recv().unwrap()
+        );
         assert_eq!(
             "custom plugin data",
             fs::read_to_string(test_env.data_path)?

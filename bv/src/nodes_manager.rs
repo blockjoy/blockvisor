@@ -742,7 +742,7 @@ where
         pal: Arc<P>,
         api_config: SharedConfig,
         registry_dir: &Path,
-        tx: mpsc::Sender<Scheduled>,
+        tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<(
         HashMap<Uuid, RwLock<Node<P>>>,
         HashMap<String, Uuid>,

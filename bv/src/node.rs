@@ -8,7 +8,7 @@ use crate::{
     node_context::NodeContext,
     node_data::{NodeData, NodeImage, NodeStatus},
     pal::{self, NetInterface, NodeConnection, Pal, RecoverBackoff, VirtualMachine},
-    scheduler::Scheduled,
+    scheduler,
     services::blockchain::{self, ROOT_FS_FILE},
     utils,
 };
@@ -58,7 +58,7 @@ struct MaybeNode<P: Pal> {
     context: NodeContext,
     data: NodeData<P::NetInterface>,
     machine: Option<P::VirtualMachine>,
-    scheduler_tx: mpsc::Sender<Scheduled>,
+    scheduler_tx: mpsc::Sender<scheduler::Action>,
 }
 
 macro_rules! check {
@@ -146,7 +146,7 @@ impl<P: Pal + Debug> Node<P> {
         pal: Arc<P>,
         api_config: SharedConfig,
         data: NodeData<P::NetInterface>,
-        scheduler_tx: mpsc::Sender<Scheduled>,
+        scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let maybe_node = MaybeNode {
             context: NodeContext::build(pal.as_ref(), data.id),
@@ -171,7 +171,7 @@ impl<P: Pal + Debug> Node<P> {
         pal: Arc<P>,
         api_config: SharedConfig,
         data: NodeData<P::NetInterface>,
-        scheduler_tx: mpsc::Sender<Scheduled>,
+        scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let node_id = data.id;
         let context = NodeContext::build(pal.as_ref(), node_id);
@@ -993,7 +993,7 @@ pub mod tests {
     struct TestEnv {
         tmp_root: PathBuf,
         registry_dir: PathBuf,
-        tx: mpsc::Sender<scheduler::Scheduled>,
+        tx: mpsc::Sender<scheduler::Action>,
         _async_panic_checker: utils::tests::AsyncPanicChecker,
     }
 

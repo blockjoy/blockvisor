@@ -254,11 +254,28 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.register_fn(
-            "schedule_fn",
-            move |name: &str, param: &str, schedule: &str| {
-                into_rhai_result(babel_engine.schedule_fn(name, param, schedule))
+            "add_task",
+            move |task_name: &str, schedule: &str, function_name: &str, function_param: &str| {
+                into_rhai_result(babel_engine.add_task(
+                    task_name,
+                    schedule,
+                    function_name,
+                    function_param,
+                ))
             },
         );
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine.register_fn(
+            "add_task",
+            move |task_name: &str, schedule: &str, function_name: &str| {
+                into_rhai_result(babel_engine.add_task(task_name, schedule, function_name, ""))
+            },
+        );
+        let babel_engine = self.babel_engine.clone();
+        self.rhai_engine
+            .register_fn("delete_task", move |task_name: &str| {
+                into_rhai_result(babel_engine.delete_task(task_name))
+            });
         let babel_engine = self.babel_engine.clone();
         self.rhai_engine.on_debug(move |msg, _, _| {
             babel_engine.log(Level::DEBUG, msg);
@@ -730,7 +747,14 @@ mod tests {
             fn save_data(&self, value: &str) -> Result<()>;
             fn load_data(&self) -> Result<String>;
             fn log(&self, level: Level, message: &str);
-            fn schedule_fn(&self, function_name: &str, function_param: &str, schedule: &str) -> Result<()>;
+            fn add_task(
+                &self,
+                task_name: &str,
+                schedule: &str,
+                function_name: &str,
+                function_param: &str,
+            ) -> Result<()>;
+            fn delete_task(&self, task_name: &str) -> Result<()>;
             fn is_download_completed(&self) -> Result<bool>;
         }
     }
