@@ -214,7 +214,7 @@ async fn main() -> Result<()> {
             ..Default::default()
         };
         if cmd_args.use_host_network {
-            api_config.pal = Some(ApptainerConfig {
+            api_config.apptainer = Some(ApptainerConfig {
                 host_network: true,
                 ..Default::default()
             });

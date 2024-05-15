@@ -24,7 +24,7 @@ jobs:
         run: echo GIT_VERSION=$(git describe --tags) >> $GITHUB_ENV
       - name: Setup packages
         run: >
-          sudo apt -y install build-essential pkg-config libssl-dev cmake tmux musl-tools pigz awscli jq
+          sudo apt -y install build-essential pkg-config libssl-dev cmake musl-tools pigz awscli jq
 
       - name: Build bundle file
         run: >

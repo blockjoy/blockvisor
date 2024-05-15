@@ -23,7 +23,7 @@ use babel_api::engine::JobStatus;
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use bv_utils::rpc::RPC_CONNECT_TIMEOUT;
 use cli_table::print_stdout;
-use eyre::{anyhow, bail, Context, Result};
+use eyre::{bail, Context, Result};
 use std::{
     ffi::OsStr,
     fs,
@@ -465,7 +465,6 @@ pub async fn process_image_command(
                 &destination_image_path,
                 &fs_extra::dir::CopyOptions::default().content_only(true),
             )?;
-            update_babelsup(&destination_image_path, &destination_image).await?;
             let _ = workspace::set_active_image(&std::env::current_dir()?, destination_image);
         }
         ImageCommand::Capture { node_id_or_name } => {
@@ -498,7 +497,8 @@ pub async fn process_image_command(
             // capture os.img
             fs::copy(
                 build_bv_var_path
-                    .join(format!("firecracker/{id}/root"))
+                    .join(REGISTRY_CONFIG_DIR)
+                    .join(format!("{id}"))
                     .join(ROOT_FS_FILE),
                 image_dir.join(ROOT_FS_FILE),
             )?;
@@ -818,8 +818,7 @@ async fn bootstrap_os_image(
     run_cmd("mkfs.ext4", [os_img_path.as_os_str()]).await?;
 
     on_rootfs(image_path, image, |mount_point| async move {
-        install_os_and_packages(debian_version, &mount_point).await?;
-        extract_babelsup(&mount_point).await
+        install_os_and_packages(debian_version, &mount_point).await
     })
     .await
 }
@@ -882,36 +881,6 @@ fn render_rhai_file(image_path: &Path, image: &NodeImage) -> Result<()> {
     println!("Render rhai file at `{}`", rhai_file_path.display());
     let out_file = fs::File::create(rhai_file_path)?;
     tera.render_to("template", &context, out_file)?;
-    Ok(())
-}
-
-async fn update_babelsup(image_path: &Path, image: &NodeImage) -> Result<()> {
-    on_rootfs(image_path, image, |mount_point| async move {
-        extract_babelsup(&mount_point).await
-    })
-    .await
-}
-
-async fn extract_babelsup(target_dir: &Path) -> Result<()> {
-    let babelsup_path = fs::canonicalize(
-        std::env::current_exe().with_context(|| "failed to get current binary path")?,
-    )
-    .with_context(|| "non canonical current binary path")?
-    .parent()
-    .ok_or_else(|| anyhow!("invalid current binary dir - has no parent"))?
-    .join("../../babelsup.tar.gz");
-    run_cmd(
-        "tar",
-        [
-            OsStr::new("--no-same-owner"),
-            OsStr::new("--no-same-permissions"),
-            OsStr::new("-C"),
-            target_dir.as_os_str(),
-            OsStr::new("-xf"),
-            babelsup_path.as_os_str(),
-        ],
-    )
-    .await?;
     Ok(())
 }
 

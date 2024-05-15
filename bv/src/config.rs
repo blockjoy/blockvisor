@@ -138,8 +138,8 @@ pub struct Config {
     pub cluster_port: Option<u32>,
     /// Addresses of the seed nodes for cluster discovery and announcements
     pub cluster_seed_urls: Option<Vec<String>>,
-    /// Platform configuration
-    pub pal: Option<ApptainerConfig>,
+    /// Apptainer configuration
+    pub apptainer: Option<ApptainerConfig>,
 }
 
 impl Config {

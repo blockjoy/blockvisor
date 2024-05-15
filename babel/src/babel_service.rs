@@ -369,7 +369,7 @@ impl<J, P> BabelService<J, P> {
     }
 
     async fn save_babel_conf(&self, config: &BabelConfig) -> Result<(), Status> {
-        // write config to file in case of babel crash (will be restarted by babelsup)
+        // write config to file in case of babel crash (will be restarted by recovery)
         let cfg_str = serde_json::to_string(config).map_err(|err| {
             Status::internal(format!("failed to serialize babel config: {err:#}"))
         })?;

@@ -24,7 +24,6 @@ pub const BLACKLIST: &str = "blacklist";
 const CURRENT_LINK: &str = "current";
 const BACKUP_LINK: &str = "backup";
 pub const INSTALLER_BIN: &str = "installer";
-const FC_BIN: &str = "firecracker/bin";
 const BLOCKVISOR_BIN: &str = "blockvisor/bin";
 const BLOCKVISOR_SERVICES: &str = "blockvisor/services";
 const BLOCKVISOR_CONFIG: &str = "blockvisor.json";
@@ -311,7 +310,6 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         };
 
         symlink_all(BLOCKVISOR_BIN, &self.paths.system_bin)?;
-        symlink_all(FC_BIN, &self.paths.system_bin)?;
         symlink_all(BLOCKVISOR_SERVICES, &self.paths.system_services)
     }
 
@@ -897,12 +895,10 @@ mod tests {
 
         fs::create_dir_all(this_path.join(BLOCKVISOR_BIN))?;
         fs::create_dir_all(this_path.join(BLOCKVISOR_SERVICES))?;
-        fs::create_dir_all(this_path.join(FC_BIN))?;
         installer.install_this_version()?;
 
         touch_file(&this_path.join(BLOCKVISOR_BIN).join("some_bin"))?;
         touch_file(&this_path.join(BLOCKVISOR_SERVICES).join("some_service"))?;
-        touch_file(&this_path.join(FC_BIN).join("firecracker"))?;
         let _ = installer.install_this_version().unwrap_err();
 
         fs::create_dir_all(&installer.paths.system_bin)?;
@@ -910,7 +906,6 @@ mod tests {
         installer.install_this_version()?;
 
         assert!(installer.paths.system_bin.join("some_bin").exists());
-        assert!(installer.paths.system_bin.join("firecracker").exists());
         assert!(installer
             .paths
             .system_services

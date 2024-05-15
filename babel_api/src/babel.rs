@@ -84,7 +84,7 @@ pub trait Babel {
     #[server_streaming]
     fn get_logs() -> String;
 
-    /// Get logs gathered from babel processes (babel, babelsup and job_runner).
+    /// Get logs gathered from babel processes (babel, and job_runner).
     #[server_streaming]
     fn get_babel_logs(max_lines: u32) -> String;
 }

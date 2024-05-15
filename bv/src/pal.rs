@@ -61,7 +61,7 @@ pub trait Pal {
 
     /// Type representing node connection.
     type NodeConnection: NodeConnection + Debug;
-    /// Created node connection, so it can be used to communicate with Babel and BabelSup.
+    /// Created node connection, so it can be used to communicate with Babel.
     fn create_node_connection(&self, node_id: Uuid) -> Self::NodeConnection;
 
     /// Type representing virtual machine on which node is running.
@@ -142,7 +142,7 @@ pub trait NodeConnection {
     /// Perform basic connectivity test, to check actual connection state.
     /// It may mutate internal state it connection was marked as broken, but now test pass.
     async fn test(&mut self) -> Result<()>;
-    /// Get reference to BabelSup rpc client. Try to reestablish connection if it's necessary.
+    /// Get reference to Babel rpc client. Try to reestablish connection if it's necessary.
     async fn babel_client(&mut self) -> Result<&mut BabelClient>;
     /// Path to UDS where BabelEngine should listen for messages form Babel.
     fn engine_socket_path(&self) -> &Path;

@@ -220,7 +220,7 @@ async fn test_bv_service_e2e() {
     let config = fs::read_to_string(config_path).unwrap();
     let mut config: Config = serde_json::from_str(&config).unwrap();
     let host_id = config.id.clone();
-    config.pal = Some(ApptainerConfig {
+    config.apptainer = Some(ApptainerConfig {
         host_network: true,
         extra_args: Some(vec!["--dns".to_owned(), "1.1.1.1,8.8.8.8".to_owned()]),
         ..Default::default()
