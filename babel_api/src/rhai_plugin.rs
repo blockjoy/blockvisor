@@ -459,7 +459,9 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 UPLOAD_JOB_NAME,
                 plugin_config::build_upload_job_config(config.upload, pre_upload_jobs),
             )?;
-            self.start_services(config.services, vec![UPLOAD_JOB_NAME.to_string()])?;
+            let post_upload_jobs =
+                self.run_actions(config.post_upload, vec![UPLOAD_JOB_NAME.to_string()])?;
+            self.start_services(config.services, post_upload_jobs)?;
             Ok(())
         }
     }
@@ -1273,12 +1275,34 @@ mod tests {
                         }
                     ]
                 },
+                post_upload: #{
+                    commands: [
+                        `echo post_upload_cmd`,
+                    ],
+                    jobs: [
+                        #{
+                            name: "post_upload_job",
+                            run_sh: `echo post_upload_job`,
+                            needs: ["some"],
+                        }
+                    ]
+                },
             };
             "#;
         let mut babel = MockBabelEngine::new();
         babel
             .expect_run_sh()
             .with(predicate::eq("echo pre_upload_cmd"), predicate::eq(None))
+            .return_once(|_, _| {
+                Ok(ShResponse {
+                    exit_code: 0,
+                    stdout: "".to_string(),
+                    stderr: "".to_string(),
+                })
+            });
+        babel
+            .expect_run_sh()
+            .with(predicate::eq("echo post_upload_cmd"), predicate::eq(None))
             .return_once(|_, _| {
                 Ok(ShResponse {
                     exit_code: 0,
@@ -1330,6 +1354,27 @@ mod tests {
         babel
             .expect_create_job()
             .with(
+                predicate::eq("post_upload_job"),
+                predicate::eq(plugin_config::build_job_config(Job {
+                    name: "post_upload_job".to_string(),
+                    run_sh: "echo post_upload_job".to_string(),
+                    restart: None,
+                    shutdown_timeout_secs: None,
+                    shutdown_signal: None,
+                    needs: Some(vec!["some".to_string(), UPLOAD_JOB_NAME.to_string()]),
+                    run_as: None,
+                })),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("post_upload_job"))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
                 predicate::eq("blockchain_service"),
                 predicate::eq(plugin_config::build_service_job_config(
                     Service {
@@ -1340,7 +1385,7 @@ mod tests {
                         shutdown_signal: None,
                         run_as: Some("some_user".to_string()),
                     },
-                    vec![UPLOAD_JOB_NAME.to_string()],
+                    vec!["post_upload_job".to_string()],
                 )),
             )
             .once()

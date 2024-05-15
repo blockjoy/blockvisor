@@ -218,6 +218,17 @@ fn test_plugin_config() -> eyre::Result<()> {
                 stderr: Default::default(),
             })
         });
+    babel
+        .expect_run_sh()
+        .with(predicate::eq("echo uploaded"), predicate::eq(None))
+        .once()
+        .returning(|_, _| {
+            Ok(ShResponse {
+                exit_code: 0,
+                stdout: Default::default(),
+                stderr: Default::default(),
+            })
+        });
 
     babel
         .expect_create_job()
@@ -452,6 +463,29 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel
         .expect_create_job()
         .with(
+            predicate::eq("post_upload_job"),
+            predicate::eq(JobConfig {
+                job_type: babel_api::engine::JobType::RunSh(
+                    "echo cleanup_after_upload".to_string(),
+                ),
+                restart: babel_api::engine::RestartPolicy::Never,
+                shutdown_timeout_secs: None,
+                shutdown_signal: None,
+                needs: Some(vec!["upload".to_string()]),
+                run_as: None,
+            }),
+        )
+        .once()
+        .returning(|_, _| Ok(()));
+    babel
+        .expect_start_job()
+        .with(predicate::eq("post_upload_job"))
+        .once()
+        .returning(|_| Ok(()));
+
+    babel
+        .expect_create_job()
+        .with(
             predicate::eq("blockchain_service_a"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::RunSh(
@@ -464,7 +498,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 }),
                 shutdown_timeout_secs: Some(120),
                 shutdown_signal: Some(babel_api::engine::PosixSignal::SIGINT),
-                needs: Some(vec!["upload".to_string()]),
+                needs: Some(vec!["post_upload_job".to_string()]),
                 run_as: Some("some_user".to_string()),
             }),
         )
@@ -491,7 +525,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 }),
                 shutdown_timeout_secs: None,
                 shutdown_signal: None,
-                needs: Some(vec!["upload".to_string()]),
+                needs: Some(vec!["post_upload_job".to_string()]),
                 run_as: None,
             }),
         )

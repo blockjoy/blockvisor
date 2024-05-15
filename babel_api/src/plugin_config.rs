@@ -18,6 +18,8 @@ pub struct PluginConfig {
     pub pre_upload: Option<Actions>,
     /// Upload configuration.
     pub upload: Option<Upload>,
+    /// List of post-upload actions.
+    pub post_upload: Option<Actions>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

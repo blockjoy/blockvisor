@@ -299,6 +299,20 @@ const PLUGIN_CONFIG = #{
             //max_retries: 5,
         //},
     },
+    /// [optional] post-upload action
+    //post_upload: #{
+        /// list of sh commands to be executed after upload
+        //commands: [
+            //`echo uploaded`,
+        //],
+        /// list of sh jobs (long running tasks), to be started after upload
+        //jobs: [
+            //#{
+                //name: "post_upload_job",
+                //run_sh: `echo cleanup_after_upload`,
+            //}
+        //]
+    //},
 };
 
 /// Returns blockchain application status.
