@@ -1,6 +1,5 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
-use blockvisord::apptainer_machine::{BABEL_BIN_NAME, CHROOT_DIR};
 use blockvisord::config::ApptainerConfig;
 use blockvisord::linux_apptainer_platform::BareNodeConnection;
 use blockvisord::nodes_manager::NodesDataCache;
@@ -14,7 +13,7 @@ use blockvisord::{
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
     services::{self, blockchain::IMAGES_DIR, kernel::KERNELS_DIR, ApiInterceptor, AuthToken},
-    utils, BV_VAR_PATH,
+    BV_VAR_PATH,
 };
 use bv_utils::logging::setup_logging;
 use bv_utils::{rpc::DefaultTimeout, run_flag::RunFlag};
@@ -30,7 +29,6 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
     time::Duration,
 };
-use sysinfo::Pid;
 use tokio::{task::JoinHandle, time::sleep};
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -395,20 +393,6 @@ impl Pal for DummyPlatform {
         .await?
         .attach()
         .await
-    }
-
-    fn get_vm_pids(&self) -> Result<Vec<Pid>> {
-        utils::get_all_processes_pids(BABEL_BIN_NAME)
-    }
-
-    fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid> {
-        Ok(utils::get_process_pid(
-            BABEL_BIN_NAME,
-            &self
-                .build_vm_data_path(vm_id)
-                .join(CHROOT_DIR)
-                .to_string_lossy(),
-        )?)
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {

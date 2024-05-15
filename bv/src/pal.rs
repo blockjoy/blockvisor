@@ -13,7 +13,6 @@ use std::{
     net::IpAddr,
     path::{Path, PathBuf},
 };
-use sysinfo::Pid;
 use tonic::{codegen::InterceptedService, transport::Channel};
 use uuid::Uuid;
 
@@ -76,10 +75,6 @@ pub trait Pal {
         &self,
         node_data: &NodeData<Self::NetInterface>,
     ) -> Result<Self::VirtualMachine>;
-    /// Get all VMs associated process ids.
-    fn get_vm_pids(&self) -> Result<Vec<Pid>>;
-    /// Get process id associated with given VM.
-    fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid>;
 
     /// Build path to VM data directory, a place where kernel and other VM related data are stored.
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf;

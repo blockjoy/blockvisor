@@ -2,7 +2,6 @@ use crate::config::ApptainerConfig;
 use crate::node::NODE_REQUEST_TIMEOUT;
 use crate::{
     apptainer_machine,
-    apptainer_machine::BABEL_BIN_NAME,
     apptainer_machine::CHROOT_DIR,
     config,
     config::SharedConfig,
@@ -10,7 +9,7 @@ use crate::{
     node_data::NodeData,
     nodes_manager::NodesDataCache,
     pal::{self, AvailableResources, NetInterface, NodeConnection, Pal},
-    services, utils,
+    services,
 };
 use async_trait::async_trait;
 use bv_utils::cmd::run_cmd;
@@ -26,7 +25,6 @@ use std::{
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
-use sysinfo::Pid;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -181,20 +179,6 @@ impl Pal for LinuxApptainerPlatform {
         .await?
         .attach()
         .await
-    }
-
-    fn get_vm_pids(&self) -> Result<Vec<Pid>> {
-        utils::get_all_processes_pids(BABEL_BIN_NAME)
-    }
-
-    fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid> {
-        Ok(utils::get_process_pid(
-            BABEL_BIN_NAME,
-            &self
-                .build_vm_data_path(vm_id)
-                .join(CHROOT_DIR)
-                .to_string_lossy(),
-        )?)
     }
 
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf {

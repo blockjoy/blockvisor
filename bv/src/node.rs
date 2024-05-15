@@ -687,7 +687,6 @@ pub mod tests {
         str::FromStr,
         time::Duration,
     };
-    use sysinfo::Pid;
     use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
     pub const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
@@ -876,8 +875,6 @@ pub mod tests {
                 &self,
                 node_data: &NodeData<DummyNet>,
             ) -> Result<MockTestVM>;
-            fn get_vm_pids(&self) -> Result<Vec<Pid>>;
-            fn get_vm_pid(&self, vm_id: Uuid) -> Result<Pid>;
             fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
             fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
             fn used_disk_space_correction(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<u64>;

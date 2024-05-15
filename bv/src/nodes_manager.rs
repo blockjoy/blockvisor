@@ -752,7 +752,6 @@ where
         let mut nodes = HashMap::new();
         let mut node_ids = HashMap::new();
         let mut node_data_cache = HashMap::new();
-        let mut vm_processes = vec![];
         let mut dir = read_dir(registry_dir)
             .await
             .context("failed to read nodes registry dir")?;
@@ -776,11 +775,6 @@ where
                 .await
             {
                 Ok(node) => {
-                    // remove VM pid from list of all discovered VM pids
-                    // in the end of load this list should be empty
-                    if node.status().await == NodeStatus::Running {
-                        vm_processes.push(pal.get_vm_pid(node.id())?);
-                    }
                     // insert node and its info into internal data structures
                     let id = node.id();
                     let name = node.data.name.clone();
@@ -809,12 +803,6 @@ where
                     );
                 }
             };
-        }
-        // check if we run some unmanaged FC processes on the host
-        for pid in pal.get_vm_pids()? {
-            if !vm_processes.contains(&pid) {
-                error!("VM with pid {pid} is not managed by BV");
-            }
         }
 
         Ok((nodes, node_ids, node_data_cache))
@@ -1677,8 +1665,6 @@ mod tests {
             .returning(|_| {
                 bail!("failed to attach");
             });
-        pal.expect_get_vm_pids()
-            .return_once(|| Ok(Default::default()));
         let config = default_config(test_env.tmp_root.clone());
         let nodes = NodesManager::load(pal, config).await?;
         assert_eq!(1, nodes.nodes_list().await.len());
