@@ -49,8 +49,10 @@ const PLUGIN_CONFIG = #{
                 /// See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
                 /// If not set default to `SIGTERM`.
                 shutdown_signal: "SIGINT",
-                /// [optional] maximum number of retries, or there is no such limit if not set
+                /// [optional] List of job names that this job needs to be finished before start.
                 needs: ["other_init_job_name"],
+                /// [optional] Run job as a different user.
+                run_as: "some_user",
             }
         ]
     },
@@ -84,6 +86,8 @@ const PLUGIN_CONFIG = #{
             /// See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
             /// If not set default to `SIGTERM`.
             shutdown_signal: "SIGINT",
+            /// [optional] Run job as a different user.
+            run_as: "some_user",
         },
         #{
             name: "blockchain_service_b",
@@ -123,6 +127,8 @@ const PLUGIN_CONFIG = #{
             backoff_base_ms: 10000,
             max_retries: 3,
         },
+        /// [optional] Run job as a different user.
+        run_as: "some_user",
     },
     /// [optional] post-download action
     post_download: #{

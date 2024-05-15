@@ -19,6 +19,9 @@ fn init() {
         // See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
         // If not set default to `SIGTERM`.
         shutdown_signal: "SIGINT",
+
+        /// [optional] Run job as a different user.
+        run_as: "some_user",
     };
     create_job("job_name_A", job_config_A);
 

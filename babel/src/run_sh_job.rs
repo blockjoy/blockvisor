@@ -24,6 +24,7 @@ pub struct RunShJob<T> {
     shutdown_signal: PosixSignal,
     timer: T,
     log_buffer: LogBuffer,
+    run_as: Option<String>,
 }
 
 impl<T: AsyncTimer + Send> RunShJob<T> {
@@ -34,6 +35,7 @@ impl<T: AsyncTimer + Send> RunShJob<T> {
         shutdown_timeout: Duration,
         shutdown_signal: PosixSignal,
         log_buffer: LogBuffer,
+        run_as: Option<String>,
     ) -> Result<Self> {
         Ok(Self {
             sh_body,
@@ -42,6 +44,7 @@ impl<T: AsyncTimer + Send> RunShJob<T> {
             shutdown_signal,
             timer,
             log_buffer,
+            run_as,
         })
     }
 
@@ -72,6 +75,16 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
         cmd.args(args.clone())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(run_as) = self.run_as.as_ref() {
+            cmd.uid(
+                users::get_user_by_name(run_as)
+                    .ok_or(JobStatus::Finished {
+                        exit_code: None,
+                        message: format!("cant run as a '{run_as}': user not found"),
+                    })?
+                    .uid(),
+            );
+        }
         let args = args.iter().map(|item| item.as_str()).collect::<Vec<_>>();
         let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
         while run.load() {
@@ -157,6 +170,7 @@ mod tests {
             Duration::from_secs(3),
             PosixSignal::SIGTERM,
             log_buffer,
+            None,
         )?
         .run(test_run, &job_name, &jobs_dir)
         .await;

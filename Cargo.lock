@@ -554,6 +554,7 @@ dependencies = [
  "tower",
  "tracing",
  "url",
+ "users",
  "walkdir",
  "zstd",
 ]

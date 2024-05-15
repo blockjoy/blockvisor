@@ -56,6 +56,8 @@ pub struct Job {
     pub shutdown_signal: Option<PosixSignal>,
     /// List of job names that this job needs to be finished before start.
     pub needs: Option<Vec<String>>,
+    /// Run job as a different user.
+    pub run_as: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -74,6 +76,8 @@ pub struct Service {
     /// See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
     /// If not set default to `SIGTERM`.
     pub shutdown_signal: Option<PosixSignal>,
+    /// Run job as a different user.
+    pub run_as: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -92,6 +96,8 @@ pub struct AlternativeDownload {
     pub run_sh: String,
     /// AlternativeDownload restart config.
     pub restart_config: Option<RestartConfig>,
+    /// Run job as a different user.
+    pub run_as: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -136,6 +142,7 @@ pub fn build_job_config(job: Job) -> JobConfig {
         shutdown_timeout_secs: job.shutdown_timeout_secs,
         shutdown_signal: job.shutdown_signal,
         needs: job.needs,
+        run_as: job.run_as,
     }
 }
 
@@ -159,6 +166,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: Some(init_jobs),
+            run_as: None,
         }
     } else {
         JobConfig {
@@ -172,6 +180,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: Some(init_jobs),
+            run_as: None,
         }
     }
 }
@@ -190,6 +199,7 @@ pub fn build_alternative_download_job_config(
         shutdown_timeout_secs: None,
         shutdown_signal: None,
         needs: Some(init_jobs),
+        run_as: alternative_download.run_as,
     }
 }
 
@@ -204,6 +214,7 @@ pub fn build_service_job_config(service: Service, needs: Vec<String>) -> JobConf
         shutdown_timeout_secs: service.shutdown_timeout_secs,
         shutdown_signal: service.shutdown_signal,
         needs: Some(needs),
+        run_as: service.run_as,
     }
 }
 
@@ -237,6 +248,7 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: Some(pre_upload_jobs),
+            run_as: None,
         }
     } else {
         JobConfig {
@@ -255,6 +267,7 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: Some(pre_upload_jobs),
+            run_as: None,
         }
     }
 }

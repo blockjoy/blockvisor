@@ -279,6 +279,8 @@ pub struct JobConfig {
     pub shutdown_signal: Option<PosixSignal>,
     /// List of job names that this job needs to be finished before start.
     pub needs: Option<Vec<String>>,
+    /// Run job as a different user.
+    pub run_as: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

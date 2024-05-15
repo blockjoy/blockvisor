@@ -878,6 +878,7 @@ mod tests {
                 },
             },
             needs: ["needed"],
+            run_as: "some_user",
         });
         create_job("download_job_name", #{
              job_type: #{
@@ -943,6 +944,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["needed".to_string()]),
+                    run_as: Some("some_user".to_string()),
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -965,6 +967,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: None,
+                    run_as: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1255,6 +1258,7 @@ mod tests {
                     #{
                         name: "blockchain_service",
                         run_sh: `echo A`,
+                        run_as: "some_user",
                     },
                 ],
                 pre_upload: #{
@@ -1297,6 +1301,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["some".to_string()]),
+                    run_as: None,
                 })),
             )
             .once()
@@ -1333,6 +1338,7 @@ mod tests {
                         restart_config: None,
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
+                        run_as: Some("some_user".to_string()),
                     },
                     vec![UPLOAD_JOB_NAME.to_string()],
                 )),
@@ -1421,6 +1427,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec![]),
+                    run_as: None,
                 })),
             )
             .once()
@@ -1453,6 +1460,7 @@ mod tests {
                     AlternativeDownload {
                         run_sh: "alternative download".to_string(),
                         restart_config: None,
+                        run_as: None,
                     },
                     vec!["init_job".to_string()],
                 )),
@@ -1475,6 +1483,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["some".to_string(), DOWNLOAD_JOB_NAME.to_string()]),
+                    run_as: None,
                 })),
             )
             .once()
@@ -1495,6 +1504,7 @@ mod tests {
                         restart_config: None,
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
+                        run_as: None,
                     },
                     vec!["post_download_job".to_string()],
                 )),

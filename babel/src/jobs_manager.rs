@@ -789,6 +789,7 @@ mod tests {
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: None,
+            run_as: None,
         }
     }
 
@@ -893,6 +894,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec![]),
+                    run_as: None,
                 },
             )
             .await
@@ -1130,6 +1132,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["invalid_dependency".to_string()]),
+                    run_as: None,
                 },
             )
             .await?;
@@ -1149,6 +1152,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["test_job".to_string()]),
+                    run_as: None,
                 },
             )
             .await?;
@@ -1226,6 +1230,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["failed_job".to_string()]),
+                    run_as: None,
                 },
             )
             .await?;
@@ -1302,6 +1307,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: None,
+                    run_as: None,
                 },
             )
             .await?;

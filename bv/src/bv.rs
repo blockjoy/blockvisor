@@ -1033,6 +1033,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec![]),
+                    run_as: None,
                 }),
             )
             .once()
@@ -1066,6 +1067,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["init_job".to_string()]),
+                    run_as: None,
                 }),
             )
             .once()
@@ -1092,6 +1094,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["download".to_string()]),
+                    run_as: None,
                 }),
             )
             .once()
@@ -1118,6 +1121,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["download".to_string()]),
+                    run_as: None,
                 }),
             )
             .once()
@@ -1166,6 +1170,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec![]),
+                    run_as: None,
                 }),
             )
             .once()
@@ -1192,6 +1197,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["upload".to_string()]),
+                    run_as: None,
                 }),
             )
             .once()
@@ -1218,6 +1224,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["upload".to_string()]),
+                    run_as: None,
                 }),
             )
             .once()

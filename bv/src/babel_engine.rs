@@ -483,6 +483,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: None,
+                    run_as: None,
                 };
             }
         }
@@ -989,6 +990,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: None,
+                    run_as: None,
                 },
             )?;
             self.engine.start_job(name)?;

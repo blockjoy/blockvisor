@@ -74,6 +74,7 @@ async fn run_job(
                         .shutdown_signal
                         .unwrap_or(DEFAULT_JOB_SHUTDOWN_SIGNAL),
                     log_buffer,
+                    job_config.run_as,
                 )?
                 .run(run, &job_name, &jobs::JOBS_DIR),
                 log_handler
