@@ -388,6 +388,16 @@ fn test_plugin_config() -> eyre::Result<()> {
         .with(predicate::eq("blockchain_service_b"))
         .once()
         .returning(|_| Ok(()));
+    babel
+        .expect_add_task()
+        .with(
+            predicate::eq("some_task"),
+            predicate::eq("* * * * * * *"),
+            predicate::eq("fn_name"),
+            predicate::eq("param_value"),
+        )
+        .once()
+        .returning(|_, _, _, _| Ok(()));
 
     babel
         .expect_stop_job()

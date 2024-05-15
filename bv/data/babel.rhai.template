@@ -313,6 +313,19 @@ const PLUGIN_CONFIG = #{
             //}
         //]
     //},
+    /// [optional] List of tasks to be scheduled on init.
+    //scheduled: [
+        //#{
+            /// Unique name of the task.
+            //name: "some_task",
+            /// Cron schedule expression.
+            //schedule: "* * * * * * *",
+            /// Function name to be executed according to schedule.
+            //function: "fn_name",
+            /// [optional] Parameter to ba passed to function.
+            //param: "param_value",
+        //}
+    //],
 };
 
 /// Returns blockchain application status.

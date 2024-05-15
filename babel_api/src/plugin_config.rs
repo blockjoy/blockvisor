@@ -20,6 +20,20 @@ pub struct PluginConfig {
     pub upload: Option<Upload>,
     /// List of post-upload actions.
     pub post_upload: Option<Actions>,
+    /// List of tasks to be scheduled on init.
+    pub scheduled: Option<Vec<Task>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Task {
+    /// Unique name of the task.
+    pub name: String,
+    /// Cron schedule expression.
+    pub schedule: String,
+    /// Function name to be executed according to schedule.
+    pub function: String,
+    /// Parameter to ba passed to function.
+    pub param: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

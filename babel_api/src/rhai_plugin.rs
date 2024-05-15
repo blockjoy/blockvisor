@@ -432,6 +432,16 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                     self.run_actions(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
                 self.start_services(config.services, post_download_jobs)?;
             }
+            if let Some(tasks) = config.scheduled {
+                for task in tasks {
+                    self.babel_engine.add_task(
+                        &task.name,
+                        &task.schedule,
+                        &task.function,
+                        &task.param.unwrap_or_default(),
+                    )?;
+                }
+            }
             Ok(())
         }
     }
@@ -1438,6 +1448,14 @@ mod tests {
                         run_sh: `echo A`,
                     },
                 ],
+                scheduled: [
+                    #{
+                        name: "some_task",
+                        schedule: "* * * * * * *",
+                        function: "fn_name",
+                        param: "param_value",
+                    }
+                ],
             };
             "#;
         let mut babel = MockBabelEngine::new();
@@ -1562,6 +1580,16 @@ mod tests {
             .once()
             .returning(|_| Ok(()));
 
+        babel
+            .expect_add_task()
+            .with(
+                predicate::eq("some_task"),
+                predicate::eq("* * * * * * *"),
+                predicate::eq("fn_name"),
+                predicate::eq("param_value"),
+            )
+            .once()
+            .returning(|_, _, _, _| Ok(()));
         let plugin = RhaiPlugin::new(script, babel)?;
         assert!(plugin.capabilities().iter().any(|v| v == "init"));
         plugin.init().unwrap();
