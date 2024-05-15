@@ -7,10 +7,8 @@ use crate::{config::SharedConfig, node_data::NodeData, nodes_manager::NodesDataC
 use async_trait::async_trait;
 use babel_api::metadata::Requirements;
 use eyre::Result;
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Debug,
-    net::IpAddr,
     path::{Path, PathBuf},
 };
 use tonic::{codegen::InterceptedService, transport::Channel};
@@ -29,19 +27,6 @@ pub trait Pal {
 
     /// Path to job runner binary bundled with this BV.
     fn job_runner_path(&self) -> &Path;
-
-    /// Type representing network interface. It is required to be Serialize/Deserialize
-    /// since it's going to be part of node data.
-    type NetInterface: NetInterface + Serialize + DeserializeOwned + Debug + Clone;
-    /// Creates the new network interface and add it to our bridge.
-    /// The `ip` is not assigned on the host but rather by the API.
-    async fn create_net_interface(
-        &self,
-        index: u32,
-        ip: IpAddr,
-        gateway: IpAddr,
-        config: &SharedConfig,
-    ) -> Result<Self::NetInterface>;
 
     /// Type representing commands stream.
     type CommandsStream: CommandsStream;
@@ -66,15 +51,9 @@ pub trait Pal {
     /// Type representing virtual machine on which node is running.
     type VirtualMachine: VirtualMachine + Debug;
     /// Created new VM instance.
-    async fn create_vm(
-        &self,
-        node_data: &NodeData<Self::NetInterface>,
-    ) -> Result<Self::VirtualMachine>;
+    async fn create_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine>;
     /// Attach to already created VM instance.
-    async fn attach_vm(
-        &self,
-        node_data: &NodeData<Self::NetInterface>,
-    ) -> Result<Self::VirtualMachine>;
+    async fn attach_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine>;
 
     /// Build path to VM data directory, a place where kernel and other VM related data are stored.
     fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
@@ -91,18 +70,6 @@ pub trait Pal {
 }
 
 pub type AvailableResources = Requirements;
-
-#[async_trait]
-pub trait NetInterface {
-    fn name(&self) -> &String;
-    fn ip(&self) -> &IpAddr;
-    fn gateway(&self) -> &IpAddr;
-
-    /// Remaster the network interface.
-    async fn remaster(&self) -> Result<()>;
-    /// Delete the network interface.
-    async fn delete(&self) -> Result<()>;
-}
 
 #[async_trait]
 pub trait ServiceConnector<S> {

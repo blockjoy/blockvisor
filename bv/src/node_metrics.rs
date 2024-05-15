@@ -77,7 +77,6 @@ impl DerefMut for Metrics {
 pub async fn collect_metrics<P>(nodes_manager: Arc<NodesManager<P>>) -> Metrics
 where
     P: Pal + Send + Sync + Debug + 'static,
-    P::NetInterface: Send + Sync + Clone,
     P::NodeConnection: Send + Sync,
     P::ApiServiceConnector: Send + Sync,
     P::VirtualMachine: Send + Sync,

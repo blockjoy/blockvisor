@@ -1,4 +1,3 @@
-use crate::src::utils::test_env::DummyNet;
 use crate::src::utils::{
     execute_sql, execute_sql_insert, rbac, stub_server::StubHostsServer, test_env,
 };
@@ -381,7 +380,7 @@ async fn test_bv_service_e2e() {
 
 async fn node_version(id: &str) -> String {
     if let Ok(node_data) =
-        NodeData::<DummyNet>::load(Path::new(&format!("/var/lib/blockvisor/nodes/{id}.json"))).await
+        NodeData::load(Path::new(&format!("/var/lib/blockvisor/nodes/{id}.json"))).await
     {
         node_data.image.node_version
     } else {

@@ -8,14 +8,13 @@ use crate::{
     linux_platform, node_context,
     node_data::NodeData,
     nodes_manager::NodesDataCache,
-    pal::{self, AvailableResources, NetInterface, NodeConnection, Pal},
+    pal::{self, AvailableResources, NodeConnection, Pal},
     services,
 };
 use async_trait::async_trait;
 use bv_utils::cmd::run_cmd;
 use bv_utils::with_retry;
 use cidr_utils::cidr::Ipv4Cidr;
-use core::fmt;
 use eyre::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -104,24 +103,6 @@ impl Pal for LinuxApptainerPlatform {
         self.base.job_runner_path.as_path()
     }
 
-    type NetInterface = LinuxNetInterface;
-
-    async fn create_net_interface(
-        &self,
-        index: u32,
-        ip: IpAddr,
-        gateway: IpAddr,
-        config: &SharedConfig,
-    ) -> Result<Self::NetInterface> {
-        let name = format!("bv{index}");
-        Ok(LinuxNetInterface {
-            name,
-            bridge_ifa: config.read().await.iface.clone(),
-            ip,
-            gateway,
-        })
-    }
-
     type CommandsStream = services::mqtt::MqttStream;
     type CommandsStreamConnector = services::mqtt::MqttConnector;
     fn create_commands_stream_connector(
@@ -147,10 +128,7 @@ impl Pal for LinuxApptainerPlatform {
 
     type VirtualMachine = apptainer_machine::ApptainerMachine;
 
-    async fn create_vm(
-        &self,
-        node_data: &NodeData<Self::NetInterface>,
-    ) -> Result<Self::VirtualMachine> {
+    async fn create_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             self.bridge_ip,
@@ -164,10 +142,7 @@ impl Pal for LinuxApptainerPlatform {
         .await
     }
 
-    async fn attach_vm(
-        &self,
-        node_data: &NodeData<Self::NetInterface>,
-    ) -> Result<Self::VirtualMachine> {
+    async fn attach_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             self.bridge_ip,
@@ -227,37 +202,6 @@ pub struct LinuxNetInterface {
 
 fn default_bridge_ifa() -> String {
     config::DEFAULT_BRIDGE_IFACE.to_string()
-}
-
-#[async_trait]
-impl NetInterface for LinuxNetInterface {
-    fn name(&self) -> &String {
-        &self.name
-    }
-
-    fn ip(&self) -> &IpAddr {
-        &self.ip
-    }
-
-    fn gateway(&self) -> &IpAddr {
-        &self.gateway
-    }
-
-    /// Remaster the network interface.
-    async fn remaster(&self) -> Result<()> {
-        Ok(())
-    }
-
-    /// Delete the network interface.
-    async fn delete(&self) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl fmt::Display for LinuxNetInterface {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.ip)
-    }
 }
 
 #[derive(Debug)]

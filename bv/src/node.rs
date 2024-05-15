@@ -6,7 +6,7 @@ use crate::{
     config::SharedConfig,
     node_context::NodeContext,
     node_data::{NodeData, NodeImage, NodeStatus},
-    pal::{self, NetInterface, NodeConnection, Pal, RecoverBackoff, VirtualMachine},
+    pal::{self, NodeConnection, Pal, RecoverBackoff, VirtualMachine},
     scheduler,
     services::blockchain::{self, ROOT_FS_FILE},
     utils,
@@ -37,7 +37,7 @@ pub type BabelEngine<N> = babel_engine::BabelEngine<N, RhaiPlugin<babel_engine::
 
 #[derive(Debug)]
 pub struct Node<P: Pal> {
-    pub data: NodeData<P::NetInterface>,
+    pub data: NodeData,
     pub babel_engine: BabelEngine<P::NodeConnection>,
     metadata: BlockchainMetadata,
     machine: P::VirtualMachine,
@@ -56,7 +56,7 @@ struct BvContext {
 
 struct MaybeNode<P: Pal> {
     context: NodeContext,
-    data: NodeData<P::NetInterface>,
+    data: NodeData,
     machine: Option<P::VirtualMachine>,
     scheduler_tx: mpsc::Sender<scheduler::Action>,
 }
@@ -134,8 +134,7 @@ impl<P: Pal> MaybeNode<P> {
         if let Some(mut machine) = self.machine.take() {
             machine.delete().await?;
         }
-        self.context.delete().await?;
-        self.data.network_interface.delete().await
+        Ok(())
     }
 }
 
@@ -145,7 +144,7 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn create(
         pal: Arc<P>,
         api_config: SharedConfig,
-        data: NodeData<P::NetInterface>,
+        data: NodeData,
         scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let maybe_node = MaybeNode {
@@ -170,7 +169,7 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn attach(
         pal: Arc<P>,
         api_config: SharedConfig,
-        data: NodeData<P::NetInterface>,
+        data: NodeData,
         scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let node_id = data.id;
@@ -284,7 +283,6 @@ impl<P: Pal + Debug> Node<P> {
 
         self.babel_engine.start().await?;
         if self.machine.state().await == pal::VmState::SHUTOFF {
-            self.data.network_interface.remaster().await?;
             self.machine.start().await?;
         }
         let id = self.id();
@@ -303,8 +301,8 @@ impl<P: Pal + Debug> Node<P> {
             node_type: self.data.image.node_type.clone(),
             protocol: self.data.image.protocol.clone(),
             node_version: self.data.image.node_version.clone(),
-            ip: self.data.network_interface.ip().to_string(),
-            gateway: self.data.network_interface.gateway().to_string(),
+            ip: self.data.network_interface.ip.to_string(),
+            gateway: self.data.network_interface.gateway.to_string(),
             standalone: self.data.standalone,
             bv_id: self.bv_context.id.clone(),
             bv_name: self.bv_context.name.clone(),
@@ -395,8 +393,7 @@ impl<P: Pal + Debug> Node<P> {
         self.save_expected_status(NodeStatus::Stopped).await?;
         self.babel_engine.stop().await?;
         self.machine.delete().await?;
-        self.context.delete().await?;
-        self.data.network_interface.delete().await
+        self.context.delete().await
     }
 
     pub async fn update(
@@ -656,6 +653,7 @@ fn fw_setup_timeout(config: &firewall::Config) -> Duration {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::node_data::NetInterface;
     use crate::{
         config::Config,
         node_context::build_registry_dir,
@@ -679,7 +677,6 @@ pub mod tests {
     use bv_utils::rpc::DefaultTimeout;
     use chrono::SubsecRound;
     use mockall::*;
-    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
     use std::{
         net::IpAddr,
@@ -692,42 +689,6 @@ pub mod tests {
     pub const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
     pub fn testing_babel_path_absolute() -> String {
         format!("{}/tests/babel.rhai", env!("CARGO_MANIFEST_DIR"))
-    }
-
-    #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-    pub struct DummyNet {
-        pub name: String,
-        pub ip: IpAddr,
-        pub gateway: IpAddr,
-        pub remaster_error: Option<String>,
-        pub delete_error: Option<String>,
-    }
-
-    #[async_trait]
-    impl NetInterface for DummyNet {
-        fn name(&self) -> &String {
-            &self.name
-        }
-        fn ip(&self) -> &IpAddr {
-            &self.ip
-        }
-        fn gateway(&self) -> &IpAddr {
-            &self.gateway
-        }
-        async fn remaster(&self) -> Result<()> {
-            if let Some(err) = &self.remaster_error {
-                bail!(err.clone())
-            } else {
-                Ok(())
-            }
-        }
-        async fn delete(&self) -> Result<()> {
-            if let Some(err) = self.delete_error.clone() {
-                bail!(err)
-            } else {
-                Ok(())
-            }
-        }
     }
 
     #[derive(Debug, Default, Clone)]
@@ -844,14 +805,6 @@ pub mod tests {
             fn bv_root(&self) -> &Path;
             fn babel_path(&self) -> &Path;
             fn job_runner_path(&self) -> &Path;
-            type NetInterface = DummyNet;
-            async fn create_net_interface(
-                &self,
-                index: u32,
-                ip: IpAddr,
-                gateway: IpAddr,
-                config: &SharedConfig,
-            ) -> Result<DummyNet>;
 
             type CommandsStream = EmptyStream;
             type CommandsStreamConnector = EmptyStreamConnector;
@@ -869,11 +822,11 @@ pub mod tests {
             type VirtualMachine = MockTestVM;
             async fn create_vm(
                 &self,
-                node_data: &NodeData<DummyNet>,
+                node_data: &NodeData,
             ) -> Result<MockTestVM>;
             async fn attach_vm(
                 &self,
-                node_data: &NodeData<DummyNet>,
+                node_data: &NodeData,
             ) -> Result<MockTestVM>;
             fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
             fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
@@ -1033,7 +986,7 @@ pub mod tests {
             pal
         }
 
-        fn default_node_data(&self) -> NodeData<DummyNet> {
+        fn default_node_data(&self) -> NodeData {
             NodeData {
                 id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
                 name: "node name".to_string(),
@@ -1047,12 +1000,9 @@ pub mod tests {
                     node_version: "1.2.3".to_string(),
                 },
                 kernel: TEST_KERNEL.to_string(),
-                network_interface: DummyNet {
-                    name: "bv1".to_string(),
+                network_interface: NetInterface {
                     ip: IpAddr::from_str("172.16.0.10").unwrap(),
                     gateway: IpAddr::from_str("172.16.0.1").unwrap(),
-                    remaster_error: None,
-                    delete_error: None,
                 },
                 requirements: Requirements {
                     vcpu_count: 1,
@@ -1077,16 +1027,15 @@ pub mod tests {
                 babel_api::babel::babel_server::BabelServer::new(babel_mock)
             )
         }
-        async fn assert_node_data_saved(&self, node_data: &NodeData<DummyNet>) {
+        async fn assert_node_data_saved(&self, node_data: &NodeData) {
             let mut node_data = node_data.clone();
             if let Some(time) = &mut node_data.started_at {
                 *time = time.trunc_subsecs(0);
             }
-            let saved_data = NodeData::<DummyNet>::load(
-                &self.registry_dir.join(format!("{}.json", node_data.id)),
-            )
-            .await
-            .unwrap();
+            let saved_data =
+                NodeData::load(&self.registry_dir.join(format!("{}.json", node_data.id)))
+                    .await
+                    .unwrap();
             assert_eq!(saved_data, node_data);
         }
     }
@@ -1415,15 +1364,6 @@ pub mod tests {
                 .once()
                 .in_sequence(&mut seq)
                 .return_const(VmState::RUNNING);
-            // remaster error
-            mock.expect_state()
-                .once()
-                .in_sequence(&mut seq)
-                .return_const(VmState::SHUTOFF);
-            mock.expect_state()
-                .once()
-                .in_sequence(&mut seq)
-                .return_const(VmState::SHUTOFF);
             // VM start failed
             mock.expect_state()
                 .once()
@@ -1479,13 +1419,6 @@ pub mod tests {
             node.start().await.unwrap_err().to_string()
         );
 
-        node.data.network_interface.remaster_error = Some("remaster error".to_string());
-        assert_eq!(
-            "remaster error",
-            node.start().await.unwrap_err().to_string()
-        );
-
-        node.data.network_interface.remaster_error = None;
         assert_eq!(
             "VM start failed",
             node.start().await.unwrap_err().to_string()
@@ -1502,8 +1435,8 @@ pub mod tests {
             node_version: node.data.image.node_version.clone(),
             protocol: node.data.image.protocol.clone(),
             node_type: node.data.image.node_type.clone(),
-            ip: node.data.network_interface.ip().to_string(),
-            gateway: node.data.network_interface.gateway().to_string(),
+            ip: node.data.network_interface.ip.to_string(),
+            gateway: node.data.network_interface.gateway.to_string(),
             standalone: node.data.standalone,
             bv_id: node.bv_context.id.clone(),
             bv_name: node.bv_context.name.clone(),

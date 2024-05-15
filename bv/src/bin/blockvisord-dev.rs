@@ -33,7 +33,6 @@ async fn main() -> Result<()> {
 async fn run_server<P>(config: config::Config, pal: P) -> Result<()>
 where
     P: Pal + Debug + Send + Sync + 'static,
-    P::NetInterface: Send + Sync + 'static,
     P::NodeConnection: Send + Sync + 'static,
     P::ApiServiceConnector: Send + Sync + 'static,
     P::VirtualMachine: Send + Sync + 'static,

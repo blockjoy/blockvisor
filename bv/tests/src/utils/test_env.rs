@@ -11,7 +11,7 @@ use blockvisord::{
     node_context,
     node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeData, NodeStatus},
-    pal::{CommandsStream, NetInterface, Pal, ServiceConnector},
+    pal::{CommandsStream, Pal, ServiceConnector},
     services::{self, blockchain::IMAGES_DIR, kernel::KERNELS_DIR, ApiInterceptor, AuthToken},
     BV_VAR_PATH,
 };
@@ -19,7 +19,6 @@ use bv_utils::logging::setup_logging;
 use bv_utils::{rpc::DefaultTimeout, run_flag::RunFlag};
 use eyre::Result;
 use predicates::prelude::predicate;
-use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::{
     fs,
@@ -111,7 +110,6 @@ impl TestEnv {
             bv_root: self.bv_root.clone(),
             babel_path: babel_dir.join("babel"),
             job_runner_path: babel_dir.join("babel_job_runner"),
-            token: self.token,
         }
     }
 
@@ -162,12 +160,7 @@ impl TestEnv {
             .join(format!("{vm_id}.json"));
         let start = std::time::Instant::now();
         loop {
-            if NodeData::<DummyNet>::load(&node_path)
-                .await
-                .unwrap()
-                .expected_status
-                == NodeStatus::Failed
-            {
+            if NodeData::load(&node_path).await.unwrap().expected_status == NodeStatus::Failed {
                 break;
             } else if start.elapsed() < timeout {
                 sleep(Duration::from_secs(5)).await;
@@ -299,7 +292,6 @@ pub struct DummyPlatform {
     pub(crate) bv_root: PathBuf,
     pub(crate) babel_path: PathBuf,
     pub(crate) job_runner_path: PathBuf,
-    pub(crate) token: u32,
 }
 
 #[async_trait]
@@ -314,19 +306,6 @@ impl Pal for DummyPlatform {
 
     fn job_runner_path(&self) -> &Path {
         self.job_runner_path.as_path()
-    }
-
-    type NetInterface = DummyNet;
-
-    async fn create_net_interface(
-        &self,
-        index: u32,
-        ip: IpAddr,
-        gateway: IpAddr,
-        _config: &SharedConfig,
-    ) -> Result<Self::NetInterface> {
-        let name = format!("bv{}t{}", index, self.token);
-        Ok(DummyNet { name, ip, gateway })
     }
 
     type CommandsStream = EmptyStream;
@@ -351,10 +330,7 @@ impl Pal for DummyPlatform {
 
     type VirtualMachine = apptainer_machine::ApptainerMachine;
 
-    async fn create_vm(
-        &self,
-        node_data: &NodeData<Self::NetInterface>,
-    ) -> Result<Self::VirtualMachine> {
+    async fn create_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
@@ -373,10 +349,7 @@ impl Pal for DummyPlatform {
         .await
     }
 
-    async fn attach_vm(
-        &self,
-        node_data: &NodeData<Self::NetInterface>,
-    ) -> Result<Self::VirtualMachine> {
+    async fn attach_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
@@ -437,32 +410,6 @@ impl services::ApiServiceConnector for DummyApiConnector {
                 DefaultTimeout(Duration::from_secs(1)),
             ),
         ))
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct DummyNet {
-    pub name: String,
-    pub ip: IpAddr,
-    pub gateway: IpAddr,
-}
-
-#[async_trait]
-impl NetInterface for DummyNet {
-    fn name(&self) -> &String {
-        &self.name
-    }
-    fn ip(&self) -> &IpAddr {
-        &self.ip
-    }
-    fn gateway(&self) -> &IpAddr {
-        &self.gateway
-    }
-    async fn remaster(&self) -> Result<()> {
-        Ok(())
-    }
-    async fn delete(&self) -> Result<()> {
-        Ok(())
     }
 }
 

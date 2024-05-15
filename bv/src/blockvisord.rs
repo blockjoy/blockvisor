@@ -65,7 +65,6 @@ pub struct BlockvisorD<P> {
 impl<P> BlockvisorD<P>
 where
     P: Pal + Send + Sync + Debug + 'static,
-    P::NetInterface: Send + Sync + Clone,
     P::NodeConnection: Send + Sync,
     P::ApiServiceConnector: Send + Sync,
     P::VirtualMachine: Send + Sync,

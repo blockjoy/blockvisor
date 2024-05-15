@@ -1,3 +1,4 @@
+use crate::node_data::NetInterface;
 use crate::{
     command_failed,
     commands::{self, into_internal, Error},
@@ -6,7 +7,7 @@ use crate::{
     node_context::build_registry_dir,
     node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
     node_metrics,
-    pal::{NetInterface, Pal},
+    pal::Pal,
     scheduler,
     scheduler::{Scheduled, Scheduler},
     services::blockchain::ROOT_FS_FILE,
@@ -26,10 +27,10 @@ use chrono::{DateTime, Utc};
 use eyre::{anyhow, Context, Result};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::{
     collections::HashMap,
     fmt::Debug,
-    net::IpAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -138,7 +139,6 @@ impl State {
 impl<P> NodesManager<P>
 where
     P: Pal + Send + Sync + Debug + 'static,
-    P::NetInterface: Send + Sync + Clone,
     P::NodeConnection: Send + Sync,
     P::ApiServiceConnector: Send + Sync,
     P::VirtualMachine: Send + Sync,
@@ -251,11 +251,11 @@ where
 
         check_user_firewall_rules(&config.rules)?;
 
-        let ip = config
+        let ip: IpAddr = config
             .ip
             .parse()
             .with_context(|| format!("invalid ip `{}`", config.ip))?;
-        let gateway = config
+        let gateway: IpAddr = config
             .gateway
             .parse()
             .with_context(|| format!("invalid gateway `{}`", config.gateway))?;
@@ -269,7 +269,7 @@ where
 
         for n in self.nodes.read().await.values() {
             let node = n.read().await;
-            if node.data.network_interface.ip() == &ip {
+            if node.data.network_interface.ip == ip {
                 command_failed!(Error::Internal(anyhow!(
                     "Node with ip address `{ip}` exists"
                 )));
@@ -290,13 +290,11 @@ where
         self.check_node_requirements(&meta.requirements, &config.image, None)
             .await?;
 
-        let network_interface = self.create_network_interface(ip, gateway).await?;
-
         let node_data_cache = NodeDataCache {
             name: config.name.clone(),
             image: config.image.clone(),
-            ip: network_interface.ip().to_string(),
-            gateway: network_interface.gateway().to_string(),
+            ip: ip.to_string(),
+            gateway: gateway.to_string(),
             started_at: None,
             standalone: config.standalone,
             requirements: meta.requirements.clone(),
@@ -309,7 +307,7 @@ where
             kernel: meta.kernel,
             expected_status: NodeStatus::Stopped,
             started_at: None,
-            network_interface,
+            network_interface: NetInterface { ip, gateway },
             requirements: meta.requirements,
             properties,
             network: config.network,
@@ -783,8 +781,8 @@ where
                         id,
                         NodeDataCache {
                             name,
-                            ip: node.data.network_interface.ip().to_string(),
-                            gateway: node.data.network_interface.gateway().to_string(),
+                            ip: node.data.network_interface.ip.to_string(),
+                            gateway: node.data.network_interface.gateway.to_string(),
                             image: node.data.image.clone(),
                             started_at: node.data.started_at,
                             standalone: node.data.standalone,
@@ -806,32 +804,6 @@ where
         }
 
         Ok((nodes, node_ids, node_data_cache))
-    }
-
-    /// Create and return the next network interface using machine index
-    async fn create_network_interface(
-        &self,
-        ip: IpAddr,
-        gateway: IpAddr,
-    ) -> Result<P::NetInterface> {
-        let machine_index = {
-            let mut data = self.state.write().await;
-            data.machine_index += 1;
-            data.machine_index
-        };
-        let iface = self
-            .pal
-            .create_net_interface(machine_index, ip, gateway, &self.api_config)
-            .await
-            .context(format!("failed to create VM bridge bv{}", machine_index))?;
-        let res = self.state.read().await.save(&self.registry_path).await;
-        if res.is_err() {
-            if let Err(err) = iface.delete().await {
-                error!("Can't delete network interface after unsuccessful node create: {err:#}");
-            }
-            res?
-        }
-        Ok(iface)
     }
 
     #[instrument(skip(pal, api_config))]
@@ -902,6 +874,7 @@ fn name_not_found(name: &str) -> eyre::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node_data::NetInterface;
     use crate::{
         node::tests::*,
         pal,
@@ -919,6 +892,7 @@ mod tests {
     use eyre::bail;
     use mockall::*;
     use std::ffi::OsStr;
+    use std::net::IpAddr;
     use std::str::FromStr;
 
     mock! {
@@ -1141,34 +1115,12 @@ mod tests {
         config: NodeConfig,
         vm_mock: MockTestVM,
     ) {
-        let expected_ip = config.ip.clone();
-        let expected_gateway = config.gateway.clone();
         pal.expect_available_resources()
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .once()
             .returning(available_test_resources);
-        pal.expect_create_net_interface()
-            .withf(move |index, ip, gateway, _| {
-                *index == expected_index
-                    && ip.to_string() == expected_ip
-                    && gateway.to_string() == expected_gateway
-            })
-            .return_once(|index, ip, gateway, _config| {
-                Ok(DummyNet {
-                    name: format!("bv{index}"),
-                    ip,
-                    gateway,
-                    remaster_error: None,
-                    delete_error: Some("net delete error".to_string()),
-                })
-            });
         pal.expect_create_vm()
-            .with(predicate::eq(expected_node_data(
-                expected_index,
-                id,
-                config,
-                None,
-            )))
+            .with(predicate::eq(expected_node_data(id, config, None)))
             .return_once(move |_| Ok(vm_mock));
         pal.expect_create_node_connection()
             .with(predicate::eq(id))
@@ -1181,8 +1133,6 @@ mod tests {
         id: Uuid,
         config: NodeConfig,
     ) {
-        let expected_ip = config.ip.clone();
-        let expected_gateway = config.gateway.clone();
         pal.expect_available_resources()
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .once()
@@ -1200,37 +1150,12 @@ mod tests {
         pal.expect_available_resources()
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .returning(available_test_resources);
-        pal.expect_create_net_interface()
-            .withf(move |index, ip, gateway, _| {
-                *index == expected_index
-                    && ip.to_string() == expected_ip
-                    && gateway.to_string() == expected_gateway
-            })
-            .return_once(|index, ip, gateway, _config| {
-                Ok(DummyNet {
-                    name: format!("bv{index}"),
-                    ip,
-                    gateway,
-                    remaster_error: None,
-                    delete_error: Some("net delete error".to_string()),
-                })
-            });
         pal.expect_create_vm()
-            .with(predicate::eq(expected_node_data(
-                expected_index,
-                id,
-                config,
-                None,
-            )))
+            .with(predicate::eq(expected_node_data(id, config, None)))
             .return_once(|_| bail!("failed to create vm"));
     }
 
-    fn expected_node_data(
-        expected_index: u32,
-        id: Uuid,
-        config: NodeConfig,
-        image: Option<NodeImage>,
-    ) -> NodeData<DummyNet> {
+    fn expected_node_data(id: Uuid, config: NodeConfig, image: Option<NodeImage>) -> NodeData {
         NodeData {
             id,
             name: config.name,
@@ -1240,12 +1165,9 @@ mod tests {
             has_pending_update: false,
             image: image.unwrap_or(config.image),
             kernel: TEST_KERNEL.to_string(),
-            network_interface: DummyNet {
-                name: format!("bv{expected_index}"),
+            network_interface: NetInterface {
                 ip: IpAddr::from_str(&config.ip).unwrap(),
                 gateway: IpAddr::from_str(&config.gateway).unwrap(),
-                remaster_error: None,
-                delete_error: Some("net delete error".to_string()),
             },
             requirements: TEST_NODE_REQUIREMENTS,
             firewall_rules: config.rules,
@@ -1307,7 +1229,6 @@ mod tests {
         };
         let mut vm_mock = MockTestVM::new();
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
-        vm_mock.expect_delete().once().returning(|| Ok(()));
         add_create_node_expectations(
             &mut pal,
             2,
@@ -1334,16 +1255,6 @@ mod tests {
             failed_node_id,
             failed_node_config.clone(),
         );
-        // expectations for create_net failed
-        let expected_ip = failed_node_config.ip.clone();
-        let expected_gateway = failed_node_config.gateway.clone();
-        pal.expect_create_net_interface()
-            .withf(move |index, ip, gateway, _| {
-                *index == 4
-                    && ip.to_string() == expected_ip
-                    && gateway.to_string() == expected_gateway
-            })
-            .return_once(|_, _, _, _| bail!("failed to create net iface"));
 
         let nodes = NodesManager::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
@@ -1384,14 +1295,6 @@ mod tests {
             "BV internal error: failed to create vm",
             nodes
                 .create(failed_node_id, failed_node_config.clone())
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-        assert_eq!(
-            "BV internal error: failed to create VM bridge bv4: failed to create net iface",
-            nodes
-                .create(failed_node_id, failed_node_config)
                 .await
                 .unwrap_err()
                 .to_string()
@@ -1573,11 +1476,6 @@ mod tests {
             nodes.delete(first_node_id).await.unwrap_err().to_string()
         );
 
-        assert_eq!(
-            "BV internal error: net delete error",
-            nodes.delete(second_node_id).await.unwrap_err().to_string()
-        );
-
         for mock in http_mocks {
             mock.assert();
         }
@@ -1600,12 +1498,9 @@ mod tests {
             has_pending_update: false,
             image: test_env.test_image.clone(),
             kernel: TEST_KERNEL.to_string(),
-            network_interface: DummyNet {
-                name: "bv1".to_string(),
+            network_interface: NetInterface {
                 ip: IpAddr::from_str("192.168.0.9").unwrap(),
                 gateway: IpAddr::from_str("192.168.0.1").unwrap(),
-                remaster_error: None,
-                delete_error: None,
             },
             requirements: Requirements {
                 vcpu_count: 1,
@@ -1733,7 +1628,6 @@ mod tests {
             .returning(available_test_resources);
         pal.expect_attach_vm()
             .with(predicate::eq(expected_node_data(
-                1,
                 node_id,
                 node_config.clone(),
                 Some(new_image.clone()),
@@ -1922,21 +1816,19 @@ mod tests {
             .withf(move |req| req.is_empty())
             .once()
             .returning(available_test_resources);
-        pal.expect_create_net_interface()
-            .return_once(|index, ip, gateway, _config| {
-                Ok(DummyNet {
-                    name: format!("bv{index}"),
-                    ip,
-                    gateway,
-                    remaster_error: Some("remaster failed".to_string()),
-                    delete_error: None,
-                })
-            });
         pal.expect_create_vm().return_once(|_| {
             let mut mock = MockTestVM::new();
             let mut seq = Sequence::new();
             mock.expect_state()
-                .times(7)
+                .times(6)
+                .in_sequence(&mut seq)
+                .return_const(VmState::SHUTOFF);
+            mock.expect_start()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(|| bail!("failed to start VM"));
+            mock.expect_state()
+                .once()
                 .in_sequence(&mut seq)
                 .return_const(VmState::SHUTOFF);
             mock.expect_state()

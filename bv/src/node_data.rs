@@ -2,17 +2,15 @@ use babel_api::metadata::{firewall, Requirements};
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
 use eyre::{Context, Result};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tracing::{error, info};
 use uuid::Uuid;
-
-use crate::pal::NetInterface;
 
 pub type NodeProperties = HashMap<String, String>;
 
@@ -49,7 +47,7 @@ impl fmt::Display for NodeImage {
 
 // Data that we store in data file
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct NodeData<N> {
+pub struct NodeData {
     pub id: Uuid,
     pub name: String,
     pub expected_status: NodeStatus,
@@ -62,7 +60,7 @@ pub struct NodeData<N> {
     pub has_pending_update: bool,
     pub image: NodeImage,
     pub kernel: String,
-    pub network_interface: N,
+    pub network_interface: NetInterface,
     pub requirements: Requirements,
     pub firewall_rules: Vec<firewall::Rule>,
     #[serde(default)]
@@ -76,7 +74,13 @@ pub struct NodeData<N> {
     pub org_id: String,
 }
 
-impl<N: NetInterface + Serialize + DeserializeOwned> NodeData<N> {
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct NetInterface {
+    pub ip: IpAddr,
+    pub gateway: IpAddr,
+}
+
+impl NodeData {
     pub async fn load(path: &Path) -> Result<Self> {
         info!("Reading nodes config file: {}", path.display());
         fs::read_to_string(&path)

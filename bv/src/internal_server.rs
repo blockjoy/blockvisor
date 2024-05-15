@@ -7,7 +7,7 @@ use crate::{
     node::Node,
     node_data::{NodeImage, NodeStatus},
     nodes_manager::{self, NodeConfig, NodesManager},
-    pal::{NetInterface, Pal},
+    pal::Pal,
     services,
     services::api::{self, common, pb},
     {get_bv_status, set_bv_status, utils, ServiceStatus}, {node_metrics, BV_VAR_PATH},
@@ -99,7 +99,6 @@ async fn status_check() -> Result<(), Status> {
 impl<P> service_server::Service for State<P>
 where
     P: Pal + Debug + Send + Sync + 'static,
-    P::NetInterface: Send + Sync + 'static,
     P::NodeConnection: Send + Sync + 'static,
     P::ApiServiceConnector: Send + Sync + 'static,
     P::VirtualMachine: Send + Sync + 'static,
@@ -493,7 +492,6 @@ where
 impl<P> State<P>
 where
     P: Pal + Send + Sync + Debug + 'static,
-    P::NetInterface: Send + Sync + Clone,
     P::NodeConnection: Send + Sync,
     P::ApiServiceConnector: Send + Sync,
     P::VirtualMachine: Send + Sync,
@@ -534,8 +532,8 @@ where
                 name: node.data.name.clone(),
                 image: node.data.image.clone(),
                 status,
-                ip: node.data.network_interface.ip().to_string(),
-                gateway: node.data.network_interface.gateway().to_string(),
+                ip: node.data.network_interface.ip.to_string(),
+                gateway: node.data.network_interface.gateway.to_string(),
                 uptime: node
                     .data
                     .started_at
@@ -678,7 +676,7 @@ where
                     used_ips.push(host_ip.clone());
                 }
                 for (_, node) in self.nodes_manager.nodes_list().await.iter() {
-                    used_ips.push(node.read().await.data.network_interface.ip().to_string());
+                    used_ips.push(node.read().await.data.network_interface.ip.to_string());
                 }
                 let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {
                     anyhow!("failed to auto assign ip - provide it manually : {err:#}")

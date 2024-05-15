@@ -51,7 +51,7 @@ pub async fn new(
     bv_root: &Path,
     gateway: IpAddr,
     mask_bits: u8,
-    node_data: &NodeData<impl pal::NetInterface>,
+    node_data: &NodeData,
     babel_path: PathBuf,
     config: ApptainerConfig,
 ) -> Result<ApptainerMachine> {
@@ -69,7 +69,6 @@ pub async fn new(
         )
         .await?;
     }
-    let ip = *node_data.network_interface.ip();
     Ok(ApptainerMachine {
         vm_dir,
         babel_path,
@@ -78,7 +77,7 @@ pub async fn new(
         os_img_path,
         vm_id: node_data.id,
         vm_name: node_data.name.clone(),
-        ip,
+        ip: node_data.network_interface.ip,
         mask_bits,
         gateway,
         requirements: node_data.requirements.clone(),
