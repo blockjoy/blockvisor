@@ -9,13 +9,13 @@ use crate::{
     internal_server::NodeCreateRequest,
     linux_apptainer_platform::LinuxApptainerPlatform,
     linux_platform::bv_root,
-    node_context::REGISTRY_CONFIG_DIR,
-    node_data::{NodeImage, NodeStatus},
+    node_context::NODES_DIR,
+    node_state::{NodeImage, NodeStatus},
     nodes_manager::NodesManager,
     pretty_table::{PrettyTable, PrettyTableRow},
     services,
     services::blockchain::{
-        BlockchainService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOT_FS_FILE,
+        BlockchainService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOTFS_FILE,
     },
     workspace, BV_VAR_PATH,
 };
@@ -489,18 +489,16 @@ pub async fn process_image_command(
                 .join(format!("{}", node.image));
             // capture rhai script
             fs::copy(
-                build_bv_var_path
-                    .join(REGISTRY_CONFIG_DIR)
-                    .join(format!("{id}.rhai")),
+                build_bv_var_path.join(NODES_DIR).join(format!("{id}.rhai")),
                 image_dir.join(BABEL_PLUGIN_NAME),
             )?;
             // capture os.img
             fs::copy(
                 build_bv_var_path
-                    .join(REGISTRY_CONFIG_DIR)
+                    .join(NODES_DIR)
                     .join(format!("{id}"))
-                    .join(ROOT_FS_FILE),
-                image_dir.join(ROOT_FS_FILE),
+                    .join(ROOTFS_FILE),
+                image_dir.join(ROOTFS_FILE),
             )?;
             cleanup_rootfs(&image_dir, &node.image)
                 .await
@@ -518,7 +516,7 @@ pub async fn process_image_command(
             let s3_client = S3Client::new(s3_endpoint, s3_region, s3_bucket, s3_prefix, image_id)?;
             s3_client.upload_file(BABEL_PLUGIN_NAME).await?;
             s3_client
-                .archive_and_upload_file(ROOT_FS_FILE, BABEL_ARCHIVE_IMAGE_NAME)
+                .archive_and_upload_file(ROOTFS_FILE, BABEL_ARCHIVE_IMAGE_NAME)
                 .await?;
         }
     }
@@ -804,7 +802,7 @@ async fn bootstrap_os_image(
     debian_version: &str,
     rootfs_size_gb: u64,
 ) -> Result<()> {
-    let os_img_path = image_path.join(ROOT_FS_FILE);
+    let os_img_path = image_path.join(ROOTFS_FILE);
 
     println!("Creating the disk image with fallocate");
     let gb = &format!("{rootfs_size_gb}GB");
@@ -923,7 +921,7 @@ async fn on_rootfs<C: FnOnce(PathBuf) -> F, F: Future<Output = Result<()>>>(
     image: &NodeImage,
     call: C,
 ) -> Result<()> {
-    let os_img_path = image_path.join(ROOT_FS_FILE);
+    let os_img_path = image_path.join(ROOTFS_FILE);
     let mount_point = std::env::temp_dir().join(format!(
         "{}_{}_{}_rootfs",
         image.protocol, image.node_type, image.node_version
@@ -932,11 +930,11 @@ async fn on_rootfs<C: FnOnce(PathBuf) -> F, F: Future<Output = Result<()>>>(
 
     run_cmd("mount", [os_img_path.as_os_str(), mount_point.as_os_str()])
         .await
-        .with_context(|| format!("failed to mount {ROOT_FS_FILE}"))?;
+        .with_context(|| format!("failed to mount {ROOTFS_FILE}"))?;
     let call_result = call(mount_point.clone()).await;
     run_cmd("umount", [mount_point.as_os_str()])
         .await
-        .with_context(|| format!("failed to umount {ROOT_FS_FILE}"))?;
+        .with_context(|| format!("failed to umount {ROOTFS_FILE}"))?;
     call_result
 }
 

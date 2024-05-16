@@ -1,6 +1,6 @@
 use crate::{
     api_with_retry,
-    node_data::NodeImage,
+    node_state::NodeImage,
     services::{
         api::{common, pb, pb::blockchain_service_client},
         ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService,
@@ -20,7 +20,7 @@ pub const IMAGES_DIR: &str = "images";
 pub const BABEL_ARCHIVE_IMAGE_NAME: &str = "blockjoy.gz";
 pub const BABEL_IMAGE_NAME: &str = "blockjoy";
 pub const BABEL_PLUGIN_NAME: &str = "babel.rhai";
-pub const ROOT_FS_FILE: &str = "os.img";
+pub const ROOTFS_FILE: &str = "os.img";
 pub const DATA_FILE: &str = "data.img";
 
 pub struct BlockchainService<C> {
@@ -121,7 +121,7 @@ impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
 
         let folder = get_image_download_folder_path(&self.bv_root, image);
         fs::create_dir_all(&folder).await?;
-        let path = folder.join(ROOT_FS_FILE);
+        let path = folder.join(ROOTFS_FILE);
         let gz = folder.join(BABEL_ARCHIVE_IMAGE_NAME);
         utils::download_archive_with_retry(&archive.url, gz)
             .await?
@@ -146,7 +146,7 @@ pub fn get_image_download_folder_path(bv_root: &Path, image: &NodeImage) -> Path
 pub async fn is_image_cache_valid(bv_root: &Path, image: &NodeImage) -> Result<bool> {
     let folder = get_image_download_folder_path(bv_root, image);
 
-    let root = folder.join(ROOT_FS_FILE);
+    let root = folder.join(ROOTFS_FILE);
     let plugin = folder.join(BABEL_PLUGIN_NAME);
     if !root.exists() || !plugin.exists() {
         return Ok(false);

@@ -9,8 +9,8 @@ use blockvisord::{
     blockvisord::BlockvisorD,
     config::{Config, SharedConfig},
     node_context,
-    node_context::REGISTRY_CONFIG_DIR,
-    node_data::{NodeData, NodeStatus},
+    node_context::NODES_DIR,
+    node_state::{NodeState, NodeStatus},
     pal::{CommandsStream, Pal, ServiceConnector},
     services::{self, blockchain::IMAGES_DIR, ApiInterceptor, AuthToken},
     BV_VAR_PATH,
@@ -151,11 +151,11 @@ impl TestEnv {
         let node_path = self
             .bv_root
             .join(BV_VAR_PATH)
-            .join(REGISTRY_CONFIG_DIR)
-            .join(format!("{vm_id}.json"));
+            .join(NODES_DIR)
+            .join(format!("{vm_id}/state.json"));
         let start = std::time::Instant::now();
         loop {
-            if NodeData::load(&node_path).await.unwrap().expected_status == NodeStatus::Failed {
+            if NodeState::load(&node_path).await.unwrap().expected_status == NodeStatus::Failed {
                 break;
             } else if start.elapsed() < timeout {
                 sleep(Duration::from_secs(5)).await;
@@ -325,12 +325,12 @@ impl Pal for DummyPlatform {
 
     type VirtualMachine = apptainer_machine::ApptainerMachine;
 
-    async fn create_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine> {
+    async fn create_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
             24,
-            node_data,
+            node_state,
             self.babel_path.clone(),
             ApptainerConfig {
                 extra_args: None,
@@ -344,12 +344,12 @@ impl Pal for DummyPlatform {
         .await
     }
 
-    async fn attach_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine> {
+    async fn attach_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
             24,
-            node_data,
+            node_state,
             self.babel_path.clone(),
             ApptainerConfig {
                 extra_args: None,
@@ -361,10 +361,6 @@ impl Pal for DummyPlatform {
         .await?
         .attach()
         .await
-    }
-
-    fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
-        node_context::build_node_dir(&self.bv_root, id)
     }
 
     fn available_resources(

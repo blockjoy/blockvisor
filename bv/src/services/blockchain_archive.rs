@@ -1,7 +1,7 @@
 use crate::{
     api_with_retry,
     config::SharedConfig,
-    node_data::NodeImage,
+    node_state::NodeImage,
     services,
     services::{
         api::{pb, pb::blockchain_archive_service_client},

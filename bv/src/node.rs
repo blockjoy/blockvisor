@@ -5,10 +5,10 @@ use crate::{
     commands::into_internal,
     config::SharedConfig,
     node_context::NodeContext,
-    node_data::{NodeData, NodeImage, NodeStatus},
+    node_state::{NodeImage, NodeState, NodeStatus},
     pal::{self, NodeConnection, Pal, RecoverBackoff, VirtualMachine},
     scheduler,
-    services::blockchain::{self, ROOT_FS_FILE},
+    services::blockchain::{self, ROOTFS_FILE},
     utils,
 };
 use babel_api::{
@@ -37,7 +37,7 @@ pub type BabelEngine<N> = babel_engine::BabelEngine<N, RhaiPlugin<babel_engine::
 
 #[derive(Debug)]
 pub struct Node<P: Pal> {
-    pub data: NodeData,
+    pub state: NodeState,
     pub babel_engine: BabelEngine<P::NodeConnection>,
     metadata: BlockchainMetadata,
     machine: P::VirtualMachine,
@@ -56,7 +56,7 @@ struct BvContext {
 
 struct MaybeNode<P: Pal> {
     context: NodeContext,
-    data: NodeData,
+    state: NodeState,
     machine: Option<P::VirtualMachine>,
     scheduler_tx: mpsc::Sender<scheduler::Action>,
 }
@@ -76,22 +76,22 @@ impl<P: Pal> MaybeNode<P> {
         pal: Arc<P>,
         api_config: SharedConfig,
     ) -> Result<Node<P>, (eyre::Report, Self)> {
-        let node_id = self.data.id;
+        let node_id = self.state.id;
         info!("Creating node with ID: {node_id}");
 
-        let (script, metadata) = check!(
-            self.context.copy_and_check_plugin(&self.data.image).await,
-            self
-        );
-        let _ = fs::remove_dir_all(&self.context.vm_data_dir).await;
+        let _ = fs::remove_dir_all(&self.context.node_dir).await;
         check!(
-            fs::create_dir_all(&self.context.vm_data_dir)
+            fs::create_dir_all(&self.context.node_dir)
                 .await
                 .map_err(Report::new),
             self
         );
-        self.machine = Some(check!(pal.create_vm(&self.data).await, self));
-        check!(self.data.save(&self.context.registry).await, self);
+        let (script, metadata) = check!(
+            self.context.copy_and_check_plugin(&self.state.image).await,
+            self
+        );
+        self.machine = Some(check!(pal.create_vm(&self.state).await, self));
+        check!(self.state.save(&self.context.nodes_dir).await, self);
 
         let host_config = api_config.config.read().await.clone();
         let bv_context = BvContext {
@@ -103,9 +103,9 @@ impl<P: Pal> MaybeNode<P> {
             BabelEngine::new(
                 NodeInfo {
                     node_id,
-                    image: self.data.image.clone(),
-                    properties: self.data.properties.clone(),
-                    network: self.data.network.clone(),
+                    image: self.state.image.clone(),
+                    properties: self.state.properties.clone(),
+                    network: self.state.network.clone(),
                 },
                 pal.create_node_connection(node_id),
                 api_config,
@@ -118,7 +118,7 @@ impl<P: Pal> MaybeNode<P> {
         );
         let recovery_backoff = pal.create_recovery_backoff();
         Ok(Node {
-            data: self.data,
+            state: self.state,
             babel_engine,
             metadata,
             // if we got into that place, then it is safe to unwrap
@@ -144,12 +144,12 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn create(
         pal: Arc<P>,
         api_config: SharedConfig,
-        data: NodeData,
+        state: NodeState,
         scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let maybe_node = MaybeNode {
-            context: NodeContext::build(pal.as_ref(), data.id),
-            data,
+            context: NodeContext::build(pal.as_ref(), state.id),
+            state,
             machine: None,
             scheduler_tx,
         };
@@ -169,10 +169,10 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn attach(
         pal: Arc<P>,
         api_config: SharedConfig,
-        data: NodeData,
+        state: NodeState,
         scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
-        let node_id = data.id;
+        let node_id = state.id;
         let context = NodeContext::build(pal.as_ref(), node_id);
         info!("Attaching to node with ID: {node_id}");
 
@@ -180,7 +180,7 @@ impl<P: Pal + Debug> Node<P> {
         let metadata = rhai_plugin::read_metadata(&script)?;
 
         let mut node_conn = pal.create_node_connection(node_id);
-        let machine = pal.attach_vm(&data).await?;
+        let machine = pal.attach_vm(&state).await?;
         if machine.state().await == pal::VmState::RUNNING {
             debug!("connecting to babel ...");
             // Since this is the startup phase it doesn't make sense to wait a long time
@@ -203,9 +203,9 @@ impl<P: Pal + Debug> Node<P> {
         let mut babel_engine = BabelEngine::new(
             NodeInfo {
                 node_id,
-                image: data.image.clone(),
-                properties: data.properties.clone(),
-                network: data.network.clone(),
+                image: state.image.clone(),
+                properties: state.properties.clone(),
+                network: state.network.clone(),
             },
             node_conn,
             api_config,
@@ -214,14 +214,14 @@ impl<P: Pal + Debug> Node<P> {
             scheduler_tx,
         )
         .await?;
-        if data.expected_status == NodeStatus::Running {
+        if state.expected_status == NodeStatus::Running {
             if let Err(err) = babel_engine.start().await {
                 error!("failed to start babel engine for node {node_id}: {err:#}");
             }
         }
         let recovery_backoff = pal.create_recovery_backoff();
         Ok(Self {
-            data,
+            state,
             babel_engine,
             metadata,
             machine,
@@ -238,7 +238,7 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Returns the node's `id`.
     pub fn id(&self) -> Uuid {
-        self.data.id
+        self.state.id
     }
 
     /// Returns the actual status of the node.
@@ -248,12 +248,12 @@ impl<P: Pal + Debug> Node<P> {
             pal::VmState::SHUTOFF => NodeStatus::Stopped,
             pal::VmState::INVALID => NodeStatus::Failed,
         };
-        if machine_status == self.data.expected_status {
+        if machine_status == self.state.expected_status {
             if machine_status == NodeStatus::Running // node is running, but 
                 && (self.babel_engine.node_connection.is_closed() // there is no babel connection
                     || self.babel_engine.node_connection.is_broken() // or is broken for some reason
-                    || self.data.has_pending_update // or it has pending update that failed to apply
-                    || !self.data.initialized // or it failed to initialize
+                    || self.state.has_pending_update // or it has pending update that failed to apply
+                    || !self.state.initialized // or it failed to initialize
             ) {
                 NodeStatus::Failed
             } else {
@@ -266,7 +266,7 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Returns the expected status of the node.
     pub fn expected_status(&self) -> NodeStatus {
-        self.data.expected_status
+        self.state.expected_status
     }
 
     /// Starts the node.
@@ -297,23 +297,23 @@ impl<P: Pal + Debug> Node<P> {
         let babel_client = self.babel_engine.node_connection.babel_client().await?;
         let node_context = babel_api::babel::NodeContext {
             node_id: id.to_string(),
-            node_name: self.data.name.clone(),
-            node_type: self.data.image.node_type.clone(),
-            protocol: self.data.image.protocol.clone(),
-            node_version: self.data.image.node_version.clone(),
-            ip: self.data.network_interface.ip.to_string(),
-            gateway: self.data.network_interface.gateway.to_string(),
-            standalone: self.data.standalone,
+            node_name: self.state.name.clone(),
+            node_type: self.state.image.node_type.clone(),
+            protocol: self.state.image.protocol.clone(),
+            node_version: self.state.image.node_version.clone(),
+            ip: self.state.network_interface.ip.to_string(),
+            gateway: self.state.network_interface.gateway.to_string(),
+            standalone: self.state.standalone,
             bv_id: self.bv_context.id.clone(),
             bv_name: self.bv_context.name.clone(),
             bv_api_url: self.bv_context.url.clone(),
-            org_id: self.data.org_id.clone(),
+            org_id: self.state.org_id.clone(),
         };
         with_retry!(
             babel_client.setup_babel((node_context.clone(), self.metadata.babel_config.clone()))
         )?;
 
-        if !self.data.initialized {
+        if !self.state.initialized {
             // setup firewall, but only once
             self.setup_firewall_rules().await?;
             if let Err(err) = self.babel_engine.init().await {
@@ -321,15 +321,15 @@ impl<P: Pal + Debug> Node<P> {
                 self.save_expected_status(NodeStatus::Failed).await?;
                 return Err(err);
             }
-            self.data.initialized = true;
-        } else if self.data.has_pending_update {
+            self.state.initialized = true;
+        } else if self.state.has_pending_update {
             // setup firewall, but only once
             self.setup_firewall_rules().await?;
-            self.data.has_pending_update = false;
+            self.state.has_pending_update = false;
         }
-        self.data.started_at = Some(Utc::now());
-        self.data.restarting = false;
-        self.data.save(&self.context.registry).await?;
+        self.state.started_at = Some(Utc::now());
+        self.state.restarting = false;
+        self.state.save(&self.context.nodes_dir).await?;
         debug!("Node started");
         Ok(())
     }
@@ -349,8 +349,8 @@ impl<P: Pal + Debug> Node<P> {
             }
         }
         self.babel_engine.node_connection.close();
-        self.data.started_at = None;
-        self.data.save(&self.context.registry).await?;
+        self.state.started_at = None;
+        self.state.save(&self.context.nodes_dir).await?;
         match self.machine.state().await {
             pal::VmState::SHUTOFF => {}
             pal::VmState::RUNNING | pal::VmState::INVALID => {
@@ -380,7 +380,7 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     pub async fn restart(&mut self, force: bool) -> Result<()> {
-        self.data.restarting = true;
+        self.state.restarting = true;
         self.stop(force).await?;
         self.start().await?;
         Ok(())
@@ -401,17 +401,17 @@ impl<P: Pal + Debug> Node<P> {
         rules: Vec<firewall::Rule>,
         org_id: String,
     ) -> commands::Result<()> {
-        self.data.firewall_rules = rules;
-        self.data.org_id = org_id;
+        self.state.firewall_rules = rules;
+        self.state.org_id = org_id;
         let result = if self.status().await == NodeStatus::Running {
             let result = self.setup_firewall_rules().await.map_err(into_internal);
-            self.data.has_pending_update = result.is_err();
+            self.state.has_pending_update = result.is_err();
             result
         } else {
-            self.data.has_pending_update = true;
+            self.state.has_pending_update = true;
             Ok(())
         };
-        self.data.save(&self.context.registry).await?;
+        self.state.save(&self.context.nodes_dir).await?;
         result
     }
 
@@ -448,11 +448,11 @@ impl<P: Pal + Debug> Node<P> {
             .update_plugin(|engine| RhaiPlugin::new(&script, engine))
             .await?;
 
-        self.data.image = image.clone();
-        self.data.requirements = self.metadata.requirements.clone();
-        self.data.initialized = false;
-        self.data.save(&self.context.registry).await?;
-        self.machine = self.pal.attach_vm(&self.data).await?;
+        self.state.image = image.clone();
+        self.state.requirements = self.metadata.requirements.clone();
+        self.state.initialized = false;
+        self.state.save(&self.context.nodes_dir).await?;
+        self.machine = self.pal.attach_vm(&self.state).await?;
 
         if need_to_restart {
             self.start().await?;
@@ -476,12 +476,12 @@ impl<P: Pal + Debug> Node<P> {
             return Ok(());
         }
         let id = self.id();
-        match self.data.expected_status {
+        match self.state.expected_status {
             NodeStatus::Running => {
                 let vm_state = self.machine.state().await;
                 if vm_state == pal::VmState::SHUTOFF
-                    || self.data.has_pending_update
-                    || !self.data.initialized
+                    || self.state.has_pending_update
+                    || !self.state.initialized
                 {
                     self.started_node_recovery().await?;
                 } else if vm_state == pal::VmState::INVALID {
@@ -508,7 +508,7 @@ impl<P: Pal + Debug> Node<P> {
                     }
                 } else {
                     self.post_recovery();
-                    if self.data.restarting {
+                    if self.state.restarting {
                         self.start().await?;
                     }
                 }
@@ -536,7 +536,7 @@ impl<P: Pal + Debug> Node<P> {
         let mut firewall_config = self.metadata.firewall.clone();
         firewall_config
             .rules
-            .append(&mut self.data.firewall_rules.clone());
+            .append(&mut self.state.firewall_rules.clone());
         with_retry!(babel_client.setup_firewall(with_timeout(
             firewall_config.clone(),
             fw_setup_timeout(&firewall_config)
@@ -545,8 +545,8 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     async fn save_expected_status(&mut self, status: NodeStatus) -> Result<()> {
-        self.data.expected_status = status;
-        self.data.save(&self.context.registry).await
+        self.state.expected_status = status;
+        self.state.save(&self.context.nodes_dir).await
     }
 
     async fn started_node_recovery(&mut self) -> Result<()> {
@@ -618,8 +618,8 @@ impl<P: Pal + Debug> Node<P> {
     /// Copy OS drive into chroot location.
     async fn copy_os_image(&self, image: &NodeImage) -> Result<()> {
         let source_path = blockchain::get_image_download_folder_path(&self.context.bv_root, image)
-            .join(ROOT_FS_FILE);
-        let os_img_path = &self.context.vm_data_dir.join(ROOT_FS_FILE);
+            .join(ROOTFS_FILE);
+        let os_img_path = &self.context.node_dir.join(ROOTFS_FILE);
         if os_img_path.exists() {
             fs::remove_file(os_img_path).await?;
         }
@@ -653,10 +653,11 @@ fn fw_setup_timeout(config: &firewall::Config) -> Duration {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::node_data::NetInterface;
+    use crate::node_state::NetInterface;
     use crate::{
         config::Config,
-        node_context::build_registry_dir,
+        node_context,
+        node_context::build_nodes_dir,
         nodes_manager,
         pal::{
             BabelClient, CommandsStream, NodeConnection, ServiceConnector, VirtualMachine, VmState,
@@ -821,13 +822,12 @@ pub mod tests {
             type VirtualMachine = MockTestVM;
             async fn create_vm(
                 &self,
-                node_data: &NodeData,
+                node_state: &NodeState,
             ) -> Result<MockTestVM>;
             async fn attach_vm(
                 &self,
-                node_data: &NodeData,
+                node_state: &NodeState,
             ) -> Result<MockTestVM>;
-            fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
             fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
             fn used_disk_space_correction(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<u64>;
 
@@ -941,9 +941,30 @@ pub mod tests {
         )
     }
 
+    pub fn default_pal(tmp_root: PathBuf) -> MockTestPal {
+        let mut pal = MockTestPal::new();
+        pal.expect_bv_root().return_const(tmp_root.to_path_buf());
+        pal.expect_babel_path().return_const(tmp_root.join("babel"));
+        pal.expect_job_runner_path()
+            .return_const(tmp_root.join("job_runner"));
+        pal.expect_create_commands_stream_connector()
+            .return_const(EmptyStreamConnector);
+        pal.expect_create_api_service_connector()
+            .return_const(TestConnector { tmp_root });
+        pal.expect_create_recovery_backoff()
+            .return_const(DummyBackoff::default());
+        pal
+    }
+
+    pub async fn make_node_dir(nodes_dir: &Path, id: Uuid) -> PathBuf {
+        let node_dir = nodes_dir.join(id.to_string());
+        fs::create_dir_all(&node_dir).await.unwrap();
+        node_dir
+    }
+
     struct TestEnv {
         tmp_root: PathBuf,
-        registry_dir: PathBuf,
+        nodes_dir: PathBuf,
         tx: mpsc::Sender<scheduler::Action>,
         _async_panic_checker: utils::tests::AsyncPanicChecker,
     }
@@ -952,41 +973,23 @@ pub mod tests {
         async fn new() -> Result<Self> {
             let (tx, _) = mpsc::channel(16);
             let tmp_root = TempDir::new()?.to_path_buf();
-            let registry_dir = build_registry_dir(&tmp_root);
-            fs::create_dir_all(&registry_dir).await?;
+            let nodes_dir = build_nodes_dir(&tmp_root);
+            fs::create_dir_all(&nodes_dir).await?;
 
             Ok(Self {
                 tmp_root,
-                registry_dir,
+                nodes_dir,
                 tx,
                 _async_panic_checker: Default::default(),
             })
         }
 
         fn default_pal(&self) -> MockTestPal {
-            let mut pal = MockTestPal::new();
-            pal.expect_bv_root()
-                .return_const(self.tmp_root.to_path_buf());
-            pal.expect_babel_path()
-                .return_const(self.tmp_root.join("babel"));
-            pal.expect_job_runner_path()
-                .return_const(self.tmp_root.join("job_runner"));
-            let tmp_root = self.tmp_root.clone();
-            pal.expect_build_vm_data_path()
-                .returning(move |id| tmp_root.clone().join(format!("vm_data_{id}")));
-            pal.expect_create_commands_stream_connector()
-                .return_const(EmptyStreamConnector);
-            pal.expect_create_api_service_connector()
-                .return_const(TestConnector {
-                    tmp_root: self.tmp_root.clone(),
-                });
-            pal.expect_create_recovery_backoff()
-                .return_const(DummyBackoff::default());
-            pal
+            default_pal(self.tmp_root.clone())
         }
 
-        fn default_node_data(&self) -> NodeData {
-            NodeData {
+        fn default_node_state(&self) -> NodeState {
+            NodeState {
                 id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
                 name: "node name".to_string(),
                 expected_status: NodeStatus::Running,
@@ -1025,16 +1028,16 @@ pub mod tests {
                 babel_api::babel::babel_server::BabelServer::new(babel_mock)
             )
         }
-        async fn assert_node_data_saved(&self, node_data: &NodeData) {
-            let mut node_data = node_data.clone();
-            if let Some(time) = &mut node_data.started_at {
+        async fn assert_node_state_saved(&self, node_state: &NodeState) {
+            let mut node_state = node_state.clone();
+            if let Some(time) = &mut node_state.started_at {
                 *time = time.trunc_subsecs(0);
             }
             let saved_data =
-                NodeData::load(&self.registry_dir.join(format!("{}.json", node_data.id)))
+                NodeState::load(&self.nodes_dir.join(format!("{}/state.json", node_state.id)))
                     .await
                     .unwrap();
-            assert_eq!(saved_data, node_data);
+            assert_eq!(saved_data, node_state);
         }
     }
 
@@ -1054,19 +1057,19 @@ pub mod tests {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
-        let node_data = test_env.default_node_data();
+        let node_state = test_env.default_node_state();
 
         pal.expect_create_node_connection()
-            .with(predicate::eq(node_data.id))
+            .with(predicate::eq(node_state.id))
             .return_once(dummy_connection_mock);
         let mut seq = Sequence::new();
         pal.expect_create_vm()
-            .with(predicate::eq(node_data.clone()))
+            .with(predicate::eq(node_state.clone()))
             .once()
             .in_sequence(&mut seq)
             .returning(|_| bail!("create VM error"));
         pal.expect_create_vm()
-            .with(predicate::eq(node_data.clone()))
+            .with(predicate::eq(node_state.clone()))
             .once()
             .in_sequence(&mut seq)
             .returning(|_| Ok(MockTestVM::new()));
@@ -1077,7 +1080,7 @@ pub mod tests {
             Node::create(
                 pal.clone(),
                 config.clone(),
-                node_data.clone(),
+                node_state.clone(),
                 test_env.tx.clone()
             )
             .await
@@ -1086,7 +1089,7 @@ pub mod tests {
         );
 
         let images_dir =
-            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_state.image);
         fs::create_dir_all(&images_dir).await?;
 
         fs::write(images_dir.join(BABEL_PLUGIN_NAME), "malformed rhai script").await?;
@@ -1095,7 +1098,7 @@ pub mod tests {
             Node::create(
                 pal.clone(),
                 config.clone(),
-                node_data.clone(),
+                node_state.clone(),
                 test_env.tx.clone()
             )
             .await
@@ -1113,7 +1116,7 @@ pub mod tests {
             Node::create(
                 pal.clone(),
                 config.clone(),
-                node_data.clone(),
+                node_state.clone(),
                 test_env.tx.clone()
             )
             .await
@@ -1121,30 +1124,30 @@ pub mod tests {
             .to_string()
         );
 
-        let node = Node::create(pal, config, node_data, test_env.tx.clone()).await?;
+        let node = Node::create(pal, config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
-        test_env.assert_node_data_saved(&node.data).await;
+        test_env.assert_node_state_saved(&node.state).await;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_attach_node() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let node_data = test_env.default_node_data();
-        let mut failed_vm_node_data = node_data.clone();
-        failed_vm_node_data.id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
-        let mut missing_babel_node_data = node_data.clone();
-        missing_babel_node_data.id =
+        let node_state = test_env.default_node_state();
+        let mut failed_vm_node_state = node_state.clone();
+        failed_vm_node_state.id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
+        let mut missing_babel_node_state = node_state.clone();
+        missing_babel_node_state.id =
             Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047532").unwrap();
-        let mut missing_job_runner_node_data = node_data.clone();
-        missing_job_runner_node_data.id =
+        let mut missing_job_runner_node_state = node_state.clone();
+        missing_job_runner_node_state.id =
             Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047533").unwrap();
         let config = default_config(test_env.tmp_root.clone());
         let mut pal = test_env.default_pal();
 
         let test_tmp_root = test_env.tmp_root.to_path_buf();
         pal.expect_create_node_connection()
-            .with(predicate::eq(node_data.id))
+            .with(predicate::eq(node_state.id))
             .once()
             .returning(move |_| {
                 let mut mock = MockTestNodeConnection::new();
@@ -1157,11 +1160,11 @@ pub mod tests {
                 mock
             });
         pal.expect_create_node_connection()
-            .with(predicate::eq(failed_vm_node_data.id))
+            .with(predicate::eq(failed_vm_node_state.id))
             .once()
             .returning(dummy_connection_mock);
         pal.expect_create_node_connection()
-            .with(predicate::eq(missing_babel_node_data.id))
+            .with(predicate::eq(missing_babel_node_state.id))
             .once()
             .returning(move |_| {
                 let mut mock = MockTestNodeConnection::new();
@@ -1173,7 +1176,7 @@ pub mod tests {
                 mock
             });
         pal.expect_create_node_connection()
-            .with(predicate::eq(missing_job_runner_node_data.id))
+            .with(predicate::eq(missing_job_runner_node_state.id))
             .once()
             .returning(move |_| {
                 let mut mock = MockTestNodeConnection::new();
@@ -1185,17 +1188,17 @@ pub mod tests {
                 mock
             });
         pal.expect_attach_vm()
-            .with(predicate::eq(failed_vm_node_data.clone()))
+            .with(predicate::eq(failed_vm_node_state.clone()))
             .once()
             .returning(|_| bail!("attach VM failed"));
-        let missing_job_runner_node_data_id = missing_job_runner_node_data.id;
-        let missing_babel_node_data_id = missing_babel_node_data.id;
-        let node_data_id = node_data.id;
+        let missing_job_runner_node_state_id = missing_job_runner_node_state.id;
+        let missing_babel_node_state_id = missing_babel_node_state.id;
+        let node_state_id = node_state.id;
         pal.expect_attach_vm()
             .withf(move |data| {
-                data.id == node_data_id
-                    || data.id == missing_babel_node_data_id
-                    || data.id == missing_job_runner_node_data_id
+                data.id == node_state_id
+                    || data.id == missing_babel_node_state_id
+                    || data.id == missing_job_runner_node_state_id
             })
             .times(3)
             .returning(|_| {
@@ -1217,8 +1220,8 @@ pub mod tests {
             Node::attach(
                 pal.clone(),
                 config.clone(),
-                node_data.clone(),
-                test_env.tx.clone()
+                node_state.clone(),
+                test_env.tx.clone(),
             )
             .await
             .unwrap_err()
@@ -1226,7 +1229,9 @@ pub mod tests {
         );
 
         fs::write(
-            test_env.registry_dir.join(format!("{}.rhai", node_data.id)),
+            make_node_dir(&test_env.nodes_dir, node_state.id)
+                .await
+                .join("babel.rhai"),
             "invalid rhai script",
         )
         .await?;
@@ -1235,7 +1240,7 @@ pub mod tests {
             Node::attach(
                 pal.clone(),
                 config.clone(),
-                node_data.clone(),
+                node_state.clone(),
                 test_env.tx.clone()
             )
             .await
@@ -1245,28 +1250,30 @@ pub mod tests {
 
         fs::copy(
             testing_babel_path_absolute(),
-            test_env.registry_dir.join(format!("{}.rhai", node_data.id)),
+            make_node_dir(&test_env.nodes_dir, node_state.id)
+                .await
+                .join("babel.rhai"),
         )
         .await?;
         fs::copy(
             testing_babel_path_absolute(),
-            test_env
-                .registry_dir
-                .join(format!("{}.rhai", failed_vm_node_data.id)),
+            make_node_dir(&test_env.nodes_dir, failed_vm_node_state.id)
+                .await
+                .join("babel.rhai"),
         )
         .await?;
         fs::copy(
             testing_babel_path_absolute(),
-            test_env
-                .registry_dir
-                .join(format!("{}.rhai", missing_babel_node_data.id)),
+            make_node_dir(&test_env.nodes_dir, missing_babel_node_state.id)
+                .await
+                .join("babel.rhai"),
         )
         .await?;
         fs::copy(
             testing_babel_path_absolute(),
-            test_env
-                .registry_dir
-                .join(format!("{}.rhai", missing_job_runner_node_data.id)),
+            make_node_dir(&test_env.nodes_dir, missing_job_runner_node_state.id)
+                .await
+                .join("babel.rhai"),
         )
         .await?;
         assert_eq!(
@@ -1274,7 +1281,7 @@ pub mod tests {
             Node::attach(
                 pal.clone(),
                 config.clone(),
-                failed_vm_node_data,
+                failed_vm_node_state,
                 test_env.tx.clone()
             )
             .await
@@ -1282,35 +1289,43 @@ pub mod tests {
             .to_string()
         );
 
-        fs::create_dir_all(pal.build_vm_data_path(missing_babel_node_data_id)).await?;
+        fs::create_dir_all(node_context::build_node_dir(
+            pal.bv_root(),
+            missing_babel_node_state_id,
+        ))
+        .await?;
         let node = Node::attach(
             pal.clone(),
             config.clone(),
-            missing_babel_node_data,
+            missing_babel_node_state,
             test_env.tx.clone(),
         )
         .await?;
         assert_eq!(NodeStatus::Failed, node.status().await);
 
-        fs::create_dir_all(pal.build_vm_data_path(missing_job_runner_node_data_id)).await?;
+        fs::create_dir_all(node_context::build_node_dir(
+            pal.bv_root(),
+            missing_job_runner_node_state_id,
+        ))
+        .await?;
         fs::write(&test_env.tmp_root.join("babel"), "dummy babel")
             .await
             .unwrap();
         let node = Node::attach(
             pal.clone(),
             config.clone(),
-            missing_job_runner_node_data.clone(),
+            missing_job_runner_node_state.clone(),
             test_env.tx.clone(),
         )
         .await?;
         assert_eq!(NodeStatus::Failed, node.status().await);
 
-        fs::create_dir_all(pal.build_vm_data_path(node_data_id)).await?;
+        fs::create_dir_all(node_context::build_node_dir(pal.bv_root(), node_state_id)).await?;
         fs::write(&test_env.tmp_root.join("job_runner"), "dummy job_runner")
             .await
             .unwrap();
         let server = test_env.start_server(babel_mock).await;
-        let node = Node::attach(pal, config, node_data, test_env.tx.clone()).await?;
+        let node = Node::attach(pal, config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
         server.assert().await;
         Ok(())
@@ -1321,13 +1336,13 @@ pub mod tests {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
-        let mut node_data = test_env.default_node_data();
-        node_data
+        let mut node_state = test_env.default_node_state();
+        node_state
             .properties
             .insert("TESTING_PARAM".to_string(), "any".to_string());
 
         let images_dir =
-            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_state.image);
         fs::create_dir_all(&images_dir).await?;
         fs::copy(
             testing_babel_path_absolute(),
@@ -1405,13 +1420,13 @@ pub mod tests {
             Ok(mock)
         });
 
-        let mut node = Node::create(Arc::new(pal), config, node_data, test_env.tx.clone()).await?;
+        let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
 
         // already started
         node.start().await?;
 
-        node.data.expected_status = NodeStatus::Stopped;
+        node.state.expected_status = NodeStatus::Stopped;
         assert_eq!(
             "can't start node which is not stopped properly",
             node.start().await.unwrap_err().to_string()
@@ -1428,18 +1443,18 @@ pub mod tests {
             .times(3)
             .returning(|_| Ok(Response::new(BinaryStatus::Ok)));
         let expected_context = babel_api::babel::NodeContext {
-            node_id: node.data.id.to_string(),
-            node_name: node.data.name.clone(),
-            node_version: node.data.image.node_version.clone(),
-            protocol: node.data.image.protocol.clone(),
-            node_type: node.data.image.node_type.clone(),
-            ip: node.data.network_interface.ip.to_string(),
-            gateway: node.data.network_interface.gateway.to_string(),
-            standalone: node.data.standalone,
+            node_id: node.state.id.to_string(),
+            node_name: node.state.name.clone(),
+            node_version: node.state.image.node_version.clone(),
+            protocol: node.state.image.protocol.clone(),
+            node_type: node.state.image.node_type.clone(),
+            ip: node.state.network_interface.ip.to_string(),
+            gateway: node.state.network_interface.gateway.to_string(),
+            standalone: node.state.standalone,
             bv_id: node.bv_context.id.clone(),
             bv_name: node.bv_context.name.clone(),
             bv_api_url: node.bv_context.url.clone(),
-            org_id: node.data.org_id.clone(),
+            org_id: node.state.org_id.clone(),
         };
         let expected_config = node.metadata.babel_config.clone();
         babel_mock
@@ -1495,25 +1510,25 @@ pub mod tests {
             .await
             .unwrap();
         let server = test_env.start_server(babel_mock).await;
-        node.data.initialized = false;
+        node.state.initialized = false;
         let start_err = format!("{:#}", node.start().await.unwrap_err());
         assert!(start_err.starts_with(r#"node_id=4931bafa-92d9-4521-9fc6-a77eee047530: status: Internal, message: "error on init""#));
-        assert_eq!(NodeStatus::Failed, node.data.expected_status);
-        assert!(!node.data.initialized);
-        assert_eq!(None, node.data.started_at);
+        assert_eq!(NodeStatus::Failed, node.state.expected_status);
+        assert!(!node.state.initialized);
+        assert_eq!(None, node.state.started_at);
 
         // successfully started
         node.start().await?;
-        assert_eq!(NodeStatus::Running, node.data.expected_status);
-        assert!(node.data.initialized);
-        assert!(node.data.started_at.is_some());
-        test_env.assert_node_data_saved(&node.data).await;
+        assert_eq!(NodeStatus::Running, node.state.expected_status);
+        assert!(node.state.initialized);
+        assert!(node.state.started_at.is_some());
+        test_env.assert_node_state_saved(&node.state).await;
 
         // successfully started again, without init, but with pending update
-        node.data.expected_status = NodeStatus::Stopped;
-        node.data.has_pending_update = true;
+        node.state.expected_status = NodeStatus::Stopped;
+        node.state.has_pending_update = true;
         node.start().await?;
-        test_env.assert_node_data_saved(&node.data).await;
+        test_env.assert_node_state_saved(&node.state).await;
 
         server.assert().await;
         Ok(())
@@ -1524,10 +1539,10 @@ pub mod tests {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
-        let node_data = test_env.default_node_data();
+        let node_state = test_env.default_node_state();
 
         let images_dir =
-            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_state.image);
         fs::create_dir_all(&images_dir).await?;
         fs::copy(
             testing_babel_path_absolute(),
@@ -1583,16 +1598,16 @@ pub mod tests {
             Ok(mock)
         });
 
-        let mut node = Node::create(Arc::new(pal), config, node_data, test_env.tx.clone()).await?;
+        let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
 
-        node.data.expected_status = NodeStatus::Stopped;
+        node.state.expected_status = NodeStatus::Stopped;
         // already stopped
         node.stop(false).await?;
 
         let now = Utc::now();
-        node.data.expected_status = NodeStatus::Running;
-        node.data.started_at = Some(now);
+        node.state.expected_status = NodeStatus::Running;
+        node.state.started_at = Some(now);
         let mut babel_mock = MockTestBabelService::new();
         let mut seq = Sequence::new();
         // failed to gracefully shutdown babel
@@ -1626,14 +1641,14 @@ pub mod tests {
             .unwrap_err()
             .to_string()
             .starts_with("Failed to gracefully shutdown babel and background jobs"));
-        assert_eq!(NodeStatus::Stopped, node.data.expected_status);
-        assert_eq!(Some(now), node.data.started_at);
+        assert_eq!(NodeStatus::Stopped, node.state.expected_status);
+        assert_eq!(Some(now), node.state.started_at);
 
         // force stop node in failed state
         node.stop(true).await?;
-        assert_eq!(NodeStatus::Stopped, node.data.expected_status);
-        assert_eq!(None, node.data.started_at);
-        test_env.assert_node_data_saved(&node.data).await;
+        assert_eq!(NodeStatus::Stopped, node.state.expected_status);
+        assert_eq!(None, node.state.started_at);
+        test_env.assert_node_state_saved(&node.state).await;
 
         server.assert().await;
         Ok(())
@@ -1644,10 +1659,10 @@ pub mod tests {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
-        let node_data = test_env.default_node_data();
+        let node_state = test_env.default_node_state();
 
         let images_dir =
-            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_state.image);
         fs::create_dir_all(&images_dir).await?;
         fs::copy(
             testing_babel_path_absolute(),
@@ -1674,7 +1689,7 @@ pub mod tests {
             Ok(mock)
         });
 
-        let mut node = Node::create(Arc::new(pal), config, node_data, test_env.tx.clone()).await?;
+        let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
 
         let mut babel_mock = MockTestBabelService::new();
@@ -1693,7 +1708,7 @@ pub mod tests {
 
         let server = test_env.start_server(babel_mock).await;
 
-        assert!(node.data.firewall_rules.is_empty());
+        assert!(node.state.firewall_rules.is_empty());
         assert!(node
             .update(
                 vec![firewall::Rule {
@@ -1710,12 +1725,12 @@ pub mod tests {
             .unwrap_err()
             .to_string()
             .contains("setup FW rules failed"));
-        assert_eq!(1, node.data.firewall_rules.len());
-        assert_eq!("test rule", node.data.firewall_rules.first().unwrap().name);
-        assert!(node.data.has_pending_update);
-        test_env.assert_node_data_saved(&node.data).await;
+        assert_eq!(1, node.state.firewall_rules.len());
+        assert_eq!("test rule", node.state.firewall_rules.first().unwrap().name);
+        assert!(node.state.has_pending_update);
+        test_env.assert_node_state_saved(&node.state).await;
 
-        node.data.has_pending_update = false;
+        node.state.has_pending_update = false;
         node.update(
             vec![firewall::Rule {
                 name: "new test rule".to_string(),
@@ -1728,13 +1743,13 @@ pub mod tests {
             "org_id".to_string(),
         )
         .await?;
-        assert_eq!(1, node.data.firewall_rules.len());
+        assert_eq!(1, node.state.firewall_rules.len());
         assert_eq!(
             "new test rule",
-            node.data.firewall_rules.first().unwrap().name
+            node.state.firewall_rules.first().unwrap().name
         );
-        assert!(!node.data.has_pending_update);
-        test_env.assert_node_data_saved(&node.data).await;
+        assert!(!node.state.has_pending_update);
+        test_env.assert_node_state_saved(&node.state).await;
 
         server.assert().await;
         Ok(())
@@ -1745,11 +1760,11 @@ pub mod tests {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
-        let node_data = test_env.default_node_data();
-        let test_image = node_data.image.clone();
+        let node_state = test_env.default_node_state();
+        let test_image = node_state.image.clone();
 
         let images_dir =
-            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_data.image);
+            blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_state.image);
         fs::create_dir_all(&images_dir).await?;
         fs::copy(
             testing_babel_path_absolute(),
@@ -1776,7 +1791,7 @@ pub mod tests {
             Ok(mock)
         });
 
-        let mut node = Node::create(Arc::new(pal), config, node_data, test_env.tx.clone()).await?;
+        let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
 
         let mut babel_mock = MockTestBabelService::new();
@@ -1796,7 +1811,7 @@ pub mod tests {
 
         let server = test_env.start_server(babel_mock).await;
 
-        assert!(node.data.firewall_rules.is_empty());
+        assert!(node.state.firewall_rules.is_empty());
         assert_eq!(
             "Can't proceed while 'upgrade_blocking' job is running. Try again after 3600 seconds.",
             node.upgrade(&test_image).await.unwrap_err().to_string()

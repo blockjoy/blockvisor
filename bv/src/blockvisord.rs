@@ -2,9 +2,8 @@ use crate::{
     api_with_retry, cluster,
     config::{Config, SharedConfig},
     hosts::{self, HostMetrics},
-    internal_server,
-    node_data::NodeStatus,
-    node_metrics,
+    internal_server, node_metrics,
+    node_state::NodeStatus,
     nodes_manager::NodesManager,
     pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
@@ -259,7 +258,7 @@ where
                 for (id, node) in nodes_manager.nodes_list().await.iter() {
                     if let Ok(node) = node.try_read() {
                         let status = node.status().await;
-                        let image = node.data.image.clone();
+                        let image = node.state.image.clone();
                         updates.push((node.id(), status, image));
                     } else {
                         debug!(
@@ -315,7 +314,7 @@ where
             let mut updates = vec![];
             for (id, node) in nodes_manager.nodes_list().await.iter() {
                 if let Ok(mut node) = node.try_write() {
-                    if node.data.standalone {
+                    if node.state.standalone {
                         // don't send updates for standalone nodes
                         continue;
                     }

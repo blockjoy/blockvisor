@@ -3,7 +3,7 @@ use crate::{
     commands::Error,
     config::SharedConfig,
     get_bv_status,
-    node_data::NodeImage,
+    node_state::NodeImage,
     nodes_manager,
     nodes_manager::NodesManager,
     pal::Pal,

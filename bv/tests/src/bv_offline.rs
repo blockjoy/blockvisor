@@ -6,7 +6,6 @@ use crate::src::utils::{
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::{
-    apptainer_machine::BABEL_BIN_NAME,
     config::{Config, SharedConfig},
     nodes_manager::NodesManager,
     services,
@@ -210,12 +209,13 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
     let process_id = utils::get_process_pid(
-        BABEL_BIN_NAME,
-        &blockvisord::node_context::build_node_dir(
-            &test_env.bv_root,
-            Uuid::parse_str(vm_id).unwrap(),
+        "babel",
+        &blockvisord::apptainer_machine::build_rootfs_dir(
+            &blockvisord::node_context::build_node_dir(
+                &test_env.bv_root,
+                Uuid::parse_str(vm_id).unwrap(),
+            ),
         )
-        .join(blockvisord::apptainer_machine::CHROOT_DIR)
         .to_string_lossy(),
     )
     .unwrap();
@@ -273,12 +273,13 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
 
     println!("break babel - permanently break node");
     fs::remove_file(babel_link).await.unwrap();
-    let vm_rootfs = blockvisord::node_context::build_node_dir(
-        &test_env.bv_root,
-        Uuid::parse_str(vm_id).unwrap(),
-    )
-    .join(blockvisord::apptainer_machine::CHROOT_DIR);
-    let process_id = utils::get_process_pid(BABEL_BIN_NAME, &vm_rootfs.to_string_lossy()).unwrap();
+    let vm_rootfs = blockvisord::apptainer_machine::build_rootfs_dir(
+        &blockvisord::node_context::build_node_dir(
+            &test_env.bv_root,
+            Uuid::parse_str(vm_id).unwrap(),
+        ),
+    );
+    let process_id = utils::get_process_pid("babel", &vm_rootfs.to_string_lossy()).unwrap();
     run_cmd("kill", ["-9", &process_id.to_string()])
         .await
         .unwrap();

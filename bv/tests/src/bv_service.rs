@@ -6,7 +6,7 @@ use assert_fs::TempDir;
 use blockvisord::config::ApptainerConfig;
 use blockvisord::{
     config::Config,
-    node_data::{NodeData, NodeImage},
+    node_state::{NodeImage, NodeState},
     services::api::{common, pb},
     services::blockchain,
 };
@@ -379,10 +379,12 @@ async fn test_bv_service_e2e() {
 }
 
 async fn node_version(id: &str) -> String {
-    if let Ok(node_data) =
-        NodeData::load(Path::new(&format!("/var/lib/blockvisor/nodes/{id}.json"))).await
+    if let Ok(node_state) = NodeState::load(Path::new(&format!(
+        "/var/lib/blockvisor/nodes/{id}/state.json"
+    )))
+    .await
     {
-        node_data.image.node_version
+        node_state.image.node_version
     } else {
         Default::default()
     }

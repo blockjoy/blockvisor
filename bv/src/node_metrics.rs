@@ -1,7 +1,7 @@
 //! Here we have the code related to the metrics for nodes. We
 
 use crate::node::BabelEngine;
-use crate::node_data::NodeStatus;
+use crate::node_state::NodeStatus;
 use crate::nodes_manager::NodesManager;
 use crate::pal::{NodeConnection, Pal};
 use crate::services::api::{common, pb};
@@ -89,7 +89,7 @@ where
             match n.try_write() {
                 Err(_) => None,
                 Ok(mut node) => {
-                    if node.status().await == NodeStatus::Running && !node.data.standalone {
+                    if node.status().await == NodeStatus::Running && !node.state.standalone {
                         collect_metric(&mut node.babel_engine)
                             .await
                             .map(|metric| (node.id(), metric))

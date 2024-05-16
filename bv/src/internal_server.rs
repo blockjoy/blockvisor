@@ -5,7 +5,7 @@ use crate::{
     config::SharedConfig,
     hosts,
     node::Node,
-    node_data::{NodeImage, NodeStatus},
+    node_state::{NodeImage, NodeStatus},
     nodes_manager::{self, NodeConfig, NodesManager},
     pal::Pal,
     services,
@@ -507,7 +507,7 @@ where
                 .ok_or_else(|| Status::not_found(format!("node '{id}' not found")))?
                 .read()
                 .await
-                .data
+                .state
                 .standalone)
     }
 
@@ -528,22 +528,22 @@ where
         Ok(if let Ok(node) = node_lock.try_read() {
             let status = node.status().await;
             NodeDisplayInfo {
-                id: node.data.id,
-                name: node.data.name.clone(),
-                image: node.data.image.clone(),
+                id: node.state.id,
+                name: node.state.name.clone(),
+                image: node.state.image.clone(),
                 status,
-                ip: node.data.network_interface.ip.to_string(),
-                gateway: node.data.network_interface.gateway.to_string(),
+                ip: node.state.network_interface.ip.to_string(),
+                gateway: node.state.network_interface.gateway.to_string(),
                 uptime: node
-                    .data
+                    .state
                     .started_at
                     .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                standalone: node.data.standalone,
+                standalone: node.state.standalone,
             }
         } else {
             let cache = self
                 .nodes_manager
-                .node_data_cache(id)
+                .node_state_cache(id)
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
             NodeDisplayInfo {
@@ -676,7 +676,7 @@ where
                     used_ips.push(host_ip.clone());
                 }
                 for (_, node) in self.nodes_manager.nodes_list().await.iter() {
-                    used_ips.push(node.read().await.data.network_interface.ip.to_string());
+                    used_ips.push(node.read().await.state.network_interface.ip.to_string());
                 }
                 let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {
                     anyhow!("failed to auto assign ip - provide it manually : {err:#}")

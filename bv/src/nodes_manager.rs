@@ -1,16 +1,16 @@
-use crate::node_data::NetInterface;
+use crate::node_state::NODE_STATE_FILENAME;
 use crate::{
     command_failed,
     commands::{self, into_internal, Error},
     config::SharedConfig,
     node::Node,
-    node_context::build_registry_dir,
-    node_data::{NodeData, NodeImage, NodeProperties, NodeStatus},
+    node_context::{build_nodes_dir, NODES_DIR},
     node_metrics,
+    node_state::{NetInterface, NodeImage, NodeProperties, NodeState, NodeStatus},
     pal::Pal,
     scheduler,
     scheduler::{Scheduled, Scheduler},
-    services::blockchain::ROOT_FS_FILE,
+    services::blockchain::ROOTFS_FILE,
     services::blockchain::{self, BlockchainService, BABEL_PLUGIN_NAME},
     BV_VAR_PATH,
 };
@@ -40,11 +40,14 @@ use tokio::{
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-pub const REGISTRY_CONFIG_FILENAME: &str = "nodes.json";
+pub const STATE_FILENAME: &str = "state.json";
 const MAX_SUPPORTED_RULES: usize = 128;
 
-pub fn build_registry_filename(bv_root: &Path) -> PathBuf {
-    bv_root.join(BV_VAR_PATH).join(REGISTRY_CONFIG_FILENAME)
+pub fn build_state_filename(bv_root: &Path) -> PathBuf {
+    bv_root
+        .join(BV_VAR_PATH)
+        .join(NODES_DIR)
+        .join(STATE_FILENAME)
 }
 
 #[derive(Debug)]
@@ -52,10 +55,10 @@ pub struct NodesManager<P: Pal + Debug> {
     api_config: SharedConfig,
     nodes: Arc<RwLock<HashMap<Uuid, RwLock<Node<P>>>>>,
     scheduler: Scheduler,
-    node_data_cache: RwLock<HashMap<Uuid, NodeDataCache>>,
+    node_state_cache: RwLock<HashMap<Uuid, NodeStateCache>>,
     node_ids: RwLock<HashMap<String, Uuid>>,
     state: RwLock<State>,
-    registry_path: PathBuf,
+    state_path: PathBuf,
     pal: Arc<P>,
 }
 
@@ -65,7 +68,7 @@ pub struct NodesManager<P: Pal + Debug> {
 /// easier access in case some node is locked, and we cannot access
 /// it's actual data right away
 #[derive(Clone, Debug, PartialEq)]
-pub struct NodeDataCache {
+pub struct NodeStateCache {
     pub name: String,
     pub image: NodeImage,
     pub ip: String,
@@ -75,7 +78,7 @@ pub struct NodeDataCache {
     pub standalone: bool,
 }
 
-pub type NodesDataCache = Vec<(Uuid, NodeDataCache)>;
+pub type NodesDataCache = Vec<(Uuid, NodeStateCache)>;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct NodeConfig {
@@ -108,26 +111,18 @@ struct State {
 }
 
 impl State {
-    async fn load(registry_path: &Path) -> Result<Self> {
-        info!(
-            "Reading nodes common config file: {}",
-            registry_path.display()
-        );
-        let config = fs::read_to_string(&registry_path)
+    async fn load(nodes_path: &Path) -> Result<Self> {
+        info!("Reading nodes common config file: {}", nodes_path.display());
+        let config = fs::read_to_string(&nodes_path)
             .await
-            .context("failed to read nodes registry")?;
-        serde_json::from_str(&config).context("failed to parse nodes registry")
+            .context("failed to read nodes state")?;
+        serde_json::from_str(&config).context("failed to parse nodes state")
     }
 
-    async fn save(&self, registry_path: &Path) -> Result<()> {
-        info!(
-            "Writing nodes common config file: {}",
-            registry_path.display()
-        );
+    async fn save(&self, nodes_path: &Path) -> Result<()> {
+        info!("Writing nodes common config file: {}", nodes_path.display());
         let config = serde_json::to_string(self).map_err(into_internal)?;
-        fs::write(registry_path, config)
-            .await
-            .map_err(into_internal)?;
+        fs::write(nodes_path, config).await.map_err(into_internal)?;
 
         Ok(())
     }
@@ -143,37 +138,33 @@ where
 {
     pub async fn load(pal: P, api_config: SharedConfig) -> Result<Self> {
         let bv_root = pal.bv_root();
-        let registry_dir = build_registry_dir(bv_root);
-        if !registry_dir.exists() {
-            fs::create_dir_all(&registry_dir)
+        let nodes_dir = build_nodes_dir(bv_root);
+        if !nodes_dir.exists() {
+            fs::create_dir_all(&nodes_dir)
                 .await
                 .map_err(into_internal)?;
         }
-        let registry_path = build_registry_filename(bv_root);
+        let state_path = build_state_filename(bv_root);
         let pal = Arc::new(pal);
         let nodes = Arc::new(RwLock::new(HashMap::new()));
-        Ok(if registry_path.exists() {
-            let data = State::load(&registry_path).await?;
+        Ok(if state_path.exists() {
+            let state = State::load(&state_path).await?;
             let scheduler = Scheduler::start(
-                &data.scheduled_tasks,
+                &state.scheduled_tasks,
                 scheduler::NodeTaskHandler(nodes.clone()),
             );
-            let (loaded_nodes, node_ids, node_data_cache) = Self::load_nodes(
-                pal.clone(),
-                api_config.clone(),
-                &registry_dir,
-                scheduler.tx(),
-            )
-            .await?;
+            let (loaded_nodes, node_ids, node_state_cache) =
+                Self::load_nodes(pal.clone(), api_config.clone(), &nodes_dir, scheduler.tx())
+                    .await?;
             *nodes.write().await = loaded_nodes;
             Self {
                 api_config,
-                state: RwLock::new(data),
+                state: RwLock::new(state),
                 nodes,
                 scheduler,
                 node_ids: RwLock::new(node_ids),
-                node_data_cache: RwLock::new(node_data_cache),
-                registry_path,
+                node_state_cache: RwLock::new(node_state_cache),
+                state_path,
                 pal,
             }
         } else {
@@ -187,11 +178,11 @@ where
                 nodes,
                 scheduler,
                 node_ids: Default::default(),
-                node_data_cache: Default::default(),
-                registry_path,
+                node_state_cache: Default::default(),
+                state_path,
                 pal,
             };
-            nodes.state.read().await.save(&nodes.registry_path).await?;
+            nodes.state.read().await.save(&nodes.state_path).await?;
             nodes
         })
     }
@@ -207,7 +198,7 @@ where
             Ok(tasks) => {
                 let mut state = self.state.write().await;
                 state.scheduled_tasks = tasks;
-                if let Err(err) = state.save(&self.registry_path).await {
+                if let Err(err) = state.save(&self.state_path).await {
                     error!("error saving nodes state: {err:#}");
                 }
             }
@@ -266,7 +257,7 @@ where
 
         for n in self.nodes.read().await.values() {
             let node = n.read().await;
-            if node.data.network_interface.ip == ip {
+            if node.state.network_interface.ip == ip {
                 command_failed!(Error::Internal(anyhow!(
                     "Node with ip address `{ip}` exists"
                 )));
@@ -287,7 +278,7 @@ where
         self.check_node_requirements(&meta.requirements, &config.image, None)
             .await?;
 
-        let node_data_cache = NodeDataCache {
+        let node_state_cache = NodeStateCache {
             name: config.name.clone(),
             image: config.image.clone(),
             ip: ip.to_string(),
@@ -297,7 +288,7 @@ where
             requirements: meta.requirements.clone(),
         };
 
-        let node_data = NodeData {
+        let node_state = NodeState {
             id,
             name: config.name.clone(),
             image: config.image,
@@ -318,16 +309,16 @@ where
         let node = Node::create(
             self.pal.clone(),
             self.api_config.clone(),
-            node_data,
+            node_state,
             self.scheduler.tx(),
         )
         .await?;
         self.nodes.write().await.insert(id, RwLock::new(node));
         node_ids.insert(config.name, id);
-        self.node_data_cache
+        self.node_state_cache
             .write()
             .await
-            .insert(id, node_data_cache);
+            .insert(id, node_state_cache);
         debug!("Node with id `{}` created", id);
 
         Ok(())
@@ -342,7 +333,7 @@ where
                 .ok_or_else(|| Error::NodeNotFound(id))?
                 .read()
                 .await
-                .data
+                .state
                 .clone();
 
             if image.protocol != data.image.protocol {
@@ -374,7 +365,7 @@ where
 
             node.upgrade(&image).await?;
 
-            let mut cache = self.node_data_cache.write().await;
+            let mut cache = self.node_state_cache.write().await;
             cache.entry(id).and_modify(|data| {
                 data.image = image;
             });
@@ -392,11 +383,11 @@ where
                 .write()
                 .await;
             node.delete().await?;
-            node.data.name.clone()
+            node.state.name.clone()
         };
         self.nodes.write().await.remove(&id);
         self.node_ids.write().await.remove(&name);
-        self.node_data_cache.write().await.remove(&id);
+        self.node_state_cache.write().await.remove(&id);
         debug!("Node deleted");
         Ok(())
     }
@@ -667,9 +658,9 @@ where
         // take into account additional copy of os.img made while creating vm
         let os_image_size_gb =
             blockchain::get_image_download_folder_path(self.pal.bv_root(), image)
-                .join(ROOT_FS_FILE)
+                .join(ROOTFS_FILE)
                 .metadata()
-                .with_context(|| format!("can't check '{ROOT_FS_FILE}' size for {image}"))?
+                .with_context(|| format!("can't check '{ROOTFS_FILE}' size for {image}"))?
                 .len()
                 / 1_000_000_000;
         if requirements.disk_size_gb + os_image_size_gb > available.disk_size_gb {
@@ -701,12 +692,12 @@ where
             .ok_or_else(|| Error::NodeNotFound(id))?
             .read()
             .await;
-        Ok(node.data.image.clone())
+        Ok(node.state.image.clone())
     }
 
-    pub async fn node_data_cache(&self, id: Uuid) -> commands::Result<NodeDataCache> {
+    pub async fn node_state_cache(&self, id: Uuid) -> commands::Result<NodeStateCache> {
         let cache = self
-            .node_data_cache
+            .node_state_cache
             .read()
             .await
             .get(&id)
@@ -717,7 +708,7 @@ where
     }
 
     pub async fn nodes_data_cache(&self) -> NodesDataCache {
-        self.node_data_cache
+        self.node_state_cache
             .read()
             .await
             .iter()
@@ -732,54 +723,61 @@ where
     async fn load_nodes(
         pal: Arc<P>,
         api_config: SharedConfig,
-        registry_dir: &Path,
+        nodes_dir: &Path,
         tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<(
         HashMap<Uuid, RwLock<Node<P>>>,
         HashMap<String, Uuid>,
-        HashMap<Uuid, NodeDataCache>,
+        HashMap<Uuid, NodeStateCache>,
     )> {
-        info!("Reading nodes config dir: {}", registry_dir.display());
+        info!("Reading nodes config dir: {}", nodes_dir.display());
         let mut nodes = HashMap::new();
         let mut node_ids = HashMap::new();
-        let mut node_data_cache = HashMap::new();
-        let mut dir = read_dir(registry_dir)
+        let mut node_state_cache = HashMap::new();
+        let node_state_path = |path: &Path| {
+            if path.is_dir() {
+                let state_path = path.join(NODE_STATE_FILENAME);
+                if state_path.exists() {
+                    Some(state_path)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        let mut dir = read_dir(nodes_dir)
             .await
-            .context("failed to read nodes registry dir")?;
+            .context("failed to read nodes state dir")?;
         while let Some(entry) = dir
             .next_entry()
             .await
-            .context("failed to read nodes registry entry")?
+            .context("failed to read nodes state entry")?
         {
-            let path = entry.path();
-            if path
-                .extension()
-                .and_then(|v| if "json" == v { Some(()) } else { None })
-                .is_none()
-            {
-                continue; // ignore other files in registry dir
-            }
-            match NodeData::load(&path)
-                .and_then(|data| async {
-                    Node::attach(pal.clone(), api_config.clone(), data, tx.clone()).await
+            let Some(path) = node_state_path(&entry.path()) else {
+                continue;
+            };
+            match NodeState::load(&path)
+                .and_then(|state| async {
+                    Node::attach(pal.clone(), api_config.clone(), state, tx.clone()).await
                 })
                 .await
             {
                 Ok(node) => {
                     // insert node and its info into internal data structures
                     let id = node.id();
-                    let name = node.data.name.clone();
+                    let name = node.state.name.clone();
                     node_ids.insert(name.clone(), id);
-                    node_data_cache.insert(
+                    node_state_cache.insert(
                         id,
-                        NodeDataCache {
+                        NodeStateCache {
                             name,
-                            ip: node.data.network_interface.ip.to_string(),
-                            gateway: node.data.network_interface.gateway.to_string(),
-                            image: node.data.image.clone(),
-                            started_at: node.data.started_at,
-                            standalone: node.data.standalone,
-                            requirements: node.data.requirements.clone(),
+                            ip: node.state.network_interface.ip.to_string(),
+                            gateway: node.state.network_interface.gateway.to_string(),
+                            image: node.state.image.clone(),
+                            started_at: node.state.started_at,
+                            standalone: node.state.standalone,
+                            requirements: node.state.requirements.clone(),
                         },
                     );
                     nodes.insert(id, RwLock::new(node));
@@ -796,7 +794,7 @@ where
             };
         }
 
-        Ok((nodes, node_ids, node_data_cache))
+        Ok((nodes, node_ids, node_state_cache))
     }
 
     #[instrument(skip(pal, api_config))]
@@ -857,14 +855,14 @@ fn name_not_found(name: &str) -> eyre::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_data::NetInterface;
+    use crate::node_state::NetInterface;
     use crate::{
         node::tests::*,
-        pal,
+        node_context, pal,
         pal::VmState,
         services::{
             api::{common, pb},
-            blockchain::ROOT_FS_FILE,
+            blockchain::ROOTFS_FILE,
         },
         utils,
     };
@@ -940,29 +938,11 @@ mod tests {
         }
 
         fn default_pal(&self) -> MockTestPal {
-            let mut pal = MockTestPal::new();
-            pal.expect_bv_root()
-                .return_const(self.tmp_root.to_path_buf());
-            pal.expect_babel_path()
-                .return_const(self.tmp_root.join("babel"));
-            pal.expect_job_runner_path()
-                .return_const(self.tmp_root.join("job_runner"));
-            let tmp_root = self.tmp_root.clone();
-            pal.expect_build_vm_data_path()
-                .returning(move |id| tmp_root.clone().join(format!("vm_data_{id}")));
-            pal.expect_create_commands_stream_connector()
-                .return_const(EmptyStreamConnector);
-            pal.expect_create_api_service_connector()
-                .return_const(TestConnector {
-                    tmp_root: self.tmp_root.clone(),
-                });
-            pal.expect_create_recovery_backoff()
-                .return_const(DummyBackoff::default());
-            pal
+            default_pal(self.tmp_root.clone())
         }
 
         async fn generate_dummy_archive(&self) {
-            let mut file_path = self.tmp_root.join(ROOT_FS_FILE).into_os_string();
+            let mut file_path = self.tmp_root.join(ROOTFS_FILE).into_os_string();
             fs::write(&file_path, "dummy archive content")
                 .await
                 .unwrap();
@@ -1064,7 +1044,7 @@ mod tests {
             .once()
             .returning(available_test_resources);
         pal.expect_create_vm()
-            .with(predicate::eq(expected_node_data(id, config, None)))
+            .with(predicate::eq(expected_node_state(id, config, None)))
             .return_once(move |_| Ok(vm_mock));
         pal.expect_create_node_connection()
             .with(predicate::eq(id))
@@ -1095,12 +1075,12 @@ mod tests {
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .returning(available_test_resources);
         pal.expect_create_vm()
-            .with(predicate::eq(expected_node_data(id, config, None)))
+            .with(predicate::eq(expected_node_state(id, config, None)))
             .return_once(|_| bail!("failed to create vm"));
     }
 
-    fn expected_node_data(id: Uuid, config: NodeConfig, image: Option<NodeImage>) -> NodeData {
-        NodeData {
+    fn expected_node_state(id: Uuid, config: NodeConfig, image: Option<NodeImage>) -> NodeState {
+        NodeState {
             id,
             name: config.name,
             expected_status: NodeStatus::Stopped,
@@ -1402,7 +1382,7 @@ mod tests {
             nodes.expected_status(first_node_id).await?
         );
         assert_eq!(
-            NodeDataCache {
+            NodeStateCache {
                 name: first_node_config.name,
                 image: first_node_config.image,
                 ip: first_node_config.ip,
@@ -1411,7 +1391,7 @@ mod tests {
                 standalone: first_node_config.standalone,
                 requirements: TEST_NODE_REQUIREMENTS,
             },
-            nodes.node_data_cache(first_node_id).await?
+            nodes.node_state_cache(first_node_id).await?
         );
 
         assert_eq!(
@@ -1432,7 +1412,7 @@ mod tests {
         let pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
 
-        let node_data = NodeData {
+        let node_state = NodeState {
             id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
             name: "first node".to_string(),
             expected_status: NodeStatus::Stopped,
@@ -1456,49 +1436,58 @@ mod tests {
             restarting: false,
             org_id: Default::default(),
         };
-        fs::create_dir_all(pal.build_vm_data_path(node_data.id)).await?;
+        fs::create_dir_all(node_context::build_node_dir(pal.bv_root(), node_state.id)).await?;
 
         let nodes = NodesManager::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
 
-        let mut invalid_node_data = node_data.clone();
-        invalid_node_data.id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
-        let registry_dir = build_registry_dir(&test_env.tmp_root);
-        fs::create_dir_all(&registry_dir).await?;
-        node_data.save(&registry_dir).await?;
-        invalid_node_data.save(&registry_dir).await?;
+        let mut invalid_node_state = node_state.clone();
+        invalid_node_state.id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
+        let nodes_dir = build_nodes_dir(&test_env.tmp_root);
+        make_node_dir(&nodes_dir, node_state.id).await;
+        node_state.save(&nodes_dir).await?;
+        make_node_dir(&nodes_dir, invalid_node_state.id).await;
+        invalid_node_state.save(&nodes_dir).await?;
+
         fs::copy(
             testing_babel_path_absolute(),
-            registry_dir.join(format!("{}.rhai", node_data.id)),
+            make_node_dir(&nodes_dir, node_state.id)
+                .await
+                .join("babel.rhai"),
         )
         .await?;
         fs::copy(
             testing_babel_path_absolute(),
-            registry_dir.join(format!("{}.rhai", invalid_node_data.id)),
+            make_node_dir(&nodes_dir, invalid_node_state.id)
+                .await
+                .join("babel.rhai"),
         )
         .await?;
+        fs::create_dir_all(nodes_dir.join("4931bafa-92d9-4521-9fc6-a77eee047533"))
+            .await
+            .unwrap();
         fs::write(
-            registry_dir.join("4931bafa-92d9-4521-9fc6-a77eee047533.json"),
+            nodes_dir.join("4931bafa-92d9-4521-9fc6-a77eee047533/state.json"),
             "invalid node data",
         )
         .await?;
 
         let mut pal = test_env.default_pal();
         pal.expect_create_node_connection()
-            .with(predicate::eq(node_data.id))
+            .with(predicate::eq(node_state.id))
             .returning(dummy_connection_mock);
         pal.expect_attach_vm()
-            .with(predicate::eq(node_data.clone()))
+            .with(predicate::eq(node_state.clone()))
             .returning(|_| {
                 let mut vm = MockTestVM::new();
                 vm.expect_state().return_const(VmState::SHUTOFF);
                 Ok(vm)
             });
         pal.expect_create_node_connection()
-            .with(predicate::eq(invalid_node_data.id))
+            .with(predicate::eq(invalid_node_state.id))
             .returning(dummy_connection_mock);
         pal.expect_attach_vm()
-            .with(predicate::eq(invalid_node_data.clone()))
+            .with(predicate::eq(invalid_node_state.clone()))
             .returning(|_| {
                 bail!("failed to attach");
             });
@@ -1507,13 +1496,13 @@ mod tests {
         assert_eq!(1, nodes.nodes_list().await.len());
         assert_eq!(
             "first node",
-            nodes.node_data_cache(node_data.id).await?.name
+            nodes.node_state_cache(node_state.id).await?.name
         );
         assert_eq!(
             NodeStatus::Stopped,
-            nodes.expected_status(node_data.id).await?
+            nodes.expected_status(node_state.id).await?
         );
-        assert_eq!(node_data.id, nodes.node_id_for_name("first node").await?);
+        assert_eq!(node_state.id, nodes.node_id_for_name("first node").await?);
 
         Ok(())
     }
@@ -1564,7 +1553,7 @@ mod tests {
             .times(2)
             .returning(available_test_resources);
         pal.expect_attach_vm()
-            .with(predicate::eq(expected_node_data(
+            .with(predicate::eq(expected_node_state(
                 node_id,
                 node_config.clone(),
                 Some(new_image.clone()),
@@ -1598,7 +1587,7 @@ mod tests {
 
         nodes.create(node_id, node_config.clone()).await?;
         assert_eq!(
-            NodeDataCache {
+            NodeStateCache {
                 name: node_config.name.clone(),
                 image: node_config.image.clone(),
                 ip: node_config.ip.clone(),
@@ -1607,12 +1596,12 @@ mod tests {
                 standalone: node_config.standalone,
                 requirements: TEST_NODE_REQUIREMENTS,
             },
-            nodes.node_data_cache(node_id).await?
+            nodes.node_state_cache(node_id).await?
         );
         {
             let mut nodes_list = nodes.nodes.write().await;
             let mut node = nodes_list.get_mut(&node_id).unwrap().write().await;
-            node.data.initialized = true;
+            node.state.initialized = true;
             assert!(node.babel_engine.has_capability("info"));
         }
         assert_eq!(
@@ -1634,7 +1623,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            NodeDataCache {
+            NodeStateCache {
                 name: node_config.name,
                 image: new_image.clone(),
                 ip: node_config.ip,
@@ -1643,12 +1632,12 @@ mod tests {
                 standalone: node_config.standalone,
                 requirements: TEST_NODE_REQUIREMENTS,
             },
-            nodes.node_data_cache(node_id).await?
+            nodes.node_state_cache(node_id).await?
         );
         {
             let mut nodes_list = nodes.nodes.write().await;
             let mut node = nodes_list.get_mut(&node_id).unwrap().write().await;
-            assert!(!node.data.initialized);
+            assert!(!node.state.initialized);
             assert!(!node.babel_engine.has_capability("info"));
         }
         assert_eq!(
@@ -1798,24 +1787,24 @@ mod tests {
         sut.nodes.recover().await;
 
         // no recovery for permanently failed node
-        sut.on_node(|node| node.data.expected_status = NodeStatus::Failed)
+        sut.on_node(|node| node.state.expected_status = NodeStatus::Failed)
             .await;
         sut.nodes.recover().await;
 
         // recovery of node that is expected to be running, but it is not
-        sut.on_node(|node| node.data.expected_status = NodeStatus::Running)
+        sut.on_node(|node| node.state.expected_status = NodeStatus::Running)
             .await;
         sut.nodes.recover().await;
 
         // recovery of node that is expected to be stopped, but it is not
-        sut.on_node(|node| node.data.expected_status = NodeStatus::Stopped)
+        sut.on_node(|node| node.state.expected_status = NodeStatus::Stopped)
             .await;
         sut.nodes.recover().await;
 
         // node connection recovery
         sut.on_node(|node| {
-            node.data.expected_status = NodeStatus::Running;
-            node.data.initialized = true;
+            node.state.expected_status = NodeStatus::Running;
+            node.state.initialized = true;
             node.post_recovery();
         })
         .await;
@@ -1823,8 +1812,8 @@ mod tests {
 
         // no recovery needed - node is expected to be running
         sut.on_node(|node| {
-            node.data.expected_status = NodeStatus::Running;
-            node.data.initialized = true;
+            node.state.expected_status = NodeStatus::Running;
+            node.state.initialized = true;
         })
         .await;
         sut.nodes.recover().await;

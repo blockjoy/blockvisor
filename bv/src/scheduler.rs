@@ -1,5 +1,5 @@
 use crate::node::Node;
-use crate::node_data::NodeStatus;
+use crate::node_state::NodeStatus;
 use crate::pal::Pal;
 use async_trait::async_trait;
 use bv_utils::run_flag::RunFlag;

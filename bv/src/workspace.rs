@@ -1,5 +1,5 @@
 use crate::{
-    linux_platform::bv_root, node_context::REGISTRY_CONFIG_DIR, node_data::NodeImage,
+    linux_platform::bv_root, node_context::NODES_DIR, node_state::NodeImage,
     services::blockchain::BABEL_PLUGIN_NAME, BV_VAR_PATH,
 };
 use eyre::Result;
@@ -51,7 +51,7 @@ pub fn set_active_node(path: &Path, id: Uuid, name: &str) -> Result<()> {
     unix::fs::symlink(
         bv_root()
             .join(BV_VAR_PATH)
-            .join(REGISTRY_CONFIG_DIR)
+            .join(NODES_DIR)
             .join(format!("{id}.rhai")),
         plugin_link_path,
     )?;

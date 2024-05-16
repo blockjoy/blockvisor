@@ -12,7 +12,7 @@ use crate::node::NODE_REQUEST_TIMEOUT;
 use crate::{
     babel_engine_service::{self, BabelEngineServer},
     config::SharedConfig,
-    node_data::{NodeImage, NodeProperties},
+    node_state::{NodeImage, NodeProperties},
     pal::{BabelClient, NodeConnection},
     scheduler,
     scheduler::Task,

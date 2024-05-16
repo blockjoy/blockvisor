@@ -1,12 +1,10 @@
 use crate::config::ApptainerConfig;
 use crate::node::NODE_REQUEST_TIMEOUT;
 use crate::{
-    apptainer_machine,
-    apptainer_machine::CHROOT_DIR,
-    config,
+    apptainer_machine, config,
     config::SharedConfig,
     linux_platform, node_context,
-    node_data::NodeData,
+    node_state::NodeState,
     nodes_manager::NodesDataCache,
     pal::{self, AvailableResources, NodeConnection, Pal},
     services,
@@ -128,12 +126,12 @@ impl Pal for LinuxApptainerPlatform {
 
     type VirtualMachine = apptainer_machine::ApptainerMachine;
 
-    async fn create_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine> {
+    async fn create_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             self.bridge_ip,
             self.mask_bits,
-            node_data,
+            node_state,
             self.babel_path.clone(),
             self.config.clone(),
         )
@@ -142,22 +140,18 @@ impl Pal for LinuxApptainerPlatform {
         .await
     }
 
-    async fn attach_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine> {
+    async fn attach_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             self.bridge_ip,
             self.mask_bits,
-            node_data,
+            node_state,
             self.babel_path.clone(),
             self.config.clone(),
         )
         .await?
         .attach()
         .await
-    }
-
-    fn build_vm_data_path(&self, id: Uuid) -> PathBuf {
-        node_context::build_node_dir(self.bv_root(), id)
     }
 
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
@@ -170,10 +164,11 @@ impl Pal for LinuxApptainerPlatform {
     fn used_disk_space_correction(&self, nodes_data_cache: &NodesDataCache) -> Result<u64> {
         let mut correction = 0;
         for (id, data) in nodes_data_cache {
-            let data_img_path = self
-                .build_vm_data_path(*id)
-                .join(CHROOT_DIR)
-                .join(babel_api::engine::DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
+            let data_img_path = apptainer_machine::build_rootfs_dir(&node_context::build_node_dir(
+                self.bv_root(),
+                *id,
+            ))
+            .join(babel_api::engine::DATA_DRIVE_MOUNT_POINT.trim_start_matches('/'));
             let actual_data_size = fs_extra::dir::get_size(&data_img_path)
                 .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
             let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
@@ -219,10 +214,11 @@ pub struct BareNodeConnection {
 }
 
 impl BareNodeConnection {
-    pub fn new(vm_path: PathBuf) -> Self {
+    pub fn new(node_path: PathBuf) -> Self {
+        let rootfs_path = apptainer_machine::build_rootfs_dir(&node_path);
         Self {
-            babel_socket_path: vm_path.join(CHROOT_DIR).join(BABEL_SOCKET_NAME),
-            engine_socket_path: vm_path.join(CHROOT_DIR).join(ENGINE_SOCKET_NAME),
+            babel_socket_path: rootfs_path.join(BABEL_SOCKET_NAME),
+            engine_socket_path: rootfs_path.join(ENGINE_SOCKET_NAME),
             state: NodeConnectionState::Closed,
         }
     }

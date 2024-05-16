@@ -6,7 +6,7 @@ use cli_table::{
     ColorChoice, Style, Table, TableStruct, WithTitle,
 };
 
-use crate::node_data::NodeStatus;
+use crate::node_state::NodeStatus;
 
 fn style_node_status(cell: CellStruct, value: &NodeStatus) -> CellStruct {
     match value {
@@ -35,7 +35,7 @@ pub struct PrettyTableRow {
 
 /// Converts into a [`cli_table::TableStruct`] table that could be displayed on command line
 ///
-/// We are putting derives on [`crate::node_data::NodeData`] to convert anything that iterates
+/// We are putting derives on [`crate::node_state::NodeState`] to convert anything that iterates
 /// over this type into a CLI table.
 ///
 /// See <https://docs.rs/cli-table/latest/cli_table/#derive-macro>

@@ -56,10 +56,9 @@ ci-clean:
 	apptainer instance stop -a || true
 	pkill -9 babel || true
 	pkill -9 babel_job_runner || true
-	umount -A --recursive /var/lib/blockvisor/nodes/*/os || true
-	umount -A --recursive /tmp/*/var/lib/blockvisor/nodes/*/os || true
+	umount -A --recursive /var/lib/blockvisor/nodes/*/rootfs || true
+	umount -A --recursive /tmp/*/var/lib/blockvisor/nodes/*/rootfs || true
 	rm -rf /var/lib/blockvisor/nodes/
-	rm -f /var/lib/blockvisor/nodes.json
 
 new-release:
 	cargo release --execute $$(git-conventional-commits version)

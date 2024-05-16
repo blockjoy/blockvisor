@@ -1,8 +1,8 @@
 use crate::config::ApptainerConfig;
 use crate::services::blockchain;
-use crate::services::blockchain::ROOT_FS_FILE;
+use crate::services::blockchain::ROOTFS_FILE;
 use crate::utils::{get_process_pid, GetProcessIdError};
-use crate::{node_context, node_data::NodeData, pal};
+use crate::{node_context, node_state::NodeState, pal};
 use async_trait::async_trait;
 use babel_api::engine::{PosixSignal, DATA_DRIVE_MOUNT_POINT};
 use bv_utils::cmd::run_cmd;
@@ -20,10 +20,10 @@ use tokio::time::sleep;
 use tracing::{debug, error};
 use uuid::Uuid;
 
-pub const CHROOT_DIR: &str = "os";
+const ROOTFS_DIR: &str = "rootfs";
 const DATA_DIR: &str = "data";
 const JOURNAL_DIR: &str = "/run/systemd/journal";
-pub const BABEL_BIN_NAME: &str = "babel";
+const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
 const BABEL_START_TIMEOUT: Duration = Duration::from_secs(3);
 const UMOUNT_RETRY_MAX: u32 = 2;
@@ -31,9 +31,13 @@ const UMOUNT_BACKOFF_BASE_MS: u64 = 1000;
 const BABEL_BIN_PATH: &str = "/usr/bin/babel";
 const APPTAINER_BIN_NAME: &str = "apptainer";
 
+pub fn build_rootfs_dir(node_dir: &Path) -> PathBuf {
+    node_dir.join(ROOTFS_DIR)
+}
+
 #[derive(Debug)]
 pub struct ApptainerMachine {
-    vm_dir: PathBuf,
+    node_dir: PathBuf,
     babel_path: PathBuf,
     chroot_dir: PathBuf,
     data_dir: PathBuf,
@@ -51,36 +55,36 @@ pub async fn new(
     bv_root: &Path,
     gateway: IpAddr,
     mask_bits: u8,
-    node_data: &NodeData,
+    node_state: &NodeState,
     babel_path: PathBuf,
     config: ApptainerConfig,
 ) -> Result<ApptainerMachine> {
-    let vm_dir = node_context::build_node_dir(bv_root, node_data.id);
-    let chroot_dir = vm_dir.join(CHROOT_DIR);
+    let node_dir = node_context::build_node_dir(bv_root, node_state.id);
+    let chroot_dir = node_dir.join(ROOTFS_DIR);
     fs::create_dir_all(&chroot_dir).await?;
-    let data_dir = vm_dir.join(DATA_DIR);
+    let data_dir = node_dir.join(DATA_DIR);
     fs::create_dir_all(&data_dir).await?;
-    let os_img_path = vm_dir.join(ROOT_FS_FILE);
+    let os_img_path = node_dir.join(ROOTFS_FILE);
     if !os_img_path.exists() {
         fs::copy(
-            blockchain::get_image_download_folder_path(bv_root, &node_data.image)
-                .join(ROOT_FS_FILE),
+            blockchain::get_image_download_folder_path(bv_root, &node_state.image)
+                .join(ROOTFS_FILE),
             &os_img_path,
         )
         .await?;
     }
     Ok(ApptainerMachine {
-        vm_dir,
+        node_dir,
         babel_path,
         chroot_dir,
         data_dir,
         os_img_path,
-        vm_id: node_data.id,
-        vm_name: node_data.name.clone(),
-        ip: node_data.network_interface.ip,
+        vm_id: node_state.id,
+        vm_name: node_state.name.clone(),
+        ip: node_state.network_interface.ip,
         mask_bits,
         gateway,
-        requirements: node_data.requirements.clone(),
+        requirements: node_state.requirements.clone(),
         config,
     })
 }
@@ -321,8 +325,8 @@ impl pal::VirtualMachine for ApptainerMachine {
             self.force_shutdown().await?;
         }
         self.umount_all().await?;
-        if self.vm_dir.exists() {
-            fs::remove_dir_all(&self.vm_dir).await?;
+        if self.node_dir.exists() {
+            fs::remove_dir_all(&self.node_dir).await?;
         }
         Ok(())
     }

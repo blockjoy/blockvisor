@@ -509,8 +509,8 @@ mod tests {
     use super::*;
     use crate::hosts;
     use crate::internal_server;
-    use crate::node_data::{NodeImage, NodeStatus};
     use crate::node_metrics;
+    use crate::node_state::{NodeImage, NodeStatus};
     use crate::utils;
     use assert_fs::TempDir;
     use babel_api::engine::JobsInfo;

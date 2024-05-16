@@ -3,14 +3,11 @@
 ///
 /// It defines `Pal` trait which is top level abstraction that contains definitions of sub layers.
 ///
-use crate::{config::SharedConfig, node_data::NodeData, nodes_manager::NodesDataCache, services};
+use crate::{config::SharedConfig, node_state::NodeState, nodes_manager::NodesDataCache, services};
 use async_trait::async_trait;
 use babel_api::metadata::Requirements;
 use eyre::Result;
-use std::{
-    fmt::Debug,
-    path::{Path, PathBuf},
-};
+use std::{fmt::Debug, path::Path};
 use tonic::{codegen::InterceptedService, transport::Channel};
 use uuid::Uuid;
 
@@ -51,12 +48,10 @@ pub trait Pal {
     /// Type representing virtual machine on which node is running.
     type VirtualMachine: VirtualMachine + Debug;
     /// Created new VM instance.
-    async fn create_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine>;
+    async fn create_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine>;
     /// Attach to already created VM instance.
-    async fn attach_vm(&self, node_data: &NodeData) -> Result<Self::VirtualMachine>;
+    async fn attach_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine>;
 
-    /// Build path to VM data directory, a place where rootfs and other VM related data are stored.
-    fn build_vm_data_path(&self, id: Uuid) -> PathBuf;
     /// Get available resources, but take into account requirements declared by nodes.
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources>;
     /// Calculate used disk space value correction. Regarding sparse files used for data images, used

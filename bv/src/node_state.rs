@@ -7,11 +7,12 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs;
 use tracing::{error, info};
 use uuid::Uuid;
 
+pub const NODE_STATE_FILENAME: &str = "state.json";
 pub type NodeProperties = HashMap<String, String>;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
@@ -47,7 +48,7 @@ impl fmt::Display for NodeImage {
 
 // Data that we store in data file
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct NodeData {
+pub struct NodeState {
     pub id: Uuid,
     pub name: String,
     pub expected_status: NodeStatus,
@@ -79,9 +80,9 @@ pub struct NetInterface {
     pub gateway: IpAddr,
 }
 
-impl NodeData {
+impl NodeState {
     pub async fn load(path: &Path) -> Result<Self> {
-        info!("Reading nodes config file: {}", path.display());
+        info!("Reading node state file: {}", path.display());
         fs::read_to_string(&path)
             .await
             .and_then(|s| match serde_json::from_str::<Self>(&s) {
@@ -91,20 +92,16 @@ impl NodeData {
                     Err(err.into())
                 }
             })
-            .with_context(|| format!("Failed to read node file `{}`", path.display()))
+            .with_context(|| format!("Failed to read node state file `{}`", path.display()))
     }
 
-    pub async fn save(&self, registry_config_dir: &Path) -> Result<()> {
-        let path = file_path(self.id, registry_config_dir);
-        info!("Writing node config: {}", path.display());
+    pub async fn save(&self, nodes_dir: &Path) -> Result<()> {
+        let path = nodes_dir
+            .join(self.id.to_string())
+            .join(NODE_STATE_FILENAME);
+        info!("Writing node state: {}", path.display());
         let config = serde_json::to_string(self)?;
         fs::write(&path, &*config).await?;
-
         Ok(())
     }
-}
-
-pub fn file_path(id: Uuid, registry_config_dir: &Path) -> PathBuf {
-    let filename = format!("{}.json", id);
-    registry_config_dir.join(filename)
 }
