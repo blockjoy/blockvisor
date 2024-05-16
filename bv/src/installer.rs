@@ -485,7 +485,7 @@ async fn check_cli_dependencies() -> Result<()> {
     for cmd in ["pigz", "tar", "fallocate", "debootstrap", "systemctl"] {
         bv_utils::cmd::run_cmd(cmd, ["--version"]).await?;
     }
-    for cmd in ["tmux", "ip", "mkfs.ext4"] {
+    for cmd in ["ip", "mkfs.ext4"] {
         bv_utils::cmd::run_cmd(cmd, ["-V"]).await?;
     }
     Ok(())

@@ -124,14 +124,6 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .await
             .map_err(|err| Status::internal(format!("failed to shutdown jobs_manger: {err:#}")))?;
 
-        // since node is going to be stopped, it is safe to set fuser_kill flag as true
-        self.pal
-            .umount_data_drive(babel_api::engine::DATA_DRIVE_MOUNT_POINT, true)
-            .await
-            .map_err(|err| {
-                Status::internal(anyhow!("failed to umount data drive: {err:#}").to_string())
-            })?;
-
         Ok(Response::new(()))
     }
 
@@ -469,7 +461,7 @@ async fn send_http_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fc_platform::{VSockConnector, VSockServer};
+    use crate::chroot_platform::{UdsConnector, UdsServer};
     use assert_fs::TempDir;
     use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
     use babel_api::metadata::firewall::Config;
@@ -504,50 +496,18 @@ mod tests {
 
     #[async_trait]
     impl BabelPal for DummyPal {
-        type BabelServer = VSockServer;
+        type BabelServer = UdsServer;
         fn babel_server(&self) -> Self::BabelServer {
-            VSockServer
+            UdsServer
         }
 
-        type Connector = VSockConnector;
+        type Connector = UdsConnector;
         fn connector(&self) -> Self::Connector {
-            VSockConnector
-        }
-
-        async fn mount_data_drive(&self, _data_directory_mount_point: &str) -> Result<()> {
-            Ok(())
-        }
-
-        async fn umount_data_drive(
-            &self,
-            _data_directory_mount_point: &str,
-            _fuser_kill: bool,
-        ) -> Result<()> {
-            Ok(())
-        }
-
-        async fn is_data_drive_mounted(&self, _data_directory_mount_point: &str) -> Result<bool> {
-            Ok(false)
+            UdsConnector
         }
 
         async fn set_node_context(&self, _node_context: NodeContext) -> eyre::Result<()> {
             Ok(())
-        }
-
-        async fn set_swap_file(
-            &self,
-            _swap_size_mb: u64,
-            _swap_file_location: &str,
-        ) -> eyre::Result<()> {
-            Ok(())
-        }
-
-        async fn is_swap_file_set(
-            &self,
-            _swap_size_mb: u64,
-            _swap_file_location: &str,
-        ) -> Result<bool> {
-            Ok(false)
         }
 
         async fn set_ram_disks(

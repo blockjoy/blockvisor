@@ -46,7 +46,6 @@ chrono = { version = "0.4.24", features = ["serde"] }
 cron = "0.12.1"
 eyre = "0.6.8"
 filesize = "0.2.0"
-firec = { git = "https://github.com/blockjoy/firec.git", rev = "9e488cd" }
 fs_extra = "1.2.0"
 futures-util = "0.3"
 ipnet = "2.8.0"

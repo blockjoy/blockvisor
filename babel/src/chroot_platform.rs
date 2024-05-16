@@ -29,7 +29,7 @@ impl pal::BabelServer for UdsServer {
         let _ = fs::remove_file(BABEL_SOCKET).await;
         let uds_stream = UnixListenerStream::new(
             tokio::net::UnixListener::bind(BABEL_SOCKET)
-                .with_context(|| "failed to bind to vsock")?,
+                .with_context(|| "failed to bind to uds")?,
         );
         Server::builder()
             .max_concurrent_streams(2)
@@ -66,22 +66,6 @@ impl pal::BabelPal for Pal {
         UdsConnector
     }
 
-    async fn mount_data_drive(&self, _data_directory_mount_point: &str) -> eyre::Result<()> {
-        Ok(())
-    }
-
-    async fn umount_data_drive(
-        &self,
-        _data_directory_mount_point: &str,
-        _fuser_kill: bool,
-    ) -> eyre::Result<()> {
-        Ok(())
-    }
-
-    async fn is_data_drive_mounted(&self, _data_directory_mount_point: &str) -> eyre::Result<bool> {
-        Ok(true)
-    }
-
     async fn set_node_context(&self, node_context: NodeContext) -> eyre::Result<()> {
         let node_env = format!(
             "BV_HOST_ID={}\n\
@@ -116,22 +100,6 @@ impl pal::BabelPal for Pal {
             run_cmd::<[&str; 0], _>(crate::POST_SETUP_SCRIPT, []).await?;
         }
         Ok(())
-    }
-
-    async fn set_swap_file(
-        &self,
-        _swap_size_mb: u64,
-        _swap_file_location: &str,
-    ) -> eyre::Result<()> {
-        Ok(())
-    }
-
-    async fn is_swap_file_set(
-        &self,
-        _swap_size_mb: u64,
-        _swap_file_location: &str,
-    ) -> eyre::Result<bool> {
-        Ok(true)
     }
 
     async fn set_ram_disks(

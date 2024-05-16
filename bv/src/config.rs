@@ -90,19 +90,22 @@ impl SharedConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum PalConfig {
-    LinuxFc,
-    LinuxBare,
-    LinuxApptainer(ApptainerConfig),
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ApptainerConfig {
     pub extra_args: Option<Vec<String>>,
     pub host_network: bool,
     pub cpu_limit: bool,
     pub memory_limit: bool,
+}
+
+impl Default for ApptainerConfig {
+    fn default() -> Self {
+        Self {
+            extra_args: None,
+            host_network: false,
+            cpu_limit: true,
+            memory_limit: true,
+        }
+    }
 }
 
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
@@ -135,8 +138,8 @@ pub struct Config {
     pub cluster_port: Option<u32>,
     /// Addresses of the seed nodes for cluster discovery and announcements
     pub cluster_seed_urls: Option<Vec<String>>,
-    /// Platform Abstraction Layer to be used by host
-    pub pal: Option<PalConfig>,
+    /// Platform configuration
+    pub pal: Option<ApptainerConfig>,
 }
 
 impl Config {

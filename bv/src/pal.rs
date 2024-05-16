@@ -123,9 +123,6 @@ pub trait CommandsStream {
 pub type BabelClient = babel_api::babel::babel_client::BabelClient<
     InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>,
 >;
-pub type BabelSupClient = babel_api::babelsup::babel_sup_client::BabelSupClient<
-    InterceptedService<Channel, bv_utils::rpc::DefaultTimeout>,
->;
 
 #[async_trait]
 pub trait NodeConnection {

@@ -14,23 +14,11 @@ async fn main() -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
     let config = config::Config::load(&bv_root()).await?;
-    match config.pal.as_ref().unwrap_or(&config::PalConfig::LinuxFc) {
-        config::PalConfig::LinuxFc => {
-            let pal = blockvisord::linux_fc_platform::LinuxFcPlatform::new().await?;
-            BlockvisorD::new(pal, config).await?.run(run).await?;
-        }
-        config::PalConfig::LinuxBare => {
-            let pal = blockvisord::linux_bare_platform::LinuxBarePlatform::new().await?;
-            BlockvisorD::new(pal, config).await?.run(run).await?;
-        }
-        config::PalConfig::LinuxApptainer(apptainer_config) => {
-            let pal = blockvisord::linux_apptainer_platform::LinuxApptainerPlatform::new(
-                &config.iface,
-                apptainer_config.clone(),
-            )
-            .await?;
-            BlockvisorD::new(pal, config).await?.run(run).await?;
-        }
-    }
+    let pal = blockvisord::linux_apptainer_platform::LinuxApptainerPlatform::new(
+        &config.iface,
+        config.pal.clone().unwrap_or_default(),
+    )
+    .await?;
+    BlockvisorD::new(pal, config).await?.run(run).await?;
     Ok(())
 }

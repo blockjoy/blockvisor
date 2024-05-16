@@ -15,10 +15,6 @@ name = "babel"
 path = "src/bin/babel.rs"
 
 [[bin]]
-name = "babelsup"
-path = "src/bin/babelsup.rs"
-
-[[bin]]
 name = "babel_job_runner"
 path = "src/bin/job_runner.rs"
 
@@ -56,7 +52,6 @@ url = "2.5.0"
 users = "0.11.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tokio-vsock = { version = "0.4.0", features = ["tonic-conn"] }
 libc = "0.2.78"
 nix = "0.27.1"
 rlimit = "0.10.1"

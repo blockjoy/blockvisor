@@ -70,9 +70,9 @@ pub struct CmdArgs {
     #[clap(long = "skip-download")]
     pub skip_download: bool,
 
-    /// Use Firecracker platform
+    /// Use host network directly
     #[clap(long)]
-    use_fc: bool,
+    use_host_network: bool,
 
     /// Skip all [y/N] prompts.
     #[clap(short, long)]
@@ -117,7 +117,7 @@ async fn main() -> Result<()> {
             .as_ref()
             .or(net.ip_to.as_ref())
             .ok_or_else(|| anyhow!("Failed to resolve `to` address"))?;
-        let ips = if cmd_args.use_fc
+        let ips = if !cmd_args.use_host_network
             || (cmd_args.ip_range_from.is_some() && cmd_args.ip_range_to.is_some())
         {
             Ipv4AddrRange::new(
@@ -196,7 +196,7 @@ async fn main() -> Result<()> {
 
         let host = client.create(create).await?.into_inner();
 
-        let api_config = Config {
+        let mut api_config = Config {
             id: host
                 .host
                 .ok_or_else(|| anyhow!("No `host` in response"))?
@@ -211,18 +211,14 @@ async fn main() -> Result<()> {
                 .blockvisor_port
                 .unwrap_or_else(config::default_blockvisor_port),
             iface: cmd_args.bridge_ifa,
-            pal: if cmd_args.use_fc {
-                Some(config::PalConfig::LinuxFc)
-            } else {
-                Some(config::PalConfig::LinuxApptainer(ApptainerConfig {
-                    extra_args: None,
-                    host_network: false,
-                    cpu_limit: true,
-                    memory_limit: true,
-                }))
-            },
             ..Default::default()
         };
+        if cmd_args.use_host_network {
+            api_config.pal = Some(ApptainerConfig {
+                host_network: true,
+                ..Default::default()
+            });
+        }
         api_config.save(&bv_root).await?;
         Some(api_config)
     } else {

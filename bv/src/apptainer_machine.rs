@@ -309,15 +309,10 @@ impl pal::VirtualMachine for ApptainerMachine {
     async fn state(&self) -> pal::VmState {
         match self.is_container_running().await {
             Ok(false) => pal::VmState::SHUTOFF,
-            Ok(true) => {
-                match get_process_pid(
-                    crate::bare_machine::BABEL_BIN_NAME,
-                    &self.chroot_dir.to_string_lossy(),
-                ) {
-                    Ok(_) => pal::VmState::RUNNING,
-                    _ => pal::VmState::INVALID,
-                }
-            }
+            Ok(true) => match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
+                Ok(_) => pal::VmState::RUNNING,
+                _ => pal::VmState::INVALID,
+            },
             _ => pal::VmState::INVALID,
         }
     }
@@ -357,24 +352,19 @@ impl pal::VirtualMachine for ApptainerMachine {
     async fn recover(&mut self) -> Result<()> {
         match self.is_container_running().await {
             Ok(false) => self.start().await,
-            Ok(true) => {
-                match get_process_pid(
-                    crate::bare_machine::BABEL_BIN_NAME,
-                    &self.chroot_dir.to_string_lossy(),
-                ) {
-                    Ok(_) => Ok(()),
-                    Err(GetProcessIdError::NotFound) => self.start_babel().await,
-                    Err(GetProcessIdError::MoreThanOne) => {
-                        kill_all_processes(
-                            &self.babel_path.to_string_lossy(),
-                            &[&self.chroot_dir.to_string_lossy()],
-                            BABEL_KILL_TIMEOUT,
-                            PosixSignal::SIGTERM,
-                        );
-                        self.start_babel().await
-                    }
+            Ok(true) => match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
+                Ok(_) => Ok(()),
+                Err(GetProcessIdError::NotFound) => self.start_babel().await,
+                Err(GetProcessIdError::MoreThanOne) => {
+                    kill_all_processes(
+                        &self.babel_path.to_string_lossy(),
+                        &[&self.chroot_dir.to_string_lossy()],
+                        BABEL_KILL_TIMEOUT,
+                        PosixSignal::SIGTERM,
+                    );
+                    self.start_babel().await
                 }
-            }
+            },
             _ => bail!("can't get container status for {}", self.vm_id),
         }
     }

@@ -4,11 +4,10 @@ use crate::src::utils::{
 };
 use assert_cmd::Command;
 use assert_fs::TempDir;
-use blockvisord::config::{ApptainerConfig, PalConfig};
-use blockvisord::node_data::NodeData;
+use blockvisord::config::ApptainerConfig;
 use blockvisord::{
     config::Config,
-    node_data::NodeImage,
+    node_data::{NodeData, NodeImage},
     services::api::{common, pb},
     services::blockchain,
 };
@@ -109,7 +108,7 @@ async fn test_bvup() {
             .args(["--ip-gateway", "216.18.214.193"])
             .args(["--ip-range-from", "216.18.214.195"])
             .args(["--ip-range-to", "216.18.214.206"])
-            .args(["--yes"])
+            .args(["--yes", "--use-host-network"])
             .env("BV_ROOT", tmp_dir.as_os_str())
             .assert()
             .success()
@@ -209,7 +208,7 @@ async fn test_bv_service_e2e() {
         .args(["--region", "europe-bosnia-number-1"]) // this region will be auto-created in API
         .args(["--api", url])
         .args(["--mqtt", mqtt])
-        .args(["--yes"])
+        .args(["--yes", "--use-host-network"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -221,12 +220,11 @@ async fn test_bv_service_e2e() {
     let config = fs::read_to_string(config_path).unwrap();
     let mut config: Config = serde_json::from_str(&config).unwrap();
     let host_id = config.id.clone();
-    config.pal = Some(PalConfig::LinuxApptainer(ApptainerConfig {
-        extra_args: Some(vec!["--dns".to_owned(), "1.1.1.1,8.8.8.8".to_owned()]),
+    config.pal = Some(ApptainerConfig {
         host_network: true,
-        cpu_limit: true,
-        memory_limit: true,
-    }));
+        extra_args: Some(vec!["--dns".to_owned(), "1.1.1.1,8.8.8.8".to_owned()]),
+        ..Default::default()
+    });
     let config = serde_json::to_string(&config).unwrap();
     tokio::fs::write(config_path, config).await.unwrap();
 

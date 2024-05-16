@@ -1,6 +1,6 @@
+use crate::pal::BabelEngineConnector;
 use crate::{
-    fc_platform, jobs,
-    pal::BabelEngineConnector,
+    chroot_platform, jobs,
     utils::{Backoff, LimitStatus},
     JOBS_MONITOR_UDS_PATH,
 };
@@ -45,7 +45,7 @@ impl<T: JobRunnerImpl + Send> JobRunner for T {
                     "job status changed to {status:?}, but failed to save job data: {err:#}"
                 );
                 error!(err_msg);
-                let mut client = fc_platform::VSockConnector.connect();
+                let mut client = chroot_platform::UdsConnector.connect();
                 let _ = with_retry!(client.bv_error(err_msg.clone()));
             }
             run.stop();

@@ -4,7 +4,6 @@ use crate::{
     command_failed, commands,
     commands::into_internal,
     config::SharedConfig,
-    node_connection::RPC_REQUEST_TIMEOUT,
     node_context::NodeContext,
     node_data::{NodeData, NodeImage, NodeStatus},
     pal::{self, NetInterface, NodeConnection, Pal, RecoverBackoff, VirtualMachine},
@@ -27,6 +26,7 @@ use tokio::{fs, time::Instant};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+pub const NODE_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_UPGRADE_RETRY_HINT: Duration = Duration::from_secs(3600);
 const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -527,8 +527,10 @@ impl<P: Pal + Debug> Node<P> {
     async fn shutdown_babel(&mut self, force: bool) -> Result<()> {
         let babel_client = self.babel_engine.node_connection.babel_client().await?;
         let timeout = with_retry!(babel_client.get_babel_shutdown_timeout(()))?.into_inner();
-        with_retry!(babel_client.shutdown_babel(with_timeout(force, timeout + RPC_REQUEST_TIMEOUT)))
-            .with_context(|| "Failed to gracefully shutdown babel and background jobs")?;
+        with_retry!(
+            babel_client.shutdown_babel(with_timeout(force, timeout + NODE_REQUEST_TIMEOUT))
+        )
+        .with_context(|| "Failed to gracefully shutdown babel and background jobs")?;
         Ok(())
     }
 

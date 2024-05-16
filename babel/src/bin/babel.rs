@@ -1,4 +1,3 @@
-use babel::pal_config::PalConfig;
 use bv_utils::logging::setup_logging;
 use std::{env, os::unix::fs};
 use tracing::info;
@@ -12,15 +11,13 @@ async fn main() -> eyre::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
     let mut args = env::args();
-    if let Some(arg) = args.nth(1).as_deref() {
-        if arg == "--chroot" {
-            let chroot_dir = args.next().expect("missing chroot directory");
-            fs::chroot(chroot_dir)?;
-            env::set_current_dir("/")?;
-        }
-        babel::pal_config::save(PalConfig::Chroot).await?;
-        babel::babel::run(babel::chroot_platform::Pal).await
+    let arg = args.nth(1).expect("missing --chroot argument");
+    if arg == "--chroot" {
+        let chroot_dir = args.next().expect("missing chroot directory");
+        fs::chroot(chroot_dir)?;
+        env::set_current_dir("/")?;
     } else {
-        babel::babel::run(babel::fc_platform::Pal).await
+        panic!("missing --chroot argument")
     }
+    babel::babel::run(babel::chroot_platform::Pal).await
 }

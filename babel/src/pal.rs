@@ -27,20 +27,7 @@ pub trait BabelPal {
     fn babel_server(&self) -> Self::BabelServer;
     type Connector: BabelEngineConnector;
     fn connector(&self) -> Self::Connector;
-    async fn mount_data_drive(&self, data_directory_mount_point: &str) -> eyre::Result<()>;
-    async fn umount_data_drive(
-        &self,
-        data_directory_mount_point: &str,
-        fuser_kill: bool,
-    ) -> eyre::Result<()>;
-    async fn is_data_drive_mounted(&self, data_directory_mount_point: &str) -> eyre::Result<bool>;
     async fn set_node_context(&self, node_context: NodeContext) -> eyre::Result<()>;
-    async fn set_swap_file(&self, swap_size_mb: u64, swap_file_location: &str) -> eyre::Result<()>;
-    async fn is_swap_file_set(
-        &self,
-        swap_size_mb: u64,
-        swap_file_location: &str,
-    ) -> eyre::Result<bool>;
     async fn set_ram_disks(&self, ram_disks: Option<Vec<RamdiskConfiguration>>)
         -> eyre::Result<()>;
     async fn is_ram_disks_set(

@@ -1,9 +1,8 @@
 use babel::chroot_platform::UdsConnector;
 use babel::pal::BabelEngineConnector;
-use babel::pal_config::PalConfig;
 use babel::{
-    download_job::DownloadJob, fc_platform::VSockConnector, job_runner::TransferConfig, jobs,
-    log_buffer::LogBuffer, run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH,
+    download_job::DownloadJob, job_runner::TransferConfig, jobs, log_buffer::LogBuffer,
+    run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH,
 };
 use babel_api::engine::{
     Compression, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
@@ -40,10 +39,7 @@ async fn main() -> eyre::Result<()> {
     if args.count() != 0 {
         bail!("Invalid number of arguments! Expected only one argument: unique job name.");
     }
-    match babel::pal_config::load().await? {
-        PalConfig::Fc => run_job(job_name, VSockConnector).await,
-        PalConfig::Chroot => run_job(job_name, UdsConnector).await,
-    }
+    run_job(job_name, UdsConnector).await
 }
 
 async fn run_job(

@@ -7,7 +7,7 @@ use crate::{
     hosts::{self, HostInfo},
     internal_server,
     internal_server::NodeCreateRequest,
-    linux_fc_platform::LinuxFcPlatform,
+    linux_apptainer_platform::LinuxApptainerPlatform,
     linux_platform::bv_root,
     node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeImage, NodeStatus},
@@ -458,7 +458,7 @@ pub async fn process_image_command(
             let images_dir = build_bv_var_path().join(IMAGES_DIR);
             let destination_image_path = images_dir.join(destination_image_id);
             fs::create_dir_all(&destination_image_path)?;
-            let pal = LinuxFcPlatform::new().await?;
+            let pal = LinuxApptainerPlatform::default().await?;
             let _ = NodesManager::fetch_image_data(pal.into(), config, &source_image).await?;
             fs_extra::dir::copy(
                 images_dir.join(source_image_id),

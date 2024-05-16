@@ -29,7 +29,7 @@ jobs:
           override: true
       - name: Setup packages
         run: >
-          sudo apt -y install build-essential pkg-config libssl-dev cmake tmux musl-tools pigz awscli
+          sudo apt -y install build-essential pkg-config libssl-dev cmake musl-tools pigz awscli
 
       - name: Build and Reinstall
         run: |

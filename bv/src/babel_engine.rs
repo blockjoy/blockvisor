@@ -1,3 +1,4 @@
+use crate::node::NODE_REQUEST_TIMEOUT;
 /// This module wraps all Babel related functionality. In particular it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
@@ -11,7 +12,6 @@
 use crate::{
     babel_engine_service::{self, BabelEngineServer},
     config::SharedConfig,
-    node_connection::RPC_REQUEST_TIMEOUT,
     node_data::{NodeImage, NodeProperties},
     pal::{BabelClient, NodeConnection},
     scheduler,
@@ -335,7 +335,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_selective_retry!(babel_client.run_sh(with_timeout(
                         body.clone(),
-                        timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
+                        timeout.unwrap_or(NODE_REQUEST_TIMEOUT)
                     )))
                     .map_err(|err| self.handle_connection_errors(err))
                     .map(|v| v.into_inner()),
@@ -350,7 +350,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_selective_retry!(babel_client.run_rest(with_timeout(
                         req.clone(),
-                        timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
+                        timeout.unwrap_or(NODE_REQUEST_TIMEOUT)
                     )))
                     .map_err(|err| self.handle_connection_errors(err))
                     .map(|v| v.into_inner()),
@@ -365,7 +365,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_selective_retry!(babel_client.run_jrpc(with_timeout(
                         req.clone(),
-                        timeout.unwrap_or(RPC_REQUEST_TIMEOUT)
+                        timeout.unwrap_or(NODE_REQUEST_TIMEOUT)
                     )))
                     .map_err(|err| self.handle_connection_errors(err))
                     .map(|v| v.into_inner()),
@@ -582,7 +582,7 @@ async fn stop_job(client: &mut BabelClient, job_name: &str) -> Result<(), tonic:
         with_retry!(client.get_job_shutdown_timeout(job_name.to_string()))?.into_inner();
     with_retry!(client.stop_job(with_timeout(
         job_name.to_string(),
-        job_timeout + RPC_REQUEST_TIMEOUT
+        job_timeout + NODE_REQUEST_TIMEOUT
     )))
     .map(|v| v.into_inner())
 }
@@ -1089,7 +1089,7 @@ mod tests {
             let connection = TestConnection {
                 client: babel_api::babel::babel_client::BabelClient::with_interceptor(
                     test_channel(&tmp_root),
-                    bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+                    bv_utils::rpc::DefaultTimeout(NODE_REQUEST_TIMEOUT),
                 ),
                 socket: vm_data_path.join("engine.socket"),
             };

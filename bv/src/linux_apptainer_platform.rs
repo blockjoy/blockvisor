@@ -1,13 +1,12 @@
 use crate::config::ApptainerConfig;
+use crate::node::NODE_REQUEST_TIMEOUT;
 use crate::{
     apptainer_machine,
     apptainer_machine::BABEL_BIN_NAME,
     apptainer_machine::CHROOT_DIR,
     config,
     config::SharedConfig,
-    linux_platform,
-    node_connection::RPC_REQUEST_TIMEOUT,
-    node_context,
+    linux_platform, node_context,
     node_data::NodeData,
     nodes_manager::NodesDataCache,
     pal::{self, AvailableResources, NetInterface, NodeConnection, Pal},
@@ -57,6 +56,20 @@ impl DerefMut for LinuxApptainerPlatform {
 }
 
 impl LinuxApptainerPlatform {
+    pub async fn default() -> Result<Self> {
+        Ok(Self {
+            base: linux_platform::LinuxPlatform::new().await?,
+            bridge_ip: IpAddr::from_str("127.0.0.1")?,
+            mask_bits: 28,
+            config: ApptainerConfig {
+                extra_args: None,
+                host_network: false,
+                cpu_limit: false,
+                memory_limit: false,
+            },
+        })
+    }
+
     pub async fn new(iface: &str, config: ApptainerConfig) -> Result<Self> {
         let routes = run_cmd("ip", ["--json", "route"]).await?;
         let mut routes: Vec<crate::utils::IpRoute> = serde_json::from_str(&routes)?;
@@ -297,7 +310,7 @@ impl NodeConnection for BareNodeConnection {
         self.state = NodeConnectionState::Babel(
             babel_api::babel::babel_client::BabelClient::with_interceptor(
                 bv_utils::rpc::build_socket_channel(&self.babel_socket_path),
-                bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+                bv_utils::rpc::DefaultTimeout(NODE_REQUEST_TIMEOUT),
             ),
         );
         Ok(())
@@ -322,7 +335,7 @@ impl NodeConnection for BareNodeConnection {
     async fn test(&mut self) -> Result<()> {
         let mut client = babel_api::babel::babel_client::BabelClient::with_interceptor(
             bv_utils::rpc::build_socket_channel(&self.babel_socket_path),
-            bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+            bv_utils::rpc::DefaultTimeout(NODE_REQUEST_TIMEOUT),
         );
         with_retry!(client.get_version(()))?;
         // update connection state (otherwise it still may be seen as broken)
