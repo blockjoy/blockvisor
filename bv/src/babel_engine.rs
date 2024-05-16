@@ -285,17 +285,6 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(logs)
     }
 
-    /// Returns the list of logs from babel processes.
-    pub async fn get_babel_logs(&mut self, max_lines: u32) -> Result<Vec<String>> {
-        let client = self.node_connection.babel_client().await?;
-        let mut resp = with_retry!(client.get_babel_logs(max_lines))?.into_inner();
-        let mut logs = Vec::<String>::default();
-        while let Some(Ok(log)) = resp.next().await {
-            logs.push(log);
-        }
-        Ok(logs)
-    }
-
     /// Clone plugin, move it to separate thread and call given function `f` on it.
     /// In parallel, it runs `node_request_handler` until function on plugin is done.
     async fn on_plugin<T: Send + 'static, F: FnOnce(P) -> Result<T> + Send + 'static>(
@@ -914,11 +903,6 @@ mod tests {
             async fn get_logs(
                 &self,
                 _request: Request<()>,
-            ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
-            type GetBabelLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
-            async fn get_babel_logs(
-                &self,
-                _request: Request<u32>,
             ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
         }
     }

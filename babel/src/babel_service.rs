@@ -317,27 +317,6 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         let stream = tokio_stream::iter(logs);
         Ok(Response::new(stream))
     }
-
-    type GetBabelLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
-
-    async fn get_babel_logs(
-        &self,
-        request: Request<u32>,
-    ) -> Result<Response<Self::GetBabelLogsStream>, Status> {
-        let max_lines = request.into_inner();
-        let mut logs = Vec::with_capacity(max_lines as usize);
-        let out = tokio::process::Command::new("journalctl")
-            .kill_on_drop(true)
-            .args(["-u", "babelsup", "-n", &max_lines.to_string(), "-o", "cat"])
-            .output()
-            .await
-            .map_err(|err| Status::internal(format!("failed to run journalctl: {err:#}")))?;
-        for line in String::from_utf8_lossy(&out.stdout).split_inclusive('\n') {
-            logs.push(Ok(line.to_owned()));
-        }
-        let stream = tokio_stream::iter(logs);
-        Ok(Response::new(stream))
-    }
 }
 
 fn to_blockchain_err(err: eyre::Error) -> Status {

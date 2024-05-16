@@ -71,7 +71,6 @@ trait Service {
     fn stop_node_job(id: Uuid, job_name: String);
     fn cleanup_node_job(id: Uuid, job_name: String);
     fn get_node_logs(id: Uuid) -> Vec<String>;
-    fn get_babel_logs(id: Uuid, max_lines: u32) -> Vec<String>;
     fn get_node_id_for_name(name: String) -> String;
     fn list_capabilities(id: Uuid) -> Vec<String>;
     fn run(id: Uuid, method: String, param: String) -> String;
@@ -385,22 +384,6 @@ where
             .logs(id)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
-        Ok(Response::new(logs))
-    }
-
-    #[instrument(skip(self))]
-    async fn get_babel_logs(
-        &self,
-        request: Request<(Uuid, u32)>,
-    ) -> Result<Response<Vec<String>>, Status> {
-        status_check().await?;
-        let (id, max_lines) = request.into_inner();
-        let logs = self
-            .nodes_manager
-            .babel_logs(id, max_lines)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
-
         Ok(Response::new(logs))
     }
 

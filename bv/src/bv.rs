@@ -265,18 +265,6 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 print!("{log}");
             }
         }
-        NodeCommand::BabelLogs {
-            id_or_name,
-            max_lines,
-        } => {
-            let id = client
-                .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
-                .await?;
-            let logs = client.get_babel_logs((id, max_lines)).await?;
-            for log in logs.into_inner() {
-                print!("{log}");
-            }
-        }
         NodeCommand::Status { id_or_names } => {
             for id_or_name in node_ids_with_fallback(id_or_names, true)? {
                 let id = client.resolve_id_or_name(&id_or_name).await?;

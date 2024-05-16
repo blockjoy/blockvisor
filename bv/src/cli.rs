@@ -180,16 +180,6 @@ pub enum NodeCommand {
         id_or_name: Option<String>,
     },
 
-    /// Display node Babel logs
-    #[clap(alias = "bl")]
-    BabelLogs {
-        /// Node id or name. BV tries to get it from workspace if not provided.
-        id_or_name: Option<String>,
-        /// Max number of log lines returned
-        #[clap(long, short, default_value = "10")]
-        max_lines: u32,
-    },
-
     /// Get node status
     Status {
         /// One or more node id or names.

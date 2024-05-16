@@ -83,10 +83,6 @@ pub trait Babel {
     /// Get logs gathered from jobs.
     #[server_streaming]
     fn get_logs() -> String;
-
-    /// Get logs gathered from babel processes (babel, and job_runner).
-    #[server_streaming]
-    fn get_babel_logs(max_lines: u32) -> String;
 }
 
 #[tonic_rpc::tonic_rpc(bincode)]

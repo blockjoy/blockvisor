@@ -909,11 +909,6 @@ pub mod tests {
                 &self,
                 _request: Request<()>,
             ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
-            type GetBabelLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
-            async fn get_babel_logs(
-                &self,
-                _request: Request<u32>,
-            ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
         }
     }
 
