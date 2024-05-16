@@ -11,10 +11,7 @@ use crate::{
     scheduler,
     scheduler::{Scheduled, Scheduler},
     services::blockchain::ROOT_FS_FILE,
-    services::{
-        blockchain::{self, BlockchainService, BABEL_PLUGIN_NAME},
-        kernel,
-    },
+    services::blockchain::{self, BlockchainService, BABEL_PLUGIN_NAME},
     BV_VAR_PATH,
 };
 use babel_api::{
@@ -304,7 +301,6 @@ where
             id,
             name: config.name.clone(),
             image: config.image,
-            kernel: meta.kernel,
             expected_status: NodeStatus::Stopped,
             started_at: None,
             network_interface: NetInterface { ip, gateway },
@@ -363,9 +359,6 @@ where
             }
             let new_meta =
                 Self::fetch_image_data(self.pal.clone(), self.api_config.clone(), &image).await?;
-            if data.kernel != new_meta.kernel {
-                command_failed!(Error::Internal(anyhow!("Cannot upgrade kernel")));
-            }
             if data.requirements.disk_size_gb != new_meta.requirements.disk_size_gb {
                 command_failed!(Error::Internal(anyhow!("Cannot upgrade disk requirements")));
             }
@@ -839,20 +832,10 @@ where
             fs::read_to_string(rhai_path).await.map_err(into_internal)?
         };
         let meta = rhai_plugin::read_metadata(&script)?;
-        if !kernel::is_kernel_cache_valid(bv_root, &meta.kernel)
-            .await
-            .with_context(|| format!("Failed to check kernel cache: `{}`", meta.kernel))?
-        {
-            kernel::download_kernel(
-                bv_root,
-                pal.create_api_service_connector(&api_config),
-                &meta.kernel,
-            )
-            .await
-            .with_context(|| "cannot download kernel")?;
-        }
-
-        info!("Reading blockchain requirements: {:?}", &meta.requirements);
+        info!(
+            "Fetched node image with requirements: {:?}",
+            &meta.requirements
+        );
         Ok(meta)
     }
 }
@@ -882,7 +865,6 @@ mod tests {
         services::{
             api::{common, pb},
             blockchain::ROOT_FS_FILE,
-            kernel::KERNELS_DIR,
         },
         utils,
     };
@@ -894,18 +876,6 @@ mod tests {
     use std::ffi::OsStr;
     use std::net::IpAddr;
     use std::str::FromStr;
-
-    mock! {
-        pub TestKernelService {}
-
-        #[tonic::async_trait]
-        impl pb::kernel_service_server::KernelService for TestKernelService {
-            async fn retrieve(&self, request: tonic::Request<pb::KernelServiceRetrieveRequest>
-            ) -> Result<tonic::Response<pb::KernelServiceRetrieveResponse>, tonic::Status>;
-            async fn list_kernel_versions(&self, request: tonic::Request<pb::KernelServiceListKernelVersionsRequest>,
-            ) -> Result<tonic::Response<pb::KernelServiceListKernelVersionsResponse>, tonic::Status>;
-        }
-    }
 
     mock! {
         pub TestBlockchainService {}
@@ -1059,35 +1029,9 @@ mod tests {
                 );
             }
 
-            // expect kernel retrieve and download,but only once
-            let url = http_server.url();
-            let mut kernels = MockTestKernelService::new();
-            kernels
-                .expect_retrieve()
-                .withf(|req| {
-                    req.get_ref().id
-                        == Some(pb::KernelIdentifier {
-                            version: TEST_KERNEL.to_string(),
-                        })
-                })
-                .return_once(move |_| {
-                    Ok(tonic::Response::new(pb::KernelServiceRetrieveResponse {
-                        location: Some(common::ArchiveLocation {
-                            url: format!("{url}/kernel"),
-                        }),
-                    }))
-                });
-            http_mocks.push(
-                http_server
-                    .mock("GET", "/kernel")
-                    .with_body_from_file(&*self.tmp_root.join("blockjoy.gz").to_string_lossy())
-                    .create(),
-            );
-
             (
                 start_test_server!(
                     &self.tmp_root,
-                    pb::kernel_service_server::KernelServiceServer::new(kernels),
                     pb::blockchain_service_server::BlockchainServiceServer::new(blockchain)
                 ),
                 http_server,
@@ -1164,7 +1108,6 @@ mod tests {
             initialized: false,
             has_pending_update: false,
             image: image.unwrap_or(config.image),
-            kernel: TEST_KERNEL.to_string(),
             network_interface: NetInterface {
                 ip: IpAddr::from_str(&config.ip).unwrap(),
                 gateway: IpAddr::from_str(&config.gateway).unwrap(),
@@ -1497,7 +1440,6 @@ mod tests {
             initialized: false,
             has_pending_update: false,
             image: test_env.test_image.clone(),
-            kernel: TEST_KERNEL.to_string(),
             network_interface: NetInterface {
                 ip: IpAddr::from_str("192.168.0.9").unwrap(),
                 gateway: IpAddr::from_str("192.168.0.1").unwrap(),
@@ -1599,11 +1541,6 @@ mod tests {
             node_type: "validator".to_string(),
             node_version: "3.2.1".to_string(),
         };
-        let invalid_kernel_image = NodeImage {
-            protocol: "testing".to_string(),
-            node_type: "validator".to_string(),
-            node_version: "3.4.5".to_string(),
-        };
         let invalid_disk_size_image = NodeImage {
             protocol: "testing".to_string(),
             node_type: "validator".to_string(),
@@ -1644,18 +1581,13 @@ mod tests {
                 ),
                 (
                     new_image.clone(),
-                    format!("{} kernel: \"{}\", requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
-                            UPGRADED_IMAGE_RHAI_TEMPLATE, TEST_KERNEL, 1, 2048, 1).into_bytes(),
-                ),
-                (
-                    invalid_kernel_image.clone(),
-                    format!("{} kernel: \"{}\", requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
-                            UPGRADED_IMAGE_RHAI_TEMPLATE, "5.10.175", 1, 2048, 1).into_bytes(),
+                    format!("{} requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
+                            UPGRADED_IMAGE_RHAI_TEMPLATE, 1, 2048, 1).into_bytes(),
                 ),
                 (
                     invalid_disk_size_image.clone(),
-                    format!("{} kernel: \"{}\", requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
-                            UPGRADED_IMAGE_RHAI_TEMPLATE, TEST_KERNEL, 1, 2048, 2).into_bytes(),
+                    format!("{} requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
+                            UPGRADED_IMAGE_RHAI_TEMPLATE, 1, 2048, 2).into_bytes(),
                 ),
                 (
                     cpu_devourer_image.clone(),
@@ -1719,27 +1651,6 @@ mod tests {
             assert!(!node.data.initialized);
             assert!(!node.babel_engine.has_capability("info"));
         }
-        fs::create_dir_all(
-            test_env
-                .tmp_root
-                .join(BV_VAR_PATH)
-                .join(KERNELS_DIR)
-                .join("5.10.175"),
-        )
-        .await?;
-        fs::copy(
-            kernel::get_kernel_path(&test_env.tmp_root, TEST_KERNEL),
-            kernel::get_kernel_path(&test_env.tmp_root, "5.10.175"),
-        )
-        .await?;
-        assert_eq!(
-            "BV internal error: Cannot upgrade kernel",
-            nodes
-                .upgrade(node_id, invalid_kernel_image.clone())
-                .await
-                .unwrap_err()
-                .to_string()
-        );
         assert_eq!(
             "BV internal error: Cannot upgrade disk requirements",
             nodes
@@ -1950,6 +1861,7 @@ mod tests {
     const UPGRADED_IMAGE_RHAI_TEMPLATE: &str = r#"
 const METADATA = #{
     min_babel_version: "0.0.9",
+    kernel: "5.10.174-build.1+fc.ufw",
     node_version: "1.15.9",
     protocol: "testing",
     node_type: "validator",

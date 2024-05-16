@@ -686,7 +686,6 @@ pub mod tests {
     };
     use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
-    pub const TEST_KERNEL: &str = "5.10.174-build.1+fc.ufw";
     pub fn testing_babel_path_absolute() -> String {
         format!("{}/tests/babel.rhai", env!("CARGO_MANIFEST_DIR"))
     }
@@ -999,7 +998,6 @@ pub mod tests {
                     node_type: "validator".to_string(),
                     node_version: "1.2.3".to_string(),
                 },
-                kernel: TEST_KERNEL.to_string(),
                 network_interface: NetInterface {
                     ip: IpAddr::from_str("172.16.0.10").unwrap(),
                     gateway: IpAddr::from_str("172.16.0.1").unwrap(),

@@ -59,7 +59,6 @@ pub struct NodeData {
     #[serde(default)]
     pub has_pending_update: bool,
     pub image: NodeImage,
-    pub kernel: String,
     pub network_interface: NetInterface,
     pub requirements: Requirements,
     pub firewall_rules: Vec<firewall::Rule>,

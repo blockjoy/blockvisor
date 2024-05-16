@@ -12,7 +12,7 @@ use blockvisord::{
     node_context::REGISTRY_CONFIG_DIR,
     node_data::{NodeData, NodeStatus},
     pal::{CommandsStream, Pal, ServiceConnector},
-    services::{self, blockchain::IMAGES_DIR, kernel::KERNELS_DIR, ApiInterceptor, AuthToken},
+    services::{self, blockchain::IMAGES_DIR, ApiInterceptor, AuthToken},
     BV_VAR_PATH,
 };
 use bv_utils::logging::setup_logging;
@@ -64,11 +64,6 @@ impl TestEnv {
         std::os::unix::fs::symlink(
             Path::new("/").join(BV_VAR_PATH).join(IMAGES_DIR),
             vars_path.join(IMAGES_DIR),
-        )?;
-        // link to pre downloaded kernels in /var/lib/blockvisord/kernels
-        std::os::unix::fs::symlink(
-            Path::new("/").join(BV_VAR_PATH).join(KERNELS_DIR),
-            vars_path.join(KERNELS_DIR),
         )?;
         fs::create_dir_all(bv_root.join("usr"))?;
         // link to /usr/bin where apptainer is expected
