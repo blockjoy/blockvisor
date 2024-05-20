@@ -193,6 +193,8 @@ impl ApptainerMachine {
                 "instance".to_string(),
                 "run".to_string(),
                 "--writable".to_string(),
+                "--no-mount".to_string(),
+                "home,cwd".to_string(),
                 "--bind".to_string(),
                 JOURNAL_DIR.to_owned(),
                 "--bind".to_string(),
