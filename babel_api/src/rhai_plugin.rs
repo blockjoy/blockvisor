@@ -317,6 +317,12 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                 i64::from_str_radix(hex.strip_prefix("0x").unwrap_or(hex), 16).map_err(Report::new),
             )
         });
+        self.rhai_engine.register_fn("system_time", || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .map_err(|err| format!("{err:#}"))
+        });
 
         let plugin = self.bare.clone();
         let config = self
