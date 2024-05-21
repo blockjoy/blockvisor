@@ -25,20 +25,33 @@ const BABEL_VERSION_CONST_NAME: &str = "BABEL_VERSION";
 
 #[derive(Debug)]
 pub struct RhaiPlugin<E> {
-    babel_engine: Arc<E>,
-    ast: AST,
+    bare: BarePlugin<E>,
     rhai_engine: rhai::Engine,
 }
 
 impl<E: Engine + Sync + Send + 'static> Clone for RhaiPlugin<E> {
     fn clone(&self) -> Self {
         let mut clone = Self {
-            babel_engine: self.babel_engine.clone(),
+            bare: self.bare.clone(),
             rhai_engine: rhai::Engine::new(),
-            ast: self.ast.clone(),
         };
         clone.init_rhai_engine();
         clone
+    }
+}
+
+#[derive(Debug)]
+struct BarePlugin<E> {
+    babel_engine: Arc<E>,
+    ast: AST,
+}
+
+impl<E: Engine + Sync + Send + 'static> Clone for BarePlugin<E> {
+    fn clone(&self) -> Self {
+        Self {
+            babel_engine: self.babel_engine.clone(),
+            ast: self.ast.clone(),
+        }
     }
 }
 
@@ -91,9 +104,11 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             .compile(script)
             .with_context(|| "Rhai syntax error")?;
         let mut plugin = RhaiPlugin {
-            babel_engine: Arc::new(babel_engine),
+            bare: BarePlugin {
+                babel_engine: Arc::new(babel_engine),
+                ast,
+            },
             rhai_engine,
-            ast,
         };
         plugin.check_babel_version()?;
         plugin.init_rhai_engine();
@@ -102,7 +117,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
 
     fn check_babel_version(&self) -> Result<()> {
         if let Ok(min_babel_version) =
-            find_const_in_ast::<String>(&self.ast, BABEL_VERSION_CONST_NAME)
+            find_const_in_ast::<String>(&self.bare.ast, BABEL_VERSION_CONST_NAME)
         {
             let min_babel_version = semver::Version::parse(&min_babel_version)?;
             let version = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
@@ -117,17 +132,17 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
 
     /// register all Babel engine methods
     fn init_rhai_engine(&mut self) {
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("create_job", move |job_name: &str, job_config: Dynamic| {
                 into_rhai_result(babel_engine.create_job(job_name, from_dynamic(&job_config)?))
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("start_job", move |job_name: &str| {
                 into_rhai_result(babel_engine.start_job(job_name))
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("start_job", move |job_name: &str, job_config: Dynamic| {
                 into_rhai_result(
@@ -136,17 +151,17 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                         .and_then(|_| babel_engine.start_job(job_name)),
                 )
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("stop_job", move |job_name: &str| {
                 into_rhai_result(babel_engine.stop_job(job_name))
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("job_info", move |job_name: &str| {
                 to_dynamic(into_rhai_result(babel_engine.job_info(job_name))?)
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn("get_jobs", move || {
             to_dynamic(into_rhai_result(babel_engine.get_jobs())?)
         });
@@ -156,7 +171,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             .register_get("status_code", DressedHttpResponse::get_status_code)
             .register_fn("expect", DressedHttpResponse::expect)
             .register_fn("expect", DressedHttpResponse::expect_with);
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_jrpc", move |req: Dynamic, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
@@ -167,7 +182,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                         .map(DressedHttpResponse::from),
                 )
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_jrpc", move |req: Dynamic| {
                 let req = into_rhai_result(from_dynamic::<BareJrpcRequest>(&req)?.try_into())?;
@@ -177,7 +192,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                         .map(DressedHttpResponse::from),
                 )
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_rest", move |req: Dynamic, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
@@ -188,7 +203,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                         .map(DressedHttpResponse::from),
                 )
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_rest", move |req: Dynamic| {
                 let req = into_rhai_result(from_dynamic::<BareRestRequest>(&req)?.try_into())?;
@@ -204,7 +219,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             .register_get("stdout", DressedShResponse::get_stdout)
             .register_get("stderr", DressedShResponse::get_stderr)
             .register_fn("unwrap", DressedShResponse::unwrap);
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("run_sh", move |body: &str, timeout: i64| {
                 let timeout = into_rhai_result(timeout.try_into().map_err(Error::new))?;
@@ -214,16 +229,16 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                         .map(DressedShResponse::from),
                 )
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn("run_sh", move |body: &str| {
             into_rhai_result(babel_engine.run_sh(body, None).map(DressedShResponse::from))
         });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("sanitize_sh_param", move |param: &str| {
                 into_rhai_result(babel_engine.sanitize_sh_param(param))
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn(
             "render_template",
             move |template: &str, output: &str, params: Map| {
@@ -234,7 +249,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                 ))
             },
         );
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn("node_params", move || {
             Map::from_iter(
                 babel_engine
@@ -243,16 +258,16 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                     .map(|(k, v)| (k.into(), v.into())),
             )
         });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("save_data", move |value: &str| {
                 into_rhai_result(babel_engine.save_data(value))
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn("load_data", move || {
             into_rhai_result(babel_engine.load_data())
         });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn(
             "add_task",
             move |task_name: &str, schedule: &str, function_name: &str, function_param: &str| {
@@ -264,31 +279,31 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                 ))
             },
         );
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn(
             "add_task",
             move |task_name: &str, schedule: &str, function_name: &str| {
                 into_rhai_result(babel_engine.add_task(task_name, schedule, function_name, ""))
             },
         );
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
             .register_fn("delete_task", move |task_name: &str| {
                 into_rhai_result(babel_engine.delete_task(task_name))
             });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.on_debug(move |msg, _, _| {
             babel_engine.log(Level::DEBUG, msg);
         });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn("info", move |msg: &str| {
             babel_engine.log(Level::INFO, msg);
         });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn("warn", move |msg: &str| {
             babel_engine.log(Level::WARN, msg);
         });
-        let babel_engine = self.babel_engine.clone();
+        let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn("error", move |msg: &str| {
             babel_engine.log(Level::ERROR, msg);
         });
@@ -302,6 +317,17 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                 i64::from_str_radix(hex.strip_prefix("0x").unwrap_or(hex), 16).map_err(Report::new),
             )
         });
+
+        let plugin = self.bare.clone();
+        let config = self
+            .evaluate_var(PLUGIN_CONFIG_CONST_NAME)
+            .map_err(|err| format!("{err:#}"));
+        self.rhai_engine.register_fn("default_init", move || {
+            let config = config
+                .clone()
+                .map_err(<String as Into<rhai::EvalAltResult>>::into)?;
+            into_rhai_result(plugin.default_init(config))
+        });
     }
 
     fn call_fn<P: rhai::FuncArgs, R: Clone + Send + Sync + 'static>(
@@ -311,10 +337,25 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
     ) -> Result<R> {
         let mut scope = build_scope();
         self.rhai_engine
-            .call_fn::<R>(&mut scope, &self.ast, name, args)
+            .call_fn::<R>(&mut scope, &self.bare.ast, name, args)
             .with_context(|| format!("Rhai function '{name}' returned error"))
     }
 
+    fn evaluate_var<T: for<'a> Deserialize<'a>>(&self, name: &str) -> Result<T> {
+        let mut scope = build_scope();
+        self.rhai_engine
+            .run_ast_with_scope(&mut scope, &self.bare.ast)?;
+        if let Some(dynamic) = scope.get(name) {
+            let value: T = from_dynamic(dynamic)
+                .with_context(|| format!("Invalid Rhai script - failed to deserialize {name}"))?;
+            Ok(value)
+        } else {
+            Err(anyhow!("Invalid Rhai script - missing {name} constant"))
+        }
+    }
+}
+
+impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
     fn run_actions(&self, actions: Option<Actions>, needs: Vec<String>) -> Result<Vec<String>> {
         let mut jobs = vec![];
         if let Some(actions) = actions {
@@ -357,26 +398,53 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             .and_then(|_| self.babel_engine.start_job(name))
     }
 
-    fn evaluate_var<T: for<'a> Deserialize<'a>>(&self, name: &str) -> Result<T> {
-        let mut scope = build_scope();
-        self.rhai_engine.run_ast_with_scope(&mut scope, &self.ast)?;
-        if let Some(dynamic) = scope.get(name) {
-            let value: T = from_dynamic(dynamic)
-                .with_context(|| format!("Invalid Rhai script - failed to deserialize {name}"))?;
-            Ok(value)
+    fn default_init(&self, config: PluginConfig) -> Result<()> {
+        let init_jobs = self.run_actions(config.init, vec![])?;
+        if let Ok(true) = self.babel_engine.is_download_completed() {
+            self.start_services(config.services, init_jobs)?;
         } else {
-            Err(anyhow!("Invalid Rhai script - missing {name} constant"))
+            if let Err(err) = self.create_and_start_job(
+                DOWNLOAD_JOB_NAME,
+                plugin_config::build_download_job_config(config.download, init_jobs.clone()),
+            ) {
+                if let Some(alternative_download) = config.alternative_download {
+                    self.create_and_start_job(
+                        DOWNLOAD_JOB_NAME,
+                        plugin_config::build_alternative_download_job_config(
+                            alternative_download,
+                            init_jobs,
+                        ),
+                    )?;
+                } else {
+                    bail!("Download failed with no alternative provided: {err:#}");
+                }
+            }
+            let post_download_jobs =
+                self.run_actions(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
+            self.start_services(config.services, post_download_jobs)?;
         }
+        if let Some(tasks) = config.scheduled {
+            for task in tasks {
+                self.babel_engine.add_task(
+                    &task.name,
+                    &task.schedule,
+                    &task.function,
+                    &task.param.unwrap_or_default(),
+                )?;
+            }
+        }
+        Ok(())
     }
 }
 
 impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     fn metadata(&self) -> Result<BlockchainMetadata> {
-        find_metadata_in_ast(&self.ast)
+        find_metadata_in_ast(&self.bare.ast)
     }
 
     fn capabilities(&self) -> Vec<String> {
         let mut capabilities: Vec<_> = self
+            .bare
             .ast
             .iter_functions()
             .map(|meta| meta.name.to_string())
@@ -397,6 +465,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
 
     fn init(&self) -> Result<()> {
         if let Some(init_meta) = self
+            .bare
             .ast
             .iter_functions()
             .find(|meta| meta.name == INIT_FN_NAME)
@@ -407,47 +476,14 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 self.call_fn(init_meta.name, (Map::default(),))
             }
         } else {
-            let config: PluginConfig = self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?;
-            let init_jobs = self.run_actions(config.init, vec![])?;
-            if let Ok(true) = self.babel_engine.is_download_completed() {
-                self.start_services(config.services, init_jobs)?;
-            } else {
-                if let Err(err) = self.create_and_start_job(
-                    DOWNLOAD_JOB_NAME,
-                    plugin_config::build_download_job_config(config.download, init_jobs.clone()),
-                ) {
-                    if let Some(alternative_download) = config.alternative_download {
-                        self.create_and_start_job(
-                            DOWNLOAD_JOB_NAME,
-                            plugin_config::build_alternative_download_job_config(
-                                alternative_download,
-                                init_jobs,
-                            ),
-                        )?;
-                    } else {
-                        bail!("Download failed with no alternative provided: {err:#}");
-                    }
-                }
-                let post_download_jobs =
-                    self.run_actions(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
-                self.start_services(config.services, post_download_jobs)?;
-            }
-            if let Some(tasks) = config.scheduled {
-                for task in tasks {
-                    self.babel_engine.add_task(
-                        &task.name,
-                        &task.schedule,
-                        &task.function,
-                        &task.param.unwrap_or_default(),
-                    )?;
-                }
-            }
-            Ok(())
+            self.bare
+                .default_init(self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?)
         }
     }
 
     fn upload(&self) -> Result<()> {
         if let Some(fn_meta) = self
+            .bare
             .ast
             .iter_functions()
             .find(|meta| meta.name == UPLOAD_JOB_NAME)
@@ -462,16 +498,18 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
         } else {
             let config: PluginConfig = self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?;
             for service in &config.services {
-                self.babel_engine.stop_job(&service.name)?;
+                self.bare.babel_engine.stop_job(&service.name)?;
             }
-            let pre_upload_jobs = self.run_actions(config.pre_upload, vec![])?;
-            self.create_and_start_job(
+            let pre_upload_jobs = self.bare.run_actions(config.pre_upload, vec![])?;
+            self.bare.create_and_start_job(
                 UPLOAD_JOB_NAME,
                 plugin_config::build_upload_job_config(config.upload, pre_upload_jobs),
             )?;
-            let post_upload_jobs =
-                self.run_actions(config.post_upload, vec![UPLOAD_JOB_NAME.to_string()])?;
-            self.start_services(config.services, post_upload_jobs)?;
+            let post_upload_jobs = self
+                .bare
+                .run_actions(config.post_upload, vec![UPLOAD_JOB_NAME.to_string()])?;
+            self.bare
+                .start_services(config.services, post_upload_jobs)?;
             Ok(())
         }
     }
@@ -497,7 +535,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     }
 
     fn application_status(&self) -> Result<ApplicationStatus> {
-        let jobs = self.babel_engine.get_jobs()?;
+        let jobs = self.bare.babel_engine.get_jobs()?;
         let check_job_status = |name: &str, expected_status: JobStatus| {
             jobs.get(name)
                 .map(|info| info.status == expected_status)
