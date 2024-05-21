@@ -25,6 +25,8 @@ pub struct PrettyTableRow {
     pub name: String,
     #[table(title = "Image", color = "Blue")]
     pub image: String,
+    #[table(title = "Network", color = "Blue")]
+    pub network: String,
     #[table(title = "State", customize_fn = "style_node_status")]
     pub status: NodeStatus,
     #[table(title = "IP Address", color = "Yellow")]

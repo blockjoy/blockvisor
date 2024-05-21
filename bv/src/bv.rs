@@ -102,6 +102,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                         id: node.id.to_string(),
                         name: node.name,
                         image: node.image.to_string(),
+                        network: node.network,
                         status: node.status,
                         ip: node.ip,
                         uptime: fmt_opt(node.uptime),

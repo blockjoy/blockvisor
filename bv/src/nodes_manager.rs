@@ -71,6 +71,7 @@ pub struct NodesManager<P: Pal + Debug> {
 pub struct NodeStateCache {
     pub name: String,
     pub image: NodeImage,
+    pub network: String,
     pub ip: String,
     pub gateway: String,
     pub requirements: Requirements,
@@ -279,6 +280,7 @@ where
         let node_state_cache = NodeStateCache {
             name: config.name.clone(),
             image: config.image.clone(),
+            network: config.network.clone(),
             ip: ip.to_string(),
             gateway: gateway.to_string(),
             started_at: None,
@@ -759,6 +761,7 @@ where
                             ip: node.state.network_interface.ip.to_string(),
                             gateway: node.state.network_interface.gateway.to_string(),
                             image: node.state.image.clone(),
+                            network: node.state.network.clone(),
                             started_at: node.state.started_at,
                             standalone: node.state.standalone,
                             requirements: node.state.requirements.clone(),
@@ -1369,6 +1372,7 @@ mod tests {
             NodeStateCache {
                 name: first_node_config.name,
                 image: first_node_config.image,
+                network: first_node_config.network,
                 ip: first_node_config.ip,
                 gateway: first_node_config.gateway,
                 started_at: None,
@@ -1564,6 +1568,7 @@ mod tests {
             NodeStateCache {
                 name: node_config.name.clone(),
                 image: node_config.image.clone(),
+                network: node_config.network.clone(),
                 ip: node_config.ip.clone(),
                 gateway: node_config.gateway.clone(),
                 started_at: None,
@@ -1600,6 +1605,7 @@ mod tests {
             NodeStateCache {
                 name: node_config.name,
                 image: new_image.clone(),
+                network: node_config.network,
                 ip: node_config.ip,
                 gateway: node_config.gateway,
                 started_at: None,
