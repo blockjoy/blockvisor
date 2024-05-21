@@ -105,7 +105,6 @@ pub enum BabelError {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 struct State {
-    machine_index: u32,
     #[serde(default)]
     pub scheduled_tasks: Vec<Scheduled>,
 }
@@ -172,7 +171,6 @@ where
             let nodes = Self {
                 api_config,
                 state: RwLock::new(State {
-                    machine_index: 0,
                     scheduled_tasks: vec![],
                 }),
                 nodes,
