@@ -348,9 +348,6 @@ where
             }
             let new_meta =
                 Self::fetch_image_data(self.pal.clone(), self.api_config.clone(), &image).await?;
-            if data.requirements.disk_size_gb != new_meta.requirements.disk_size_gb {
-                command_failed!(Error::Internal(anyhow!("Cannot upgrade disk requirements")));
-            }
 
             self.check_node_requirements(&new_meta.requirements, &image, Some(&data.requirements))
                 .await?;
@@ -1517,11 +1514,6 @@ mod tests {
             node_type: "validator".to_string(),
             node_version: "3.2.1".to_string(),
         };
-        let invalid_disk_size_image = NodeImage {
-            protocol: "testing".to_string(),
-            node_type: "validator".to_string(),
-            node_version: "3.4.6".to_string(),
-        };
         let cpu_devourer_image = NodeImage {
             protocol: "testing".to_string(),
             node_type: "validator".to_string(),
@@ -1559,11 +1551,6 @@ mod tests {
                     new_image.clone(),
                     format!("{} requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
                             UPGRADED_IMAGE_RHAI_TEMPLATE, 1, 2048, 1).into_bytes(),
-                ),
-                (
-                    invalid_disk_size_image.clone(),
-                    format!("{} requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
-                            UPGRADED_IMAGE_RHAI_TEMPLATE, 1, 2048, 2).into_bytes(),
                 ),
                 (
                     cpu_devourer_image.clone(),
@@ -1627,14 +1614,6 @@ mod tests {
             assert!(!node.state.initialized);
             assert!(!node.babel_engine.has_capability("info"));
         }
-        assert_eq!(
-            "BV internal error: Cannot upgrade disk requirements",
-            nodes
-                .upgrade(node_id, invalid_disk_size_image.clone())
-                .await
-                .unwrap_err()
-                .to_string()
-        );
         assert_eq!(
             "BV internal error: Not enough vcpu to allocate for the node",
             nodes
