@@ -173,16 +173,12 @@ impl ApptainerMachine {
     async fn is_container_running(&self) -> Result<bool> {
         Ok(run_cmd(APPTAINER_BIN_NAME, ["instance", "list"])
             .await?
-            .contains(&format!("{}", self.vm_id)))
+            .contains(&self.vm_name))
     }
 
     async fn stop_container(&self) -> Result<()> {
         if self.is_container_running().await? {
-            run_cmd(
-                APPTAINER_BIN_NAME,
-                ["instance", "stop", &format!("{}", self.vm_id)],
-            )
-            .await?;
+            run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &self.vm_name]).await?;
         }
         Ok(())
     }
@@ -223,7 +219,7 @@ impl ApptainerMachine {
                 args.append(&mut extra_args.clone());
             }
             args.push(self.chroot_dir.to_string_lossy().to_string());
-            args.push(format!("{}", self.vm_id));
+            args.push(self.vm_name.clone());
             run_cmd(APPTAINER_BIN_NAME, args).await?;
         }
         Ok(())
@@ -240,7 +236,7 @@ impl ApptainerMachine {
         cmd.args([
             "exec",
             "--pid",
-            &format!("instance://{}", self.vm_id),
+            &format!("instance://{}", self.vm_name),
             BABEL_BIN_NAME,
             &self.chroot_dir.to_string_lossy(),
         ]);

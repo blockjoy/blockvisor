@@ -95,7 +95,7 @@
 				"type": "f5anything"
 			},
 			{
-				"command": "apptainer shell instance://$(cat .bv-workspace |jq .active_node.id| xargs)",
+				"command": "apptainer shell instance://$(cat .bv-workspace |jq .active_node.name| xargs)",
 				"name": "node shell",
 				"request": "launch",
 				"type": "f5anything"

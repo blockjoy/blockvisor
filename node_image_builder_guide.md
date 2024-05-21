@@ -110,7 +110,7 @@ Hence, node won't be visible for the API, as it would normally be.
 __HINT 5__: Once created node is started, `apptainer shell` can be used, to modify rootfs and install/update blockchain specific software.
 <br>Adding below alias to your `~/.bashrc` will allow you to quickly attach  to it (don't forget to install `jq` first):
 ```
-alias node_shell='apptainer shell instance://$(cat .bv-workspace |jq .active_node.id| xargs)'
+alias node_shell='apptainer shell instance://$(cat .bv-workspace |jq .active_node.name| xargs)'
 ```
 Now doing `node_shell` in your workspace folder will run active node shell.
 
