@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     let config = config::Config::load(&bv_root()).await?;
     let pal = blockvisord::linux_apptainer_platform::LinuxApptainerPlatform::new(
         &config.iface,
-        config.apptainer.clone().unwrap_or_default(),
+        config.apptainer.clone(),
     )
     .await?;
     run_server(config, pal).await?;

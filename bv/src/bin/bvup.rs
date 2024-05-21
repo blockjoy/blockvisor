@@ -214,10 +214,10 @@ async fn main() -> Result<()> {
             ..Default::default()
         };
         if cmd_args.use_host_network {
-            api_config.apptainer = Some(ApptainerConfig {
+            api_config.apptainer = ApptainerConfig {
                 host_network: true,
                 ..Default::default()
-            });
+            };
         }
         api_config.save(&bv_root).await?;
         Some(api_config)

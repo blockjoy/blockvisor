@@ -219,11 +219,11 @@ async fn test_bv_service_e2e() {
     let config = fs::read_to_string(config_path).unwrap();
     let mut config: Config = serde_json::from_str(&config).unwrap();
     let host_id = config.id.clone();
-    config.apptainer = Some(ApptainerConfig {
+    config.apptainer = ApptainerConfig {
         host_network: true,
         extra_args: Some(vec!["--dns".to_owned(), "1.1.1.1,8.8.8.8".to_owned()]),
         ..Default::default()
-    });
+    };
     let config = serde_json::to_string(&config).unwrap();
     tokio::fs::write(config_path, config).await.unwrap();
 

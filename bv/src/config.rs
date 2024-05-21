@@ -139,7 +139,7 @@ pub struct Config {
     /// Addresses of the seed nodes for cluster discovery and announcements
     pub cluster_seed_urls: Option<Vec<String>>,
     /// Apptainer configuration
-    pub apptainer: Option<ApptainerConfig>,
+    pub apptainer: ApptainerConfig,
 }
 
 impl Config {
