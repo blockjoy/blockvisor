@@ -35,6 +35,8 @@ services:
     environment:
       EMAIL_TEMPLATE_DIR: /emails
       CHARGEBEE_SECRET: asdfasdf
+      STRIPE_SECRET: asdfasdf
+      STRIPE_URL: https://localhost:3001
       DATABASE_URL: postgres://blockvisor:password@database:5432/blockvisor_db
       TOKEN_EXPIRATION_MINS: 10
       REFRESH_EXPIRATION_USER_MINS: 1200
