@@ -1,4 +1,5 @@
 use eyre::Result;
+use std::ffi::OsString;
 use std::{ffi::OsStr, io::BufRead};
 use thiserror::Error;
 use tokio::process::Command;
@@ -23,12 +24,22 @@ pub enum CmdError {
 /// remember to add it to requirements check in `installer::check_cli_dependencies()`.   
 pub async fn run_cmd<I, S>(cmd: &str, args: I) -> Result<String, CmdError>
 where
-    I: IntoIterator<Item = S>,
+    I: IntoIterator<Item = S> + Clone,
     S: AsRef<OsStr>,
 {
+    debug!(
+        "Running command: `{cmd}{}`",
+        args.clone()
+            .into_iter()
+            .fold(OsString::new(), |mut v, item| {
+                v.push(" ");
+                v.push(item);
+                v
+            })
+            .to_string_lossy()
+    );
     let mut command = Command::new(cmd);
     command.args(args);
-    debug!("Running command: `{:?}`", command);
     let output = command
         .output()
         .await

@@ -17,6 +17,7 @@ use clap::{crate_version, ArgGroup, Parser};
 use eyre::{anyhow, bail, Context, Result};
 use ipnet::Ipv4AddrRange;
 use std::net::Ipv4Addr;
+use std::path::Path;
 use std::str::FromStr;
 use tonic::transport::Endpoint;
 
@@ -168,6 +169,15 @@ async fn main() -> Result<()> {
             return Ok(());
         }
 
+        if !cmd_args.use_host_network {
+            run_cmd("sysctl", ["-w", "net.ipv4.ip_forward=1"]).await?;
+            utils::render_template(
+                include_str!("../../data/00_bridge.conflist.template"),
+                Path::new("/usr/local/etc/apptainer/network/00_bridge.conflist"),
+                &[("bridge_ifa", &cmd_args.bridge_ifa), ("host_ip", &ip)],
+            )?;
+        }
+
         let create = pb::HostServiceCreateRequest {
             provision_token: cmd_args.provision_token.unwrap(),
             name: host_info.name.clone(),
@@ -177,7 +187,7 @@ async fn main() -> Result<()> {
             disk_size_bytes: host_info.disk_space_bytes,
             os: host_info.os,
             os_version: host_info.os_version,
-            ip_addr: ip,
+            ip_addr: ip.clone(),
             ip_gateway: gateway,
             org_id: None,
             region: cmd_args.region,

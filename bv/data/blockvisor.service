@@ -5,7 +5,7 @@ Wants=network-online.target
 After=syslog.target network.target network-online.target
 
 [Service]
-Environment="RUST_LOG=info,blockvisor=debug,babel=debug"
+Environment="RUST_LOG=info,blockvisor=debug,babel=debug,bv_utils=debug"
 ExecStart=/usr/bin/blockvisord
 Restart=always
 KillMode=process

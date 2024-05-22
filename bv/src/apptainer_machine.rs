@@ -9,7 +9,6 @@ use bv_utils::cmd::run_cmd;
 use bv_utils::system::{gracefully_terminate_process, is_process_running, kill_all_processes};
 use bv_utils::with_retry;
 use eyre::{anyhow, bail, Result};
-use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -110,11 +109,15 @@ impl ApptainerMachine {
 
     async fn try_create(self, mounted: &mut Vec<PathBuf>) -> Result<Self> {
         if !is_mounted(&self.chroot_dir).await? {
-            mount([
-                self.os_img_path.clone().into_os_string(),
-                self.chroot_dir.clone().into_os_string(),
-            ])
-            .await?;
+            run_cmd(
+                "mount",
+                [
+                    self.os_img_path.clone().into_os_string(),
+                    self.chroot_dir.clone().into_os_string(),
+                ],
+            )
+            .await
+            .map_err(|err| anyhow!("failed to mount '{}': {err:#}", self.os_img_path.display()))?;
             mounted.push(self.chroot_dir.clone());
             fs::create_dir_all(
                 self.chroot_dir
@@ -291,18 +294,6 @@ async fn is_mounted(path: &Path) -> Result<bool> {
             )
         })?;
     Ok(df_out.contains(path.to_string_lossy().trim_end_matches('/')))
-}
-
-async fn mount<I, S>(args: I) -> Result<()>
-where
-    I: IntoIterator<Item = S> + Debug,
-    S: AsRef<OsStr>,
-{
-    let cmd = format!("mount {args:?}");
-    run_cmd("mount", args)
-        .await
-        .map_err(|err| anyhow!("failed to '{cmd}': {err:#}"))?;
-    Ok(())
 }
 
 #[async_trait]

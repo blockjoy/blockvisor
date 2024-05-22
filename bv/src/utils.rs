@@ -266,6 +266,18 @@ pub async fn discover_net_params(ifa_name: &str) -> Result<NetParams> {
     parse_net_params_from_str(ifa_name, &routes)
 }
 
+pub fn render_template(template: &str, path: &Path, params: &[(&str, &str)]) -> Result<()> {
+    let mut context = tera::Context::new();
+    for (key, value) in params {
+        context.insert(key.to_string(), value);
+    }
+    let mut tera = tera::Tera::default();
+    tera.add_raw_template("template", template)?;
+    let out_file = std::fs::File::create(path)?;
+    tera.render_to("template", &context, out_file)?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;

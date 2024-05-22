@@ -17,7 +17,7 @@ use crate::{
     services::blockchain::{
         BlockchainService, BABEL_ARCHIVE_IMAGE_NAME, BABEL_PLUGIN_NAME, IMAGES_DIR, ROOTFS_FILE,
     },
-    workspace, BV_VAR_PATH,
+    utils, workspace, BV_VAR_PATH,
 };
 use babel_api::engine::JobStatus;
 use bv_utils::cmd::{ask_confirm, run_cmd};
@@ -428,7 +428,17 @@ pub async fn process_image_command(
             let images_dir = build_bv_var_path().join(IMAGES_DIR);
             let destination_image_path = images_dir.join(image_id);
             fs::create_dir_all(&destination_image_path)?;
-            render_rhai_file(&destination_image_path, &destination_image)?;
+            let rhai_file_path = destination_image_path.join(BABEL_PLUGIN_NAME);
+            println!("Render rhai file at `{}`", rhai_file_path.display());
+            utils::render_template(
+                include_str!("../data/babel.rhai.template"),
+                &rhai_file_path,
+                &[
+                    ("protocol", &destination_image.protocol),
+                    ("node_type", &destination_image.node_type),
+                    ("babel_version", env!("CARGO_PKG_VERSION")),
+                ],
+            )?;
             bootstrap_os_image(
                 &destination_image_path,
                 &destination_image,
@@ -856,21 +866,6 @@ async fn run_in_chroot(mount_point: &Path, cmd: &str) -> Result<()> {
     Ok(())
 }
 
-fn render_rhai_file(image_path: &Path, image: &NodeImage) -> Result<()> {
-    let mut context = tera::Context::new();
-    context.insert("protocol", &image.protocol);
-    context.insert("node_type", &image.node_type);
-    context.insert("babel_version", env!("CARGO_PKG_VERSION"));
-    let mut tera = tera::Tera::default();
-    let template = include_str!("../data/babel.rhai.template");
-    tera.add_raw_template("template", template)?;
-    let rhai_file_path = image_path.join(BABEL_PLUGIN_NAME);
-    println!("Render rhai file at `{}`", rhai_file_path.display());
-    let out_file = fs::File::create(rhai_file_path)?;
-    tera.render_to("template", &context, out_file)?;
-    Ok(())
-}
-
 /// Cleanup rootfs from babel state remnants (remove /var/lib/babel).
 async fn cleanup_rootfs(image_path: &Path, image: &NodeImage) -> Result<()> {
     on_rootfs(image_path, image, |mount_point| async move {
@@ -945,13 +940,14 @@ mod tests {
         let tmp_root = TempDir::new()?.to_path_buf();
         fs::create_dir_all(&tmp_root)?;
         let rhai_path = tmp_root.join(BABEL_PLUGIN_NAME);
-        render_rhai_file(
-            &tmp_root,
-            &NodeImage {
-                protocol: "testing".to_string(),
-                node_type: "node".to_string(),
-                node_version: "1.2.3".to_string(),
-            },
+        utils::render_template(
+            include_str!("../data/babel.rhai.template"),
+            &rhai_path,
+            &[
+                ("protocol", "testing"),
+                ("node_type", "node"),
+                ("babel_version", env!("CARGO_PKG_VERSION")),
+            ],
         )?;
 
         let mut babel = bv_tests_utils::babel_engine_mock::MockBabelEngine::new();

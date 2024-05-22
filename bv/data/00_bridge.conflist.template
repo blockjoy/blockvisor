@@ -1,0 +1,16 @@
+{
+    "cniVersion": "1.0.0",
+    "name": "bridge",
+    "plugins": [
+        {
+            "type": "bridge",
+            "bridge": "{{ bridge_ifa }}",
+            "ipam": {
+                "type": "static",
+                "routes": [
+                    { "dst": "0.0.0.0/0", "gw": "{{ host_ip }}" }
+                ]
+            }
+        }
+    ]
+}
