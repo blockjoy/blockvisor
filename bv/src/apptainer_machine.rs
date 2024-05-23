@@ -188,41 +188,49 @@ impl ApptainerMachine {
 
     async fn start_container(&self) -> Result<()> {
         if !self.is_container_running().await? {
+            let hostname = self.vm_name.replace('_', "-");
+            let chroot_path = self.chroot_dir.to_string_lossy();
+            let data_path = format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT);
+            let cpus = format!("{}", self.requirements.vcpu_count);
+            let mem = format!("{}", self.requirements.mem_size_mb * 1_000_000);
+            let net = format!("IP={}/{};GATEWAY={}", self.ip, self.mask_bits, self.gateway);
             let mut args = vec![
-                "instance".to_string(),
-                "run".to_string(),
-                "--writable".to_string(),
-                "--no-mount".to_string(),
-                "home,cwd".to_string(),
-                "--bind".to_string(),
-                JOURNAL_DIR.to_owned(),
-                "--bind".to_string(),
-                format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT),
-                "--hostname".to_string(),
-                self.vm_name.replace('_', "-"),
+                "instance",
+                "run",
+                "--ipc",
+                "--cleanenv",
+                "--writable",
+                "--no-mount",
+                "home,cwd",
+                "--bind",
+                JOURNAL_DIR,
+                "--bind",
+                &data_path,
+                "--hostname",
+                &hostname,
             ];
             if self.config.cpu_limit {
-                args.push("--cpus".to_string());
-                args.push(format!("{}", self.requirements.vcpu_count));
+                args.push("--cpus");
+                args.push(&cpus);
             }
             if self.config.memory_limit {
-                args.push("--memory".to_string());
-                args.push(format!("{}", self.requirements.mem_size_mb * 1_000_000));
+                args.push("--memory");
+                args.push(&mem);
             }
             if !self.config.host_network {
                 args.append(&mut vec![
-                    "--net".to_string(),
-                    "--network".to_string(),
-                    "bridge".to_string(),
-                    "--network-args".to_string(),
-                    format!("IP={}/{};GATEWAY={}", self.ip, self.mask_bits, self.gateway),
+                    "--net",
+                    "--network",
+                    "bridge",
+                    "--network-args",
+                    &net,
                 ]);
             }
             if let Some(extra_args) = self.config.extra_args.as_ref() {
-                args.append(&mut extra_args.clone());
+                args.append(&mut extra_args.iter().map(|i| i.as_str()).collect());
             }
-            args.push(self.chroot_dir.to_string_lossy().to_string());
-            args.push(self.vm_name.clone());
+            args.push(&chroot_path);
+            args.push(&self.vm_name);
             run_cmd(APPTAINER_BIN_NAME, args).await?;
         }
         Ok(())
@@ -236,9 +244,8 @@ impl ApptainerMachine {
         )
         .await?;
         let mut cmd = Command::new(APPTAINER_BIN_NAME);
+        cmd.args(["exec", "--ipc", "--cleanenv", "--userns", "--pid"]);
         cmd.args([
-            "exec",
-            "--pid",
             &format!("instance://{}", self.vm_name),
             BABEL_BIN_NAME,
             &self.chroot_dir.to_string_lossy(),

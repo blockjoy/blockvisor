@@ -32,8 +32,9 @@ where
         args.clone()
             .into_iter()
             .fold(OsString::new(), |mut v, item| {
-                v.push(" ");
+                v.push(" \"");
                 v.push(item);
+                v.push("\"");
                 v
             })
             .to_string_lossy()

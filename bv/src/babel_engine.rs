@@ -1,5 +1,5 @@
 use crate::node::NODE_REQUEST_TIMEOUT;
-/// This module wraps all Babel related functionality. In particular it implements binding between
+/// This module wraps all Babel related functionality. In particular, it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
 /// Since Babel Plugin may incorporate external scripting language (like Rhai) that doesn't support
@@ -525,6 +525,10 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                         }
                         Some(slots) => *slots,
                     };
+                    debug!(
+                        "retrieving upload manifest for {}/{}/{} with {} slots",
+                        self.node_info.image, self.node_info.network, data_version, slots
+                    );
                     match services::blockchain_archive::retrieve_upload_manifest(
                         &self.api_config,
                         self.node_info.image.clone(),
