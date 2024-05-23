@@ -9,7 +9,6 @@ use std::{
     ffi::OsStr,
     net::Ipv4Addr,
     path::{Path, PathBuf},
-    str::FromStr,
     time::Duration,
 };
 use sysinfo::{Pid, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
@@ -191,7 +190,7 @@ pub struct IpRoute {
     pub gateway: Option<String>,
     pub dev: String,
     pub prefsrc: Option<String>,
-    pub protocol: String,
+    pub protocol: Option<String>,
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -222,30 +221,27 @@ pub fn next_available_ip(net_params: &NetParams, used: &[String]) -> Result<Stri
         .ok_or(anyhow!("no available ip in range {:?}", range))
 }
 
+pub fn is_dev_ip(route: &IpRoute, dev: &str) -> bool {
+    route.dev == dev
+        && route.dst != "default"
+        && route.prefsrc.is_some()
+        && route.protocol.as_deref() == Some("kernel")
+}
+
 fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Result<NetParams> {
     let mut routes: Vec<IpRoute> = serde_json::from_str(routes_json_str)?;
-    routes.retain(|r| r.dev == ifa_name);
-
     let mut params = NetParams::default();
     if let Some(route) = routes.iter().find(|route| route.dst == "default") {
         params.gateway.clone_from(&route.gateway);
     }
-    for route in routes {
-        if route.prefsrc.is_some() {
+    routes.retain(|route| is_dev_ip(route, ifa_name));
+    if let Some(route) = routes.pop() {
+        // if multiple IPs, let user decide
+        if routes.is_empty() {
             // IP range available for VMs
             let cidr = Ipv4Cidr::from_str(&route.dst)
                 .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
             let mut ips = cidr.iter();
-
-            if let Some(gateway) = params
-                .gateway
-                .as_ref()
-                .and_then(|ip| Ipv4Addr::from_str(ip).ok())
-            {
-                if !cidr.contains(gateway) {
-                    continue;
-                }
-            }
             if cidr.get_bits() <= 30 {
                 // For routing mask values <= 30, first and last IPs are
                 // base and broadcast addresses and are unusable.

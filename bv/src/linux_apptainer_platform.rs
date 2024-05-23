@@ -1,5 +1,6 @@
 use crate::config::ApptainerConfig;
 use crate::node::NODE_REQUEST_TIMEOUT;
+use crate::utils::is_dev_ip;
 use crate::{
     apptainer_machine, config,
     config::SharedConfig,
@@ -68,12 +69,9 @@ impl LinuxApptainerPlatform {
     pub async fn new(iface: &str, config: ApptainerConfig) -> Result<Self> {
         let routes = run_cmd("ip", ["--json", "route"]).await?;
         let mut routes: Vec<crate::utils::IpRoute> = serde_json::from_str(&routes)?;
-        routes.retain(|r| r.dev == iface);
+        routes.retain(|route| is_dev_ip(route, iface));
         let route = routes
-            .into_iter()
-            .find(|route| {
-                route.dst != "default" && route.prefsrc.is_some() && route.protocol == "kernel"
-            })
+            .pop()
             .ok_or(anyhow!("can't find {iface} ip in routing table"))?;
         let cidr = Ipv4Cidr::from_str(&route.dst)
             .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
