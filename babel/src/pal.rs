@@ -1,6 +1,5 @@
 use crate::BabelEngineClient;
 use async_trait::async_trait;
-use babel_api::babel::NodeContext;
 use babel_api::metadata::firewall::Config;
 use babel_api::metadata::RamdiskConfiguration;
 use bv_utils::run_flag::RunFlag;
@@ -27,7 +26,7 @@ pub trait BabelPal {
     fn babel_server(&self) -> Self::BabelServer;
     type Connector: BabelEngineConnector;
     fn connector(&self) -> Self::Connector;
-    async fn set_node_context(&self, node_context: NodeContext) -> eyre::Result<()>;
+    async fn setup_node(&self) -> eyre::Result<()>;
     async fn set_ram_disks(&self, ram_disks: Option<Vec<RamdiskConfiguration>>)
         -> eyre::Result<()>;
     async fn is_ram_disks_set(

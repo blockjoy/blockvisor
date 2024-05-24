@@ -1,7 +1,9 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
+use blockvisord::bv_context::BvContext;
 use blockvisord::config::ApptainerConfig;
 use blockvisord::linux_apptainer_platform::BareNodeConnection;
+use blockvisord::node_env::NodeEnv;
 use blockvisord::nodes_manager::NodesDataCache;
 use blockvisord::pal::{AvailableResources, RecoverBackoff};
 use blockvisord::{
@@ -325,11 +327,16 @@ impl Pal for DummyPlatform {
 
     type VirtualMachine = apptainer_machine::ApptainerMachine;
 
-    async fn create_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine> {
+    async fn create_vm(
+        &self,
+        bv_context: &BvContext,
+        node_state: &NodeState,
+    ) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
             24,
+            NodeEnv::new(bv_context, node_state),
             node_state,
             self.babel_path.clone(),
             ApptainerConfig {
@@ -344,11 +351,16 @@ impl Pal for DummyPlatform {
         .await
     }
 
-    async fn attach_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine> {
+    async fn attach_vm(
+        &self,
+        bv_context: &BvContext,
+        node_state: &NodeState,
+    ) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
             24,
+            NodeEnv::new(bv_context, node_state),
             node_state,
             self.babel_path.clone(),
             ApptainerConfig {

@@ -25,7 +25,6 @@ use tracing::info;
 
 pub const BABEL_LOGS_UDS_PATH: &str = "/var/lib/babel/logs.socket";
 pub const JOBS_MONITOR_UDS_PATH: &str = "/var/lib/babel/jobs_monitor.socket";
-const NODE_ENV_FILE_PATH: &str = "/var/lib/babel/node_env";
 const POST_SETUP_SCRIPT: &str = "/var/lib/babel/post_setup.sh";
 
 pub type BabelEngineClient = babel_api::babel::babel_engine_client::BabelEngineClient<

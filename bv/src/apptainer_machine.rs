@@ -1,4 +1,5 @@
 use crate::config::ApptainerConfig;
+use crate::node_env::{NodeEnv, NODE_ENV_FILE_PATH};
 use crate::services::blockchain;
 use crate::services::blockchain::ROOTFS_FILE;
 use crate::utils::{get_process_pid, GetProcessIdError};
@@ -9,6 +10,7 @@ use bv_utils::cmd::run_cmd;
 use bv_utils::system::{gracefully_terminate_process, is_process_running, kill_all_processes};
 use bv_utils::with_retry;
 use eyre::{anyhow, bail, Result};
+use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -28,6 +30,7 @@ const BABEL_START_TIMEOUT: Duration = Duration::from_secs(3);
 const UMOUNT_RETRY_MAX: u32 = 2;
 const UMOUNT_BACKOFF_BASE_MS: u64 = 1000;
 const BABEL_BIN_PATH: &str = "/usr/bin/babel";
+const BABEL_VAR_PATH: &str = "var/lib/babel";
 const APPTAINER_BIN_NAME: &str = "apptainer";
 
 pub fn build_rootfs_dir(node_dir: &Path) -> PathBuf {
@@ -48,12 +51,14 @@ pub struct ApptainerMachine {
     gateway: IpAddr,
     requirements: babel_api::metadata::Requirements,
     config: ApptainerConfig,
+    node_env: NodeEnv,
 }
 
 pub async fn new(
     bv_root: &Path,
     gateway: IpAddr,
     mask_bits: u8,
+    node_env: NodeEnv,
     node_state: &NodeState,
     babel_path: PathBuf,
     config: ApptainerConfig,
@@ -85,6 +90,7 @@ pub async fn new(
         gateway,
         requirements: node_state.requirements.clone(),
         config,
+        node_env,
     })
 }
 
@@ -125,7 +131,9 @@ impl ApptainerMachine {
             )
             .await?;
             fs::create_dir_all(self.chroot_dir.join(JOURNAL_DIR.trim_start_matches('/'))).await?;
+            fs::create_dir_all(self.chroot_dir.join(BABEL_VAR_PATH)).await?;
         }
+        self.node_env.save(&self.chroot_dir).await?;
         Ok(self)
     }
 
@@ -245,6 +253,10 @@ impl ApptainerMachine {
         .await?;
         let mut cmd = Command::new(APPTAINER_BIN_NAME);
         cmd.args(["exec", "--ipc", "--cleanenv", "--userns", "--pid"]);
+        cmd.args([
+            OsStr::new("--env-file"),
+            self.chroot_dir.join(NODE_ENV_FILE_PATH).as_os_str(),
+        ]);
         cmd.args([
             &format!("instance://{}", self.vm_name),
             BABEL_BIN_NAME,

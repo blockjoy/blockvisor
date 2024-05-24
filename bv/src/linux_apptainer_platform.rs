@@ -1,14 +1,17 @@
-use crate::config::ApptainerConfig;
-use crate::node::NODE_REQUEST_TIMEOUT;
-use crate::utils::is_dev_ip;
+use crate::node_env::NodeEnv;
 use crate::{
-    apptainer_machine, config,
-    config::SharedConfig,
-    linux_platform, node_context,
+    apptainer_machine,
+    bv_context::BvContext,
+    config,
+    config::{ApptainerConfig, SharedConfig},
+    linux_platform,
+    node::NODE_REQUEST_TIMEOUT,
+    node_context,
     node_state::NodeState,
     nodes_manager::NodesDataCache,
     pal::{self, AvailableResources, NodeConnection, Pal},
     services,
+    utils::is_dev_ip,
 };
 use async_trait::async_trait;
 use bv_utils::cmd::run_cmd;
@@ -124,11 +127,16 @@ impl Pal for LinuxApptainerPlatform {
 
     type VirtualMachine = apptainer_machine::ApptainerMachine;
 
-    async fn create_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine> {
+    async fn create_vm(
+        &self,
+        bv_context: &BvContext,
+        node_state: &NodeState,
+    ) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             self.bridge_ip,
             self.mask_bits,
+            NodeEnv::new(bv_context, node_state),
             node_state,
             self.babel_path.clone(),
             self.config.clone(),
@@ -138,11 +146,16 @@ impl Pal for LinuxApptainerPlatform {
         .await
     }
 
-    async fn attach_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine> {
+    async fn attach_vm(
+        &self,
+        bv_context: &BvContext,
+        node_state: &NodeState,
+    ) -> Result<Self::VirtualMachine> {
         apptainer_machine::new(
             &self.bv_root,
             self.bridge_ip,
             self.mask_bits,
+            NodeEnv::new(bv_context, node_state),
             node_state,
             self.babel_path.clone(),
             self.config.clone(),

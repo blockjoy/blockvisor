@@ -6,7 +6,6 @@ use crate::{
     metadata::{firewall, BabelConfig},
     utils::{Binary, BinaryStatus},
 };
-use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, time::Duration};
 
 #[tonic_rpc::tonic_rpc(bincode)]
@@ -14,7 +13,7 @@ pub trait Babel {
     /// Get installed version of babel.
     fn get_version() -> String;
     /// Initial Babel setup that must be run on node startup Mount data directory.
-    fn setup_babel(context: NodeContext, config: BabelConfig);
+    fn setup_babel(config: BabelConfig);
     /// Get maximum time it may take to gracefully shutdown babel with all running jobs.
     fn get_babel_shutdown_timeout() -> Duration;
     /// Try gracefully shutdown babel before node stop/restart. In particular, it gracefully shut down all jobs.
@@ -104,32 +103,4 @@ pub trait BabelEngine {
     fn upgrade_blocking_jobs_finished();
     /// Sent error message to blockvisord so alert can be triggered.
     fn bv_error(message: String);
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct NodeContext {
-    /// Unique id of the node.
-    pub node_id: String,
-    /// Friendly name of the name.
-    pub node_name: String,
-    /// Version of the image, that node was created from.
-    pub node_version: String,
-    /// Name of the blockchain protocol.
-    pub protocol: String,
-    /// Type of the node (validator, node, etc).
-    pub node_type: String,
-    /// Node IP address.
-    pub ip: String,
-    // Node gateway address.
-    pub gateway: String,
-    /// If node run in standalone mode.
-    pub standalone: bool,
-    /// BV host unique id.
-    pub bv_id: String,
-    /// BV host friendly name.
-    pub bv_name: String,
-    /// API url used by BV.
-    pub bv_api_url: String,
-    /// Unique id of the organisation associated with node.
-    pub org_id: String,
 }

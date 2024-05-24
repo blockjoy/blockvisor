@@ -1,6 +1,7 @@
 use crate::{
     babel_engine,
     babel_engine::NodeInfo,
+    bv_context::BvContext,
     command_failed, commands,
     commands::into_internal,
     config::SharedConfig,
@@ -47,13 +48,6 @@ pub struct Node<P: Pal> {
     bv_context: BvContext,
 }
 
-#[derive(Debug)]
-struct BvContext {
-    id: String,
-    name: String,
-    url: String,
-}
-
 struct MaybeNode<P: Pal> {
     context: NodeContext,
     state: NodeState,
@@ -90,15 +84,10 @@ impl<P: Pal> MaybeNode<P> {
             self.context.copy_and_check_plugin(&self.state.image).await,
             self
         );
-        self.machine = Some(check!(pal.create_vm(&self.state).await, self));
+        let bv_context = BvContext::from_config(api_config.config.read().await.clone());
+        self.machine = Some(check!(pal.create_vm(&bv_context, &self.state).await, self));
         check!(self.state.save(&self.context.nodes_dir).await, self);
 
-        let host_config = api_config.config.read().await.clone();
-        let bv_context = BvContext {
-            id: host_config.id,
-            name: host_config.name,
-            url: host_config.blockjoy_api_url,
-        };
         let babel_engine = check!(
             BabelEngine::new(
                 NodeInfo {
@@ -180,7 +169,8 @@ impl<P: Pal + Debug> Node<P> {
         let metadata = rhai_plugin::read_metadata(&script)?;
 
         let mut node_conn = pal.create_node_connection(node_id);
-        let machine = pal.attach_vm(&state).await?;
+        let bv_context = BvContext::from_config(api_config.config.read().await.clone());
+        let machine = pal.attach_vm(&bv_context, &state).await?;
         if machine.state().await == pal::VmState::RUNNING {
             debug!("connecting to babel ...");
             // Since this is the startup phase it doesn't make sense to wait a long time
@@ -194,12 +184,6 @@ impl<P: Pal + Debug> Node<P> {
                 node_conn.close();
             }
         }
-        let host_config = api_config.config.read().await.clone();
-        let bv_context = BvContext {
-            id: host_config.id,
-            name: host_config.name,
-            url: host_config.blockjoy_api_url,
-        };
         let mut babel_engine = BabelEngine::new(
             NodeInfo {
                 node_id,
@@ -285,7 +269,6 @@ impl<P: Pal + Debug> Node<P> {
         if self.machine.state().await == pal::VmState::SHUTOFF {
             self.machine.start().await?;
         }
-        let id = self.id();
         self.babel_engine.node_connection.setup().await?;
         check_job_runner(
             &mut self.babel_engine.node_connection,
@@ -295,23 +278,7 @@ impl<P: Pal + Debug> Node<P> {
 
         // setup babel
         let babel_client = self.babel_engine.node_connection.babel_client().await?;
-        let node_context = babel_api::babel::NodeContext {
-            node_id: id.to_string(),
-            node_name: self.state.name.clone(),
-            node_type: self.state.image.node_type.clone(),
-            protocol: self.state.image.protocol.clone(),
-            node_version: self.state.image.node_version.clone(),
-            ip: self.state.network_interface.ip.to_string(),
-            gateway: self.state.network_interface.gateway.to_string(),
-            standalone: self.state.standalone,
-            bv_id: self.bv_context.id.clone(),
-            bv_name: self.bv_context.name.clone(),
-            bv_api_url: self.bv_context.url.clone(),
-            org_id: self.state.org_id.clone(),
-        };
-        with_retry!(
-            babel_client.setup_babel((node_context.clone(), self.metadata.babel_config.clone()))
-        )?;
+        with_retry!(babel_client.setup_babel(self.metadata.babel_config.clone()))?;
 
         if !self.state.initialized {
             // setup firewall, but only once
@@ -452,7 +419,7 @@ impl<P: Pal + Debug> Node<P> {
         self.state.requirements = self.metadata.requirements.clone();
         self.state.initialized = false;
         self.state.save(&self.context.nodes_dir).await?;
-        self.machine = self.pal.attach_vm(&self.state).await?;
+        self.machine = self.pal.attach_vm(&self.bv_context, &self.state).await?;
 
         if need_to_restart {
             self.start().await?;
@@ -822,10 +789,12 @@ pub mod tests {
             type VirtualMachine = MockTestVM;
             async fn create_vm(
                 &self,
+                bv_context: &BvContext,
                 node_state: &NodeState,
             ) -> Result<MockTestVM>;
             async fn attach_vm(
                 &self,
+                bv_context: &BvContext,
                 node_state: &NodeState,
             ) -> Result<MockTestVM>;
             fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
@@ -845,7 +814,7 @@ pub mod tests {
             async fn get_version(&self, _request: Request<()>) -> Result<Response<String>, Status>;
             async fn setup_babel(
                 &self,
-                request: Request<(babel_api::babel::NodeContext, BabelConfig)>,
+                request: Request<BabelConfig>,
             ) -> Result<Response<()>, Status>;
             async fn get_babel_shutdown_timeout(
                 &self,
@@ -934,6 +903,14 @@ pub mod tests {
             },
             bv_root,
         )
+    }
+
+    pub fn default_bv_context() -> BvContext {
+        BvContext {
+            id: "host_id".to_string(),
+            name: "host_name".to_string(),
+            url: "api.url".to_string(),
+        }
     }
 
     pub fn default_pal(tmp_root: PathBuf) -> MockTestPal {
@@ -1052,6 +1029,7 @@ pub mod tests {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
+        let bv_context = default_bv_context();
         let node_state = test_env.default_node_state();
 
         pal.expect_create_node_connection()
@@ -1059,15 +1037,18 @@ pub mod tests {
             .return_once(dummy_connection_mock);
         let mut seq = Sequence::new();
         pal.expect_create_vm()
-            .with(predicate::eq(node_state.clone()))
+            .with(
+                predicate::eq(bv_context.clone()),
+                predicate::eq(node_state.clone()),
+            )
             .once()
             .in_sequence(&mut seq)
-            .returning(|_| bail!("create VM error"));
+            .returning(|_, _| bail!("create VM error"));
         pal.expect_create_vm()
-            .with(predicate::eq(node_state.clone()))
+            .with(predicate::eq(bv_context), predicate::eq(node_state.clone()))
             .once()
             .in_sequence(&mut seq)
-            .returning(|_| Ok(MockTestVM::new()));
+            .returning(|_, _| Ok(MockTestVM::new()));
         let pal = Arc::new(pal);
 
         assert_eq!(
@@ -1138,6 +1119,7 @@ pub mod tests {
         missing_job_runner_node_state.id =
             Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047533").unwrap();
         let config = default_config(test_env.tmp_root.clone());
+        let bv_context = default_bv_context();
         let mut pal = test_env.default_pal();
 
         let test_tmp_root = test_env.tmp_root.to_path_buf();
@@ -1183,20 +1165,23 @@ pub mod tests {
                 mock
             });
         pal.expect_attach_vm()
-            .with(predicate::eq(failed_vm_node_state.clone()))
+            .with(
+                predicate::eq(bv_context),
+                predicate::eq(failed_vm_node_state.clone()),
+            )
             .once()
-            .returning(|_| bail!("attach VM failed"));
+            .returning(|_, _| bail!("attach VM failed"));
         let missing_job_runner_node_state_id = missing_job_runner_node_state.id;
         let missing_babel_node_state_id = missing_babel_node_state.id;
         let node_state_id = node_state.id;
         pal.expect_attach_vm()
-            .withf(move |data| {
+            .withf(move |_, data| {
                 data.id == node_state_id
                     || data.id == missing_babel_node_state_id
                     || data.id == missing_job_runner_node_state_id
             })
             .times(3)
-            .returning(|_| {
+            .returning(|_, _| {
                 let mut mock = MockTestVM::new();
                 mock.expect_state().return_const(VmState::RUNNING);
                 Ok(mock)
@@ -1359,7 +1344,7 @@ pub mod tests {
                 .return_const(Default::default());
             mock
         });
-        pal.expect_create_vm().return_once(|_| {
+        pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             let mut seq = Sequence::new();
             // already started
@@ -1437,26 +1422,12 @@ pub mod tests {
             .expect_check_job_runner()
             .times(3)
             .returning(|_| Ok(Response::new(BinaryStatus::Ok)));
-        let expected_context = babel_api::babel::NodeContext {
-            node_id: node.state.id.to_string(),
-            node_name: node.state.name.clone(),
-            node_version: node.state.image.node_version.clone(),
-            protocol: node.state.image.protocol.clone(),
-            node_type: node.state.image.node_type.clone(),
-            ip: node.state.network_interface.ip.to_string(),
-            gateway: node.state.network_interface.gateway.to_string(),
-            standalone: node.state.standalone,
-            bv_id: node.bv_context.id.clone(),
-            bv_name: node.bv_context.name.clone(),
-            bv_api_url: node.bv_context.url.clone(),
-            org_id: node.state.org_id.clone(),
-        };
         let expected_config = node.metadata.babel_config.clone();
         babel_mock
             .expect_setup_babel()
             .withf(move |req| {
-                let (context, config) = req.get_ref();
-                *context == expected_context && *config == expected_config
+                let config = req.get_ref();
+                *config == expected_config
             })
             .times(3)
             .returning(|_| Ok(Response::new(())));
@@ -1560,7 +1531,7 @@ pub mod tests {
                 .return_const(Default::default());
             mock
         });
-        pal.expect_create_vm().return_once(|_| {
+        pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             let mut seq = Sequence::new();
             // already stopped
@@ -1678,7 +1649,7 @@ pub mod tests {
                 .return_const(Default::default());
             mock
         });
-        pal.expect_create_vm().return_once(|_| {
+        pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             mock.expect_state().times(2).returning(|| VmState::RUNNING);
             Ok(mock)
@@ -1780,7 +1751,7 @@ pub mod tests {
                 .return_const(Default::default());
             mock
         });
-        pal.expect_create_vm().return_once(|_| {
+        pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             mock.expect_state().once().returning(|| VmState::RUNNING);
             Ok(mock)

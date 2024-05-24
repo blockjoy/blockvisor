@@ -1,7 +1,6 @@
 use crate::{pal, BabelEngineClient};
 use async_trait::async_trait;
 use babel_api::babel::babel_server::Babel;
-use babel_api::babel::NodeContext;
 use babel_api::metadata::firewall::Config;
 use babel_api::metadata::RamdiskConfiguration;
 use bv_utils::cmd::{run_cmd, CmdError};
@@ -12,7 +11,6 @@ use std::path::Path;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
-use tracing::warn;
 
 const BABEL_SOCKET: &str = "/babel.socket";
 const ENGINE_SOCKET: &str = "/engine.socket";
@@ -66,36 +64,7 @@ impl pal::BabelPal for Pal {
         UdsConnector
     }
 
-    async fn set_node_context(&self, node_context: NodeContext) -> eyre::Result<()> {
-        let node_env = format!(
-            "BV_HOST_ID={}\n\
-             BV_HOST_NAME={}\n\
-             BV_API_URL={}\n\
-             NODE_ID={}\n\
-             NODE_NAME={}\n\
-             NODE_TYPE={}\n\
-             ORG_ID={}\n\
-             BLOCKCHAIN_TYPE={}\n\
-             NODE_VERSION={}\n\
-             NODE_IP={}\n\
-             NODE_GATEWAY={}\n\
-             NODE_STANDALONE={}\n",
-            node_context.bv_id,
-            node_context.bv_name,
-            node_context.bv_api_url,
-            node_context.node_id,
-            node_context.node_name,
-            node_context.node_type,
-            node_context.org_id,
-            node_context.protocol,
-            node_context.node_version,
-            node_context.ip,
-            node_context.gateway,
-            node_context.standalone
-        );
-        if let Err(err) = fs::write(crate::NODE_ENV_FILE_PATH, node_env).await {
-            warn!("failed to write node_env file: {err:#}");
-        }
+    async fn setup_node(&self) -> eyre::Result<()> {
         if Path::new(crate::POST_SETUP_SCRIPT).exists() {
             run_cmd::<[&str; 0], _>(crate::POST_SETUP_SCRIPT, []).await?;
         }

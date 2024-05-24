@@ -4,7 +4,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use babel_api::{
-    babel::NodeContext,
     engine::{HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest, ShResponse},
     metadata::{firewall, BabelConfig},
 };
@@ -72,20 +71,17 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(env!("CARGO_PKG_VERSION").to_string()))
     }
 
-    async fn setup_babel(
-        &self,
-        request: Request<(NodeContext, BabelConfig)>,
-    ) -> Result<Response<()>, Status> {
-        let (context, config) = request.into_inner();
+    async fn setup_babel(&self, request: Request<BabelConfig>) -> Result<Response<()>, Status> {
+        let config = request.into_inner();
 
         apply_babel_config(&self.pal, &config)
             .await
             .map_err(|err| Status::internal(anyhow!("{err:#}").to_string()))?;
         self.save_babel_conf(&config).await?;
         self.pal
-            .set_node_context(context)
+            .setup_node()
             .await
-            .map_err(|err| Status::internal(format!("failed to setup hostname with: {err:#}")))?;
+            .map_err(|err| Status::internal(format!("failed to setup node with: {err:#}")))?;
 
         let mut state = self.state.lock().await;
         if let BabelServiceState::NotReady(_) = state.deref() {
@@ -485,7 +481,7 @@ mod tests {
             UdsConnector
         }
 
-        async fn set_node_context(&self, _node_context: NodeContext) -> eyre::Result<()> {
+        async fn setup_node(&self) -> eyre::Result<()> {
             Ok(())
         }
 
@@ -827,18 +823,12 @@ mod tests {
 
         test_env
             .client
-            .setup_babel((
-                NodeContext {
-                    node_name: "localhost".to_string(),
-                    ..Default::default()
-                },
-                BabelConfig {
-                    log_buffer_capacity_ln: 10,
-                    swap_size_mb: 16,
-                    swap_file_location: "/swapfile".to_string(),
-                    ramdisks: None,
-                },
-            ))
+            .setup_babel(BabelConfig {
+                log_buffer_capacity_ln: 10,
+                swap_size_mb: 16,
+                swap_file_location: "/swapfile".to_string(),
+                ramdisks: None,
+            })
             .await?;
         let logs_tx = test_env.logs_rx.await?;
         logs_tx

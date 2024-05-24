@@ -3,7 +3,10 @@
 ///
 /// It defines `Pal` trait which is top level abstraction that contains definitions of sub layers.
 ///
-use crate::{config::SharedConfig, node_state::NodeState, nodes_manager::NodesDataCache, services};
+use crate::{
+    bv_context::BvContext, config::SharedConfig, node_state::NodeState,
+    nodes_manager::NodesDataCache, services,
+};
 use async_trait::async_trait;
 use babel_api::metadata::Requirements;
 use eyre::Result;
@@ -48,9 +51,17 @@ pub trait Pal {
     /// Type representing virtual machine on which node is running.
     type VirtualMachine: VirtualMachine + Debug;
     /// Created new VM instance.
-    async fn create_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine>;
+    async fn create_vm(
+        &self,
+        bv_context: &BvContext,
+        node_state: &NodeState,
+    ) -> Result<Self::VirtualMachine>;
     /// Attach to already created VM instance.
-    async fn attach_vm(&self, node_state: &NodeState) -> Result<Self::VirtualMachine>;
+    async fn attach_vm(
+        &self,
+        bv_context: &BvContext,
+        node_state: &NodeState,
+    ) -> Result<Self::VirtualMachine>;
 
     /// Get available resources, but take into account requirements declared by nodes.
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources>;

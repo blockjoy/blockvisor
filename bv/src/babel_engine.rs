@@ -526,7 +526,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                         Some(slots) => *slots,
                     };
                     debug!(
-                        "retrieving upload manifest for {}/{}/{} with {} slots",
+                        "retrieving upload manifest for {}/{}/{:?} with {} slots",
                         self.node_info.image, self.node_info.network, data_version, slots
                     );
                     match services::blockchain_archive::retrieve_upload_manifest(
@@ -830,6 +830,7 @@ mod tests {
     };
     use bv_tests_utils::{rpc::test_channel, start_test_server};
     use mockall::*;
+    use tokio::time::timeout;
     use tonic::{Request, Response, Streaming};
 
     mock! {
@@ -841,7 +842,7 @@ mod tests {
             async fn get_version(&self, _request: Request<()>) -> Result<Response<String>, Status>;
             async fn setup_babel(
                 &self,
-                request: Request<(babel_api::babel::NodeContext, BabelConfig)>,
+                request: Request<BabelConfig>,
             ) -> Result<Response<()>, Status>;
             async fn get_babel_shutdown_timeout(
                 &self,
@@ -1314,7 +1315,10 @@ mod tests {
         assert_eq!(expected_action, test_env.rx.try_recv().unwrap());
         assert_eq!(
             scheduler::Action::Delete("task_name".to_string()),
-            test_env.rx.try_recv().unwrap()
+            timeout(Duration::from_secs(1), test_env.rx.recv())
+                .await
+                .unwrap()
+                .unwrap()
         );
         assert_eq!(
             "custom plugin data",

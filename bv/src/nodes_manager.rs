@@ -1031,8 +1031,11 @@ mod tests {
             .once()
             .returning(available_test_resources);
         pal.expect_create_vm()
-            .with(predicate::eq(expected_node_state(id, config, None)))
-            .return_once(move |_| Ok(vm_mock));
+            .with(
+                predicate::eq(default_bv_context()),
+                predicate::eq(expected_node_state(id, config, None)),
+            )
+            .return_once(move |_, _| Ok(vm_mock));
         pal.expect_create_node_connection()
             .with(predicate::eq(id))
             .return_once(dummy_connection_mock);
@@ -1062,8 +1065,11 @@ mod tests {
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .returning(available_test_resources);
         pal.expect_create_vm()
-            .with(predicate::eq(expected_node_state(id, config, None)))
-            .return_once(|_| bail!("failed to create vm"));
+            .with(
+                predicate::eq(default_bv_context()),
+                predicate::eq(expected_node_state(id, config, None)),
+            )
+            .return_once(|_, _| bail!("failed to create vm"));
     }
 
     fn expected_node_state(id: Uuid, config: NodeConfig, image: Option<NodeImage>) -> NodeState {
@@ -1465,8 +1471,11 @@ mod tests {
             .with(predicate::eq(node_state.id))
             .returning(dummy_connection_mock);
         pal.expect_attach_vm()
-            .with(predicate::eq(node_state.clone()))
-            .returning(|_| {
+            .with(
+                predicate::eq(default_bv_context()),
+                predicate::eq(node_state.clone()),
+            )
+            .returning(|_, _| {
                 let mut vm = MockTestVM::new();
                 vm.expect_state().return_const(VmState::SHUTOFF);
                 Ok(vm)
@@ -1475,8 +1484,11 @@ mod tests {
             .with(predicate::eq(invalid_node_state.id))
             .returning(dummy_connection_mock);
         pal.expect_attach_vm()
-            .with(predicate::eq(invalid_node_state.clone()))
-            .returning(|_| {
+            .with(
+                predicate::eq(default_bv_context()),
+                predicate::eq(invalid_node_state.clone()),
+            )
+            .returning(|_, _| {
                 bail!("failed to attach");
             });
         let config = default_config(test_env.tmp_root.clone());
@@ -1536,12 +1548,15 @@ mod tests {
             .times(2)
             .returning(available_test_resources);
         pal.expect_attach_vm()
-            .with(predicate::eq(expected_node_state(
-                node_id,
-                node_config.clone(),
-                Some(new_image.clone()),
-            )))
-            .return_once(|_| Ok(MockTestVM::new()));
+            .with(
+                predicate::eq(default_bv_context()),
+                predicate::eq(expected_node_state(
+                    node_id,
+                    node_config.clone(),
+                    Some(new_image.clone()),
+                )),
+            )
+            .return_once(|_, _| Ok(MockTestVM::new()));
 
         let nodes = NodesManager::load(pal, config).await?;
 
@@ -1688,7 +1703,7 @@ mod tests {
             .withf(move |req| req.is_empty())
             .once()
             .returning(available_test_resources);
-        pal.expect_create_vm().return_once(|_| {
+        pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             let mut seq = Sequence::new();
             mock.expect_state()
