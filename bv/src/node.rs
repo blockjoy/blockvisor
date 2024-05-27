@@ -31,8 +31,6 @@ pub const NODE_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_UPGRADE_RETRY_HINT: Duration = Duration::from_secs(3600);
 const NODE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 const NODE_STOPPED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
-const FW_SETUP_TIMEOUT_SEC: u64 = 30;
-const FW_RULE_SETUP_TIMEOUT_SEC: u64 = 1;
 
 pub type BabelEngine<N> = babel_engine::BabelEngine<N, RhaiPlugin<babel_engine::Engine>>;
 
@@ -499,15 +497,16 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     async fn setup_firewall_rules(&mut self) -> Result<()> {
-        let babel_client = self.babel_engine.node_connection.babel_client().await?;
         let mut firewall_config = self.metadata.firewall.clone();
         firewall_config
             .rules
             .append(&mut self.state.firewall_rules.clone());
-        with_retry!(babel_client.setup_firewall(with_timeout(
-            firewall_config.clone(),
-            fw_setup_timeout(&firewall_config)
-        )))?;
+        // TODO MJR
+        // let babel_client = self.babel_engine.node_connection.babel_client().await?;
+        // with_retry!(babel_client.setup_firewall(with_timeout(
+        //     firewall_config.clone(),
+        //     fw_setup_timeout(&firewall_config)
+        // )))?;
         Ok(())
     }
 
@@ -609,12 +608,6 @@ async fn check_job_runner(
         with_retry!(client.upload_job_runner(tokio_stream::iter(job_runner_bin.clone())))?;
     }
     Ok(())
-}
-
-fn fw_setup_timeout(config: &firewall::Config) -> Duration {
-    Duration::from_secs(
-        FW_SETUP_TIMEOUT_SEC + FW_RULE_SETUP_TIMEOUT_SEC * config.rules.len() as u64,
-    )
 }
 
 #[cfg(test)]
@@ -823,10 +816,6 @@ pub mod tests {
             async fn shutdown_babel(
                 &self,
                 request: Request<bool>,
-            ) -> Result<Response<()>, Status>;
-            async fn setup_firewall(
-                &self,
-                request: Request<babel_api::metadata::firewall::Config>,
             ) -> Result<Response<()>, Status>;
             async fn check_job_runner(
                 &self,
@@ -1431,17 +1420,6 @@ pub mod tests {
             })
             .times(3)
             .returning(|_| Ok(Response::new(())));
-        babel_mock
-            .expect_setup_firewall()
-            .withf(move |req| {
-                let config = req.get_ref();
-                config.enabled
-                    && config.default_in == firewall::Action::Deny
-                    && config.default_out == firewall::Action::Allow
-                    && config.rules.len() == 2
-            })
-            .times(3)
-            .returning(|_| Ok(Response::new(())));
         let mut seq = Sequence::new();
         babel_mock
             .expect_run_sh()
@@ -1658,20 +1636,9 @@ pub mod tests {
         let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
 
-        let mut babel_mock = MockTestBabelService::new();
-        let mut seq = Sequence::new();
+        let babel_mock = MockTestBabelService::new();
+        // TODO MJR
         // failed to gracefully shutdown babel
-        babel_mock
-            .expect_setup_firewall()
-            .times(4)
-            .in_sequence(&mut seq)
-            .returning(|_| Err(Status::internal("setup FW rules failed")));
-        babel_mock
-            .expect_setup_firewall()
-            .once()
-            .in_sequence(&mut seq)
-            .returning(|_| Ok(Response::new(())));
-
         let server = test_env.start_server(babel_mock).await;
 
         assert!(node.state.firewall_rules.is_empty());

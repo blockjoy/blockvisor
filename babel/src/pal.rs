@@ -1,6 +1,5 @@
 use crate::BabelEngineClient;
 use async_trait::async_trait;
-use babel_api::metadata::firewall::Config;
 use babel_api::metadata::RamdiskConfiguration;
 use bv_utils::run_flag::RunFlag;
 
@@ -33,5 +32,4 @@ pub trait BabelPal {
         &self,
         ram_disks: Option<Vec<RamdiskConfiguration>>,
     ) -> eyre::Result<bool>;
-    async fn apply_firewall_config(&self, config: Config) -> eyre::Result<()>;
 }

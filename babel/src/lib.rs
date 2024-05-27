@@ -12,7 +12,6 @@ pub mod log_buffer;
 pub mod logs_service;
 pub mod pal;
 pub mod run_sh_job;
-pub mod ufw_wrapper;
 pub mod upload_job;
 pub mod utils;
 

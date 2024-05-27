@@ -3,7 +3,7 @@ use crate::{
         DownloadManifest, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest,
         ShResponse,
     },
-    metadata::{firewall, BabelConfig},
+    metadata::BabelConfig,
     utils::{Binary, BinaryStatus},
 };
 use std::{path::PathBuf, time::Duration};
@@ -19,8 +19,6 @@ pub trait Babel {
     /// Try gracefully shutdown babel before node stop/restart. In particular, it gracefully shut down all jobs.
     /// All `Running` jobs will be shutdown and won't start again until node is started again.
     fn shutdown_babel(force: bool);
-    /// Setup firewall according to given configuration.
-    fn setup_firewall(config: firewall::Config);
     /// Check if JobRunner binary exists and its checksum match expected.
     fn check_job_runner(checksum: u32) -> BinaryStatus;
     /// Upload JobRunner binary, overriding existing one (if any).

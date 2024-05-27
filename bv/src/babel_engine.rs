@@ -852,10 +852,6 @@ mod tests {
                 &self,
                 request: Request<bool>,
             ) -> Result<Response<()>, Status>;
-            async fn setup_firewall(
-                &self,
-                request: Request<babel_api::metadata::firewall::Config>,
-            ) -> Result<Response<()>, Status>;
             async fn check_job_runner(
                 &self,
                 request: Request<u32>,

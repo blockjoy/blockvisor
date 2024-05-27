@@ -1,7 +1,6 @@
 use crate::{pal, BabelEngineClient};
 use async_trait::async_trait;
 use babel_api::babel::babel_server::Babel;
-use babel_api::metadata::firewall::Config;
 use babel_api::metadata::RamdiskConfiguration;
 use bv_utils::cmd::{run_cmd, CmdError};
 use bv_utils::rpc::RPC_REQUEST_TIMEOUT;
@@ -110,10 +109,6 @@ impl pal::BabelPal for Pal {
         Ok(ram_disks
             .iter()
             .all(|disk| df_out.contains(disk.ram_disk_mount_point.trim_end_matches('/'))))
-    }
-
-    async fn apply_firewall_config(&self, _config: Config) -> eyre::Result<()> {
-        Ok(())
     }
 }
 

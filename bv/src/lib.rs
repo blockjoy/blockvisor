@@ -24,6 +24,7 @@ pub mod pretty_table;
 pub mod scheduler;
 pub mod self_updater;
 pub mod services;
+pub mod ufw_wrapper;
 pub mod utils;
 pub mod workspace;
 

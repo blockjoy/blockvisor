@@ -5,7 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::{
     engine::{HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest, ShResponse},
-    metadata::{firewall, BabelConfig},
+    metadata::BabelConfig,
 };
 use eyre::{anyhow, ContextCompat, Result};
 use nu_glob::{Pattern, PatternError};
@@ -120,19 +120,6 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .await
             .map_err(|err| Status::internal(format!("failed to shutdown jobs_manger: {err:#}")))?;
 
-        Ok(Response::new(()))
-    }
-
-    async fn setup_firewall(
-        &self,
-        request: Request<firewall::Config>,
-    ) -> Result<Response<()>, Status> {
-        self.pal
-            .apply_firewall_config(request.into_inner())
-            .await
-            .map_err(|err| {
-                Status::internal(format!("failed to apply firewall config with: {err:#}"))
-            })?;
         Ok(Response::new(()))
     }
 
@@ -439,7 +426,6 @@ mod tests {
     use crate::chroot_platform::{UdsConnector, UdsServer};
     use assert_fs::TempDir;
     use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
-    use babel_api::metadata::firewall::Config;
     use babel_api::metadata::RamdiskConfiguration;
     use bv_tests_utils::start_test_server;
     use futures::StreamExt;
@@ -497,10 +483,6 @@ mod tests {
             _ram_disks: Option<Vec<RamdiskConfiguration>>,
         ) -> Result<bool> {
             Ok(false)
-        }
-
-        async fn apply_firewall_config(&self, _config: Config) -> Result<()> {
-            Ok(())
         }
     }
 
