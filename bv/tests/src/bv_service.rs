@@ -1,3 +1,4 @@
+use crate::src::utils::test_env::link_apptainer_config;
 use crate::src::utils::{
     execute_sql, execute_sql_insert, rbac, stub_server::StubHostsServer, test_env,
 };
@@ -39,6 +40,7 @@ fn test_bv_service_restart_with_cli() {
 #[serial]
 fn test_bvup_unknown_provision_token() {
     let tmp_dir = TempDir::new().unwrap();
+    link_apptainer_config(&tmp_dir).unwrap();
 
     let provision_token = "NOT_FOUND";
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];

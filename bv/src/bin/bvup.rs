@@ -17,9 +17,7 @@ use clap::{crate_version, ArgGroup, Parser};
 use eyre::{anyhow, bail, Context, Result};
 use ipnet::Ipv4AddrRange;
 use std::net::Ipv4Addr;
-use std::path::Path;
 use std::str::FromStr;
-use tokio::fs;
 use tonic::transport::Endpoint;
 
 #[derive(Parser, Debug)]
@@ -172,10 +170,22 @@ async fn main() -> Result<()> {
 
         if !cmd_args.use_host_network {
             run_cmd("sysctl", ["-w", "net.ipv4.ip_forward=1"]).await?;
-            let _ = fs::create_dir_all("/usr/local/etc/apptainer/network/").await;
+            const APPTAINER_NET_CONFIG_DIR: &str = "etc/apptainer/network";
+            const USR_LOCAL: &str = "usr/local";
+            let apptainer_net_dir = if bv_root.join(APPTAINER_NET_CONFIG_DIR).exists() {
+                bv_root.join(APPTAINER_NET_CONFIG_DIR)
+            } else if bv_root
+                .join(USR_LOCAL)
+                .join(APPTAINER_NET_CONFIG_DIR)
+                .exists()
+            {
+                bv_root.join(USR_LOCAL).join(APPTAINER_NET_CONFIG_DIR)
+            } else {
+                bail!("apptainer network config not found");
+            };
             utils::render_template(
                 include_str!("../../data/00_bridge.conflist.template"),
-                Path::new("/usr/local/etc/apptainer/network/00_bridge.conflist"),
+                &apptainer_net_dir.join("00_bridge.conflist"),
                 &[("bridge_ifa", &cmd_args.bridge_ifa), ("host_ip", &ip)],
             )?;
         }

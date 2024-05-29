@@ -73,6 +73,7 @@ impl TestEnv {
             Path::new("/").join("usr").join("bin"),
             bv_root.join("usr").join("bin"),
         )?;
+        link_apptainer_config(&bv_root)?;
         api_config.blockvisor_port = 0;
         api_config.save(&bv_root).await?;
         Ok(Self {
@@ -220,6 +221,16 @@ impl TestEnv {
         )
         .unwrap()
     }
+}
+
+pub fn link_apptainer_config(bv_root: &Path) -> Result<()> {
+    fs::create_dir_all(bv_root.join("usr/local/etc"))?;
+    // link apptainer config
+    std::os::unix::fs::symlink(
+        Path::new("/usr/local/etc/apptainer"),
+        bv_root.join("usr/local/etc/apptainer"),
+    )?;
+    Ok(())
 }
 
 impl Drop for TestEnv {
