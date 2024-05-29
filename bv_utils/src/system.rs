@@ -19,7 +19,7 @@ pub fn get_ip_address(ifa_name: &str) -> Result<String> {
     Ok(ip.to_string())
 }
 
-pub fn gracefully_terminate_process(pid: Pid, timeout: Duration) -> bool {
+pub async fn gracefully_terminate_process(pid: Pid, timeout: Duration) -> bool {
     let mut sys = System::new();
     if !sys.refresh_process_specifics(pid, ProcessRefreshKind::new()) {
         return true;
@@ -29,7 +29,7 @@ pub fn gracefully_terminate_process(pid: Pid, timeout: Duration) -> bool {
         let now = std::time::Instant::now();
         while is_process_running(pid) {
             if now.elapsed() < timeout {
-                std::thread::sleep(Duration::from_secs(1))
+                tokio::time::sleep(Duration::from_secs(1)).await
             } else {
                 return false;
             }

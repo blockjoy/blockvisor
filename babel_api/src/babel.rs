@@ -56,7 +56,7 @@ pub trait Babel {
     ) -> ShResponse;
 
     /// This function renders configuration template with provided `params`.
-    /// It assume that file pointed by `template` argument exists.
+    /// It assumes that file pointed by `template` argument exists.
     /// File pointed by `output` path will be overwritten if exists.
     fn render_template(
         /// Path to template file.

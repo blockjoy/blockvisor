@@ -112,7 +112,7 @@ async fn serve_logs(mut run: RunFlag, logs_service: LogsService) -> eyre::Result
 
 async fn serve_jobs_monitor<P>(
     mut run: RunFlag,
-    jobs_monitor_service: jobs_manager::Monitor<P::Connector>,
+    jobs_monitor_service: jobs_manager::Monitor,
 ) -> eyre::Result<()>
 where
     P: pal::BabelPal + Send + Sync,

@@ -140,13 +140,13 @@ impl ApptainerMachine {
     pub async fn attach(self) -> Result<Self> {
         let vm = self.create().await?;
         if vm.is_container_running().await? {
-            vm.stop_babel(false)?;
+            vm.stop_babel(false).await?;
             vm.start_babel().await?;
         }
         Ok(vm)
     }
 
-    fn stop_babel(&self, force: bool) -> Result<bool> {
+    async fn stop_babel(&self, force: bool) -> Result<bool> {
         debug!("stop_babel for {}", self.vm_id);
         match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
             Ok(pid) => {
@@ -159,7 +159,7 @@ impl ApptainerMachine {
                         PosixSignal::SIGTERM,
                     );
                 } else {
-                    gracefully_terminate_process(pid, BABEL_KILL_TIMEOUT);
+                    gracefully_terminate_process(pid, BABEL_KILL_TIMEOUT).await;
                 }
                 if is_process_running(pid) {
                     bail!("failed to stop babel for vm {}", self.vm_id);
@@ -340,13 +340,13 @@ impl pal::VirtualMachine for ApptainerMachine {
     }
 
     async fn shutdown(&mut self) -> Result<()> {
-        self.stop_babel(false)?;
+        self.stop_babel(false).await?;
         self.stop_container().await?;
         Ok(())
     }
 
     async fn force_shutdown(&mut self) -> Result<()> {
-        self.stop_babel(true)?;
+        self.stop_babel(true).await?;
         self.stop_container().await?;
         Ok(())
     }

@@ -25,7 +25,7 @@ use std::{collections::HashMap, fs, fs::read_dir, path::Path, sync::Arc, time::D
 use sysinfo::{Pid, PidExt, Process, System, SystemExt};
 use tokio::{
     select,
-    sync::{watch, Mutex},
+    sync::{mpsc, watch, Mutex},
 };
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
@@ -39,13 +39,19 @@ pub enum JobsManagerState {
     Shutdown,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum JobReport {
+    PushLog { name: String, message: String },
+    RegisterRestart { name: String },
+}
+
 pub async fn create<C: BabelEngineConnector>(
     connector: C,
     jobs_dir: &Path,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: &Path,
     state: JobsManagerState,
-) -> Result<(Client<C>, Monitor<C>, Manager<C>)> {
+) -> Result<(Client<C>, Monitor, Manager<C>)> {
     let jobs_config_dir = jobs_dir.join(CONFIG_SUBDIR);
     if !jobs_config_dir.exists() {
         fs::create_dir_all(jobs_config_dir)?;
@@ -65,6 +71,7 @@ pub async fn create<C: BabelEngineConnector>(
     let jobs_registry = Arc::new(Mutex::new(jobs_context));
     let (job_added_tx, job_added_rx) = watch::channel(());
     let (jobs_manager_state_tx, jobs_manager_state_rx) = watch::channel(state);
+    let (jobs_monitor_tx, jobs_monitor_rx) = mpsc::channel(256);
     Ok((
         Client {
             jobs_registry: jobs_registry.clone(),
@@ -72,15 +79,14 @@ pub async fn create<C: BabelEngineConnector>(
             job_added_tx,
             jobs_manager_state_tx,
         },
-        Monitor {
-            jobs_registry: jobs_registry.clone(),
-        },
+        Monitor { jobs_monitor_tx },
         Manager {
             jobs_registry,
             job_runner_lock,
             job_runner_bin_path: job_runner_bin_path.to_string_lossy().to_string(),
             job_added_rx,
             jobs_manager_state_rx,
+            jobs_monitor_rx,
         },
     ))
 }
@@ -215,7 +221,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
                         PosixSignal::SIGTERM,
                     );
                 } else {
-                    terminate_job(name, *pid, &job.config)?;
+                    terminate_job(name, *pid, &job.config).await?;
                 }
                 // job_runner process has been stopped, but job should be restarted on next jobs manager startup
                 job.state = JobState::Inactive(JobStatus::Running);
@@ -315,7 +321,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         if let Some(job) = jobs_context.jobs.get_mut(name) {
             match &mut job.state {
                 JobState::Active(pid) => {
-                    terminate_job(name, *pid, &job.config)?;
+                    terminate_job(name, *pid, &job.config).await?;
                     job.state = JobState::Inactive(JobStatus::Stopped);
                 }
                 JobState::Inactive(status) => {
@@ -333,16 +339,19 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
 
     async fn cleanup(&self, name: &str) -> Result<()> {
         info!("Requested '{name} job to cleanup'");
-        let jobs_context = self.jobs_registry.lock().await;
-        if let Some(job) = jobs_context.jobs.get(name) {
-            if let JobState::Inactive(_) = job.state {
-                jobs_context.jobs_data.cleanup_job(&job.config)?;
+        let config = {
+            let jobs_context = self.jobs_registry.lock().await;
+            if let Some(job) = jobs_context.jobs.get(name) {
+                if let JobState::Inactive(_) = job.state {
+                    job.config.clone()
+                } else {
+                    bail!("can't cleanup active job '{name}'");
+                }
             } else {
-                bail!("can't cleanup active job '{name}'");
+                bail!("can't cleanup, job '{name}' not found");
             }
-        } else {
-            bail!("can't cleanup, job '{name}' not found");
-        }
+        };
+        JobsData::cleanup_job(&config)?;
         Ok(())
     }
 
@@ -384,7 +393,7 @@ fn build_job_info(job: &Job, progress: Option<JobProgress>) -> JobInfo {
     }
 }
 
-fn terminate_job(name: &str, pid: Pid, config: &JobConfig) -> Result<()> {
+async fn terminate_job(name: &str, pid: Pid, config: &JobConfig) -> Result<()> {
     let shutdown_timeout = Duration::from_secs(
         config
             .shutdown_timeout_secs
@@ -394,35 +403,33 @@ fn terminate_job(name: &str, pid: Pid, config: &JobConfig) -> Result<()> {
         "Terminate job '{name}' with timeout {}s",
         shutdown_timeout.as_secs()
     );
-    if !gracefully_terminate_process(pid, shutdown_timeout) {
+    if !gracefully_terminate_process(pid, shutdown_timeout).await {
         bail!("Failed to terminate job_runner for '{name}' job (pid {pid}), timeout expired!");
     }
     Ok(())
 }
 
-pub struct Monitor<C> {
-    jobs_registry: JobsRegistry<C>,
+pub struct Monitor {
+    jobs_monitor_tx: mpsc::Sender<JobReport>,
 }
 
 #[tonic::async_trait]
-impl<C: Send + 'static> babel_api::babel::jobs_monitor_server::JobsMonitor for Monitor<C> {
+impl babel_api::babel::jobs_monitor_server::JobsMonitor for Monitor {
     async fn push_log(&self, request: Request<(String, String)>) -> Result<Response<()>, Status> {
         let (name, message) = request.into_inner();
-        let jobs = &mut self.jobs_registry.lock().await.jobs;
-        let job = jobs
-            .get_mut(&name)
-            .ok_or(Status::not_found(format!("job '{name}' not found")))?;
-        job.push_log(&message);
+        self.jobs_monitor_tx
+            .send(JobReport::PushLog { name, message })
+            .await
+            .map_err(|err| Status::internal(format!("{err:#}")))?;
         Ok(Response::new(()))
     }
 
     async fn register_restart(&self, request: Request<String>) -> Result<Response<()>, Status> {
         let name = request.into_inner();
-        let jobs = &mut self.jobs_registry.lock().await.jobs;
-        let job = jobs
-            .get_mut(&name)
-            .ok_or(Status::not_found(format!("job '{name}' not found")))?;
-        job.register_restart();
+        self.jobs_monitor_tx
+            .send(JobReport::RegisterRestart { name })
+            .await
+            .map_err(|err| Status::internal(format!("{err:#}")))?;
         Ok(Response::new(()))
     }
 }
@@ -433,6 +440,7 @@ pub struct Manager<C> {
     job_runner_bin_path: String,
     job_added_rx: watch::Receiver<()>,
     jobs_manager_state_rx: watch::Receiver<JobsManagerState>,
+    jobs_monitor_rx: mpsc::Receiver<JobReport>,
 }
 
 impl<C: BabelEngineConnector> Manager<C> {
@@ -459,14 +467,39 @@ impl<C: BabelEngineConnector> Manager<C> {
                 } else {
                     let mut futures: FuturesUnordered<_> =
                         async_pids.iter().map(|a| a.watch()).collect();
-                    select!(
-                        _ = futures.next() => {}
-                        _ = self.job_added_rx.changed() => {}
-                        _ = self.jobs_manager_state_rx.changed() => {}
-                        _ = run.wait() => {}
-                    );
+                    'monitor: loop {
+                        select!(
+                            report = self.jobs_monitor_rx.recv() => {
+                                self.handle_job_report(report).await;
+                                continue 'monitor
+                            }
+                            _ = futures.next() => {}
+                            _ = self.job_added_rx.changed() => {}
+                            _ = self.jobs_manager_state_rx.changed() => {}
+                            _ = run.wait() => {}
+                        );
+                        break 'monitor;
+                    }
                 }
             } // refresh process and update_jobs again in case of error
+        }
+    }
+
+    async fn handle_job_report(&mut self, report: Option<JobReport>) {
+        match report {
+            Some(JobReport::PushLog { name, message }) => {
+                let jobs = &mut self.jobs_registry.lock().await.jobs;
+                if let Some(job) = jobs.get_mut(&name) {
+                    job.push_log(&message);
+                }
+            }
+            Some(JobReport::RegisterRestart { name }) => {
+                let jobs = &mut self.jobs_registry.lock().await.jobs;
+                if let Some(job) = jobs.get_mut(&name) {
+                    job.register_restart();
+                }
+            }
+            None => {}
         }
     }
 

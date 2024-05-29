@@ -125,7 +125,7 @@ impl JobsData {
         load_job_data(&progress_file_path(name, &self.jobs_status_dir)).ok()
     }
 
-    pub fn cleanup_job(&self, config: &JobConfig) -> Result<()> {
+    pub fn cleanup_job(config: &JobConfig) -> Result<()> {
         match &config.job_type {
             JobType::Download { .. } => {
                 download_job::cleanup_job(&ARCHIVE_JOBS_META_DIR, &BLOCKCHAIN_DATA_PATH)?
