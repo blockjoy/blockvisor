@@ -8,8 +8,9 @@ use crate::{
     nodes_manager::NodesDataCache, services,
 };
 use async_trait::async_trait;
-use babel_api::metadata::Requirements;
+use babel_api::metadata::{firewall, Requirements};
 use eyre::Result;
+use std::net::IpAddr;
 use std::{fmt::Debug, path::Path};
 use tonic::{codegen::InterceptedService, transport::Channel};
 use uuid::Uuid;
@@ -73,6 +74,14 @@ pub trait Pal {
     type RecoveryBackoff: RecoverBackoff + Debug;
     /// Created new VM instance.
     fn create_recovery_backoff(&self) -> Self::RecoveryBackoff;
+
+    /// Apply node specific firewall rules.
+    async fn apply_firewall_config(
+        &self,
+        node_id: Uuid,
+        node_ip: IpAddr,
+        config: firewall::Config,
+    ) -> Result<()>;
 }
 
 pub type AvailableResources = Requirements;

@@ -301,7 +301,6 @@ where
             firewall_rules: config.rules,
             initialized: false,
             standalone: config.standalone,
-            has_pending_update: false,
             restarting: false,
             org_id: config.org_id,
         };
@@ -1030,6 +1029,7 @@ mod tests {
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .once()
             .returning(available_test_resources);
+        add_firewall_expectation(pal, id, IpAddr::from_str(&config.ip).unwrap());
         pal.expect_create_vm()
             .with(
                 predicate::eq(default_bv_context()),
@@ -1064,6 +1064,7 @@ mod tests {
         pal.expect_available_resources()
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .returning(available_test_resources);
+        add_firewall_expectation(pal, id, IpAddr::from_str(&config.ip).unwrap());
         pal.expect_create_vm()
             .with(
                 predicate::eq(default_bv_context()),
@@ -1079,7 +1080,6 @@ mod tests {
             expected_status: NodeStatus::Stopped,
             started_at: None,
             initialized: false,
-            has_pending_update: false,
             image: image.unwrap_or(config.image),
             network_interface: NetInterface {
                 ip: IpAddr::from_str(&config.ip).unwrap(),
@@ -1412,7 +1412,6 @@ mod tests {
             expected_status: NodeStatus::Stopped,
             started_at: None,
             initialized: false,
-            has_pending_update: false,
             image: test_env.test_image.clone(),
             network_interface: NetInterface {
                 ip: IpAddr::from_str("192.168.0.9").unwrap(),
@@ -1703,6 +1702,11 @@ mod tests {
             .withf(move |req| req.is_empty())
             .once()
             .returning(available_test_resources);
+        add_firewall_expectation(
+            &mut pal,
+            node_id,
+            IpAddr::from_str(&node_config.ip).unwrap(),
+        );
         pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             let mut seq = Sequence::new();

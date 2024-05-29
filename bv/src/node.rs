@@ -82,6 +82,15 @@ impl<P: Pal> MaybeNode<P> {
             self.context.copy_and_check_plugin(&self.state.image).await,
             self
         );
+        check!(
+            pal.apply_firewall_config(
+                self.state.id,
+                self.state.network_interface.ip,
+                build_firewall_rules(&self.state.firewall_rules, &metadata.firewall)
+            )
+            .await,
+            self
+        );
         let bv_context = BvContext::from_config(api_config.config.read().await.clone());
         self.machine = Some(check!(pal.create_vm(&bv_context, &self.state).await, self));
         check!(self.state.save(&self.context.nodes_dir).await, self);
@@ -234,7 +243,6 @@ impl<P: Pal + Debug> Node<P> {
             if machine_status == NodeStatus::Running // node is running, but 
                 && (self.babel_engine.node_connection.is_closed() // there is no babel connection
                     || self.babel_engine.node_connection.is_broken() // or is broken for some reason
-                    || self.state.has_pending_update // or it has pending update that failed to apply
                     || !self.state.initialized // or it failed to initialize
             ) {
                 NodeStatus::Failed
@@ -279,18 +287,12 @@ impl<P: Pal + Debug> Node<P> {
         with_retry!(babel_client.setup_babel(self.metadata.babel_config.clone()))?;
 
         if !self.state.initialized {
-            // setup firewall, but only once
-            self.setup_firewall_rules().await?;
             if let Err(err) = self.babel_engine.init().await {
                 // mark as permanently failed - non-recoverable
                 self.save_expected_status(NodeStatus::Failed).await?;
                 return Err(err);
             }
             self.state.initialized = true;
-        } else if self.state.has_pending_update {
-            // setup firewall, but only once
-            self.setup_firewall_rules().await?;
-            self.state.has_pending_update = false;
         }
         self.state.started_at = Some(Utc::now());
         self.state.restarting = false;
@@ -368,16 +370,20 @@ impl<P: Pal + Debug> Node<P> {
     ) -> commands::Result<()> {
         self.state.firewall_rules = rules;
         self.state.org_id = org_id;
-        let result = if self.status().await == NodeStatus::Running {
-            let result = self.setup_firewall_rules().await.map_err(into_internal);
-            self.state.has_pending_update = result.is_err();
-            result
-        } else {
-            self.state.has_pending_update = true;
-            Ok(())
-        };
+        let res = self
+            .pal
+            .apply_firewall_config(
+                self.state.id,
+                self.state.network_interface.ip,
+                build_firewall_rules(&self.state.firewall_rules, &self.metadata.firewall),
+            )
+            .await
+            .map_err(into_internal);
+        if res.is_err() {
+            self.state.expected_status = NodeStatus::Failed;
+        }
         self.state.save(&self.context.nodes_dir).await?;
-        result
+        res
     }
 
     /// Updates OS image for VM.
@@ -444,10 +450,7 @@ impl<P: Pal + Debug> Node<P> {
         match self.state.expected_status {
             NodeStatus::Running => {
                 let vm_state = self.machine.state().await;
-                if vm_state == pal::VmState::SHUTOFF
-                    || self.state.has_pending_update
-                    || !self.state.initialized
-                {
+                if vm_state == pal::VmState::SHUTOFF || !self.state.initialized {
                     self.started_node_recovery().await?;
                 } else if vm_state == pal::VmState::INVALID {
                     self.vm_recovery().await?;
@@ -493,20 +496,6 @@ impl<P: Pal + Debug> Node<P> {
             babel_client.shutdown_babel(with_timeout(force, timeout + NODE_REQUEST_TIMEOUT))
         )
         .with_context(|| "Failed to gracefully shutdown babel and background jobs")?;
-        Ok(())
-    }
-
-    async fn setup_firewall_rules(&mut self) -> Result<()> {
-        let mut firewall_config = self.metadata.firewall.clone();
-        firewall_config
-            .rules
-            .append(&mut self.state.firewall_rules.clone());
-        // TODO MJR
-        // let babel_client = self.babel_engine.node_connection.babel_client().await?;
-        // with_retry!(babel_client.setup_firewall(with_timeout(
-        //     firewall_config.clone(),
-        //     fw_setup_timeout(&firewall_config)
-        // )))?;
         Ok(())
     }
 
@@ -593,6 +582,12 @@ impl<P: Pal + Debug> Node<P> {
 
         Ok(())
     }
+}
+
+fn build_firewall_rules(rules: &[firewall::Rule], firewall: &firewall::Config) -> firewall::Config {
+    let mut firewall_config = firewall.clone();
+    firewall_config.rules.append(&mut rules.to_vec());
+    firewall_config
 }
 
 async fn check_job_runner(
@@ -795,6 +790,13 @@ pub mod tests {
 
             type RecoveryBackoff = DummyBackoff;
             fn create_recovery_backoff(&self) -> DummyBackoff;
+
+            async fn apply_firewall_config(
+                &self,
+                node_id: Uuid,
+                node_ip: IpAddr,
+                config: firewall::Config,
+            ) -> Result<()>;
         }
     }
 
@@ -894,6 +896,31 @@ pub mod tests {
         )
     }
 
+    pub fn default_firewall_config() -> firewall::Config {
+        firewall::Config {
+            default_in: firewall::Action::Deny,
+            default_out: firewall::Action::Allow,
+            rules: vec![
+                firewall::Rule {
+                    name: "Allowed incoming tcp traffic on port".to_string(),
+                    action: firewall::Action::Allow,
+                    direction: firewall::Direction::In,
+                    protocol: Some(firewall::Protocol::Tcp),
+                    ips: None,
+                    ports: vec![24567],
+                },
+                firewall::Rule {
+                    name: "Allowed incoming udp traffic on ip and port".to_string(),
+                    action: firewall::Action::Allow,
+                    direction: firewall::Direction::In,
+                    protocol: Some(firewall::Protocol::Udp),
+                    ips: Some("192.168.0.1".to_string()),
+                    ports: vec![24567],
+                },
+            ],
+        }
+    }
+
     pub fn default_bv_context() -> BvContext {
         BvContext {
             id: "host_id".to_string(),
@@ -921,6 +948,17 @@ pub mod tests {
         let node_dir = nodes_dir.join(id.to_string());
         fs::create_dir_all(&node_dir).await.unwrap();
         node_dir
+    }
+
+    pub fn add_firewall_expectation(pal: &mut MockTestPal, id: Uuid, ip: IpAddr) {
+        pal.expect_apply_firewall_config()
+            .with(
+                predicate::eq(id),
+                predicate::eq(ip),
+                predicate::eq(default_firewall_config()),
+            )
+            .once()
+            .returning(|_, _, _| Ok(()));
     }
 
     struct TestEnv {
@@ -956,7 +994,6 @@ pub mod tests {
                 expected_status: NodeStatus::Running,
                 started_at: None,
                 initialized: true,
-                has_pending_update: false,
                 image: NodeImage {
                     protocol: "testing".to_string(),
                     node_type: "validator".to_string(),
@@ -1021,6 +1058,14 @@ pub mod tests {
         let bv_context = default_bv_context();
         let node_state = test_env.default_node_state();
 
+        pal.expect_apply_firewall_config()
+            .with(
+                predicate::eq(node_state.id),
+                predicate::eq(node_state.network_interface.ip),
+                predicate::eq(default_firewall_config()),
+            )
+            .times(2)
+            .returning(|_, _, _| Ok(()));
         pal.expect_create_node_connection()
             .with(predicate::eq(node_state.id))
             .return_once(dummy_connection_mock);
@@ -1333,6 +1378,7 @@ pub mod tests {
                 .return_const(Default::default());
             mock
         });
+        add_firewall_expectation(&mut pal, node_state.id, node_state.network_interface.ip);
         pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             let mut seq = Sequence::new();
@@ -1470,7 +1516,6 @@ pub mod tests {
 
         // successfully started again, without init, but with pending update
         node.state.expected_status = NodeStatus::Stopped;
-        node.state.has_pending_update = true;
         node.start().await?;
         test_env.assert_node_state_saved(&node.state).await;
 
@@ -1509,6 +1554,7 @@ pub mod tests {
                 .return_const(Default::default());
             mock
         });
+        add_firewall_expectation(&mut pal, node_state.id, node_state.network_interface.ip);
         pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             let mut seq = Sequence::new();
@@ -1627,43 +1673,35 @@ pub mod tests {
                 .return_const(Default::default());
             mock
         });
-        pal.expect_create_vm().return_once(|_, _| {
-            let mut mock = MockTestVM::new();
-            mock.expect_state().times(2).returning(|| VmState::RUNNING);
-            Ok(mock)
+        add_firewall_expectation(&mut pal, node_state.id, node_state.network_interface.ip);
+        pal.expect_create_vm()
+            .return_once(|_, _| Ok(MockTestVM::new()));
+
+        let mut updated_rules = default_firewall_config();
+        updated_rules.rules.push(firewall::Rule {
+            name: "new test rule".to_string(),
+            action: firewall::Action::Allow,
+            direction: firewall::Direction::Out,
+            protocol: None,
+            ips: None,
+            ports: vec![],
         });
+        pal.expect_apply_firewall_config()
+            .with(
+                predicate::eq(node_state.id),
+                predicate::eq(node_state.network_interface.ip),
+                predicate::eq(updated_rules),
+            )
+            .once()
+            .returning(|_, _, _| Ok(()));
+        pal.expect_apply_firewall_config()
+            .once()
+            .returning(|_, _, _| bail!("failed to apply firewall config"));
 
         let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());
 
-        let babel_mock = MockTestBabelService::new();
-        // TODO MJR
-        // failed to gracefully shutdown babel
-        let server = test_env.start_server(babel_mock).await;
-
         assert!(node.state.firewall_rules.is_empty());
-        assert!(node
-            .update(
-                vec![firewall::Rule {
-                    name: "test rule".to_string(),
-                    action: firewall::Action::Allow,
-                    direction: firewall::Direction::Out,
-                    protocol: None,
-                    ips: None,
-                    ports: vec![],
-                }],
-                "org_id".to_string()
-            )
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("setup FW rules failed"));
-        assert_eq!(1, node.state.firewall_rules.len());
-        assert_eq!("test rule", node.state.firewall_rules.first().unwrap().name);
-        assert!(node.state.has_pending_update);
-        test_env.assert_node_state_saved(&node.state).await;
-
-        node.state.has_pending_update = false;
         node.update(
             vec![firewall::Rule {
                 name: "new test rule".to_string(),
@@ -1681,10 +1719,18 @@ pub mod tests {
             "new test rule",
             node.state.firewall_rules.first().unwrap().name
         );
-        assert!(!node.state.has_pending_update);
         test_env.assert_node_state_saved(&node.state).await;
 
-        server.assert().await;
+        assert_eq!(
+            "BV internal error: failed to apply firewall config",
+            node.update(vec![], "failed_org_id".to_string())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(0, node.state.firewall_rules.len());
+        test_env.assert_node_state_saved(&node.state).await;
+
         Ok(())
     }
 
@@ -1718,6 +1764,7 @@ pub mod tests {
                 .return_const(Default::default());
             mock
         });
+        add_firewall_expectation(&mut pal, node_state.id, node_state.network_interface.ip);
         pal.expect_create_vm().return_once(|_, _| {
             let mut mock = MockTestVM::new();
             mock.expect_state().once().returning(|| VmState::RUNNING);

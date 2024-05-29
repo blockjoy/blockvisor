@@ -14,6 +14,7 @@ use crate::{
     utils::is_dev_ip,
 };
 use async_trait::async_trait;
+use babel_api::metadata::firewall;
 use bv_utils::cmd::run_cmd;
 use bv_utils::with_retry;
 use cidr_utils::cidr::Ipv4Cidr;
@@ -194,6 +195,17 @@ impl Pal for LinuxApptainerPlatform {
     type RecoveryBackoff = linux_platform::RecoveryBackoff;
     fn create_recovery_backoff(&self) -> Self::RecoveryBackoff {
         Default::default()
+    }
+
+    async fn apply_firewall_config(
+        &self,
+        node_id: Uuid,
+        node_ip: IpAddr,
+        config: firewall::Config,
+    ) -> Result<()> {
+        self.base
+            .apply_firewall_config(node_id, node_ip, config)
+            .await
     }
 }
 

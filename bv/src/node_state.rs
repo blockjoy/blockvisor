@@ -57,8 +57,6 @@ pub struct NodeState {
     pub started_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub initialized: bool,
-    #[serde(default)]
-    pub has_pending_update: bool,
     pub image: NodeImage,
     pub network_interface: NetInterface,
     pub requirements: Requirements,

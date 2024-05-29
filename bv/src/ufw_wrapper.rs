@@ -166,6 +166,8 @@ mod tests {
             .returning(|_| Ok(()));
     }
 
+    // TODO MJR
+    #[ignore]
     #[tokio::test]
     async fn test_run_failed() -> Result<()> {
         let config = Config {

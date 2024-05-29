@@ -1,5 +1,6 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
+use babel_api::metadata::firewall;
 use blockvisord::bv_context::BvContext;
 use blockvisord::config::ApptainerConfig;
 use blockvisord::linux_apptainer_platform::BareNodeConnection;
@@ -405,6 +406,15 @@ impl Pal for DummyPlatform {
 
     fn create_recovery_backoff(&self) -> DummyBackoff {
         Default::default()
+    }
+
+    async fn apply_firewall_config(
+        &self,
+        _node_id: Uuid,
+        _node_ip: IpAddr,
+        _config: firewall::Config,
+    ) -> Result<()> {
+        Ok(())
     }
 }
 
