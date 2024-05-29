@@ -1729,7 +1729,6 @@ const METADATA = #{
         ],
     },
     firewall: #{
-        enabled: true,
         default_in: "deny",
         default_out: "allow",
         rules: [
@@ -1804,7 +1803,6 @@ fn any_function() {}
                 }]),
             },
             firewall: firewall::Config {
-                enabled: true,
                 default_in: firewall::Action::Deny,
                 default_out: firewall::Action::Allow,
                 rules: vec![

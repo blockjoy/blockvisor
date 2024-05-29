@@ -76,9 +76,6 @@ const METADATA = #{
 
     // Node firewall configuration.
     firewall: #{
-        // Option to disable firewall at all. Only for debugging purpose - use on your own risk!
-        enabled: true,
-
         // Fallback action for inbound traffic used when packet doesn't match any rule.
         // Allowed values: "allow", "deny", "reject"
         default_in: "deny",

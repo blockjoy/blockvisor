@@ -1853,7 +1853,6 @@ const METADATA = #{
         ramdisks: []
     },
     firewall: #{
-        enabled: true,
         default_in: "deny",
         default_out: "allow",
         rules: [],
@@ -1884,7 +1883,6 @@ const METADATA = #{
         ramdisks: []
     },
     firewall: #{
-        enabled: true,
         default_in: "deny",
         default_out: "allow",
         rules: [],

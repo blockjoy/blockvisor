@@ -30,32 +30,28 @@ impl UfwRunner for SysRunner {
 }
 
 async fn apply_firewall_config_with(config: Config, runner: impl UfwRunner) -> Result<()> {
-    if config.enabled {
-        // first convert config to convenient structure
-        let rule_args = RuleArgs::from_rules(&config.rules);
-        // dry-run rules to make sure they are valid
-        for args in &rule_args {
-            dry_run(&runner, &args.into()).await?;
-        }
-        //finally reset and apply whole firewall config
-        runner.run(&["--force", "reset"]).await?;
-        runner.run(&["enable"]).await?;
-        runner
-            .run(&["default", variant_to_string(&config.default_in), "incoming"])
-            .await?;
-        runner
-            .run(&[
-                "default",
-                variant_to_string(&config.default_out),
-                "outgoing",
-            ])
-            .await?;
-        // and actually apply rules
-        for args in &rule_args {
-            runner.run(&args.into()).await?;
-        }
-    } else {
-        runner.run(&["disable"]).await?;
+    // first convert config to convenient structure
+    let rule_args = RuleArgs::from_rules(&config.rules);
+    // dry-run rules to make sure they are valid
+    for args in &rule_args {
+        dry_run(&runner, &args.into()).await?;
+    }
+    //finally reset and apply whole firewall config
+    runner.run(&["--force", "reset"]).await?;
+    runner.run(&["enable"]).await?;
+    runner
+        .run(&["default", variant_to_string(&config.default_in), "incoming"])
+        .await?;
+    runner
+        .run(&[
+            "default",
+            variant_to_string(&config.default_out),
+            "outgoing",
+        ])
+        .await?;
+    // and actually apply rules
+    for args in &rule_args {
+        runner.run(&args.into()).await?;
     }
     Ok(())
 }
@@ -173,7 +169,6 @@ mod tests {
     #[tokio::test]
     async fn test_run_failed() -> Result<()> {
         let config = Config {
-            enabled: false,
             default_in: Action::Allow,
             default_out: Action::Allow,
             rules: vec![],
@@ -196,24 +191,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_disable() -> Result<()> {
-        let config = Config {
-            enabled: false,
-            default_in: Action::Allow,
-            default_out: Action::Allow,
-            rules: vec![],
-        };
-        let mut mock_runner = MockTestRunner::new();
-        expect_with_args(&mut mock_runner, &["disable"]);
-
-        apply_firewall_config_with(config, mock_runner).await?;
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_no_rules() -> Result<()> {
         let config = Config {
-            enabled: true,
             default_in: Action::Deny,
             default_out: Action::Allow,
             rules: vec![],
@@ -231,7 +210,6 @@ mod tests {
     #[tokio::test]
     async fn test_with_rules() -> Result<()> {
         let config = Config {
-            enabled: true,
             default_in: Action::Deny,
             default_out: Action::Reject,
             rules: vec![

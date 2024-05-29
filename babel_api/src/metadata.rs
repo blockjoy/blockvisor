@@ -122,11 +122,9 @@ pub mod firewall {
         pub ports: Vec<u16>,
     }
 
-    /// Firewall configuration that is applied on node start.
+    /// Firewall configuration that is applied to node traffic.
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
     pub struct Config {
-        /// Option to disable firewall at all. Only for debugging purpose - use on your own risk!
-        pub enabled: bool,
         /// Fallback action for inbound traffic used when packet doesn't match any rule.
         pub default_in: Action,
         /// Fallback action for outbound traffic used when packet doesn't match any rule.

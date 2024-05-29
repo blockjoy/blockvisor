@@ -32,7 +32,6 @@ const METADATA = #{
         ]
     },
     firewall: #{
-        enabled: true,
         default_in: "deny",
         default_out: "allow",
         rules: [
