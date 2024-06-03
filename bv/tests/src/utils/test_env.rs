@@ -1,33 +1,31 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
-use babel_api::metadata::firewall;
-use blockvisord::bv_context::BvContext;
-use blockvisord::config::ApptainerConfig;
-use blockvisord::linux_apptainer_platform::BareNodeConnection;
-use blockvisord::node_env::NodeEnv;
-use blockvisord::nodes_manager::NodesDataCache;
-use blockvisord::pal::{AvailableResources, RecoverBackoff};
+
 use blockvisord::{
     apptainer_machine,
     blockvisord::BlockvisorD,
-    config::{Config, SharedConfig},
+    bv_context::BvContext,
+    config::{ApptainerConfig, Config, SharedConfig},
+    linux_apptainer_platform::BareNodeConnection,
     node_context,
     node_context::NODES_DIR,
+    node_env::NodeEnv,
     node_state::{NodeState, NodeStatus},
+    nodes_manager::NodesDataCache,
+    pal::{AvailableResources, NodeFirewallConfig, RecoverBackoff},
     pal::{CommandsStream, Pal, ServiceConnector},
     services::{self, blockchain::IMAGES_DIR, ApiInterceptor, AuthToken},
     BV_VAR_PATH,
 };
-use bv_utils::logging::setup_logging;
-use bv_utils::{rpc::DefaultTimeout, run_flag::RunFlag};
+use bv_utils::{logging::setup_logging, rpc::DefaultTimeout, run_flag::RunFlag};
 use eyre::Result;
 use predicates::prelude::predicate;
-use std::str::FromStr;
 use std::{
     fs,
     net::IpAddr,
     path::{Path, PathBuf},
     str,
+    str::FromStr,
     sync::atomic::{AtomicU32, Ordering},
     time::Duration,
 };
@@ -408,12 +406,7 @@ impl Pal for DummyPlatform {
         Default::default()
     }
 
-    async fn apply_firewall_config(
-        &self,
-        _node_id: Uuid,
-        _node_ip: IpAddr,
-        _config: firewall::Config,
-    ) -> Result<()> {
+    async fn apply_firewall_config(&self, _config: NodeFirewallConfig) -> Result<()> {
         Ok(())
     }
 }

@@ -1,22 +1,24 @@
+use crate::pal::NodeFirewallConfig;
 use async_trait::async_trait;
-use babel_api::metadata::firewall::{Config, Direction, Protocol, Rule};
+use babel_api::metadata::firewall::{Direction, Protocol};
 use eyre::{bail, Result};
 use serde_variant::to_variant_name;
+use uuid::Uuid;
 
-pub async fn apply_firewall_config(config: Config) -> Result<()> {
+pub async fn apply_firewall_config(config: NodeFirewallConfig) -> Result<()> {
     apply_firewall_config_with(config, SysRunner).await
 }
 
 #[async_trait]
 trait UfwRunner {
-    async fn run<'a>(&self, args: &[&'a str]) -> Result<()>;
+    async fn run<'a>(&self, args: &[&'a str]) -> Result<String>;
 }
 
 struct SysRunner;
 
 #[async_trait]
 impl UfwRunner for SysRunner {
-    async fn run<'a>(&self, args: &[&'a str]) -> Result<()> {
+    async fn run<'a>(&self, args: &[&'a str]) -> Result<String> {
         let output = tokio::process::Command::new("ufw")
             .args(args)
             .output()
@@ -24,99 +26,130 @@ impl UfwRunner for SysRunner {
         if !output.status.success() {
             let args_str = args.join(" ");
             bail!("Failed to run command 'ufw {args_str}', got output: `{output:?}`");
+        } else {
+            Ok(String::from_utf8(output.stdout)?)
         }
-        Ok(())
     }
 }
 
-async fn apply_firewall_config_with(config: Config, runner: impl UfwRunner) -> Result<()> {
+async fn apply_firewall_config_with(
+    config: NodeFirewallConfig,
+    runner: impl UfwRunner,
+) -> Result<()> {
+    let id = config.id;
     // first convert config to convenient structure
-    let rule_args = RuleArgs::from_rules(&config.rules);
+    let rule_args = RuleArgs::from_rules(config);
     // dry-run rules to make sure they are valid
     for args in &rule_args {
         dry_run(&runner, &args.into()).await?;
     }
-    //finally reset and apply whole firewall config
-    runner.run(&["--force", "reset"]).await?;
-    runner.run(&["enable"]).await?;
-    runner
-        .run(&["default", variant_to_string(&config.default_in), "incoming"])
-        .await?;
-    runner
-        .run(&[
-            "default",
-            variant_to_string(&config.default_out),
-            "outgoing",
-        ])
-        .await?;
-    // and actually apply rules
+    //clean old node rules
+    clean_node_rules(id, &runner).await?;
+    // and apply new rules
     for args in &rule_args {
         runner.run(&args.into()).await?;
     }
     Ok(())
 }
 
-struct RuleArgs<'a> {
-    policy: &'a str,
-    direction: &'a Direction,
-    protocol: Option<String>,
-    ips: &'a str,
-    port: Option<String>, // no port means - no port argument passed at all i.e. rule apply for all ports
-    name: &'a str,
+async fn clean_node_rules(node_id: Uuid, runner: &impl UfwRunner) -> Result<()> {
+    let stdout = runner.run(&["status", "numbered"]).await?;
+    let rules = stdout.lines().filter_map(|line| {
+        if line.contains(&node_id.to_string()) {
+            line.split_once(']')
+                .map(|(number, _)| number.trim_start_matches('[').trim())
+        } else {
+            None
+        }
+    });
+    for rule in rules {
+        runner.run(&["--force", "delete", rule]).await?;
+    }
+    Ok(())
 }
 
-impl<'a> RuleArgs<'a> {
-    fn from_rules(rules: &'a [Rule]) -> Vec<Self> {
+struct RuleArgs {
+    policy: String,
+    direction: Direction,
+    protocol: Option<String>,
+    ip_from: String,
+    ip_to: String,
+    port: Option<String>, // no port means - no port argument passed at all i.e. rule apply for all ports
+    name: String,
+}
+
+impl RuleArgs {
+    fn from_rules(config: NodeFirewallConfig) -> Vec<Self> {
         let mut rule_args = Vec::default();
-        for rule in rules.iter().rev() {
+        for rule in config.config.rules.into_iter().rev() {
             let proto = rule.protocol.as_ref().and_then(|proto| {
                 if &Protocol::Both != proto {
-                    Some(variant_to_string(proto).to_string())
+                    Some(variant_to_string(proto))
                 } else {
                     None
                 }
             });
+            let ips = rule.ips.map_or("any".to_string(), |ip| ip);
+            let name = format!("{} {}", config.id, rule.name);
+            let (ip_from, ip_to) = match rule.direction {
+                Direction::Out => (config.ip.to_string(), ips),
+                Direction::In => (ips, config.ip.to_string()),
+            };
+
             if rule.ports.is_empty() {
                 rule_args.push(Self {
                     policy: variant_to_string(&rule.action),
-                    direction: &rule.direction,
+                    direction: rule.direction,
                     protocol: proto,
-                    ips: rule.ips.as_ref().map_or("any", |ip| ip.as_str()),
+                    ip_from,
+                    ip_to,
                     port: None,
-                    name: rule.name.as_str(),
+                    name,
                 });
             } else {
                 for port in &rule.ports {
                     rule_args.push(Self {
                         policy: variant_to_string(&rule.action),
-                        direction: &rule.direction,
+                        direction: rule.direction.clone(),
                         protocol: proto.clone(),
-                        ips: rule.ips.as_ref().map_or("any", |ip| ip.as_str()),
+                        ip_from: ip_from.clone(),
+                        ip_to: ip_to.clone(),
                         port: Some(port.to_string()),
-                        name: rule.name.as_str(),
+                        name: name.clone(),
                     });
                 }
             }
         }
+        rule_args.push(Self {
+            policy: variant_to_string(&config.config.default_in),
+            direction: Direction::In,
+            protocol: None,
+            ip_from: "any".to_string(),
+            ip_to: config.ip.to_string(),
+            port: None,
+            name: format!("{} default in", config.id),
+        });
+        rule_args.push(Self {
+            policy: variant_to_string(&config.config.default_out),
+            direction: Direction::Out,
+            protocol: None,
+            ip_from: config.ip.to_string(),
+            ip_to: "any".to_string(),
+            port: None,
+            name: format!("{} default out", config.id),
+        });
         rule_args
     }
 
     fn into(&self) -> Vec<&str> {
-        let mut args = vec![self.policy, variant_to_string(self.direction)];
-        match self.direction {
-            Direction::Out => {
-                args.push("from");
-                args.push("any");
-                args.push("to");
-                args.push(self.ips);
-            }
-            Direction::In => {
-                args.push("from");
-                args.push(self.ips);
-                args.push("to");
-                args.push("any");
-            }
-        };
+        let mut args = vec![
+            self.policy.as_str(),
+            to_variant_name(&self.direction).unwrap(),
+            "from",
+            &self.ip_from,
+            "to",
+            &self.ip_to,
+        ];
         if let Some(port) = &self.port {
             args.push("port");
             args.push(port.as_str());
@@ -125,36 +158,37 @@ impl<'a> RuleArgs<'a> {
             args.push("proto");
             args.push(proto.as_str());
         }
-        if !self.name.is_empty() {
-            args.push("comment");
-            args.push(self.name);
-        }
+        args.push("comment");
+        args.push(&self.name);
         args
     }
 }
 
-fn variant_to_string<T: serde::ser::Serialize>(variant: &T) -> &str {
+fn variant_to_string<T: serde::ser::Serialize>(variant: &T) -> String {
     // `to_variant_name()` may fail only with `UnsupportedType` which shall not happen,
     // so it is safe to unwrap here.
-    to_variant_name(variant).unwrap()
+    to_variant_name(variant).unwrap().to_string()
 }
 
-async fn dry_run(runner: &impl UfwRunner, args: &[&str]) -> Result<()> {
+async fn dry_run(runner: &impl UfwRunner, args: &[&str]) -> Result<String> {
     runner.run(&[&["--dry-run"], args].concat()).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use babel_api::metadata::firewall::{Action, Direction};
+    use babel_api::metadata::firewall;
+    use babel_api::metadata::firewall::{Action, Rule};
     use mockall::*;
+    use std::net::IpAddr;
+    use std::str::FromStr;
 
     mock! {
         pub TestRunner {}
 
         #[async_trait]
         impl UfwRunner for TestRunner {
-            async fn run<'a>(&self, args: &[&'a str]) -> Result<()>;
+            async fn run<'a>(&self, args: &[&'a str]) -> Result<String>;
         }
     }
 
@@ -163,23 +197,41 @@ mod tests {
             .expect_run()
             .once()
             .withf(move |args| args == expected_args)
-            .returning(|_| Ok(()));
+            .returning(|_| Ok(String::default()));
     }
 
-    // TODO MJR
-    #[ignore]
+    fn default_config() -> NodeFirewallConfig {
+        NodeFirewallConfig {
+            id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
+            ip: IpAddr::from_str("192.168.0.7").unwrap(),
+            config: firewall::Config {
+                default_in: Action::Deny,
+                default_out: Action::Allow,
+                rules: vec![],
+            },
+        }
+    }
+
     #[tokio::test]
     async fn test_run_failed() -> Result<()> {
-        let config = Config {
-            default_in: Action::Allow,
-            default_out: Action::Allow,
-            rules: vec![],
-        };
+        let config = default_config();
         let mut mock_runner = MockTestRunner::new();
         mock_runner
             .expect_run()
             .once()
-            .withf(|args| args == ["disable"])
+            .withf(|args| {
+                args == [
+                    "--dry-run",
+                    "deny",
+                    "in",
+                    "from",
+                    "any",
+                    "to",
+                    "192.168.0.7",
+                    "comment",
+                    "4931bafa-92d9-4521-9fc6-a77eee047530 default in",
+                ]
+            })
             .returning(|_| bail!("test_error"));
 
         assert_eq!(
@@ -194,16 +246,72 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_rules() -> Result<()> {
-        let config = Config {
-            default_in: Action::Deny,
-            default_out: Action::Allow,
-            rules: vec![],
-        };
+        let config = default_config();
         let mut mock_runner = MockTestRunner::new();
-        expect_with_args(&mut mock_runner, &["--force", "reset"]);
-        expect_with_args(&mut mock_runner, &["enable"]);
-        expect_with_args(&mut mock_runner, &["default", "deny", "incoming"]);
-        expect_with_args(&mut mock_runner, &["default", "allow", "outgoing"]);
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "deny",
+                "in",
+                "from",
+                "any",
+                "to",
+                "192.168.0.7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default in",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "any",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default out",
+            ],
+        );
+        mock_runner
+            .expect_run()
+            .once()
+            .withf(|args| args == ["status", "numbered"])
+            .returning(|_| Ok("anything\n\
+            [ 1] 192.168.0.7               ALLOW IN    Anywhere                   # 4931bafa-92d9-4521-9fc6-a77eee047530: name\n
+            [ 3 ] 192.168.0.13 8000          ALLOW IN    Anywhere                   # 5931bafa-92d9-4521-9fc6-a77eee047530: another name\n\
+            [ 7 ] 192.168.0.7 8000          ALLOW IN    Anywhere                   # 4931bafa-92d9-4521-9fc6-a77eee047530: another name".to_string()));
+        expect_with_args(&mut mock_runner, &["--force", "delete", "1"]);
+        expect_with_args(&mut mock_runner, &["--force", "delete", "7"]);
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "deny",
+                "in",
+                "from",
+                "any",
+                "to",
+                "192.168.0.7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default in",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "any",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default out",
+            ],
+        );
 
         apply_firewall_config_with(config, mock_runner).await?;
         Ok(())
@@ -211,44 +319,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_rules() -> Result<()> {
-        let config = Config {
-            default_in: Action::Deny,
-            default_out: Action::Reject,
-            rules: vec![
-                Rule {
-                    name: "rule A".to_string(),
-                    action: Action::Allow,
-                    direction: Direction::Out,
-                    protocol: None,
-                    ips: Some("ip.is.validated.before".to_string()),
-                    ports: vec![7],
-                },
-                Rule {
-                    name: "rule B".to_string(),
-                    action: Action::Allow,
-                    direction: Direction::In,
-                    protocol: Some(Protocol::Tcp),
-                    ips: Some("ip.is.validated.before".to_string()),
-                    ports: vec![144, 77],
-                },
-                Rule {
-                    name: "no ports".to_string(),
-                    action: Action::Allow,
-                    direction: Direction::Out,
-                    protocol: None,
-                    ips: None,
-                    ports: vec![],
-                },
-                Rule {
-                    name: "".to_string(),
-                    action: Action::Allow,
-                    direction: Direction::Out,
-                    protocol: None,
-                    ips: None,
-                    ports: vec![7],
-                },
-            ],
-        };
+        let mut config = default_config();
+        config.config.rules = vec![
+            Rule {
+                name: "rule A".to_string(),
+                action: Action::Allow,
+                direction: Direction::Out,
+                protocol: None,
+                ips: Some("ip.is.validated.before".to_string()),
+                ports: vec![7],
+            },
+            Rule {
+                name: "rule B".to_string(),
+                action: Action::Allow,
+                direction: Direction::In,
+                protocol: Some(Protocol::Tcp),
+                ips: Some("ip.is.validated.before".to_string()),
+                ports: vec![144, 77],
+            },
+            Rule {
+                name: "no ports".to_string(),
+                action: Action::Allow,
+                direction: Direction::Out,
+                protocol: None,
+                ips: None,
+                ports: vec![],
+            },
+            Rule {
+                name: "".to_string(),
+                action: Action::Allow,
+                direction: Direction::Out,
+                protocol: None,
+                ips: None,
+                ports: vec![7],
+            },
+        ];
         let mut mock_runner = MockTestRunner::new();
         expect_with_args(
             &mut mock_runner,
@@ -257,11 +362,13 @@ mod tests {
                 "allow",
                 "out",
                 "from",
-                "any",
+                "192.168.0.7",
                 "to",
                 "any",
                 "port",
                 "7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 ",
             ],
         );
         expect_with_args(
@@ -271,11 +378,11 @@ mod tests {
                 "allow",
                 "out",
                 "from",
-                "any",
+                "192.168.0.7",
                 "to",
                 "any",
                 "comment",
-                "no ports",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 no ports",
             ],
         );
         expect_with_args(
@@ -287,13 +394,13 @@ mod tests {
                 "from",
                 "ip.is.validated.before",
                 "to",
-                "any",
+                "192.168.0.7",
                 "port",
                 "144",
                 "proto",
                 "tcp",
                 "comment",
-                "rule B",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 rule B",
             ],
         );
         expect_with_args(
@@ -305,13 +412,13 @@ mod tests {
                 "from",
                 "ip.is.validated.before",
                 "to",
-                "any",
+                "192.168.0.7",
                 "port",
                 "77",
                 "proto",
                 "tcp",
                 "comment",
-                "rule B",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 rule B",
             ],
         );
         expect_with_args(
@@ -321,29 +428,72 @@ mod tests {
                 "allow",
                 "out",
                 "from",
-                "any",
+                "192.168.0.7",
                 "to",
                 "ip.is.validated.before",
                 "port",
                 "7",
                 "comment",
-                "rule A",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 rule A",
             ],
-        );
-
-        expect_with_args(&mut mock_runner, &["--force", "reset"]);
-        expect_with_args(&mut mock_runner, &["enable"]);
-        expect_with_args(&mut mock_runner, &["default", "deny", "incoming"]);
-        expect_with_args(&mut mock_runner, &["default", "reject", "outgoing"]);
-
-        expect_with_args(
-            &mut mock_runner,
-            &["allow", "out", "from", "any", "to", "any", "port", "7"],
         );
         expect_with_args(
             &mut mock_runner,
             &[
-                "allow", "out", "from", "any", "to", "any", "comment", "no ports",
+                "--dry-run",
+                "deny",
+                "in",
+                "from",
+                "any",
+                "to",
+                "192.168.0.7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default in",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "any",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default out",
+            ],
+        );
+
+        expect_with_args(&mut mock_runner, &["status", "numbered"]);
+
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "any",
+                "port",
+                "7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 ",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "any",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 no ports",
             ],
         );
         expect_with_args(
@@ -354,13 +504,13 @@ mod tests {
                 "from",
                 "ip.is.validated.before",
                 "to",
-                "any",
+                "192.168.0.7",
                 "port",
                 "144",
                 "proto",
                 "tcp",
                 "comment",
-                "rule B",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 rule B",
             ],
         );
         expect_with_args(
@@ -371,13 +521,13 @@ mod tests {
                 "from",
                 "ip.is.validated.before",
                 "to",
-                "any",
+                "192.168.0.7",
                 "port",
                 "77",
                 "proto",
                 "tcp",
                 "comment",
-                "rule B",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 rule B",
             ],
         );
         expect_with_args(
@@ -386,13 +536,39 @@ mod tests {
                 "allow",
                 "out",
                 "from",
-                "any",
+                "192.168.0.7",
                 "to",
                 "ip.is.validated.before",
                 "port",
                 "7",
                 "comment",
-                "rule A",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 rule A",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "deny",
+                "in",
+                "from",
+                "any",
+                "to",
+                "192.168.0.7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default in",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "any",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default out",
             ],
         );
 

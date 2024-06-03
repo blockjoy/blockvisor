@@ -1,4 +1,3 @@
-use crate::node_env::NodeEnv;
 use crate::{
     apptainer_machine,
     bv_context::BvContext,
@@ -7,25 +6,24 @@ use crate::{
     linux_platform,
     node::NODE_REQUEST_TIMEOUT,
     node_context,
+    node_env::NodeEnv,
     node_state::NodeState,
     nodes_manager::NodesDataCache,
-    pal::{self, AvailableResources, NodeConnection, Pal},
+    pal::{self, AvailableResources, NodeConnection, NodeFirewallConfig, Pal},
     services,
     utils::is_dev_ip,
 };
 use async_trait::async_trait;
-use babel_api::metadata::firewall;
-use bv_utils::cmd::run_cmd;
-use bv_utils::with_retry;
+use bv_utils::{cmd::run_cmd, with_retry};
 use cidr_utils::cidr::Ipv4Cidr;
 use eyre::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
-use std::str::FromStr;
 use std::{
+    fmt::Debug,
     net::IpAddr,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    str::FromStr,
 };
 use tracing::debug;
 use uuid::Uuid;
@@ -197,15 +195,8 @@ impl Pal for LinuxApptainerPlatform {
         Default::default()
     }
 
-    async fn apply_firewall_config(
-        &self,
-        node_id: Uuid,
-        node_ip: IpAddr,
-        config: firewall::Config,
-    ) -> Result<()> {
-        self.base
-            .apply_firewall_config(node_id, node_ip, config)
-            .await
+    async fn apply_firewall_config(&self, config: NodeFirewallConfig) -> Result<()> {
+        self.base.apply_firewall_config(config).await
     }
 }
 

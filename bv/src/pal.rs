@@ -10,8 +10,7 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::metadata::{firewall, Requirements};
 use eyre::Result;
-use std::net::IpAddr;
-use std::{fmt::Debug, path::Path};
+use std::{fmt::Debug, net::IpAddr, path::Path};
 use tonic::{codegen::InterceptedService, transport::Channel};
 use uuid::Uuid;
 
@@ -76,14 +75,15 @@ pub trait Pal {
     fn create_recovery_backoff(&self) -> Self::RecoveryBackoff;
 
     /// Apply node specific firewall rules.
-    async fn apply_firewall_config(
-        &self,
-        node_id: Uuid,
-        node_ip: IpAddr,
-        config: firewall::Config,
-    ) -> Result<()>;
+    async fn apply_firewall_config(&self, config: NodeFirewallConfig) -> Result<()>;
 }
 
+#[derive(Debug, PartialEq)]
+pub struct NodeFirewallConfig {
+    pub id: Uuid,
+    pub ip: IpAddr,
+    pub config: firewall::Config,
+}
 pub type AvailableResources = Requirements;
 
 #[async_trait]

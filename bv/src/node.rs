@@ -7,7 +7,7 @@ use crate::{
     config::SharedConfig,
     node_context::NodeContext,
     node_state::{NodeImage, NodeState, NodeStatus},
-    pal::{self, NodeConnection, Pal, RecoverBackoff, VirtualMachine},
+    pal::{self, NodeConnection, NodeFirewallConfig, Pal, RecoverBackoff, VirtualMachine},
     scheduler,
     services::blockchain::{self, ROOTFS_FILE},
     utils,
@@ -83,11 +83,11 @@ impl<P: Pal> MaybeNode<P> {
             self
         );
         check!(
-            pal.apply_firewall_config(
-                self.state.id,
-                self.state.network_interface.ip,
-                build_firewall_rules(&self.state.firewall_rules, &metadata.firewall)
-            )
+            pal.apply_firewall_config(NodeFirewallConfig {
+                id: self.state.id,
+                ip: self.state.network_interface.ip,
+                config: build_firewall_rules(&self.state.firewall_rules, &metadata.firewall),
+            })
             .await,
             self
         );
@@ -372,11 +372,11 @@ impl<P: Pal + Debug> Node<P> {
         self.state.org_id = org_id;
         let res = self
             .pal
-            .apply_firewall_config(
-                self.state.id,
-                self.state.network_interface.ip,
-                build_firewall_rules(&self.state.firewall_rules, &self.metadata.firewall),
-            )
+            .apply_firewall_config(NodeFirewallConfig {
+                id: self.state.id,
+                ip: self.state.network_interface.ip,
+                config: build_firewall_rules(&self.state.firewall_rules, &self.metadata.firewall),
+            })
             .await
             .map_err(into_internal);
         if res.is_err() {
@@ -793,9 +793,7 @@ pub mod tests {
 
             async fn apply_firewall_config(
                 &self,
-                node_id: Uuid,
-                node_ip: IpAddr,
-                config: firewall::Config,
+                config: NodeFirewallConfig,
             ) -> Result<()>;
         }
     }
@@ -896,28 +894,32 @@ pub mod tests {
         )
     }
 
-    pub fn default_firewall_config() -> firewall::Config {
-        firewall::Config {
-            default_in: firewall::Action::Deny,
-            default_out: firewall::Action::Allow,
-            rules: vec![
-                firewall::Rule {
-                    name: "Allowed incoming tcp traffic on port".to_string(),
-                    action: firewall::Action::Allow,
-                    direction: firewall::Direction::In,
-                    protocol: Some(firewall::Protocol::Tcp),
-                    ips: None,
-                    ports: vec![24567],
-                },
-                firewall::Rule {
-                    name: "Allowed incoming udp traffic on ip and port".to_string(),
-                    action: firewall::Action::Allow,
-                    direction: firewall::Direction::In,
-                    protocol: Some(firewall::Protocol::Udp),
-                    ips: Some("192.168.0.1".to_string()),
-                    ports: vec![24567],
-                },
-            ],
+    pub fn default_firewall_config(id: Uuid, ip: IpAddr) -> NodeFirewallConfig {
+        NodeFirewallConfig {
+            id,
+            ip,
+            config: firewall::Config {
+                default_in: firewall::Action::Deny,
+                default_out: firewall::Action::Allow,
+                rules: vec![
+                    firewall::Rule {
+                        name: "Allowed incoming tcp traffic on port".to_string(),
+                        action: firewall::Action::Allow,
+                        direction: firewall::Direction::In,
+                        protocol: Some(firewall::Protocol::Tcp),
+                        ips: None,
+                        ports: vec![24567],
+                    },
+                    firewall::Rule {
+                        name: "Allowed incoming udp traffic on ip and port".to_string(),
+                        action: firewall::Action::Allow,
+                        direction: firewall::Direction::In,
+                        protocol: Some(firewall::Protocol::Udp),
+                        ips: Some("192.168.0.1".to_string()),
+                        ports: vec![24567],
+                    },
+                ],
+            },
         }
     }
 
@@ -952,13 +954,9 @@ pub mod tests {
 
     pub fn add_firewall_expectation(pal: &mut MockTestPal, id: Uuid, ip: IpAddr) {
         pal.expect_apply_firewall_config()
-            .with(
-                predicate::eq(id),
-                predicate::eq(ip),
-                predicate::eq(default_firewall_config()),
-            )
+            .with(predicate::eq(default_firewall_config(id, ip)))
             .once()
-            .returning(|_, _, _| Ok(()));
+            .returning(|_| Ok(()));
     }
 
     struct TestEnv {
@@ -1059,13 +1057,12 @@ pub mod tests {
         let node_state = test_env.default_node_state();
 
         pal.expect_apply_firewall_config()
-            .with(
-                predicate::eq(node_state.id),
-                predicate::eq(node_state.network_interface.ip),
-                predicate::eq(default_firewall_config()),
-            )
+            .with(predicate::eq(default_firewall_config(
+                node_state.id,
+                node_state.network_interface.ip,
+            )))
             .times(2)
-            .returning(|_, _, _| Ok(()));
+            .returning(|_| Ok(()));
         pal.expect_create_node_connection()
             .with(predicate::eq(node_state.id))
             .return_once(dummy_connection_mock);
@@ -1677,8 +1674,9 @@ pub mod tests {
         pal.expect_create_vm()
             .return_once(|_, _| Ok(MockTestVM::new()));
 
-        let mut updated_rules = default_firewall_config();
-        updated_rules.rules.push(firewall::Rule {
+        let mut updated_rules =
+            default_firewall_config(node_state.id, node_state.network_interface.ip);
+        updated_rules.config.rules.push(firewall::Rule {
             name: "new test rule".to_string(),
             action: firewall::Action::Allow,
             direction: firewall::Direction::Out,
@@ -1687,16 +1685,12 @@ pub mod tests {
             ports: vec![],
         });
         pal.expect_apply_firewall_config()
-            .with(
-                predicate::eq(node_state.id),
-                predicate::eq(node_state.network_interface.ip),
-                predicate::eq(updated_rules),
-            )
+            .with(predicate::eq(updated_rules))
             .once()
-            .returning(|_, _, _| Ok(()));
+            .returning(|_| Ok(()));
         pal.expect_apply_firewall_config()
             .once()
-            .returning(|_, _, _| bail!("failed to apply firewall config"));
+            .returning(|_| bail!("failed to apply firewall config"));
 
         let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
         assert_eq!(NodeStatus::Running, node.expected_status());

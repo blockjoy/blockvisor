@@ -1,14 +1,13 @@
-use crate::nodes_manager::NodesDataCache;
-use crate::pal::AvailableResources;
 /// Default Platform Abstraction Layer implementation for Linux.
-use crate::{pal, BV_VAR_PATH};
-use babel_api::metadata::firewall;
+use crate::{
+    nodes_manager::NodesDataCache,
+    pal::{self, AvailableResources, NodeFirewallConfig},
+    ufw_wrapper, BV_VAR_PATH,
+};
 use bv_utils::exp_backoff_timeout;
 use eyre::{anyhow, bail, Context, Result};
-use std::net::IpAddr;
 use std::{fs, path::PathBuf, time::Instant};
 use sysinfo::{DiskExt, System, SystemExt};
-use uuid::Uuid;
 
 const ENV_BV_ROOT_KEY: &str = "BV_ROOT";
 
@@ -82,14 +81,8 @@ impl LinuxPlatform {
         })
     }
 
-    pub async fn apply_firewall_config(
-        &self,
-        node_id: Uuid,
-        node_ip: IpAddr,
-        config: firewall::Config,
-    ) -> Result<()> {
-        // TODO MJR
-        Ok(())
+    pub async fn apply_firewall_config(&self, config: NodeFirewallConfig) -> Result<()> {
+        ufw_wrapper::apply_firewall_config(config).await
     }
 }
 
