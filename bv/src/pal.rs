@@ -76,6 +76,8 @@ pub trait Pal {
 
     /// Apply node specific firewall rules.
     async fn apply_firewall_config(&self, config: NodeFirewallConfig) -> Result<()>;
+    /// Cleanup node specific firewall rules.
+    async fn cleanup_firewall_config(&self, id: Uuid) -> Result<()>;
 }
 
 #[derive(Debug, PartialEq)]

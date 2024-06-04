@@ -409,6 +409,9 @@ impl Pal for DummyPlatform {
     async fn apply_firewall_config(&self, _config: NodeFirewallConfig) -> Result<()> {
         Ok(())
     }
+    async fn cleanup_firewall_config(&self, _id: Uuid) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone)]

@@ -1,8 +1,8 @@
 /// Default Platform Abstraction Layer implementation for Linux.
 use crate::{
     nodes_manager::NodesDataCache,
-    pal::{self, AvailableResources, NodeFirewallConfig},
-    ufw_wrapper, BV_VAR_PATH,
+    pal::{self, AvailableResources},
+    BV_VAR_PATH,
 };
 use bv_utils::exp_backoff_timeout;
 use eyre::{anyhow, bail, Context, Result};
@@ -79,10 +79,6 @@ impl LinuxPlatform {
             mem_size_mb: available_mem_size_mb,
             disk_size_gb: available_disk_space / 1_000_000_000,
         })
-    }
-
-    pub async fn apply_firewall_config(&self, config: NodeFirewallConfig) -> Result<()> {
-        ufw_wrapper::apply_firewall_config(config).await
     }
 }
 

@@ -360,6 +360,7 @@ impl<P: Pal + Debug> Node<P> {
         self.save_expected_status(NodeStatus::Stopped).await?;
         self.babel_engine.stop().await?;
         self.machine.delete().await?;
+        self.pal.cleanup_firewall_config(self.state.id).await?;
         self.context.delete().await
     }
 
@@ -795,6 +796,7 @@ pub mod tests {
                 &self,
                 config: NodeFirewallConfig,
             ) -> Result<()>;
+            async fn cleanup_firewall_config(&self, id: Uuid) -> Result<()>;
         }
     }
 

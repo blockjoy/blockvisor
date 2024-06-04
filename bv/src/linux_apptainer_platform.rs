@@ -10,7 +10,7 @@ use crate::{
     node_state::NodeState,
     nodes_manager::NodesDataCache,
     pal::{self, AvailableResources, NodeConnection, NodeFirewallConfig, Pal},
-    services,
+    services, ufw_wrapper,
     utils::is_dev_ip,
 };
 use async_trait::async_trait;
@@ -193,7 +193,11 @@ impl Pal for LinuxApptainerPlatform {
     }
 
     async fn apply_firewall_config(&self, config: NodeFirewallConfig) -> Result<()> {
-        self.base.apply_firewall_config(config).await
+        ufw_wrapper::apply_firewall_config(config).await
+    }
+
+    async fn cleanup_firewall_config(&self, id: Uuid) -> Result<()> {
+        ufw_wrapper::cleanup_node_rules(id).await
     }
 }
 

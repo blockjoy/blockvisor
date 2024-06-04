@@ -9,6 +9,10 @@ pub async fn apply_firewall_config(config: NodeFirewallConfig) -> Result<()> {
     apply_firewall_config_with(config, SysRunner).await
 }
 
+pub async fn cleanup_node_rules(node_id: Uuid) -> Result<()> {
+    cleanup_node_rules_with(node_id, &SysRunner).await
+}
+
 #[async_trait]
 trait UfwRunner {
     async fn run<'a>(&self, args: &[&'a str]) -> Result<String>;
@@ -44,7 +48,7 @@ async fn apply_firewall_config_with(
         dry_run(&runner, &args.into()).await?;
     }
     //clean old node rules
-    clean_node_rules(id, &runner).await?;
+    cleanup_node_rules_with(id, &runner).await?;
     // and apply new rules
     for args in &rule_args {
         runner.run(&args.into()).await?;
@@ -52,18 +56,25 @@ async fn apply_firewall_config_with(
     Ok(())
 }
 
-async fn clean_node_rules(node_id: Uuid, runner: &impl UfwRunner) -> Result<()> {
+async fn cleanup_node_rules_with(node_id: Uuid, runner: &impl UfwRunner) -> Result<()> {
     let stdout = runner.run(&["status", "numbered"]).await?;
-    let rules = stdout.lines().filter_map(|line| {
-        if line.contains(&node_id.to_string()) {
-            line.split_once(']')
-                .map(|(number, _)| number.trim_start_matches('[').trim())
-        } else {
-            None
-        }
-    });
-    for rule in rules {
-        runner.run(&["--force", "delete", rule]).await?;
+    let mut rules = stdout
+        .lines()
+        .filter_map(|line| {
+            if line.contains(&node_id.to_string()) {
+                line.split_once(']').and_then(|(number, _)| {
+                    number.trim_start_matches('[').trim().parse::<usize>().ok()
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    rules.sort();
+    while let Some(rule) = rules.pop() {
+        runner
+            .run(&["--force", "delete", &format!("{rule}")])
+            .await?;
     }
     Ok(())
 }
