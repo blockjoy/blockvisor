@@ -4,7 +4,7 @@ use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::Result;
 use tracing::info;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     setup_logging();
     let run = RunFlag::run_until_ctrlc();

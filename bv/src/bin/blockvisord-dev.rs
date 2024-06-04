@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 use tonic::transport::Server;
 use tracing::info;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     setup_logging();
     info!(
