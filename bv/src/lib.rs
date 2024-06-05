@@ -1,4 +1,5 @@
 pub mod apptainer_machine;
+pub mod apptainer_platform;
 pub mod babel_engine;
 pub mod babel_engine_service;
 pub mod blockvisord;
@@ -11,7 +12,6 @@ pub mod config;
 pub mod hosts;
 pub mod installer;
 pub mod internal_server;
-pub mod linux_apptainer_platform;
 pub mod linux_platform;
 pub mod node;
 pub mod node_context;

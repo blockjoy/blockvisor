@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
         env!("CARGO_PKG_VERSION")
     );
     let config = config::Config::load(&bv_root()).await?;
-    let pal = blockvisord::linux_apptainer_platform::LinuxApptainerPlatform::new(
+    let pal = blockvisord::apptainer_platform::ApptainerPlatform::new(
         &config.iface,
         config.apptainer.clone(),
     )

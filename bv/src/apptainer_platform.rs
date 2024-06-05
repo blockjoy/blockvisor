@@ -32,14 +32,14 @@ const ENGINE_SOCKET_NAME: &str = "engine.socket";
 const BABEL_SOCKET_NAME: &str = "babel.socket";
 
 #[derive(Debug)]
-pub struct LinuxApptainerPlatform {
+pub struct ApptainerPlatform {
     base: linux_platform::LinuxPlatform,
     bridge_ip: IpAddr,
     mask_bits: u8,
     config: ApptainerConfig,
 }
 
-impl Deref for LinuxApptainerPlatform {
+impl Deref for ApptainerPlatform {
     type Target = linux_platform::LinuxPlatform;
 
     fn deref(&self) -> &Self::Target {
@@ -47,13 +47,13 @@ impl Deref for LinuxApptainerPlatform {
     }
 }
 
-impl DerefMut for LinuxApptainerPlatform {
+impl DerefMut for ApptainerPlatform {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.base
     }
 }
 
-impl LinuxApptainerPlatform {
+impl ApptainerPlatform {
     pub async fn default() -> Result<Self> {
         Ok(Self {
             base: linux_platform::LinuxPlatform::new().await?,
@@ -88,7 +88,7 @@ impl LinuxApptainerPlatform {
 }
 
 #[async_trait]
-impl Pal for LinuxApptainerPlatform {
+impl Pal for ApptainerPlatform {
     fn bv_root(&self) -> &Path {
         self.base.bv_root.as_path()
     }

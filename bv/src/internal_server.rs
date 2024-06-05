@@ -1,4 +1,4 @@
-use crate::linux_apptainer_platform::LinuxApptainerPlatform;
+use crate::apptainer_platform::ApptainerPlatform;
 use crate::{
     cluster::ClusterData,
     config,
@@ -106,7 +106,7 @@ where
 {
     #[instrument(skip(self), ret(Debug))]
     async fn info(&self, _request: Request<()>) -> Result<Response<String>, Status> {
-        let pal = LinuxApptainerPlatform::default()
+        let pal = ApptainerPlatform::default()
             .await
             .map_err(|e| Status::internal(format!("{e:#}")))?;
         let mut config = config::Config::load(pal.bv_root())

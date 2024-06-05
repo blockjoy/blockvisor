@@ -3,10 +3,10 @@ use async_trait::async_trait;
 
 use blockvisord::{
     apptainer_machine,
+    apptainer_platform::BareNodeConnection,
     blockvisord::BlockvisorD,
     bv_context::BvContext,
     config::{ApptainerConfig, Config, SharedConfig},
-    linux_apptainer_platform::BareNodeConnection,
     node_context,
     node_context::NODES_DIR,
     node_env::NodeEnv,
