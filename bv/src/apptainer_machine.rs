@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 pub const DATA_DIR: &str = "data";
 const ROOTFS_DIR: &str = "rootfs";
+const CGROUPS_CONF_FILE: &str = "cgroups.toml";
 const JOURNAL_DIR: &str = "/run/systemd/journal";
 const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -42,6 +43,7 @@ pub struct ApptainerMachine {
     node_dir: PathBuf,
     babel_path: PathBuf,
     chroot_dir: PathBuf,
+    cgroups_path: PathBuf,
     data_dir: PathBuf,
     os_img_path: PathBuf,
     vm_id: Uuid,
@@ -50,6 +52,7 @@ pub struct ApptainerMachine {
     mask_bits: u8,
     gateway: IpAddr,
     requirements: babel_api::metadata::Requirements,
+    cpus: Vec<usize>,
     config: ApptainerConfig,
     node_env: NodeEnv,
 }
@@ -65,6 +68,7 @@ pub async fn new(
 ) -> Result<ApptainerMachine> {
     let node_dir = node_context::build_node_dir(bv_root, node_state.id);
     let chroot_dir = node_dir.join(ROOTFS_DIR);
+    let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
     fs::create_dir_all(&chroot_dir).await?;
     let data_dir = node_dir.join(DATA_DIR);
     fs::create_dir_all(&data_dir).await?;
@@ -81,6 +85,7 @@ pub async fn new(
         node_dir,
         babel_path,
         chroot_dir,
+        cgroups_path,
         data_dir,
         os_img_path,
         vm_id: node_state.id,
@@ -89,6 +94,7 @@ pub async fn new(
         mask_bits,
         gateway,
         requirements: node_state.requirements.clone(),
+        cpus: node_state.assigned_cpus.clone(),
         config,
         node_env,
     })
@@ -133,6 +139,27 @@ impl ApptainerMachine {
             fs::create_dir_all(self.chroot_dir.join(JOURNAL_DIR.trim_start_matches('/'))).await?;
             fs::create_dir_all(self.chroot_dir.join(BABEL_VAR_PATH)).await?;
         }
+        if self.config.cpu_limit || self.config.memory_limit {
+            let mut content = String::new();
+            if self.config.memory_limit {
+                content += &format!(
+                    "memory.limit = {}\n",
+                    self.requirements.mem_size_mb * 1_000_000,
+                )
+            }
+            if self.config.cpu_limit {
+                content += &format!(
+                    "cpu.cpus = \"{}\"\n",
+                    self.cpus
+                        .iter()
+                        .map(|cpu| cpu.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )
+            }
+            fs::write(&self.cgroups_path, content).await?;
+        }
+
         self.node_env.save(&self.chroot_dir).await?;
         Ok(self)
     }
@@ -198,9 +225,8 @@ impl ApptainerMachine {
         if !self.is_container_running().await? {
             let hostname = self.vm_name.replace('_', "-");
             let chroot_path = self.chroot_dir.to_string_lossy();
+            let cgroups_path = self.cgroups_path.to_string_lossy();
             let data_path = format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT);
-            let cpus = format!("{}", self.requirements.vcpu_count);
-            let mem = format!("{}", self.requirements.mem_size_mb * 1_000_000);
             let net = format!("IP={}/{};GATEWAY={}", self.ip, self.mask_bits, self.gateway);
             let mut args = vec![
                 "instance",
@@ -217,13 +243,9 @@ impl ApptainerMachine {
                 "--hostname",
                 &hostname,
             ];
-            if self.config.cpu_limit {
-                args.push("--cpus");
-                args.push(&cpus);
-            }
-            if self.config.memory_limit {
-                args.push("--memory");
-                args.push(&mem);
+            if self.config.cpu_limit || self.config.memory_limit {
+                args.push("--apply-cgroups");
+                args.push(&cgroups_path);
             }
             if !self.config.host_network {
                 args.append(&mut vec![

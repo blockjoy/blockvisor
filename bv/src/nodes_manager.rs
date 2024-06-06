@@ -412,8 +412,8 @@ where
             let mut cache = self.node_state_cache.write().await;
             cache.entry(id).and_modify(|data| {
                 data.image = image;
-                data.requirements = node.state.requirements.clone();
-                data.assigned_cpus = node.state.assigned_cpus.clone();
+                data.requirements.clone_from(&node.state.requirements);
+                data.assigned_cpus.clone_from(&node.state.assigned_cpus);
             });
         }
         Ok(())
