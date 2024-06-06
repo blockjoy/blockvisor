@@ -59,6 +59,8 @@ pub struct NodeState {
     pub initialized: bool,
     pub image: NodeImage,
     pub network_interface: NetInterface,
+    #[serde(default)]
+    pub assigned_cpus: Vec<usize>,
     pub requirements: Requirements,
     pub firewall_rules: Vec<firewall::Rule>,
     #[serde(default)]

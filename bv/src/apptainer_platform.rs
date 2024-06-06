@@ -164,6 +164,10 @@ impl Pal for ApptainerPlatform {
         .await
     }
 
+    fn available_cpus(&self) -> usize {
+        self.base.available_cpus()
+    }
+
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
         self.base.available_resources(
             nodes_data_cache,

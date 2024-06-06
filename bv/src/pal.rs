@@ -63,6 +63,8 @@ pub trait Pal {
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine>;
 
+    /// Get available cpus.
+    fn available_cpus(&self) -> usize;
     /// Get available resources, but take into account requirements declared by nodes.
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources>;
     /// Calculate used disk space value correction. Regarding sparse files used for data images, used

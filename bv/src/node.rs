@@ -786,6 +786,7 @@ pub mod tests {
                 bv_context: &BvContext,
                 node_state: &NodeState,
             ) -> Result<MockTestVM>;
+            fn available_cpus(&self) -> usize;
             fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
             fn used_disk_space_correction(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<u64>;
 
@@ -1003,6 +1004,7 @@ pub mod tests {
                     ip: IpAddr::from_str("172.16.0.10").unwrap(),
                     gateway: IpAddr::from_str("172.16.0.1").unwrap(),
                 },
+                assigned_cpus: vec![0],
                 requirements: Requirements {
                     vcpu_count: 1,
                     mem_size_mb: 16,

@@ -385,6 +385,10 @@ impl Pal for DummyPlatform {
         .await
     }
 
+    fn available_cpus(&self) -> usize {
+        4
+    }
+
     fn available_resources(
         &self,
         _nodes_data_cache: &NodesDataCache,

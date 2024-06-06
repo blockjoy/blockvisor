@@ -53,6 +53,12 @@ impl LinuxPlatform {
         })
     }
 
+    pub fn available_cpus(&self) -> usize {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+        sys.cpus().len()
+    }
+
     pub fn available_resources(
         &self,
         nodes_data_cache: &NodesDataCache,

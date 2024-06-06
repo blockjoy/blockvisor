@@ -1,4 +1,3 @@
-use crate::node_state::NODE_STATE_FILENAME;
 use crate::{
     command_failed,
     commands::{self, into_internal, Error},
@@ -6,7 +5,9 @@ use crate::{
     node::Node,
     node_context::{build_nodes_dir, NODES_DIR},
     node_metrics,
-    node_state::{NetInterface, NodeImage, NodeProperties, NodeState, NodeStatus},
+    node_state::{
+        NetInterface, NodeImage, NodeProperties, NodeState, NodeStatus, NODE_STATE_FILENAME,
+    },
     pal::Pal,
     scheduler,
     scheduler::{Scheduled, Scheduler},
@@ -21,21 +22,20 @@ use babel_api::{
     rhai_plugin,
 };
 use chrono::{DateTime, Utc};
-use eyre::{anyhow, Context, Result};
+use eyre::{anyhow, bail, Context, Result};
 use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 use std::{
     collections::HashMap,
     fmt::Debug,
+    net::IpAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use thiserror::Error;
-use tokio::sync::mpsc;
 use tokio::{
     fs::{self, read_dir},
-    sync::{RwLock, RwLockReadGuard},
+    sync::{mpsc, Mutex, RwLock, RwLockReadGuard},
 };
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
@@ -55,6 +55,7 @@ pub struct NodesManager<P: Pal + Debug> {
     api_config: SharedConfig,
     nodes: Arc<RwLock<HashMap<Uuid, RwLock<Node<P>>>>>,
     scheduler: Scheduler,
+    cpu_registry: Mutex<CpuRegistry>,
     node_state_cache: RwLock<HashMap<Uuid, NodeStateCache>>,
     node_ids: RwLock<HashMap<String, Uuid>>,
     state: RwLock<State>,
@@ -75,6 +76,7 @@ pub struct NodeStateCache {
     pub ip: String,
     pub gateway: String,
     pub requirements: Requirements,
+    pub assigned_cpus: Vec<usize>,
     pub started_at: Option<DateTime<Utc>>,
     pub standalone: bool,
 }
@@ -128,6 +130,30 @@ impl State {
     }
 }
 
+#[derive(Debug)]
+struct CpuRegistry(Vec<usize>);
+
+impl CpuRegistry {
+    fn new(available_cpus: usize) -> Self {
+        Self((0..available_cpus).collect::<Vec<_>>())
+    }
+
+    fn acquire(&mut self, count: usize) -> Result<Vec<usize>> {
+        if count > self.0.len() {
+            bail!("not enough cpu cores")
+        }
+        Ok(self.0.drain(self.0.len() - count..).collect())
+    }
+
+    fn release(&mut self, cpus: &mut Vec<usize>) {
+        self.0.append(cpus);
+    }
+
+    fn mark_acquired(&mut self, cpus: &[usize]) {
+        self.0.retain(|cpu| !cpus.contains(cpu));
+    }
+}
+
 impl<P> NodesManager<P>
 where
     P: Pal + Send + Sync + Debug + 'static,
@@ -147,21 +173,29 @@ where
         let state_path = build_state_filename(bv_root);
         let pal = Arc::new(pal);
         let nodes = Arc::new(RwLock::new(HashMap::new()));
+        let available_cpus = pal.available_cpus();
+        let mut cpu_registry = CpuRegistry::new(available_cpus);
         Ok(if state_path.exists() {
             let state = State::load(&state_path).await?;
             let scheduler = Scheduler::start(
                 &state.scheduled_tasks,
                 scheduler::NodeTaskHandler(nodes.clone()),
             );
-            let (loaded_nodes, node_ids, node_state_cache) =
-                Self::load_nodes(pal.clone(), api_config.clone(), &nodes_dir, scheduler.tx())
-                    .await?;
+            let (loaded_nodes, node_ids, node_state_cache) = Self::load_nodes(
+                pal.clone(),
+                api_config.clone(),
+                &nodes_dir,
+                scheduler.tx(),
+                &mut cpu_registry,
+            )
+            .await?;
             *nodes.write().await = loaded_nodes;
             Self {
                 api_config,
                 state: RwLock::new(state),
                 nodes,
                 scheduler,
+                cpu_registry: Mutex::new(cpu_registry),
                 node_ids: RwLock::new(node_ids),
                 node_state_cache: RwLock::new(node_state_cache),
                 state_path,
@@ -176,6 +210,7 @@ where
                 }),
                 nodes,
                 scheduler,
+                cpu_registry: Mutex::new(cpu_registry),
                 node_ids: Default::default(),
                 node_state_cache: Default::default(),
                 state_path,
@@ -276,6 +311,11 @@ where
 
         self.check_node_requirements(&meta.requirements, &config.image, None)
             .await?;
+        let mut assigned_cpus = self
+            .cpu_registry
+            .lock()
+            .await
+            .acquire(meta.requirements.vcpu_count)?;
 
         let node_state_cache = NodeStateCache {
             name: config.name.clone(),
@@ -286,6 +326,7 @@ where
             started_at: None,
             standalone: config.standalone,
             requirements: meta.requirements.clone(),
+            assigned_cpus: assigned_cpus.clone(),
         };
 
         let node_state = NodeState {
@@ -295,6 +336,7 @@ where
             expected_status: NodeStatus::Stopped,
             started_at: None,
             network_interface: NetInterface { ip, gateway },
+            assigned_cpus: assigned_cpus.clone(),
             requirements: meta.requirements,
             properties,
             network: config.network,
@@ -311,8 +353,11 @@ where
             node_state,
             self.scheduler.tx(),
         )
-        .await?;
-        self.nodes.write().await.insert(id, RwLock::new(node));
+        .await;
+        if node.is_err() {
+            self.cpu_registry.lock().await.release(&mut assigned_cpus);
+        }
+        self.nodes.write().await.insert(id, RwLock::new(node?));
         node_ids.insert(config.name, id);
         self.node_state_cache
             .write()
@@ -359,11 +404,16 @@ where
                 .write()
                 .await;
 
+            let mut cpu_registry = self.cpu_registry.lock().await;
+            cpu_registry.release(&mut node.state.assigned_cpus);
+            node.state.assigned_cpus = cpu_registry.acquire(new_meta.requirements.vcpu_count)?;
             node.upgrade(&image).await?;
 
             let mut cache = self.node_state_cache.write().await;
             cache.entry(id).and_modify(|data| {
                 data.image = image;
+                data.requirements = node.state.requirements.clone();
+                data.assigned_cpus = node.state.assigned_cpus.clone();
             });
         }
         Ok(())
@@ -383,7 +433,12 @@ where
         };
         self.nodes.write().await.remove(&id);
         self.node_ids.write().await.remove(&name);
-        self.node_state_cache.write().await.remove(&id);
+        if let Some(mut node) = self.node_state_cache.write().await.remove(&id) {
+            self.cpu_registry
+                .lock()
+                .await
+                .release(&mut node.assigned_cpus);
+        }
         debug!("Node deleted");
         Ok(())
     }
@@ -710,6 +765,7 @@ where
         api_config: SharedConfig,
         nodes_dir: &Path,
         tx: mpsc::Sender<scheduler::Action>,
+        cpu_registry: &mut CpuRegistry,
     ) -> Result<(
         HashMap<Uuid, RwLock<Node<P>>>,
         HashMap<String, Uuid>,
@@ -744,6 +800,7 @@ where
             };
             match NodeState::load(&path)
                 .and_then(|state| async {
+                    cpu_registry.mark_acquired(&state.assigned_cpus);
                     Node::attach(pal.clone(), api_config.clone(), state, tx.clone()).await
                 })
                 .await
@@ -764,6 +821,7 @@ where
                             started_at: node.state.started_at,
                             standalone: node.state.standalone,
                             requirements: node.state.requirements.clone(),
+                            assigned_cpus: node.state.assigned_cpus.clone(),
                         },
                     );
                     nodes.insert(id, RwLock::new(node));
@@ -1021,6 +1079,7 @@ mod tests {
     fn add_create_node_expectations(
         pal: &mut MockTestPal,
         expected_index: u32,
+        expected_cpus: Vec<usize>,
         id: Uuid,
         config: NodeConfig,
         vm_mock: MockTestVM,
@@ -1033,7 +1092,7 @@ mod tests {
         pal.expect_create_vm()
             .with(
                 predicate::eq(default_bv_context()),
-                predicate::eq(expected_node_state(id, config, None)),
+                predicate::eq(expected_node_state(id, config, expected_cpus, None)),
             )
             .return_once(move |_, _| Ok(vm_mock));
         pal.expect_create_node_connection()
@@ -1044,6 +1103,7 @@ mod tests {
     fn add_create_node_fail_vm_expectations(
         pal: &mut MockTestPal,
         expected_index: u32,
+        expected_cpus: Vec<usize>,
         id: Uuid,
         config: NodeConfig,
     ) {
@@ -1068,12 +1128,17 @@ mod tests {
         pal.expect_create_vm()
             .with(
                 predicate::eq(default_bv_context()),
-                predicate::eq(expected_node_state(id, config, None)),
+                predicate::eq(expected_node_state(id, config, expected_cpus, None)),
             )
             .return_once(|_, _| bail!("failed to create vm"));
     }
 
-    fn expected_node_state(id: Uuid, config: NodeConfig, image: Option<NodeImage>) -> NodeState {
+    fn expected_node_state(
+        id: Uuid,
+        config: NodeConfig,
+        expected_cpus: Vec<usize>,
+        image: Option<NodeImage>,
+    ) -> NodeState {
         NodeState {
             id,
             name: config.name,
@@ -1085,6 +1150,7 @@ mod tests {
                 ip: IpAddr::from_str(&config.ip).unwrap(),
                 gateway: IpAddr::from_str(&config.gateway).unwrap(),
             },
+            assigned_cpus: expected_cpus,
             requirements: TEST_NODE_REQUIREMENTS,
             firewall_rules: config.rules,
             properties: config
@@ -1103,6 +1169,7 @@ mod tests {
     async fn test_create_node_and_delete() -> Result<()> {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
+        pal.expect_available_cpus().return_const(3usize);
         let config = default_config(test_env.tmp_root.clone());
 
         let first_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
@@ -1126,6 +1193,7 @@ mod tests {
         add_create_node_expectations(
             &mut pal,
             1,
+            vec![2],
             first_node_id,
             first_node_config.clone(),
             vm_mock,
@@ -1148,6 +1216,7 @@ mod tests {
         add_create_node_expectations(
             &mut pal,
             2,
+            vec![1],
             second_node_id,
             second_node_config.clone(),
             vm_mock,
@@ -1168,6 +1237,7 @@ mod tests {
         add_create_node_fail_vm_expectations(
             &mut pal,
             3,
+            vec![0],
             failed_node_id,
             failed_node_config.clone(),
         );
@@ -1215,6 +1285,7 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         );
+        assert_eq!(1, nodes.cpu_registry.lock().await.0.len());
         assert_eq!(
             "BV internal error: Node with name `first node name` exists",
             nodes
@@ -1384,6 +1455,7 @@ mod tests {
                 started_at: None,
                 standalone: first_node_config.standalone,
                 requirements: TEST_NODE_REQUIREMENTS,
+                assigned_cpus: vec![2],
             },
             nodes.node_state_cache(first_node_id).await?
         );
@@ -1403,7 +1475,8 @@ mod tests {
     #[tokio::test]
     async fn test_load() -> Result<()> {
         let test_env = TestEnv::new().await?;
-        let pal = test_env.default_pal();
+        let mut pal = test_env.default_pal();
+        pal.expect_available_cpus().return_const(1usize);
         let config = default_config(test_env.tmp_root.clone());
 
         let node_state = NodeState {
@@ -1417,6 +1490,7 @@ mod tests {
                 ip: IpAddr::from_str("192.168.0.9").unwrap(),
                 gateway: IpAddr::from_str("192.168.0.1").unwrap(),
             },
+            assigned_cpus: vec![0],
             requirements: Requirements {
                 vcpu_count: 1,
                 mem_size_mb: 1024,
@@ -1466,6 +1540,7 @@ mod tests {
         .await?;
 
         let mut pal = test_env.default_pal();
+        pal.expect_available_cpus().return_const(1usize);
         pal.expect_create_node_connection()
             .with(predicate::eq(node_state.id))
             .returning(dummy_connection_mock);
@@ -1534,26 +1609,41 @@ mod tests {
             node_type: "validator".to_string(),
             node_version: "3.4.7".to_string(),
         };
+        const UPDATED_REQUIREMENTS: Requirements = Requirements {
+            vcpu_count: 2,
+            mem_size_mb: 4096,
+            disk_size_gb: 3,
+        };
         let mut vm_mock = MockTestVM::new();
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         vm_mock.expect_release().return_once(|| Ok(()));
-        add_create_node_expectations(&mut pal, 1, node_id, node_config.clone(), vm_mock);
+        add_create_node_expectations(&mut pal, 1, vec![4], node_id, node_config.clone(), vm_mock);
         pal.expect_available_resources()
             .withf(move |req| 1 == req.len() as u32)
             .once()
             .returning(|_requirements| bail!("failed to get available resources"));
+        pal.expect_available_cpus().return_const(5usize);
         pal.expect_available_resources()
             .withf(move |req| 1 == req.len() as u32)
             .times(2)
-            .returning(available_test_resources);
+            .returning(|_| {
+                Ok(Requirements {
+                    vcpu_count: 5,
+                    mem_size_mb: 4096,
+                    disk_size_gb: 4,
+                })
+            });
+        let mut expected_updated_state = expected_node_state(
+            node_id,
+            node_config.clone(),
+            vec![3, 4],
+            Some(new_image.clone()),
+        );
+        expected_updated_state.requirements = UPDATED_REQUIREMENTS.clone();
         pal.expect_attach_vm()
             .with(
                 predicate::eq(default_bv_context()),
-                predicate::eq(expected_node_state(
-                    node_id,
-                    node_config.clone(),
-                    Some(new_image.clone()),
-                )),
+                predicate::eq(expected_updated_state),
             )
             .return_once(|_, _| Ok(MockTestVM::new()));
 
@@ -1568,7 +1658,7 @@ mod tests {
                 (
                     new_image.clone(),
                     format!("{} requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
-                            UPGRADED_IMAGE_RHAI_TEMPLATE, 1, 2048, 1).into_bytes(),
+                            UPGRADED_IMAGE_RHAI_TEMPLATE, UPDATED_REQUIREMENTS.vcpu_count, UPDATED_REQUIREMENTS.mem_size_mb, UPDATED_REQUIREMENTS.disk_size_gb).into_bytes(),
                 ),
                 (
                     cpu_devourer_image.clone(),
@@ -1588,6 +1678,7 @@ mod tests {
                 started_at: None,
                 standalone: node_config.standalone,
                 requirements: TEST_NODE_REQUIREMENTS,
+                assigned_cpus: vec![4],
             },
             nodes.node_state_cache(node_id).await?
         );
@@ -1624,7 +1715,8 @@ mod tests {
                 gateway: node_config.gateway,
                 started_at: None,
                 standalone: node_config.standalone,
-                requirements: TEST_NODE_REQUIREMENTS,
+                requirements: UPDATED_REQUIREMENTS.clone(),
+                assigned_cpus: vec![3, 4],
             },
             nodes.node_state_cache(node_id).await?
         );
@@ -1698,6 +1790,7 @@ mod tests {
             org_id: Default::default(),
         };
 
+        pal.expect_available_cpus().return_const(1usize);
         pal.expect_available_resources()
             .withf(move |req| req.is_empty())
             .once()
