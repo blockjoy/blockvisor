@@ -22,6 +22,12 @@ pub fn bv_root() -> PathBuf {
     PathBuf::from(std::env::var(ENV_BV_ROOT_KEY).unwrap_or_else(|_| "/".to_string()))
 }
 
+pub fn available_cpus() -> usize {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    sys.cpus().len()
+}
+
 impl LinuxPlatform {
     pub async fn new() -> Result<Self> {
         let bv_root = bv_root();
@@ -51,12 +57,6 @@ impl LinuxPlatform {
             babel_path,
             job_runner_path,
         })
-    }
-
-    pub fn available_cpus(&self) -> usize {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        sys.cpus().len()
     }
 
     pub fn available_resources(

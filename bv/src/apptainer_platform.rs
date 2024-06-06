@@ -165,7 +165,7 @@ impl Pal for ApptainerPlatform {
     }
 
     fn available_cpus(&self) -> usize {
-        self.base.available_cpus()
+        linux_platform::available_cpus()
     }
 
     fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {

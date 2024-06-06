@@ -131,25 +131,25 @@ impl State {
 }
 
 #[derive(Debug)]
-struct CpuRegistry(Vec<usize>);
+pub struct CpuRegistry(Vec<usize>);
 
 impl CpuRegistry {
-    fn new(available_cpus: usize) -> Self {
+    pub fn new(available_cpus: usize) -> Self {
         Self((0..available_cpus).collect::<Vec<_>>())
     }
 
-    fn acquire(&mut self, count: usize) -> Result<Vec<usize>> {
+    pub fn acquire(&mut self, count: usize) -> Result<Vec<usize>> {
         if count > self.0.len() {
             bail!("not enough cpu cores")
         }
         Ok(self.0.drain(self.0.len() - count..).collect())
     }
 
-    fn release(&mut self, cpus: &mut Vec<usize>) {
+    pub fn release(&mut self, cpus: &mut Vec<usize>) {
         self.0.append(cpus);
     }
 
-    fn mark_acquired(&mut self, cpus: &[usize]) {
+    pub fn mark_acquired(&mut self, cpus: &[usize]) {
         self.0.retain(|cpu| !cpus.contains(cpu));
     }
 }
