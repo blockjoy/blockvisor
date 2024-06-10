@@ -188,7 +188,7 @@ async fn test_bv_service_e2e() {
     const OLD_IMAGE: &str = "testing/validator/0.0.2";
     const NEW_IMAGE_VERSION: &str = "0.0.3";
     println!("add blockchain");
-    let blockchain_query = r#"INSERT INTO blockchains (id, name, visibility, ticker) values ('ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'Testing', 'public', 'TEST');
+    let blockchain_query = r#"INSERT INTO blockchains (id, name, display_name, visibility, ticker) values ('ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'Testing', 'Testing', 'public', 'TEST');
         INSERT INTO blockchain_node_types (id, blockchain_id, node_type, visibility) VALUES ('206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'validator', 'public');
         INSERT INTO blockchain_versions (id, blockchain_id, blockchain_node_type_id, version) VALUES ('78d4c409-401d-491f-8c87-df7f35971bb7','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '0.0.2');
         INSERT INTO blockchain_properties VALUES ('5972a35a-333c-421f-ab64-a77f4ae17533', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'keystore-file', NULL, 'file_upload', FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
