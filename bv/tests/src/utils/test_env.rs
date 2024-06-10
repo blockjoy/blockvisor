@@ -266,14 +266,11 @@ pub async fn wait_for_node_status(
     bv_root: Option<&Path>,
 ) {
     println!("wait for {status} node");
-    let start = std::time::Instant::now();
-    while let Err(err) = try_bv_run(&["node", "status", vm_id], status, bv_root) {
-        if start.elapsed() < timeout {
-            sleep(Duration::from_secs(1)).await;
-        } else {
-            panic!("timeout expired: {err:#}")
-        }
-    }
+    wait_for_expected(
+        || try_bv_run(&["node", "status", vm_id], status, bv_root),
+        timeout,
+    )
+    .await;
 }
 
 pub async fn wait_for_job_status(
@@ -284,8 +281,16 @@ pub async fn wait_for_job_status(
     bv_root: Option<&Path>,
 ) {
     println!("wait for {status} '{job}' job");
+    wait_for_expected(
+        || try_bv_run(&["node", "job", vm_id, "info", job], status, bv_root),
+        timeout,
+    )
+    .await;
+}
+
+pub async fn wait_for_expected(call: impl Fn() -> AssertResult, timeout: Duration) {
     let start = std::time::Instant::now();
-    while let Err(err) = try_bv_run(&["node", "job", vm_id, "info", job], status, bv_root) {
+    while let Err(err) = call() {
         if start.elapsed() < timeout {
             sleep(Duration::from_secs(1)).await;
         } else {
@@ -450,7 +455,7 @@ impl ServiceConnector<EmptyStream> for EmptyStreamConnector {
 #[async_trait]
 impl CommandsStream for EmptyStream {
     async fn wait_for_pending_commands(&mut self) -> Result<Option<Vec<u8>>> {
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_secs(3)).await;
         Ok(None)
     }
 }
