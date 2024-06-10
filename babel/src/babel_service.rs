@@ -1,6 +1,6 @@
 use crate::{
     apply_babel_config, download_job::is_download_completed, jobs_manager::JobsManagerClient,
-    pal::BabelPal, utils, utils::sources_list,
+    pal::BabelPal, utils,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -8,7 +8,6 @@ use babel_api::{
     metadata::BabelConfig,
 };
 use eyre::{anyhow, ContextCompat, Result};
-use nu_glob::{Pattern, PatternError};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::RequestBuilder;
 use serde_json::json;
@@ -259,24 +258,6 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(()))
     }
 
-    async fn recommended_number_of_chunks(
-        &self,
-        request: Request<(PathBuf, Option<Vec<String>>)>,
-    ) -> Result<Response<u32>, Status> {
-        let (source, exclude) = request.into_inner();
-        let exclude = exclude
-            .unwrap_or_default()
-            .iter()
-            .map(|pattern_str| Pattern::new(pattern_str))
-            .collect::<Result<Vec<Pattern>, PatternError>>()
-            .map_err(|err| Status::invalid_argument(format!("invalid exclude pattern: {err:#}")))?;
-        Ok(Response::new(
-            estimate_nb_of_chunks(source, exclude).map_err(|err| {
-                Status::internal(format!("failed to calculate data size: {err:#}"))
-            })?,
-        ))
-    }
-
     async fn is_download_completed(&self, _request: Request<()>) -> Result<Response<bool>, Status> {
         Ok(Response::new(is_download_completed()))
     }
@@ -388,12 +369,6 @@ impl<J, P> BabelService<J, P> {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         })
     }
-}
-
-fn estimate_nb_of_chunks(source: PathBuf, exclude: Vec<Pattern>) -> Result<u32> {
-    let (total_size, _) = sources_list(&source, &exclude)?;
-    // recommended size of chunk is around 1Gb
-    Ok(1 + u32::try_from(total_size / (1024 * 1024 * 1024))?)
 }
 
 /// Takes RequestBuilder and add common http things (timeout, headers).

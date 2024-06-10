@@ -1,6 +1,6 @@
-use crate::pal::BabelEngineConnector;
 use crate::{
     chroot_platform, jobs,
+    pal::BabelEngineConnector,
     utils::{Backoff, LimitStatus},
     JOBS_MONITOR_UDS_PATH,
 };
@@ -36,23 +36,74 @@ pub trait JobRunner {
 }
 
 #[async_trait]
+pub trait Runner {
+    async fn run(&mut self, run: RunFlag) -> eyre::Result<()>;
+}
+
+#[async_trait]
 impl<T: JobRunnerImpl + Send> JobRunner for T {
     async fn run(self, mut run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus {
         if let Err(status) = self.try_run_job(run.clone(), name).await {
-            if let Err(err) = jobs::save_status(&status, name, &jobs_dir.join(jobs::STATUS_SUBDIR))
-            {
-                let err_msg = format!(
-                    "job status changed to {status:?}, but failed to save job data: {err:#}"
-                );
-                error!(err_msg);
-                let mut client = chroot_platform::UdsConnector.connect();
-                let _ = with_retry!(client.bv_error(err_msg.clone()));
-            }
+            save_job_status(&status, name, jobs_dir).await;
             run.stop();
             status
         } else {
             JobStatus::Running
         }
+    }
+}
+
+pub async fn save_job_status(status: &JobStatus, name: &str, jobs_dir: &Path) {
+    if let Err(err) = jobs::save_status(status, name, &jobs_dir.join(jobs::STATUS_SUBDIR)) {
+        let err_msg =
+            format!("job status changed to {status:?}, but failed to save job data: {err:#}");
+        error!(err_msg);
+        let mut client = chroot_platform::UdsConnector.connect();
+        let _ = with_retry!(client.bv_error(err_msg.clone()));
+    }
+}
+
+pub struct ArchiveJobRunner<T, X> {
+    pub timer: T,
+    pub restart_policy: RestartPolicy,
+    pub runner: X,
+}
+
+impl<T: AsyncTimer + Send, X: Runner + Send> ArchiveJobRunner<T, X> {
+    pub fn new(timer: T, restart_policy: RestartPolicy, xloader: X) -> Self {
+        Self {
+            timer,
+            restart_policy,
+            runner: xloader,
+        }
+    }
+
+    pub async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus {
+        <Self as JobRunner>::run(self, run, name, jobs_dir).await
+    }
+}
+
+#[async_trait]
+impl<T: AsyncTimer + Send, X: Runner + Send> JobRunnerImpl for ArchiveJobRunner<T, X> {
+    async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
+        info!("job '{name}' started");
+
+        let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
+        while run.load() {
+            backoff.start();
+            match self.runner.run(run.clone()).await {
+                Ok(_) => {
+                    let message = format!("job '{name}' finished");
+                    backoff.stopped(Some(0), message).await?;
+                }
+                Err(err) => {
+                    backoff
+                        .stopped(Some(-1), format!("job '{name}' failed with: {err:#}"))
+                        .await?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

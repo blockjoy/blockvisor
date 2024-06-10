@@ -857,10 +857,6 @@ pub mod tests {
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
-            async fn recommended_number_of_chunks(
-                &self,
-                request: Request<(PathBuf, Option<Vec<String>>)>,
-            ) -> Result<Response<u32>, Status>;
             async fn is_download_completed(
                 &self,
                 request: Request<()>,

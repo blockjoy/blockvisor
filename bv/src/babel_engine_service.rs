@@ -1,6 +1,6 @@
 use crate::{babel_engine::NodeInfo, config::SharedConfig, services};
 use async_trait::async_trait;
-use babel_api::engine::DownloadManifest;
+use babel_api::engine::{DownloadManifest, UploadManifest};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -35,6 +35,56 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
             Err(Status::internal(err.to_string()))
         } else {
             Ok(Response::new(()))
+        }
+    }
+
+    async fn get_download_manifest(
+        &self,
+        _request: Request<()>,
+    ) -> eyre::Result<Response<DownloadManifest>, Status> {
+        debug!(
+            "getting DownloadManifest from API for {}/{}",
+            self.node_info.image, self.node_info.network
+        );
+        match services::blockchain_archive::get_download_manifest(
+            &self.config,
+            self.node_info.image.clone(),
+            self.node_info.network.clone(),
+        )
+        .await
+        {
+            Err(err) => {
+                warn!("{err:#}");
+                Err(Status::internal(err.to_string()))
+            }
+            Ok(manifest) => Ok(Response::new(manifest)),
+        }
+    }
+
+    async fn get_upload_manifest(
+        &self,
+        request: Request<(u32, u32, Option<u64>)>,
+    ) -> eyre::Result<Response<UploadManifest>, Status> {
+        let (slots, url_expires_secs, data_version) = request.into_inner();
+        debug!(
+            "getting UploadManifest from API for {}/{}/{:?} with {} slots",
+            self.node_info.image, self.node_info.network, data_version, slots
+        );
+        match services::blockchain_archive::get_upload_manifest(
+            &self.config,
+            self.node_info.image.clone(),
+            self.node_info.network.clone(),
+            slots,
+            url_expires_secs,
+            data_version,
+        )
+        .await
+        {
+            Err(err) => {
+                warn!("{err:#}");
+                Err(Status::internal(err.to_string()))
+            }
+            Ok(manifest) => Ok(Response::new(manifest)),
         }
     }
 

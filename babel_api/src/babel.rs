@@ -1,3 +1,4 @@
+use crate::engine::UploadManifest;
 use crate::{
     engine::{
         DownloadManifest, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest,
@@ -65,15 +66,6 @@ pub trait Babel {
         params: String,
     );
 
-    /// Estimate recommended number of chunks for given blockchain data.
-    fn recommended_number_of_chunks(
-        /// Source directory with files to be uploaded.
-        source: PathBuf,
-        /// List of exclude patterns. Files in `source` directory that match any of pattern,
-        /// won't be taken into account.
-        exclude: Option<Vec<String>>,
-    ) -> u32;
-
     /// Checks if blockchain data has been already downloaded.
     fn is_download_completed() -> bool;
 
@@ -97,6 +89,14 @@ pub trait JobsMonitor {
 pub trait BabelEngine {
     /// Send `DownloadManifest` blueprint to API.
     fn put_download_manifest(manifest: DownloadManifest);
+    /// Send `DownloadManifest` blueprint to API.
+    fn get_download_manifest() -> DownloadManifest;
+    /// Send `DownloadManifest` blueprint to API.
+    fn get_upload_manifest(
+        slots: u32,
+        url_expires_secs: u32,
+        data_version: Option<u64>,
+    ) -> UploadManifest;
     /// Notify about finished job, so upgrade can be retried.
     fn upgrade_blocking_jobs_finished();
     /// Sent error message to blockvisord so alert can be triggered.

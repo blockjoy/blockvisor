@@ -200,10 +200,6 @@ pub enum JobType {
     RunSh(String),
     /// Download data - according to given manifest.
     Download {
-        /// Manifest to be used to download data.
-        /// If `None` BV will ask blockvisor-api for manifest
-        /// based on node `NodeImage` and `network`.  
-        manifest: Option<DownloadManifest>,
         /// Destination directory for downloaded files.
         destination: Option<PathBuf>,
         /// Maximum number of parallel opened connections.
@@ -213,11 +209,6 @@ pub enum JobType {
     },
     /// Upload data - according to given manifest.
     Upload {
-        /// Manifest to be used to upload data.
-        /// If `None` BV will ask blockvisor-api for manifest
-        /// based on node `NodeImage`, `network`, and size of data
-        /// stored in `source` directory.  
-        manifest: Option<UploadManifest>,
         /// Source directory with files to be uploaded.
         source: Option<PathBuf>,
         /// List of exclude patterns. Files in `source` directory that match any of pattern,

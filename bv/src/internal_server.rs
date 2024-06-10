@@ -719,6 +719,7 @@ where
                     operator: common::SearchOperator::And.into(),
                     id: None,
                     name: Some(protocol.clone()),
+                    display_name: None,
                 }),
                 sort: vec![],
             })

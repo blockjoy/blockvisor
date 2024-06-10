@@ -1000,7 +1000,6 @@ mod tests {
                 predicate::eq("download"),
                 predicate::eq(JobConfig {
                     job_type: babel_api::engine::JobType::Download {
-                        manifest: None,
                         destination: None,
                         max_connections: None,
                         max_runners: None,
@@ -1094,7 +1093,6 @@ mod tests {
                 predicate::eq("upload"),
                 predicate::eq(JobConfig {
                     job_type: babel_api::engine::JobType::Upload {
-                        manifest: None,
                         source: None,
                         exclude: Some(vec![
                             "**/something_to_ignore*".to_string(),

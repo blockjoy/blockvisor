@@ -1,3 +1,4 @@
+use crate::job_runner::Runner;
 /// This module implements job runner for downloading data. It downloads data according to given
 /// manifest and destination dir. In case of recoverable errors download is retried according to given
 /// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
@@ -5,17 +6,16 @@
 use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
-    job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
+    job_runner::{ConnectionPool, TransferConfig},
     jobs,
     jobs::{load_job_data, save_job_data},
     pal::BabelEngineConnector,
 };
 use async_trait::async_trait;
 use babel_api::engine::{
-    Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, JobStatus,
-    RestartPolicy,
+    Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress,
 };
-use bv_utils::{run_flag::RunFlag, timer::AsyncTimer, with_retry};
+use bv_utils::{run_flag::RunFlag, with_retry};
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
@@ -35,7 +35,7 @@ use std::{
 use tokio::sync::Semaphore;
 use tokio::task::JoinError;
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
-use tracing::{error, info};
+use tracing::error;
 
 // if downloading single part (about 100Mb) takes more than 10min, it mean that something
 // is not ok
@@ -86,80 +86,16 @@ pub fn remove_remnants(manifest: DownloadManifest, destination_dir: &Path) -> Re
     Ok(())
 }
 
-pub struct DownloadJob<T, C> {
-    downloader: Downloader<C>,
-    restart_policy: RestartPolicy,
-    timer: T,
-}
-
-struct Downloader<C> {
-    connector: C,
-    manifest: DownloadManifest,
-    destination_dir: PathBuf,
-    config: TransferConfig,
-}
-
-impl<T: AsyncTimer + Send, C: BabelEngineConnector + Copy + Send + Sync + 'static>
-    DownloadJob<T, C>
-{
-    pub fn new(
-        timer: T,
-        connector: C,
-        manifest: DownloadManifest,
-        destination_dir: PathBuf,
-        restart_policy: RestartPolicy,
-        config: TransferConfig,
-    ) -> Result<Self> {
-        Ok(Self {
-            downloader: Downloader {
-                connector,
-                manifest,
-                destination_dir,
-                config,
-            },
-            restart_policy,
-            timer,
-        })
-    }
-
-    pub async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus {
-        <Self as JobRunner>::run(self, run, name, jobs_dir).await
-    }
+pub struct Downloader<C> {
+    pub connector: C,
+    pub manifest: DownloadManifest,
+    pub destination_dir: PathBuf,
+    pub config: TransferConfig,
 }
 
 #[async_trait]
-impl<T: AsyncTimer + Send, C: BabelEngineConnector + Copy + Send + Sync + 'static> JobRunnerImpl
-    for DownloadJob<T, C>
-{
-    /// Run and restart downloader until `backoff.stopped` return `JobStatus` or job runner
-    /// is stopped explicitly.  
-    async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
-        info!("download job '{name}' started",);
-
-        let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
-        while run.load() {
-            backoff.start();
-            match self.downloader.download(run.clone()).await {
-                Ok(_) => {
-                    let message = format!("download job '{name}' finished");
-                    backoff.stopped(Some(0), message).await?;
-                }
-                Err(err) => {
-                    backoff
-                        .stopped(
-                            Some(-1),
-                            format!("download_job '{name}' failed with: {err:#}"),
-                        )
-                        .await?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<C: BabelEngineConnector + Copy + Send + Sync + 'static> Downloader<C> {
-    async fn download(&mut self, mut run: RunFlag) -> Result<()> {
+impl<C: BabelEngineConnector + Copy + Send + Sync + 'static> Runner for Downloader<C> {
+    async fn run(&mut self, mut run: RunFlag) -> Result<()> {
         let completed_path = self.config.archive_jobs_meta_dir.join(COMPLETED_FILENAME);
         if completed_path.exists() {
             // download job shall be idempotent, to avoid downloading everything again after upgrade
@@ -209,6 +145,28 @@ impl<C: BabelEngineConnector + Copy + Send + Sync + 'static> Downloader<C> {
         }
         File::create(completed_path)?;
         Ok(())
+    }
+}
+
+impl<C: BabelEngineConnector + Copy + Send + Sync + 'static> Downloader<C> {
+    pub async fn prepare(
+        connector: C,
+        destination_dir: PathBuf,
+        mut config: TransferConfig,
+    ) -> Result<Self> {
+        let manifest = connector
+            .connect()
+            .get_download_manifest(())
+            .await?
+            .into_inner();
+        manifest.validate()?;
+        config.compression = manifest.compression;
+        Ok(Self {
+            connector,
+            manifest,
+            destination_dir,
+            config,
+        })
     }
 
     fn try_resume_or_cleanup(&self) -> Result<HashSet<String>> {
@@ -734,8 +692,9 @@ mod tests {
     use super::*;
     use crate::chroot_platform::UdsConnector;
     use crate::compression::ZstdEncoder;
+    use crate::job_runner::ArchiveJobRunner;
     use assert_fs::TempDir;
-    use babel_api::engine::{Checksum, RestartConfig};
+    use babel_api::engine::{Checksum, JobStatus, RestartConfig, RestartPolicy};
     use bv_utils::timer::SysTimer;
     use mockito::{Server, ServerGuard};
     use std::fs;
@@ -775,9 +734,14 @@ mod tests {
     }
 
     impl TestEnv {
-        fn download_job(&self, manifest: DownloadManifest) -> DownloadJob<SysTimer, UdsConnector> {
-            DownloadJob {
-                downloader: Downloader {
+        fn download_job(
+            &self,
+            manifest: DownloadManifest,
+        ) -> ArchiveJobRunner<SysTimer, Downloader<UdsConnector>> {
+            ArchiveJobRunner::new(
+                SysTimer,
+                RestartPolicy::Never,
+                Downloader {
                     connector: UdsConnector,
                     manifest,
                     destination_dir: self.dest_dir.clone(),
@@ -793,9 +757,7 @@ mod tests {
                         compression: None,
                     },
                 },
-                restart_policy: RestartPolicy::Never,
-                timer: SysTimer,
-            }
+            )
         }
 
         fn url(&self, path: &str) -> Option<url::Url> {
@@ -1045,7 +1007,7 @@ mod tests {
             .with_body(compressed_chunk)
             .create();
         let mut job = test_env.download_job(manifest);
-        job.downloader.config.compression = Some(Compression::ZSTD(5));
+        job.runner.config.compression = Some(Compression::ZSTD(5));
         job.restart_policy = RestartPolicy::OnFailure(RestartConfig {
             backoff_timeout_ms: 1000,
             backoff_base_ms: 1,
@@ -1146,7 +1108,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: chunk 'first_chunk' download failed: corrupted manifest - expected at least one destination file in chunk".to_string()
+                message: "job 'name' failed with: chunk 'first_chunk' download failed: corrupted manifest - expected at least one destination file in chunk".to_string()
             },
             test_env
                 .download_job(manifest_wo_destination)
@@ -1180,7 +1142,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: chunk 'first_chunk' download failed: (decompressed) chunk size doesn't mach expected one".to_string()
+                message: "job 'name' failed with: chunk 'first_chunk' download failed: (decompressed) chunk size doesn't mach expected one".to_string()
             },
             test_env
                 .download_job(manifest_inconsistent_destination)
@@ -1223,7 +1185,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: chunk 'first_chunk' download failed: server error: received more bytes than requested"
+                message: "job 'name' failed with: chunk 'first_chunk' download failed: server error: received more bytes than requested"
                     .to_string()
             },
             test_env
@@ -1259,7 +1221,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: chunk 'second_chunk' download failed: server error: received less bytes than requested"
+                message: "job 'name' failed with: chunk 'second_chunk' download failed: server error: received less bytes than requested"
                     .to_string()
             },
             test_env
@@ -1287,7 +1249,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: chunk 'third_chunk' download failed: server responded with 501 Not Implemented"
+                message: "job 'name' failed with: chunk 'third_chunk' download failed: server responded with 501 Not Implemented"
                     .to_string()
             },
             test_env
@@ -1388,7 +1350,7 @@ mod tests {
         fs::write(test_env.dest_dir.join("second.file"), vec![1u8; 55])?;
 
         let mut job = test_env.download_job(manifest);
-        job.downloader.config.max_runners = 1;
+        job.runner.config.max_runners = 1;
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(0),
@@ -1432,7 +1394,7 @@ mod tests {
             .await
         {
             assert!(message.starts_with(&format!(
-                "download_job 'name' failed with: Can't download {} bytes of data while only",
+                "job 'name' failed with: Can't download {} bytes of data while only",
                 u64::MAX
             )));
         } else {
@@ -1474,16 +1436,15 @@ mod tests {
 
         let job = test_env.download_job(manifest);
         fs::create_dir_all(&test_env.dest_dir)?;
-        let mut perms = fs::metadata(&job.downloader.destination_dir)?.permissions();
+        let mut perms = fs::metadata(&job.runner.destination_dir)?.permissions();
         perms.set_readonly(true);
-        fs::set_permissions(&job.downloader.destination_dir, perms)?;
+        fs::set_permissions(&job.runner.destination_dir, perms)?;
 
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message:
-                    "download_job 'name' failed with: Writer error: Permission denied (os error 13)"
-                        .to_string()
+                message: "job 'name' failed with: Writer error: Permission denied (os error 13)"
+                    .to_string()
             },
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );
@@ -1590,11 +1551,11 @@ mod tests {
             .create();
 
         let mut job = test_env.download_job(manifest.clone());
-        job.downloader.config.max_runners = 1;
+        job.runner.config.max_runners = 1;
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: chunk 'second_chunk' download failed: chunk checksum mismatch - expected [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], actual [223, 133, 134, 120, 124, 112, 193, 150, 43, 123, 78, 114, 164, 121, 55, 99, 61, 88, 63, 101]".to_string()
+                message: "job 'name' failed with: chunk 'second_chunk' download failed: chunk checksum mismatch - expected [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], actual [223, 133, 134, 120, 124, 112, 193, 150, 43, 123, 78, 114, 164, 121, 55, 99, 61, 88, 63, 101]".to_string()
             },
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );
@@ -1634,7 +1595,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "download_job 'name' failed with: chunk 'first_chunk' download failed: server responded with 501 Not Implemented".to_string()
+                message: "job 'name' failed with: chunk 'first_chunk' download failed: server responded with 501 Not Implemented".to_string()
             },
             test_env.download_job(another_manifest.clone()).run(RunFlag::default(), "name", &test_env.tmp_dir).await
         );

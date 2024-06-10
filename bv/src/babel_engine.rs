@@ -43,8 +43,6 @@ use tonic::Status;
 use tracing::{debug, error, info, instrument, trace, warn, Level};
 use uuid::Uuid;
 
-const RNOC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-
 lazy_static::lazy_static! {
     static ref NON_RETRIABLE: Vec<tonic::Code> = vec![tonic::Code::Internal, tonic::Code::Cancelled,
         tonic::Code::InvalidArgument, tonic::Code::Unimplemented, tonic::Code::PermissionDenied];
@@ -457,105 +455,16 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     async fn handle_create_job(
         &mut self,
         job_name: String,
-        mut job_config: JobConfig,
+        job_config: JobConfig,
     ) -> std::result::Result<(), Error> {
         let babel_client = self.node_connection.babel_client().await?;
         if let JobType::Download { .. } = &job_config.job_type {
-            if with_retry!(babel_client.is_download_completed(()))
-                .with_context(|| "is_download_completed")?
-                .into_inner()
-            {
-                // create dummy download job if data are already there
-                job_config = JobConfig {
-                    job_type: JobType::RunSh("echo download_completed".to_string()),
-                    restart: babel_api::engine::RestartPolicy::Never,
-                    shutdown_timeout_secs: None,
-                    shutdown_signal: None,
-                    needs: None,
-                    run_as: None,
-                };
-            }
-        }
-        match &mut job_config.job_type {
-            JobType::Download { manifest, .. } => {
-                if manifest.is_none() {
-                    match services::blockchain_archive::retrieve_download_manifest(
-                        &self.api_config,
-                        self.node_info.image.clone(),
-                        self.node_info.network.clone(),
-                    )
-                    .await
-                    {
-                        Ok(retrieved_manifest) => {
-                            let _ = manifest.replace(retrieved_manifest);
-                        }
-                        Err(err) => {
-                            warn!("{err:#}");
-                            return Err(err);
-                        }
-                    }
-                } // if already set it mean that plugin use some custom manifest source - other than the API
-                if let Some(manifest) = manifest {
-                    manifest.validate()?
-                }
-            }
-            JobType::Upload {
-                manifest,
-                number_of_chunks,
-                url_expires_secs,
-                source,
-                exclude,
-                data_version,
-                ..
-            } => {
-                if manifest.is_none() {
-                    let slots = match number_of_chunks {
-                        None => {
-                            with_retry!(babel_client.recommended_number_of_chunks(with_timeout(
-                                (
-                                    source.clone().unwrap_or(
-                                        babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()
-                                    ),
-                                    exclude.clone()
-                                ),
-                                RNOC_REQUEST_TIMEOUT
-                            )))
-                            .with_context(|| "recommended_number_of_chunks")?
-                            .into_inner()
-                        }
-                        Some(slots) => *slots,
-                    };
-                    debug!(
-                        "retrieving upload manifest for {}/{}/{:?} with {} slots",
-                        self.node_info.image, self.node_info.network, data_version, slots
-                    );
-                    match services::blockchain_archive::retrieve_upload_manifest(
-                        &self.api_config,
-                        self.node_info.image.clone(),
-                        self.node_info.network.clone(),
-                        slots,
-                        // with expected upload speed at least 33MB/s
-                        // upload of one chunk (recommended 1GB size) should not take more than 30s,
-                        // but be generous and give at least 1h
-                        url_expires_secs.unwrap_or(3600 + slots * 30),
-                        *data_version,
-                    )
-                    .await
-                    {
-                        Ok(retrieved_manifest) => {
-                            let _ = manifest.replace(retrieved_manifest);
-                        }
-                        Err(err) => {
-                            warn!("{err:#}");
-                            return Err(err);
-                        }
-                    }
-                } // if already set it mean that plugin use some custom manifest source - other than the API
-                if let Some(manifest) = manifest {
-                    manifest.validate()?
-                }
-            }
-            _ => {}
+            services::blockchain_archive::has_download_manifest(
+                &self.api_config,
+                self.node_info.image.clone(),
+                self.node_info.network.clone(),
+            )
+            .await?
         }
         with_retry!(babel_client.create_job((job_name.clone(), job_config.clone())))
             .map_err(|err| self.handle_connection_errors(err))
@@ -892,10 +801,6 @@ mod tests {
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
-            async fn recommended_number_of_chunks(
-                &self,
-                request: Request<(PathBuf, Option<Vec<String>>)>,
-            ) -> Result<Response<u32>, Status>;
             async fn is_download_completed(
                 &self,
                 request: Request<()>,

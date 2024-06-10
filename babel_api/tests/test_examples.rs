@@ -263,7 +263,6 @@ fn test_plugin_config() -> eyre::Result<()> {
             predicate::eq("download"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::Download {
-                    manifest: None,
                     destination: None,
                     max_connections: Some(5),
                     max_runners: Some(8),
@@ -437,7 +436,6 @@ fn test_plugin_config() -> eyre::Result<()> {
             predicate::eq("upload"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::Upload {
-                    manifest: None,
                     source: None,
                     exclude: Some(vec![
                         "**/something_to_ignore*".to_string(),

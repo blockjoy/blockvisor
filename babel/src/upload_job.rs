@@ -4,7 +4,7 @@
 /// Backoff timeout and retry count are reset if upload continue without errors for at least `backoff_timeout_ms`.
 use crate::{
     compression::{Coder, NoCoder, ZstdEncoder},
-    job_runner::{ConnectionPool, JobBackoff, JobRunner, JobRunnerImpl, TransferConfig},
+    job_runner::{ConnectionPool, Runner, TransferConfig},
     jobs::{load_job_data, save_job_data},
     pal::BabelEngineConnector,
     utils::sources_list,
@@ -13,13 +13,12 @@ use async_trait::async_trait;
 use babel_api::{
     babel::babel_engine_client::BabelEngineClient,
     engine::{
-        Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, JobStatus,
-        RestartPolicy, UploadManifest,
+        Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, UploadManifest,
     },
 };
 use bv_utils::{
     rpc::{with_timeout, RPC_REQUEST_TIMEOUT},
-    {run_flag::RunFlag, timer::AsyncTimer, with_retry},
+    {run_flag::RunFlag, with_retry},
 };
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
@@ -35,7 +34,7 @@ use std::{
 };
 use tokio::{sync::Semaphore, task::JoinError};
 use tonic::{codegen::InterceptedService, transport::Channel};
-use tracing::{error, info};
+use tracing::error;
 
 // if uploading single chunk (about 1Gb) takes more than 100min, it mean that something
 // is not ok
@@ -56,13 +55,7 @@ pub fn cleanup_job(meta_dir: &Path) -> Result<()> {
     }
 }
 
-pub struct UploadJob<T, C> {
-    uploader: Uploader<C>,
-    restart_policy: RestartPolicy,
-    timer: T,
-}
-
-struct Uploader<C> {
+pub struct Uploader<C> {
     connector: C,
     manifest: UploadManifest,
     source_dir: PathBuf,
@@ -70,68 +63,9 @@ struct Uploader<C> {
     config: TransferConfig,
 }
 
-impl<T: AsyncTimer + Send, C: BabelEngineConnector + Send> UploadJob<T, C> {
-    pub fn new(
-        timer: T,
-        connector: C,
-        manifest: UploadManifest,
-        source_dir: PathBuf,
-        exclude: Vec<String>,
-        restart_policy: RestartPolicy,
-        config: TransferConfig,
-    ) -> Result<Self> {
-        Ok(Self {
-            uploader: Uploader {
-                connector,
-                manifest,
-                source_dir,
-                exclude: exclude
-                    .iter()
-                    .map(|pattern_str| Pattern::new(pattern_str))
-                    .collect::<Result<Vec<Pattern>, PatternError>>()?,
-                config,
-            },
-            restart_policy,
-            timer,
-        })
-    }
-
-    pub async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) -> JobStatus {
-        <Self as JobRunner>::run(self, run, name, jobs_dir).await
-    }
-}
-
 #[async_trait]
-impl<T: AsyncTimer + Send, C: BabelEngineConnector + Send> JobRunnerImpl for UploadJob<T, C> {
-    /// Run and restart uploader until `backoff.stopped` return `JobStatus` or job runner
-    /// is stopped explicitly.  
-    async fn try_run_job(mut self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
-        info!("upload job '{name}' started");
-
-        let mut backoff = JobBackoff::new(name, self.timer, run.clone(), &self.restart_policy);
-        while run.load() {
-            backoff.start();
-            match self.uploader.upload(run.clone()).await {
-                Ok(_) => {
-                    let message = format!("upload job '{name}' finished");
-                    backoff.stopped(Some(0), message).await?;
-                }
-                Err(err) => {
-                    backoff
-                        .stopped(
-                            Some(-1),
-                            format!("upload_job '{name}' failed with: {err:#}"),
-                        )
-                        .await?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<C: BabelEngineConnector> Uploader<C> {
-    async fn upload(&mut self, mut run: RunFlag) -> Result<()> {
+impl<C: BabelEngineConnector + Send> Runner for Uploader<C> {
+    async fn run(&mut self, mut run: RunFlag) -> Result<()> {
         let parts_path = self.config.archive_jobs_meta_dir.join(PARTS_FILENAME);
         let mut manifest = if let Ok(manifest) = load_job_data::<DownloadManifest>(&parts_path) {
             let resume_possible = manifest
@@ -217,6 +151,49 @@ impl<C: BabelEngineConnector> Uploader<C> {
 
         cleanup_job(&self.config.archive_jobs_meta_dir)?;
         Ok(())
+    }
+}
+
+impl<C: BabelEngineConnector> Uploader<C> {
+    pub async fn prepare(
+        connector: C,
+        source_dir: PathBuf,
+        exclude: Vec<String>,
+        number_of_chunks: Option<u32>,
+        url_expires_secs: Option<u32>,
+        data_version: Option<u64>,
+        config: TransferConfig,
+    ) -> Result<Self> {
+        let exclude = exclude
+            .iter()
+            .map(|pattern_str| Pattern::new(pattern_str))
+            .collect::<Result<Vec<Pattern>, PatternError>>()?;
+        let slots = if let Some(number_of_chunks) = number_of_chunks {
+            number_of_chunks
+        } else {
+            let (total_size, _) = sources_list(&source_dir, &exclude)?;
+            // recommended size of chunk is around 1Gb
+            1 + u32::try_from(total_size / (1024 * 1024 * 1024))?
+        };
+        let manifest = connector
+            .connect()
+            .get_upload_manifest((
+                slots, // with expected upload speed at least 33MB/s
+                // upload of one chunk (recommended 1GB size) should not take more than 30s,
+                // but be generous and give at least 1h
+                url_expires_secs.unwrap_or(3600 + slots * 30),
+                data_version,
+            ))
+            .await?
+            .into_inner();
+        manifest.validate()?;
+        Ok(Self {
+            connector,
+            manifest,
+            source_dir,
+            exclude,
+            config,
+        })
     }
 
     /// Prepare DownloadManifest blueprint with files to chunks mapping, based on provided slots.
@@ -598,10 +575,11 @@ impl<E: Coder> Iterator for DestinationsReader<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::job_runner::ArchiveJobRunner;
     use crate::utils;
     use crate::utils::tests::MockBabelEngine;
     use assert_fs::TempDir;
-    use babel_api::engine::{RestartConfig, Slot};
+    use babel_api::engine::{JobStatus, RestartConfig, RestartPolicy, Slot};
     use bv_tests_utils::rpc::TestServer;
     use bv_tests_utils::start_test_server;
     use bv_utils::timer::SysTimer;
@@ -651,9 +629,9 @@ mod tests {
         fn upload_job(
             &self,
             manifest: UploadManifest,
-        ) -> UploadJob<SysTimer, utils::tests::DummyConnector> {
-            UploadJob {
-                uploader: Uploader {
+        ) -> ArchiveJobRunner<SysTimer, Uploader<utils::tests::DummyConnector>> {
+            ArchiveJobRunner {
+                runner: Uploader {
                     connector: utils::tests::DummyConnector {
                         tmp_dir: self.tmp_dir.clone(),
                     },
@@ -962,7 +940,7 @@ mod tests {
         let server = test_env.start_engine_server(mock).await;
 
         let mut job = test_env.upload_job(test_env.dummy_upload_manifest()?);
-        job.uploader.config.compression = Some(Compression::ZSTD(5));
+        job.runner.config.compression = Some(Compression::ZSTD(5));
         job.restart_policy = RestartPolicy::OnFailure(RestartConfig {
             backoff_timeout_ms: 1000,
             backoff_base_ms: 1,
@@ -1056,7 +1034,7 @@ mod tests {
 
         let job = test_env.upload_job(test_env.dummy_upload_manifest()?);
         // mark first two as uploaded
-        let mut progress = job.uploader.prepare_blueprint()?;
+        let mut progress = job.runner.prepare_blueprint()?;
         let chunk_a = progress
             .chunks
             .iter_mut()
@@ -1080,10 +1058,7 @@ mod tests {
         ]);
         chunk_b.url = None;
         save_job_data(
-            &job.uploader
-                .config
-                .archive_jobs_meta_dir
-                .join(PARTS_FILENAME),
+            &job.runner.config.archive_jobs_meta_dir.join(PARTS_FILENAME),
             &Some(&progress),
         )?;
 
@@ -1106,7 +1081,7 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "upload_job 'name' failed with: chunk 'KeyC' upload failed: server responded with 501 Not Implemented"
+                message: "job 'name' failed with: chunk 'KeyC' upload failed: server responded with 501 Not Implemented"
                     .to_string()
             },
             test_env
@@ -1121,11 +1096,11 @@ mod tests {
     async fn test_invalid_source_dir() -> Result<()> {
         let test_env = setup_test_env()?;
         let mut job = test_env.upload_job(test_env.dummy_upload_manifest()?);
-        job.uploader.source_dir = PathBuf::from("some/invalid/source");
+        job.runner.source_dir = PathBuf::from("some/invalid/source");
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message: "upload_job 'name' failed with: IO error for operation on some/invalid/source: No such file or directory (os error 2): No such file or directory (os error 2)"
+                message: "job 'name' failed with: IO error for operation on some/invalid/source: No such file or directory (os error 2): No such file or directory (os error 2)"
                     .to_string()
             },
             job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
@@ -1141,9 +1116,8 @@ mod tests {
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(-1),
-                message:
-                    "upload_job 'name' failed with: invalid upload manifest - no slots granted"
-                        .to_string()
+                message: "job 'name' failed with: invalid upload manifest - no slots granted"
+                    .to_string()
             },
             test_env
                 .upload_job(manifest)
@@ -1170,7 +1144,7 @@ mod tests {
             ],
         };
         let job = test_env.upload_job(manifest);
-        let mut blueprint = job.uploader.prepare_blueprint()?;
+        let mut blueprint = job.runner.prepare_blueprint()?;
         normalize_manifest(&mut blueprint);
         assert_eq!(
             DownloadManifest {

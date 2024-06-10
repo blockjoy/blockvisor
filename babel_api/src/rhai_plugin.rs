@@ -1014,7 +1014,6 @@ mod tests {
                 predicate::eq("download_job_name"),
                 predicate::eq(JobConfig {
                     job_type: JobType::Download {
-                        manifest: None,
                         destination: None,
                         max_connections: None,
                         max_runners: None,

@@ -346,7 +346,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // create
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: node_name.clone(),
                     image: image.clone(),
@@ -363,7 +365,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // create with same node id
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: "some-new-name".to_string(),
                     image: image.clone(),
@@ -380,7 +384,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // create with same node name
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: failed_node_id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: node_name.clone(),
                     image: image.clone(),
@@ -397,7 +403,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // delete - this one should not be executed since previous one is expected to fail
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: failed_node_id,
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Delete(pb::NodeDelete {})),
             })),
         ],
@@ -405,7 +413,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // create with same node ip address
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: Uuid::new_v4().to_string(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: "some-new-name".to_string(),
                     image: image.clone(),
@@ -424,7 +434,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // create with invalid node ip address
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: Uuid::new_v4().to_string(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: "some-new-name".to_string(),
                     image: image.clone(),
@@ -443,7 +455,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // create with invalid gateway ip address
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: Uuid::new_v4().to_string(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Create(pb::NodeCreate {
                     name: "some-new-name".to_string(),
                     image: image.clone(),
@@ -462,43 +476,57 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // stop stopped
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Stop(pb::NodeStop {})),
             })),
             // start
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Start(pb::NodeStart {})),
             })),
             // start running
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Start(pb::NodeStart {})),
             })),
             // stop
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Stop(pb::NodeStop {})),
             })),
             // restart stopped
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Restart(pb::NodeRestart {})),
             })),
             // restart running
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Restart(pb::NodeRestart {})),
             })),
             // upgrade running
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Upgrade(pb::NodeUpgrade {
                     image: image_v2,
                 })),
@@ -508,7 +536,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // update with invalid rules
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
                     rules: vec![common::FirewallRule {
                         name: "Rule B".to_string(),
@@ -526,7 +556,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // update with too many rules
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
                     rules: rules.into_iter().cycle().take(129).collect(),
                     org_id: "org-id".to_string(),
@@ -537,7 +569,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // update firewall rules
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Update(pb::NodeUpdate {
                     rules: vec![common::FirewallRule {
                         name: "Rule A".to_string(),
@@ -553,7 +587,9 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             // delete
             cmd(pb::command::Command::Node(pb::NodeCommand {
                 node_id: id.clone(),
+                node_name: node_name.clone(),
                 host_id: host_id.clone(),
+                host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Delete(pb::NodeDelete {})),
             })),
         ],

@@ -169,6 +169,7 @@ pub async fn setup_rbac(db_url: &str) {
         ('grpc-new-host', 'auth-refresh'),
         ('grpc-new-host', 'babel-notify'),
         ('grpc-new-host', 'blockchain-archive-get-download'),
+        ('grpc-new-host', 'blockchain-archive-has-download'),
         ('grpc-new-host', 'blockchain-archive-get-upload'),
         ('grpc-new-host', 'blockchain-archive-put-download'),
         ('grpc-new-host', 'blockchain-get'),

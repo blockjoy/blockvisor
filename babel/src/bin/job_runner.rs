@@ -1,11 +1,17 @@
-use babel::chroot_platform::UdsConnector;
-use babel::pal::BabelEngineConnector;
+use babel::job_runner::save_job_status;
 use babel::{
-    download_job::DownloadJob, job_runner::TransferConfig, jobs, log_buffer::LogBuffer,
-    run_sh_job::RunShJob, upload_job::UploadJob, BABEL_LOGS_UDS_PATH,
+    chroot_platform::UdsConnector,
+    download_job::{is_download_completed, Downloader},
+    job_runner::{ArchiveJobRunner, TransferConfig},
+    jobs,
+    log_buffer::LogBuffer,
+    pal::BabelEngineConnector,
+    run_sh_job::RunShJob,
+    upload_job::Uploader,
+    BABEL_LOGS_UDS_PATH,
 };
 use babel_api::engine::{
-    Compression, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
+    Compression, JobStatus, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
 use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobType};
 use bv_utils::{logging::setup_logging, rpc::RPC_REQUEST_TIMEOUT, run_flag::RunFlag};
@@ -77,54 +83,70 @@ async fn run_job(
             );
         }
         JobType::Download {
-            manifest,
             destination,
             max_connections,
             max_runners,
         } => {
-            let Some(manifest) = manifest else {
-                bail!("missing DownloadManifest")
-            };
-            let compression = manifest.compression;
-            DownloadJob::new(
-                bv_utils::timer::SysTimer,
-                connector,
-                manifest,
-                destination.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
-                job_config.restart,
-                build_transfer_config(
+            if is_download_completed() {
+                save_job_status(
+                    &JobStatus::Finished {
+                        exit_code: Some(0),
+                        message: format!("job '{job_name}' finished"),
+                    },
                     &job_name,
-                    compression,
-                    max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
-                    max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
-                )?,
-            )?
-            .run(run, &job_name, &jobs::JOBS_DIR)
-            .await;
+                    &jobs::JOBS_DIR,
+                )
+                .await;
+            } else {
+                ArchiveJobRunner::new(
+                    bv_utils::timer::SysTimer,
+                    job_config.restart,
+                    Downloader::prepare(
+                        connector,
+                        destination
+                            .unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
+                        build_transfer_config(
+                            &job_name,
+                            None,
+                            max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
+                            max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
+                        )?,
+                    )
+                    .await?,
+                )
+                .run(run, &job_name, &jobs::JOBS_DIR)
+                .await;
+            }
         }
         JobType::Upload {
-            manifest,
             source,
             exclude,
             compression,
             max_connections,
             max_runners,
-            ..
+            number_of_chunks,
+            url_expires_secs,
+            data_version,
         } => {
-            UploadJob::new(
+            ArchiveJobRunner::new(
                 bv_utils::timer::SysTimer,
-                connector,
-                manifest.ok_or(anyhow!("missing UploadManifest"))?,
-                source.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
-                exclude.unwrap_or_default(),
                 job_config.restart,
-                build_transfer_config(
-                    &job_name,
-                    compression,
-                    max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
-                    max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
-                )?,
-            )?
+                Uploader::prepare(
+                    connector,
+                    source.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
+                    exclude.unwrap_or_default(),
+                    number_of_chunks,
+                    url_expires_secs,
+                    data_version,
+                    build_transfer_config(
+                        &job_name,
+                        compression,
+                        max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
+                        max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
+                    )?,
+                )
+                .await?,
+            )
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;
         }
