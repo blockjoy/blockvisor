@@ -1,9 +1,6 @@
 use crate::{
     config::{Config, CONFIG_PATH},
-    internal_server, linux_platform,
-    node_context::build_nodes_dir,
-    node_state::{NodeState, NODE_STATE_FILENAME},
-    nodes_manager, ServiceStatus,
+    internal_server, ServiceStatus,
 };
 use async_trait::async_trait;
 use bv_utils::{timer::Timer, with_retry};
@@ -17,7 +14,6 @@ use std::{
     {env, fs},
 };
 use sysinfo::{System, SystemExt};
-use tokio::fs::read_dir;
 use tonic::{codegen::InterceptedService, transport::Channel};
 use tracing::{debug, info, warn};
 
@@ -340,42 +336,6 @@ impl<T: Timer, S: BvService> Installer<T, S> {
             })?;
 
             // migrate config to new format if needed
-            let node_state_path = |path: &Path| {
-                if path.is_dir() {
-                    let state_path = path.join(NODE_STATE_FILENAME);
-                    if state_path.exists() {
-                        Some(state_path)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            };
-            let nodes_dir = build_nodes_dir(&self.paths.bv_root);
-            if nodes_dir.exists() {
-                let mut dir = read_dir(&nodes_dir)
-                    .await
-                    .context("failed to read nodes state dir")?;
-                let mut cpus = nodes_manager::CpuRegistry::new(linux_platform::available_cpus());
-                let mut nodes = vec![];
-                while let Ok(Some(entry)) = dir.next_entry().await {
-                    let Some(path) = node_state_path(&entry.path()) else {
-                        continue;
-                    };
-                    if let Ok(node) = NodeState::load(&path).await {
-                        if node.assigned_cpus.is_empty() {
-                            nodes.push(node);
-                        } else {
-                            cpus.mark_acquired(&node.assigned_cpus);
-                        }
-                    };
-                }
-                for mut node in nodes {
-                    node.assigned_cpus = cpus.acquire(node.requirements.vcpu_count)?;
-                    node.save(&nodes_dir).await?;
-                }
-            }
         };
 
         Ok(())
