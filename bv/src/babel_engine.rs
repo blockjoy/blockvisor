@@ -238,7 +238,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     /// Checks if node has some particular capability
-    pub fn has_capability(&mut self, method: &str) -> bool {
+    pub fn has_capability(&self, method: &str) -> bool {
         self.capabilities.iter().any(|v| v == method)
     }
 

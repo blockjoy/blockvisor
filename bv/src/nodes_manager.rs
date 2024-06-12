@@ -1722,7 +1722,7 @@ mod tests {
         );
         {
             let mut nodes_list = nodes.nodes.write().await;
-            let mut node = nodes_list.get_mut(&node_id).unwrap().write().await;
+            let node = nodes_list.get_mut(&node_id).unwrap().write().await;
             assert!(!node.state.initialized);
             assert!(!node.babel_engine.has_capability("info"));
         }

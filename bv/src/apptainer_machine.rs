@@ -1,33 +1,41 @@
-use crate::config::ApptainerConfig;
-use crate::node_env::{NodeEnv, NODE_ENV_FILE_PATH};
-use crate::services::blockchain;
-use crate::services::blockchain::ROOTFS_FILE;
-use crate::utils::{get_process_pid, GetProcessIdError};
-use crate::{node_context, node_state::NodeState, pal};
+use crate::{
+    config::ApptainerConfig,
+    node_context,
+    node_env::{NodeEnv, NODE_ENV_FILE_PATH},
+    node_state::NodeState,
+    pal,
+    services::blockchain,
+    services::blockchain::ROOTFS_FILE,
+    utils::{get_process_pid, GetProcessIdError},
+};
 use async_trait::async_trait;
 use babel_api::engine::{PosixSignal, DATA_DRIVE_MOUNT_POINT};
-use bv_utils::cmd::run_cmd;
-use bv_utils::system::{gracefully_terminate_process, is_process_running, kill_all_processes};
-use bv_utils::with_retry;
+use bv_utils::{
+    cmd::run_cmd,
+    system::{gracefully_terminate_process, is_process_running, kill_all_processes},
+    with_retry,
+};
 use eyre::{anyhow, bail, Result};
-use std::ffi::OsStr;
-use std::fmt::Debug;
-use std::net::IpAddr;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tokio::fs;
-use tokio::process::Command;
-use tokio::time::sleep;
+use std::{
+    ffi::OsStr,
+    fmt::Debug,
+    net::IpAddr,
+    path::{Path, PathBuf},
+    str::FromStr,
+    time::Duration,
+};
+use sysinfo::{Pid, PidExt};
+use tokio::{fs, process::Command};
 use tracing::{debug, error};
 use uuid::Uuid;
 
 pub const DATA_DIR: &str = "data";
 const ROOTFS_DIR: &str = "rootfs";
 const CGROUPS_CONF_FILE: &str = "cgroups.toml";
+const APPTAINER_PID_FILE: &str = "apptainer.pid";
 const JOURNAL_DIR: &str = "/run/systemd/journal";
 const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
-const BABEL_START_TIMEOUT: Duration = Duration::from_secs(3);
 const UMOUNT_RETRY_MAX: u32 = 2;
 const UMOUNT_BACKOFF_BASE_MS: u64 = 1000;
 const BABEL_BIN_PATH: &str = "/usr/bin/babel";
@@ -44,6 +52,9 @@ pub struct ApptainerMachine {
     babel_path: PathBuf,
     chroot_dir: PathBuf,
     cgroups_path: PathBuf,
+    apptainer_pid_path: PathBuf,
+    apptainer_pid: Option<Pid>,
+    babel_pid: Option<Pid>,
     data_dir: PathBuf,
     os_img_path: PathBuf,
     vm_id: Uuid,
@@ -69,6 +80,7 @@ pub async fn new(
     let node_dir = node_context::build_node_dir(bv_root, node_state.id);
     let chroot_dir = node_dir.join(ROOTFS_DIR);
     let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
+    let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
     fs::create_dir_all(&chroot_dir).await?;
     let data_dir = node_dir.join(DATA_DIR);
     fs::create_dir_all(&data_dir).await?;
@@ -86,6 +98,9 @@ pub async fn new(
         babel_path,
         chroot_dir,
         cgroups_path,
+        apptainer_pid_path,
+        apptainer_pid: None,
+        babel_pid: None,
         data_dir,
         os_img_path,
         vm_id: node_state.id,
@@ -165,16 +180,92 @@ impl ApptainerMachine {
     }
 
     pub async fn attach(self) -> Result<Self> {
-        let vm = self.create().await?;
-        if vm.is_container_running().await? {
+        let mut vm = self.create().await?;
+        if vm.apptainer_pid_path.exists() {
+            vm.load_apptainer_pid().await?;
+        }
+        if vm.is_container_running() {
             vm.stop_babel(false).await?;
             vm.start_babel().await?;
         }
         Ok(vm)
     }
 
-    async fn stop_babel(&self, force: bool) -> Result<bool> {
+    async fn load_apptainer_pid(&mut self) -> Result<()> {
+        self.apptainer_pid = Some(Pid::from_str(
+            fs::read_to_string(&self.apptainer_pid_path).await?.trim(),
+        )?);
+        Ok(())
+    }
+
+    fn is_container_running(&self) -> bool {
+        self.apptainer_pid.map(is_process_running).unwrap_or(false)
+    }
+
+    async fn stop_container(&mut self) -> Result<()> {
+        if self.is_container_running() {
+            run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &self.vm_name]).await?;
+        }
+        self.apptainer_pid = None;
+        Ok(())
+    }
+
+    async fn start_container(&mut self) -> Result<()> {
+        if !self.is_container_running() {
+            let hostname = self.vm_name.replace('_', "-");
+            let chroot_path = self.chroot_dir.to_string_lossy();
+            let cgroups_path = self.cgroups_path.to_string_lossy();
+            let apptainer_pid_path = self.apptainer_pid_path.to_string_lossy();
+            let data_path = format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT);
+            let net = format!("IP={}/{};GATEWAY={}", self.ip, self.mask_bits, self.gateway);
+            let mut args = vec![
+                "instance",
+                "run",
+                "--ipc",
+                "--cleanenv",
+                "--writable",
+                "--no-mount",
+                "home,cwd",
+                "--pid-file",
+                &apptainer_pid_path,
+                "--bind",
+                JOURNAL_DIR,
+                "--bind",
+                &data_path,
+                "--hostname",
+                &hostname,
+            ];
+            if self.config.cpu_limit || self.config.memory_limit {
+                args.push("--apply-cgroups");
+                args.push(&cgroups_path);
+            }
+            if !self.config.host_network {
+                args.append(&mut vec![
+                    "--net",
+                    "--network",
+                    "bridge",
+                    "--network-args",
+                    &net,
+                ]);
+            }
+            if let Some(extra_args) = self.config.extra_args.as_ref() {
+                args.append(&mut extra_args.iter().map(|i| i.as_str()).collect());
+            }
+            args.push(&chroot_path);
+            args.push(&self.vm_name);
+            run_cmd(APPTAINER_BIN_NAME, args).await?;
+            self.load_apptainer_pid().await?;
+        }
+        Ok(())
+    }
+
+    fn is_babel_running(&self) -> bool {
+        self.babel_pid.map(is_process_running).unwrap_or(false)
+    }
+
+    async fn stop_babel(&mut self, force: bool) -> Result<bool> {
         debug!("stop_babel for {}", self.vm_id);
+        self.babel_pid = None;
         match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
             Ok(pid) => {
                 debug!("babel for {} has PID={}", self.vm_id, pid);
@@ -208,65 +299,7 @@ impl ApptainerMachine {
         }
     }
 
-    async fn is_container_running(&self) -> Result<bool> {
-        Ok(run_cmd(APPTAINER_BIN_NAME, ["instance", "list"])
-            .await?
-            .contains(&self.vm_name))
-    }
-
-    async fn stop_container(&self) -> Result<()> {
-        if self.is_container_running().await? {
-            run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &self.vm_name]).await?;
-        }
-        Ok(())
-    }
-
-    async fn start_container(&self) -> Result<()> {
-        if !self.is_container_running().await? {
-            let hostname = self.vm_name.replace('_', "-");
-            let chroot_path = self.chroot_dir.to_string_lossy();
-            let cgroups_path = self.cgroups_path.to_string_lossy();
-            let data_path = format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT);
-            let net = format!("IP={}/{};GATEWAY={}", self.ip, self.mask_bits, self.gateway);
-            let mut args = vec![
-                "instance",
-                "run",
-                "--ipc",
-                "--cleanenv",
-                "--writable",
-                "--no-mount",
-                "home,cwd",
-                "--bind",
-                JOURNAL_DIR,
-                "--bind",
-                &data_path,
-                "--hostname",
-                &hostname,
-            ];
-            if self.config.cpu_limit || self.config.memory_limit {
-                args.push("--apply-cgroups");
-                args.push(&cgroups_path);
-            }
-            if !self.config.host_network {
-                args.append(&mut vec![
-                    "--net",
-                    "--network",
-                    "bridge",
-                    "--network-args",
-                    &net,
-                ]);
-            }
-            if let Some(extra_args) = self.config.extra_args.as_ref() {
-                args.append(&mut extra_args.iter().map(|i| i.as_str()).collect());
-            }
-            args.push(&chroot_path);
-            args.push(&self.vm_name);
-            run_cmd(APPTAINER_BIN_NAME, args).await?;
-        }
-        Ok(())
-    }
-
-    async fn start_babel(&self) -> Result<()> {
+    async fn start_babel(&mut self) -> Result<()> {
         // start babel in chroot
         fs::copy(
             &self.babel_path,
@@ -285,16 +318,9 @@ impl ApptainerMachine {
             &self.chroot_dir.to_string_lossy(),
         ]);
         debug!("start_babel for {}: '{:?}'", self.vm_id, cmd);
-        cmd.spawn()?;
-        let start = std::time::Instant::now();
-        while let Err(GetProcessIdError::NotFound) =
-            get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy())
-        {
-            if start.elapsed() < BABEL_START_TIMEOUT {
-                sleep(Duration::from_millis(100)).await;
-            } else {
-                bail!("babel start timeout expired")
-            }
+        self.babel_pid = cmd.spawn()?.id().map(Pid::from_u32);
+        if self.babel_pid.is_none() {
+            bail!("failed to start babel for {}", self.vm_id)
         }
         Ok(())
     }
@@ -340,13 +366,14 @@ async fn is_mounted(path: &Path) -> Result<bool> {
 #[async_trait]
 impl pal::VirtualMachine for ApptainerMachine {
     async fn state(&self) -> pal::VmState {
-        match self.is_container_running().await {
-            Ok(false) => pal::VmState::SHUTOFF,
-            Ok(true) => match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
-                Ok(_) => pal::VmState::RUNNING,
-                _ => pal::VmState::INVALID,
-            },
-            _ => pal::VmState::INVALID,
+        if self.is_container_running() {
+            if self.is_babel_running() {
+                pal::VmState::RUNNING
+            } else {
+                pal::VmState::INVALID
+            }
+        } else {
+            pal::VmState::SHUTOFF
         }
     }
 
@@ -383,9 +410,8 @@ impl pal::VirtualMachine for ApptainerMachine {
     }
 
     async fn recover(&mut self) -> Result<()> {
-        match self.is_container_running().await {
-            Ok(false) => self.start().await,
-            Ok(true) => match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
+        if self.is_container_running() {
+            match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
                 Ok(_) => Ok(()),
                 Err(GetProcessIdError::NotFound) => self.start_babel().await,
                 Err(GetProcessIdError::MoreThanOne) => {
@@ -397,8 +423,9 @@ impl pal::VirtualMachine for ApptainerMachine {
                     );
                     self.start_babel().await
                 }
-            },
-            _ => bail!("can't get container status for {}", self.vm_id),
+            }
+        } else {
+            self.start().await
         }
     }
 }
