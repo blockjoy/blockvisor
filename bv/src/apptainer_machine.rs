@@ -26,6 +26,7 @@ use std::{
 };
 use sysinfo::{Pid, PidExt};
 use tokio::{fs, process::Command};
+use tracing::log::warn;
 use tracing::{debug, error};
 use uuid::Uuid;
 
@@ -181,9 +182,7 @@ impl ApptainerMachine {
 
     pub async fn attach(self) -> Result<Self> {
         let mut vm = self.create().await?;
-        if vm.apptainer_pid_path.exists() {
-            vm.load_apptainer_pid().await?;
-        }
+        vm.load_apptainer_pid().await?;
         if vm.is_container_running() {
             vm.stop_babel(false).await?;
             vm.start_babel().await?;
@@ -192,9 +191,36 @@ impl ApptainerMachine {
     }
 
     async fn load_apptainer_pid(&mut self) -> Result<()> {
-        self.apptainer_pid = Some(Pid::from_str(
-            fs::read_to_string(&self.apptainer_pid_path).await?.trim(),
-        )?);
+        if self.apptainer_pid_path.exists() {
+            self.apptainer_pid = Some(Pid::from_str(
+                fs::read_to_string(&self.apptainer_pid_path).await?.trim(),
+            )?);
+        } else {
+            // fallback to `apptainer list`
+            let json: serde_json::Value = serde_json::from_str(
+                &run_cmd(
+                    APPTAINER_BIN_NAME,
+                    ["instance", "list", "--json", &self.vm_name],
+                )
+                .await?,
+            )?;
+            if let Some(pid) = json.get("instances").and_then(|instances| {
+                instances.as_array().and_then(|instances| {
+                    instances
+                        .first()
+                        .and_then(|instance| instance.get("pid").and_then(|pid| pid.as_u64()))
+                })
+            }) {
+                self.apptainer_pid = Some(Pid::from_u32(pid as u32));
+                if let Err(err) = fs::write(&self.apptainer_pid_path, format!("{pid}")).await {
+                    warn!(
+                        "failed to save container pid to file '{}': {:#}",
+                        self.apptainer_pid_path.display(),
+                        err
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
