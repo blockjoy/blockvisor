@@ -37,5 +37,6 @@ mock! {
         ) -> Result<()>;
         fn delete_task(&self, task_name: &str) -> Result<()>;
         fn is_download_completed(&self) -> Result<bool>;
+        fn has_blockchain_archive(&self) -> Result<bool>;
     }
 }

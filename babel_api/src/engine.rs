@@ -76,6 +76,8 @@ pub trait Engine {
 
     /// Checks if blockchain data has been already downloaded.
     fn is_download_completed(&self) -> Result<bool>;
+    /// Checks if blockchain archive is available.
+    fn has_blockchain_archive(&self) -> Result<bool>;
 }
 
 /// Structure describing where decompressed data shall be written to and how many bytes.

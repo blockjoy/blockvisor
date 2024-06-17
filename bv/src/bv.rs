@@ -995,6 +995,10 @@ mod tests {
             .once()
             .returning(|| Ok(false));
         babel
+            .expect_has_blockchain_archive()
+            .once()
+            .returning(|| Ok(true));
+        babel
             .expect_create_job()
             .with(
                 predicate::eq("download"),

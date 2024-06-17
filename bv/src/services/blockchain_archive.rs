@@ -92,9 +92,9 @@ pub async fn has_download_manifest(
     config: &SharedConfig,
     image: NodeImage,
     network: String,
-) -> Result<()> {
+) -> Result<bool> {
     let mut client = connect_blockchain_archive_service(config).await?;
-    if !api_with_retry!(
+    Ok(api_with_retry!(
         client,
         client.has_blockchain_archive(pb::BlockchainArchiveServiceHasBlockchainArchiveRequest {
             id: Some(image.clone().try_into()?),
@@ -103,16 +103,7 @@ pub async fn has_download_manifest(
     )
     .with_context(|| format!("cannot check download manifest for {:?}-{}", image, network))?
     .into_inner()
-    .available
-    {
-        Err(anyhow!(
-            "manifest not available for {:?}-{}",
-            image,
-            network
-        ))
-    } else {
-        Ok(())
-    }
+    .available)
 }
 
 pub async fn get_upload_manifest(

@@ -440,6 +440,16 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
+            EngineRequest::HasBlockchainArchive { response_tx } => {
+                let _ = response_tx.send(
+                    services::blockchain_archive::has_download_manifest(
+                        &self.api_config,
+                        self.node_info.image.clone(),
+                        self.node_info.network.clone(),
+                    )
+                    .await,
+                );
+            }
         }
     }
 
@@ -463,12 +473,19 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     ) -> std::result::Result<(), Error> {
         let babel_client = self.node_connection.babel_client().await?;
         if let JobType::Download { .. } = &job_config.job_type {
-            services::blockchain_archive::has_download_manifest(
+            if !services::blockchain_archive::has_download_manifest(
                 &self.api_config,
                 self.node_info.image.clone(),
                 self.node_info.network.clone(),
             )
             .await?
+            {
+                bail!(
+                    "manifest not available for {:?}-{}",
+                    self.node_info.image,
+                    self.node_info.network
+                )
+            }
         }
         with_retry!(babel_client.create_job((job_name.clone(), job_config.clone())))
             .map_err(|err| self.handle_connection_errors(err))
@@ -551,6 +568,9 @@ enum EngineRequest {
     AddTask(scheduler::Scheduled),
     DeleteTask(String),
     IsDownloadCompleted {
+        response_tx: ResponseTx<Result<bool>>,
+    },
+    HasBlockchainArchive {
         response_tx: ResponseTx<Result<bool>>,
     },
 }
@@ -704,6 +724,13 @@ impl babel_api::engine::Engine for Engine {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx
             .blocking_send(EngineRequest::IsDownloadCompleted { response_tx })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn has_blockchain_archive(&self) -> Result<bool> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .blocking_send(EngineRequest::HasBlockchainArchive { response_tx })?;
         response_rx.blocking_recv()?
     }
 }

@@ -5,7 +5,7 @@ use babel_api::{
     rhai_plugin,
 };
 use bv_tests_utils::babel_engine_mock::MockBabelEngine;
-use eyre::{bail, Context};
+use eyre::Context;
 use mockall::*;
 use std::{collections::HashMap, fs, path::Path};
 
@@ -188,7 +188,7 @@ fn test_plugin_config() -> eyre::Result<()> {
             predicate::eq("mkdir -p /opt/netdata/var/cache/netdata"),
             predicate::eq(None),
         )
-        .once()
+        .times(2)
         .returning(|_, _| {
             Ok(ShResponse {
                 exit_code: 0,
@@ -199,7 +199,7 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel
         .expect_run_sh()
         .with(predicate::eq("echo downloaded"), predicate::eq(None))
-        .once()
+        .times(2)
         .returning(|_, _| {
             Ok(ShResponse {
                 exit_code: 0,
@@ -245,15 +245,23 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: Some("some_user".to_string()),
             }),
         )
-        .once()
+        .times(2)
         .returning(|_, _| Ok(()));
     babel
         .expect_start_job()
         .with(predicate::eq("init_job"))
-        .once()
+        .times(2)
         .returning(|_| Ok(()));
     babel
         .expect_is_download_completed()
+        .times(2)
+        .returning(|| Ok(false));
+    babel
+        .expect_has_blockchain_archive()
+        .once()
+        .returning(|| Ok(true));
+    babel
+        .expect_has_blockchain_archive()
         .once()
         .returning(|| Ok(false));
 
@@ -280,11 +288,6 @@ fn test_plugin_config() -> eyre::Result<()> {
         )
         .once()
         .returning(|_, _| Ok(()));
-    babel
-        .expect_start_job()
-        .with(predicate::eq("download"))
-        .once()
-        .returning(|_| bail!("no manifest"));
 
     babel
         .expect_create_job()
@@ -310,7 +313,7 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel
         .expect_start_job()
         .with(predicate::eq("download"))
-        .once()
+        .times(2)
         .returning(|_| Ok(()));
 
     babel
@@ -326,12 +329,12 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
             }),
         )
-        .once()
+        .times(2)
         .returning(|_, _| Ok(()));
     babel
         .expect_start_job()
         .with(predicate::eq("post_download_job"))
-        .once()
+        .times(2)
         .returning(|_| Ok(()));
 
     babel
@@ -353,12 +356,12 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: Some("some_user".to_string()),
             }),
         )
-        .once()
+        .times(2)
         .returning(|_, _| Ok(()));
     babel
         .expect_start_job()
         .with(predicate::eq("blockchain_service_a"))
-        .once()
+        .times(2)
         .returning(|_| Ok(()));
 
     babel
@@ -380,12 +383,12 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
             }),
         )
-        .once()
+        .times(2)
         .returning(|_, _| Ok(()));
     babel
         .expect_start_job()
         .with(predicate::eq("blockchain_service_b"))
-        .once()
+        .times(2)
         .returning(|_| Ok(()));
     babel
         .expect_add_task()
@@ -395,7 +398,7 @@ fn test_plugin_config() -> eyre::Result<()> {
             predicate::eq("fn_name"),
             predicate::eq("param_value"),
         )
-        .once()
+        .times(2)
         .returning(|_, _, _, _| Ok(()));
 
     babel
@@ -574,6 +577,7 @@ fn test_plugin_config() -> eyre::Result<()> {
     let script = fs::read_to_string("examples/plugin_config.rhai")?;
     let plugin = rhai_plugin::RhaiPlugin::new(&script, babel)?;
 
+    plugin.init().unwrap();
     plugin.init().unwrap();
     plugin.upload().unwrap();
     assert_eq!(
