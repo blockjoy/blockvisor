@@ -70,7 +70,7 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
     /// Run and restart job child process until `backoff.stopped` return `JobStatus` or job runner
     /// is stopped explicitly.  
     async fn try_run_job(self, mut run: RunFlag, name: &str) -> Result<(), JobStatus> {
-        let (cmd_name, args) = utils::bv_shell(&self.sh_body);
+        let (cmd_name, args) = utils::bv_shell(self.sh_body.trim());
         let mut cmd = Command::new(cmd_name);
         cmd.args(args.clone())
             .stdout(Stdio::piped())

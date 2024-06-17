@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use sysinfo::{
     Disk, DiskExt, Pid, Process, ProcessExt, ProcessRefreshKind, Signal, System, SystemExt,
 };
+use tracing::log::debug;
 
 const PROCESS_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -48,6 +49,7 @@ pub fn is_process_running(pid: Pid) -> bool {
 
 /// Kill all processes that match `cmd` and passed `args`.
 pub fn kill_all_processes(cmd: &str, args: &[&str], timeout: Duration, signal: PosixSignal) {
+    debug!("kill_all_processes '{cmd} {args:?}");
     let mut sys = System::new();
     sys.refresh_processes();
     let ps = sys.processes();
@@ -67,11 +69,16 @@ fn kill_process_tree(
     timeout: Duration,
     signal: Signal,
 ) {
+    debug!("killing process {} with {signal:?}", proc.pid());
     // Better to kill parent first, since it may implement some child restart mechanism.
     // Try to interrupt the process, and kill it after timeout in case it has not finished.
     proc.kill_with(signal);
     while is_process_running(proc.pid()) {
         if now.elapsed() > timeout {
+            debug!(
+                "{signal:?} failed (timeout expired) - force kill {}",
+                proc.pid()
+            );
             proc.kill();
             proc.wait();
             break;

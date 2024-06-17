@@ -25,13 +25,11 @@ fn bv_user() -> Option<String> {
 ///
 /// If we want to run as custom user, we will be using `su`, otherwise just `sh`
 pub fn bv_shell(body: &str) -> (&str, Vec<String>) {
+    let body = body.trim().to_owned();
     if let Some(user) = bv_user() {
-        (
-            "su",
-            vec!["-".to_owned(), user, "-c".to_owned(), body.to_owned()],
-        )
+        ("su", vec!["-".to_owned(), user, "-c".to_owned(), body])
     } else {
-        ("sh", vec!["-c".to_owned(), body.to_owned()])
+        ("sh", vec!["-c".to_owned(), body])
     }
 }
 
