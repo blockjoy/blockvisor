@@ -274,6 +274,8 @@ pub struct JobConfig {
     pub needs: Option<Vec<String>>,
     /// Run job as a different user.
     pub run_as: Option<String>,
+    /// Capacity of log buffer (in lines).
+    pub log_buffer_capacity_ln: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

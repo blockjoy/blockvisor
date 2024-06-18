@@ -173,13 +173,6 @@ pub enum NodeCommand {
         yes: bool,
     },
 
-    /// Display node jobs logs
-    #[clap(alias = "l")]
-    Logs {
-        /// Node id or name. BV tries to get it from workspace if not provided.
-        id_or_name: Option<String>,
-    },
-
     /// Get node status
     Status {
         /// One or more node id or names.

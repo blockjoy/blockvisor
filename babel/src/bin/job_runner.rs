@@ -8,22 +8,22 @@ use babel::{
     pal::BabelEngineConnector,
     run_sh_job::RunShJob,
     upload_job::Uploader,
-    BABEL_LOGS_UDS_PATH,
 };
+use babel_api::engine::JobType;
 use babel_api::engine::{
     Compression, JobStatus, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
-use babel_api::{babel::logs_collector_client::LogsCollectorClient, engine::JobType};
-use bv_utils::{logging::setup_logging, rpc::RPC_REQUEST_TIMEOUT, run_flag::RunFlag};
+use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::{anyhow, bail};
+use std::io::Write;
+use std::path::PathBuf;
 use std::{env, fs, time::Duration};
 use tokio::join;
 use tracing::info;
 
 /// Logs are forwarded asap to log server, so we don't need big buffer, only to buffer logs during some
 /// temporary log server unavailability (e.g. while updating).
-const LOG_BUFFER_CAPACITY_LN: usize = 1024;
-const LOG_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const DEFAULT_LOG_BUFFER_CAPACITY_LN: usize = 1024;
 const DEFAULT_MAX_DOWNLOAD_CONNECTIONS: usize = 3;
 const DEFAULT_MAX_UPLOAD_CONNECTIONS: usize = 3;
 const DEFAULT_MAX_RUNNERS: usize = 8;
@@ -60,8 +60,19 @@ async fn run_job(
     ))?;
     match job_config.job_type {
         JobType::RunSh(body) => {
-            let log_buffer = LogBuffer::new(LOG_BUFFER_CAPACITY_LN);
-            let log_handler = run_log_handler(run.clone(), log_buffer.subscribe());
+            let log_buffer = LogBuffer::new(DEFAULT_LOG_BUFFER_CAPACITY_LN);
+            let logs_dir = jobs::JOBS_DIR.join(jobs::LOGS_SUBDIR);
+            if !logs_dir.exists() {
+                fs::create_dir_all(&logs_dir)?;
+            }
+            let log_handler = run_log_handler(
+                run.clone(),
+                log_buffer.subscribe(),
+                logs_dir.join(&job_name),
+                job_config
+                    .log_buffer_capacity_ln
+                    .unwrap_or(DEFAULT_LOG_BUFFER_CAPACITY_LN),
+            );
             join!(
                 RunShJob::new(
                     bv_utils::timer::SysTimer,
@@ -175,21 +186,19 @@ fn build_transfer_config(
 async fn run_log_handler(
     mut log_run: RunFlag,
     mut log_rx: tokio::sync::broadcast::Receiver<String>,
+    path: PathBuf,
+    capacity: usize,
 ) {
-    let mut client = LogsCollectorClient::with_interceptor(
-        bv_utils::rpc::build_socket_channel(BABEL_LOGS_UDS_PATH),
-        bv_utils::rpc::DefaultTimeout(RPC_REQUEST_TIMEOUT),
+    let mut log_file = file_rotate::FileRotate::new(
+        path,
+        file_rotate::suffix::AppendCount::new(2),
+        file_rotate::ContentLimit::Lines(capacity),
+        file_rotate::compression::Compression::OnRotate(0),
+        None,
     );
-
     while log_run.load() {
         if let Some(Ok(log)) = log_run.select(log_rx.recv()).await {
-            while client.send_log(log.clone()).await.is_err() {
-                // try to send log every 1s - log server may be temporarily unavailable
-                log_run.select(tokio::time::sleep(LOG_RETRY_INTERVAL)).await;
-                if !log_run.load() {
-                    break;
-                }
-            }
+            let _ = log_file.write_all(log.as_bytes());
         }
     }
 }

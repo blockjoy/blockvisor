@@ -155,18 +155,6 @@
 				"type": "f5anything"
 			},
 			{
-				"command": "bv node logs",
-				"name": "node logs",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "bv node babel-logs",
-				"name": "node babel-logs",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
 				"command": "bv node status",
 				"name": "node status",
 				"request": "launch",

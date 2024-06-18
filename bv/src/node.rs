@@ -861,11 +861,6 @@ pub mod tests {
                 &self,
                 request: Request<()>,
             ) -> Result<Response<bool>, Status>;
-            type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
-            async fn get_logs(
-                &self,
-                _request: Request<()>,
-            ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
         }
     }
 

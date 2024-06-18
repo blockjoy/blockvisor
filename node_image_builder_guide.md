@@ -101,7 +101,7 @@ Additionally `babel.rhai` symbolic link is created. It points to rhai script ins
 __HINT 2__: You can check what blockvisor is doing on the host by running `journalctl -u blockvisor -fn 50`.
 
 __HINT 3__: The `bv node create` command copy RHAI script from active image (e.g. `/var/lib/blockvisor/images/example/node/1.2.3/babel.rhai`)
-to `/var/lib/blockvisor/nodes/<image_id>.rhai`. Hence, editing `babel.rhai` from image won't affect created node.
+to `/var/lib/blockvisor/nodes/<image_id>/babel.rhai`. Hence, editing `babel.rhai` from image won't affect created node.
 
 __HINT 4__: When using standard (not `dev`) BV bundle, it is recommended to use `--standalone` flag,
 while adding support for a new node. All commands, run on a node created in standalone mode, will bypass the API.
@@ -152,10 +152,10 @@ Also make sure that following tools, required by Babel, are available:
 
 ### Implementing/Customizing Babel Plugin for New Blockchain
 
-Once you've created the node, you should be able to find it's rhai script in `/var/lib/blockvisor/nodes/<node_id>.rhai`.
-This file is automatically symlinked into workspace dir as `babel.rhai`.
+Once you've created the node, you should be able to find it's rhai script in `<workspace>/node/babel.rhai`.
+Whole node directory is automatically symlinked into workspace dir as `node`.
 
-__WARNING__: Pay attention to what you're editing - Rhai scripts in `/var/lib/blockvisor/nodes/<node_id>.rhai`
+__WARNING__: Pay attention to what you're editing - Rhai scripts in `/var/lib/blockvisor/nodes/<node_id>/babel.rhai`
 are what's actually running on the nodes, not the ones in `/var/lib/blockvisor/images`.
 <br>It is strongly recommended to use VS Code and workspace with auto-generated symlinks to avoid misuse. 
 

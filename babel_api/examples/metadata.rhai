@@ -53,9 +53,6 @@ const METADATA = #{
 
     // Configuration of Babel - agent running inside VM.
     babel_config: #{
-        // Capacity of log buffer (in lines).
-        log_buffer_capacity_ln: 1024,
-
         // Size of swap file created on the node, in MB.
         swap_size_mb: 512,
 

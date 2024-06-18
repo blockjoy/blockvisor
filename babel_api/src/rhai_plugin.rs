@@ -1015,6 +1015,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["needed".to_string()]),
                     run_as: Some("some_user".to_string()),
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1037,6 +1038,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: None,
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1413,6 +1415,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["some".to_string()]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 })),
             )
             .once()
@@ -1450,6 +1453,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["some".to_string(), UPLOAD_JOB_NAME.to_string()]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 })),
             )
             .once()
@@ -1472,6 +1476,7 @@ mod tests {
                         shutdown_signal: None,
                         run_as: Some("some_user".to_string()),
                         use_blockchain_data: true,
+                        log_buffer_capacity_ln: None,
                     },
                     vec!["post_upload_job".to_string()],
                 )),
@@ -1559,6 +1564,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec![]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 })),
             )
             .once()
@@ -1585,6 +1591,7 @@ mod tests {
                         run_sh: "alternative download".to_string(),
                         restart_config: None,
                         run_as: None,
+                        log_buffer_capacity_ln: None,
                     },
                     vec!["init_job".to_string()],
                 )),
@@ -1608,6 +1615,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["some".to_string(), DOWNLOAD_JOB_NAME.to_string()]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 })),
             )
             .once()
@@ -1630,6 +1638,7 @@ mod tests {
                         shutdown_signal: None,
                         run_as: None,
                         use_blockchain_data: true,
+                        log_buffer_capacity_ln: None,
                     },
                     vec!["post_download_job".to_string()],
                 )),
@@ -1654,6 +1663,7 @@ mod tests {
                         shutdown_signal: None,
                         run_as: None,
                         use_blockchain_data: false,
+                        log_buffer_capacity_ln: None,
                     },
                     vec![],
                 )),
@@ -1836,7 +1846,6 @@ fn any_function() {}
             ]),
             min_babel_version: "0.0.9".to_string(),
             babel_config: BabelConfig {
-                log_buffer_capacity_ln: 1024,
                 swap_size_mb: 1024,
                 swap_file_location: "/swapfile".to_string(),
                 ramdisks: Some(vec![RamdiskConfiguration {

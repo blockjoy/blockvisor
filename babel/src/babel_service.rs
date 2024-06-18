@@ -12,16 +12,10 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::RequestBuilder;
 use serde_json::json;
 use std::str::FromStr;
-use std::{
-    mem,
-    ops::{Deref, DerefMut},
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{ops::Deref, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     fs,
-    sync::{broadcast, oneshot, Mutex, RwLock},
+    sync::{broadcast, oneshot, RwLock},
 };
 use tonic::{Request, Response, Status, Streaming};
 
@@ -35,14 +29,8 @@ pub type JobRunnerLock = Arc<RwLock<Option<u32>>>;
 pub type LogsTx = oneshot::Sender<broadcast::Sender<String>>;
 pub type LogsRx = broadcast::Receiver<String>;
 
-pub enum BabelServiceState {
-    NotReady(LogsTx),
-    Ready(LogsRx),
-}
-
 pub struct BabelService<J, P> {
     inner: reqwest::Client,
-    state: Arc<Mutex<BabelServiceState>>,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: PathBuf,
     /// jobs manager client used to work with jobs
@@ -81,21 +69,6 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .setup_node()
             .await
             .map_err(|err| Status::internal(format!("failed to setup node with: {err:#}")))?;
-
-        let mut state = self.state.lock().await;
-        if let BabelServiceState::NotReady(_) = state.deref() {
-            // setup logs_server
-            let (logs_broadcast_tx, logs_rx) = broadcast::channel(config.log_buffer_capacity_ln);
-            if let BabelServiceState::NotReady(logs_tx) =
-                mem::replace(state.deref_mut(), BabelServiceState::Ready(logs_rx))
-            {
-                logs_tx
-                    .send(logs_broadcast_tx)
-                    .map_err(|_| Status::internal("failed to setup logs_server"))?;
-            } else {
-                unreachable!()
-            }
-        }
         self.jobs_manager
             .startup()
             .await
@@ -261,26 +234,6 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
     async fn is_download_completed(&self, _request: Request<()>) -> Result<Response<bool>, Status> {
         Ok(Response::new(is_download_completed()))
     }
-
-    type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
-
-    async fn get_logs(
-        &self,
-        _request: Request<()>,
-    ) -> Result<Response<Self::GetLogsStream>, Status> {
-        let mut logs = Vec::default();
-        if let BabelServiceState::Ready(rx) = self.state.lock().await.deref_mut() {
-            loop {
-                match rx.try_recv() {
-                    Ok(log) => logs.push(Ok(log)),
-                    Err(broadcast::error::TryRecvError::Lagged(_)) => {}
-                    Err(_) => break,
-                }
-            }
-        }
-        let stream = tokio_stream::iter(logs);
-        Ok(Response::new(stream))
-    }
 }
 
 fn to_blockchain_err(err: eyre::Error) -> Status {
@@ -294,7 +247,6 @@ impl<J, P> BabelService<J, P> {
         jobs_manager: J,
         babel_cfg_path: PathBuf,
         pal: P,
-        state: BabelServiceState,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
@@ -302,7 +254,6 @@ impl<J, P> BabelService<J, P> {
 
         Ok(Self {
             inner: client,
-            state: Arc::new(Mutex::new(state)),
             job_runner_lock,
             job_runner_bin_path,
             jobs_manager,
@@ -403,7 +354,6 @@ mod tests {
     use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
     use babel_api::metadata::RamdiskConfiguration;
     use bv_tests_utils::start_test_server;
-    use futures::StreamExt;
     use mockall::*;
     use serde_json::json;
     use std::env::temp_dir;
@@ -471,7 +421,6 @@ mod tests {
         job_runner_path: PathBuf,
         job_runner_lock: JobRunnerLock,
         client: BabelClient<Channel>,
-        logs_rx: oneshot::Receiver<broadcast::Sender<String>>,
         server: bv_tests_utils::rpc::TestServer,
     }
 
@@ -482,7 +431,6 @@ mod tests {
         let babel_cfg_path = tmp_root.join("babel.cfg");
         let job_runner_lock = Arc::new(RwLock::new(None));
         let client = test_client(&tmp_root)?;
-        let (logs_tx, logs_rx) = oneshot::channel();
         let mut jobs_manager_mock = MockJobsManager::new();
         jobs_manager_mock.expect_startup().returning(|| Ok(()));
         let babel_service = BabelService::new(
@@ -491,7 +439,6 @@ mod tests {
             jobs_manager_mock,
             babel_cfg_path,
             DummyPal,
-            BabelServiceState::NotReady(logs_tx),
         )?;
         let server = start_test_server!(
             &tmp_root,
@@ -502,20 +449,17 @@ mod tests {
             job_runner_path,
             job_runner_lock,
             client,
-            logs_rx,
             server,
         })
     }
 
     fn build_babel_service_with_defaults() -> Result<BabelService<MockJobsManager, DummyPal>> {
-        let (_tx, rx) = broadcast::channel(1);
         BabelService::new(
             Arc::new(Default::default()),
             Default::default(),
             MockJobsManager::new(),
             Default::default(),
             DummyPal,
-            BabelServiceState::Ready(rx),
         )
     }
 
@@ -661,14 +605,12 @@ mod tests {
         let job_runner_bin_path = TempDir::new().unwrap().join("job_runner");
         let job_runner_lock = Arc::new(RwLock::new(None));
 
-        let (_, rx) = broadcast::channel(1);
         let service = BabelService::new(
             job_runner_lock.clone(),
             job_runner_bin_path,
             MockJobsManager::new(),
             Default::default(),
             DummyPal,
-            BabelServiceState::Ready(rx),
         )?;
 
         assert_eq!(
@@ -762,51 +704,6 @@ mod tests {
             .await
             .unwrap_err();
 
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_logs() -> Result<()> {
-        let mut test_env = setup_test_env()?;
-
-        let mut stream = test_env.client.get_logs(()).await?.into_inner();
-
-        let mut logs = Vec::<String>::default();
-        while let Some(Ok(log)) = stream.next().await {
-            logs.push(log);
-        }
-
-        assert_eq!(Vec::<String>::default(), logs);
-
-        test_env
-            .client
-            .setup_babel(BabelConfig {
-                log_buffer_capacity_ln: 10,
-                swap_size_mb: 16,
-                swap_file_location: "/swapfile".to_string(),
-                ramdisks: None,
-            })
-            .await?;
-        let logs_tx = test_env.logs_rx.await?;
-        logs_tx
-            .send("log1".to_string())
-            .expect("failed to send log");
-        logs_tx
-            .send("log2".to_string())
-            .expect("failed to send log");
-        logs_tx
-            .send("log3".to_string())
-            .expect("failed to send log");
-
-        let mut stream = test_env.client.get_logs(()).await?.into_inner();
-
-        let mut logs = Vec::<String>::default();
-        while let Some(Ok(log)) = stream.next().await {
-            logs.push(log);
-        }
-
-        assert_eq!(vec!["log1", "log2", "log3"], logs);
-        test_env.server.assert().await;
         Ok(())
     }
 }

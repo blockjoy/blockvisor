@@ -20,6 +20,7 @@ lazy_static::lazy_static! {
 
 pub const CONFIG_SUBDIR: &str = "config";
 pub const STATUS_SUBDIR: &str = "status";
+pub const LOGS_SUBDIR: &str = "logs";
 pub const LOG_EXPIRE_DAYS: i64 = 1;
 pub const MAX_JOB_LOGS: usize = 1024;
 pub const MAX_LOG_ENTRY_LEN: usize = 1024;

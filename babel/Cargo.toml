@@ -26,6 +26,7 @@ bv_utils = { version = "*", path = "../bv_utils" }
 chrono = "0.4.24"
 crc = "3.0.0"
 eyre = "0.6.8"
+file-rotate = "0.7.6"
 futures = "0.3.25"
 futures-util = "0.3.28"
 gjson = "0.8"

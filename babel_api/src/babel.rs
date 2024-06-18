@@ -68,15 +68,6 @@ pub trait Babel {
 
     /// Checks if blockchain data has been already downloaded.
     fn is_download_completed() -> bool;
-
-    /// Get logs gathered from jobs.
-    #[server_streaming]
-    fn get_logs() -> String;
-}
-
-#[tonic_rpc::tonic_rpc(bincode)]
-pub trait LogsCollector {
-    fn send_log(log: String);
 }
 
 #[tonic_rpc::tonic_rpc(bincode)]

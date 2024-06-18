@@ -22,6 +22,10 @@ fn init() {
 
         /// [optional] Run job as a different user.
         run_as: "some_user",
+
+        /// [optional] Capacity of log buffer (in lines).
+        /// If not set default to 1024.
+        log_buffer_capacity_ln: 2048,
     };
     create_job("job_name_A", job_config_A);
 

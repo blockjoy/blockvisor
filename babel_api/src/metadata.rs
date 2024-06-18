@@ -54,8 +54,6 @@ pub struct BlockchainMetadata {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BabelConfig {
-    /// Capacity of log buffer (in lines).
-    pub log_buffer_capacity_ln: usize,
     /// Size of swap file created on the node, in MB.
     pub swap_size_mb: u64,
     /// Location of swap file.

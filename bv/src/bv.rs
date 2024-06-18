@@ -257,15 +257,6 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 }
             }
         }
-        NodeCommand::Logs { id_or_name } => {
-            let id = client
-                .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
-                .await?;
-            let logs = client.get_node_logs(id).await?;
-            for log in logs.into_inner() {
-                print!("{log}");
-            }
-        }
         NodeCommand::Status { id_or_names } => {
             for id_or_name in node_ids_with_fallback(id_or_names, true)? {
                 let id = client.resolve_id_or_name(&id_or_name).await?;
@@ -980,6 +971,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec![]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .once()
@@ -1017,6 +1009,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["init_job".to_string()]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .once()
@@ -1044,6 +1037,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["download".to_string()]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .once()
@@ -1071,6 +1065,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["download".to_string()]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .once()
@@ -1119,6 +1114,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec![]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .once()
@@ -1146,6 +1142,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["upload".to_string()]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .once()
@@ -1173,6 +1170,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["upload".to_string()]),
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 }),
             )
             .once()

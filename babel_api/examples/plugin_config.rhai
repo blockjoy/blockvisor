@@ -53,6 +53,9 @@ const PLUGIN_CONFIG = #{
                 needs: ["other_init_job_name"],
                 /// [optional] Run job as a different user.
                 run_as: "some_user",
+                /// [optional] Capacity of log buffer (in lines).
+                /// If not set default to 1024.
+                log_buffer_capacity_ln: 512,
             }
         ]
     },
@@ -93,6 +96,9 @@ const PLUGIN_CONFIG = #{
             /// is finished. They are also stopped while uploading blockchain archive.
             /// If not set default to true.
             use_blockchain_data: true,
+            /// [optional] Capacity of log buffer (in lines).
+            /// If not set default to 1024.
+            log_buffer_capacity_ln: 2048,
         },
         #{
             name: "blockchain_service_b",
@@ -134,6 +140,9 @@ const PLUGIN_CONFIG = #{
         },
         /// [optional] Run job as a different user.
         run_as: "some_user",
+        /// [optional] Capacity of log buffer (in lines).
+        /// If not set default to 1024.
+        log_buffer_capacity_ln: 512,
     },
     /// [optional] post-download sh jobs, to be started after download
     post_download: [

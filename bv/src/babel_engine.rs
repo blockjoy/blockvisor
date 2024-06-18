@@ -29,7 +29,6 @@ use bv_utils::{
     {run_flag::RunFlag, with_retry},
 };
 use eyre::{bail, Error, Result, WrapErr};
-use futures_util::StreamExt;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -274,17 +273,6 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         let babel_client = self.node_connection.babel_client().await?;
         with_retry!(babel_client.cleanup_job(name.to_owned()))?;
         Ok(())
-    }
-
-    /// Returns the list of logs from blockchain jobs.
-    pub async fn get_logs(&mut self) -> Result<Vec<String>> {
-        let client = self.node_connection.babel_client().await?;
-        let mut resp = with_retry!(client.get_logs(()))?.into_inner();
-        let mut logs = Vec::<String>::default();
-        while let Some(Ok(log)) = resp.next().await {
-            logs.push(log);
-        }
-        Ok(logs)
     }
 
     /// Clone plugin, move it to separate thread and call given function `f` on it.
@@ -836,11 +824,6 @@ mod tests {
                 &self,
                 request: Request<()>,
             ) -> Result<Response<bool>, Status>;
-            type GetLogsStream = tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>;
-            async fn get_logs(
-                &self,
-                _request: Request<()>,
-            ) -> Result<Response<tokio_stream::Iter<std::vec::IntoIter<Result<String, Status>>>>, Status>;
         }
     }
 
@@ -912,6 +895,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: None,
                     run_as: None,
+                    log_buffer_capacity_ln: None,
                 },
             )?;
             self.engine.start_job(name)?;

@@ -74,6 +74,8 @@ pub struct Job {
     pub needs: Option<Vec<String>>,
     /// Run job as a different user.
     pub run_as: Option<String>,
+    /// Capacity of log buffer (in lines).
+    pub log_buffer_capacity_ln: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -100,6 +102,8 @@ pub struct Service {
     /// Default to true if not set.
     #[serde(default = "default_use_blockchain_data")]
     pub use_blockchain_data: bool,
+    /// Capacity of log buffer (in lines).
+    pub log_buffer_capacity_ln: Option<usize>,
 }
 fn default_use_blockchain_data() -> bool {
     true
@@ -123,6 +127,8 @@ pub struct AlternativeDownload {
     pub restart_config: Option<RestartConfig>,
     /// Run job as a different user.
     pub run_as: Option<String>,
+    /// Capacity of log buffer (in lines).
+    pub log_buffer_capacity_ln: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -168,6 +174,7 @@ pub fn build_job_config(job: Job) -> JobConfig {
         shutdown_signal: job.shutdown_signal,
         needs: job.needs,
         run_as: job.run_as,
+        log_buffer_capacity_ln: job.log_buffer_capacity_ln,
     }
 }
 
@@ -191,6 +198,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
             shutdown_signal: None,
             needs: Some(init_jobs),
             run_as: None,
+            log_buffer_capacity_ln: None,
         }
     } else {
         JobConfig {
@@ -204,6 +212,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
             shutdown_signal: None,
             needs: Some(init_jobs),
             run_as: None,
+            log_buffer_capacity_ln: None,
         }
     }
 }
@@ -223,6 +232,7 @@ pub fn build_alternative_download_job_config(
         shutdown_signal: None,
         needs: Some(init_jobs),
         run_as: alternative_download.run_as,
+        log_buffer_capacity_ln: alternative_download.log_buffer_capacity_ln,
     }
 }
 
@@ -242,6 +252,7 @@ pub fn build_service_job_config(service: Service, needs: Vec<String>) -> JobConf
             None
         },
         run_as: service.run_as,
+        log_buffer_capacity_ln: service.log_buffer_capacity_ln,
     }
 }
 
@@ -275,6 +286,7 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
             shutdown_signal: None,
             needs: Some(pre_upload_jobs),
             run_as: None,
+            log_buffer_capacity_ln: None,
         }
     } else {
         JobConfig {
@@ -293,6 +305,7 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
             shutdown_signal: None,
             needs: Some(pre_upload_jobs),
             run_as: None,
+            log_buffer_capacity_ln: None,
         }
     }
 }

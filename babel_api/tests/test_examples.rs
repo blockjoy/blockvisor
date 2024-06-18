@@ -221,6 +221,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: Some(babel_api::engine::PosixSignal::SIGINT),
                 needs: Some(vec!["other_init_job_name".to_string()]),
                 run_as: Some("some_user".to_string()),
+                log_buffer_capacity_ln: Some(512),
             }),
         )
         .times(2)
@@ -262,6 +263,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: None,
                 needs: Some(vec!["init_job".to_string()]),
                 run_as: None,
+                log_buffer_capacity_ln: None,
             }),
         )
         .once()
@@ -284,6 +286,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: None,
                 needs: Some(vec!["init_job".to_string()]),
                 run_as: Some("some_user".to_string()),
+                log_buffer_capacity_ln: Some(512),
             }),
         )
         .once()
@@ -305,6 +308,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: None,
                 needs: Some(vec!["download".to_string()]),
                 run_as: None,
+                log_buffer_capacity_ln: None,
             }),
         )
         .times(2)
@@ -332,6 +336,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: Some(babel_api::engine::PosixSignal::SIGINT),
                 needs: Some(vec!["post_download_job".to_string()]),
                 run_as: Some("some_user".to_string()),
+                log_buffer_capacity_ln: Some(2048),
             }),
         )
         .times(2)
@@ -359,6 +364,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: None,
                 needs: Some(vec!["post_download_job".to_string()]),
                 run_as: None,
+                log_buffer_capacity_ln: None,
             }),
         )
         .times(2)
@@ -401,6 +407,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: None,
                 needs: Some(vec![]),
                 run_as: None,
+                log_buffer_capacity_ln: None,
             }),
         )
         .once()
@@ -439,6 +446,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: None,
                 needs: Some(vec!["pre_upload_job".to_string()]),
                 run_as: None,
+                log_buffer_capacity_ln: None,
             }),
         )
         .once()
@@ -462,6 +470,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: None,
                 needs: Some(vec!["upload".to_string()]),
                 run_as: None,
+                log_buffer_capacity_ln: None,
             }),
         )
         .once()
@@ -489,6 +498,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: Some(babel_api::engine::PosixSignal::SIGINT),
                 needs: Some(vec!["post_upload_job".to_string()]),
                 run_as: Some("some_user".to_string()),
+                log_buffer_capacity_ln: Some(2048),
             }),
         )
         .once()
@@ -516,6 +526,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 shutdown_signal: None,
                 needs: Some(vec!["post_upload_job".to_string()]),
                 run_as: None,
+                log_buffer_capacity_ln: None,
             }),
         )
         .once()

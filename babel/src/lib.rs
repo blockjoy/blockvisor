@@ -9,7 +9,6 @@ pub mod job_runner;
 pub mod jobs;
 pub mod jobs_manager;
 pub mod log_buffer;
-pub mod logs_service;
 pub mod pal;
 pub mod run_sh_job;
 pub mod upload_job;
@@ -22,7 +21,6 @@ use tokio::fs;
 use tonic::{codegen::InterceptedService, transport::Channel};
 use tracing::info;
 
-pub const BABEL_LOGS_UDS_PATH: &str = "/var/lib/babel/logs.socket";
 pub const JOBS_MONITOR_UDS_PATH: &str = "/var/lib/babel/jobs_monitor.socket";
 const POST_SETUP_SCRIPT: &str = "/var/lib/babel/post_setup.sh";
 

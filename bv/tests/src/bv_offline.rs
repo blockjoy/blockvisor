@@ -6,7 +6,9 @@ use crate::src::utils::{
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::{
+    apptainer_machine::build_rootfs_dir,
     config::{Config, SharedConfig},
+    node_context::build_node_dir,
     nodes_manager::NodesManager,
     services,
     services::api::{self, common, pb},
@@ -117,6 +119,13 @@ async fn test_bv_cmd_jobs() -> Result<()> {
             panic!("timeout expired: {err:#}")
         }
     }
+
+    assert!(fs::read_to_string(
+        build_rootfs_dir(&build_node_dir(&test_env.bv_root, Uuid::parse_str(vm_id)?))
+            .join("var/lib/babel/jobs/logs/upload"),
+    )
+    .await?
+    .contains("upload|dummy_upload"));
 
     let _ = test_env.sh_inside(vm_id, "touch /var/lib/babel/jobs/status/upload.parts");
     println!("cleanup job");

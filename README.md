@@ -69,13 +69,14 @@ used during debugging issues, not printed by default
 - `/usr/bin/babel_job_runner`
 - `/etc/babel.conf`
 - `/etc/bvignore`
-- `/var/lib/babel/jobs/<job_name>.cfg`
-- `/var/lib/babel/jobs/<job_name>.status`
+- `/var/lib/babel/jobs/config/<job_name>.cfg`
+- `/var/lib/babel/jobs/status/<job_name>.status`
+- `/var/lib/babel/jobs/status/<job_name>.progress`
+- `/var/lib/babel/jobs/logs/<job_name>`
 - `/var/lib/babel/jobs_monitor.socket`
-- `/var/lib/babel/logs.socket`
 - `/var/lib/babel/node_env`
 - `/var/lib/babel/post_setup.sh`
-- `/blockjoy/.babel_jobs/` archive jobs (e.g. download) metadata dir
+- `/blockjoy/.babel_jobs/` archive jobs (e.g. download) metadata dir, in particular `download.completed` file
 - `/blockjoy/blockchain_data/` directory where blockchain data are downloaded (uploaded from)
 
 ### Bundle
