@@ -1,10 +1,10 @@
-use crate::engine::RestRequest;
-use crate::plugin_config::{Actions, Service};
 use crate::{
-    engine::{self, Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, ShResponse},
+    engine::{
+        self, Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse,
+    },
     metadata::{check_metadata, BlockchainMetadata},
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
-    plugin_config::{self, PluginConfig},
+    plugin_config::{self, Actions, Job, PluginConfig, Service},
 };
 use eyre::{anyhow, bail, Context, Error, Report, Result};
 use rhai::{
@@ -363,7 +363,6 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
 
 impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
     fn run_actions(&self, actions: Option<Actions>, needs: Vec<String>) -> Result<Vec<String>> {
-        let mut jobs = vec![];
         if let Some(actions) = actions {
             for command in actions.commands {
                 let resp = self.babel_engine.run_sh(&command, None)?;
@@ -371,7 +370,16 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
                     bail!("init command '{command}' failed with exit_code: {resp:?}")
                 }
             }
-            for mut job in actions.jobs {
+            self.run_jobs(Some(actions.jobs), needs)
+        } else {
+            Ok(needs)
+        }
+    }
+
+    fn run_jobs(&self, jobs: Option<Vec<Job>>, needs: Vec<String>) -> Result<Vec<String>> {
+        if let Some(jobs) = jobs {
+            let mut started_jobs = vec![];
+            for mut job in jobs {
                 let name = job.name.clone();
                 if let Some(job_needs) = job.needs.as_mut() {
                     job_needs.append(&mut needs.clone())
@@ -379,9 +387,13 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
                     job.needs = Some(needs.clone());
                 }
                 self.create_and_start_job(&name, plugin_config::build_job_config(job))?;
-                jobs.push(name);
+                started_jobs.push(name);
             }
-            Ok(if jobs.is_empty() { needs } else { jobs })
+            Ok(if started_jobs.is_empty() {
+                needs
+            } else {
+                started_jobs
+            })
         } else {
             Ok(needs)
         }
@@ -413,7 +425,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
                     plugin_config::build_download_job_config(config.download, services_needs),
                 )?;
                 services_needs =
-                    self.run_actions(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
+                    self.run_jobs(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
             } else if let Some(alternative_download) = config.alternative_download {
                 self.create_and_start_job(
                     DOWNLOAD_JOB_NAME,
@@ -423,7 +435,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
                     ),
                 )?;
                 services_needs =
-                    self.run_actions(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
+                    self.run_jobs(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
             }
         }
         self.start_services(config.services, services_needs)?;
@@ -514,7 +526,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             )?;
             let post_upload_jobs = self
                 .bare
-                .run_actions(config.post_upload, vec![UPLOAD_JOB_NAME.to_string()])?;
+                .run_jobs(config.post_upload, vec![UPLOAD_JOB_NAME.to_string()])?;
             self.bare
                 .start_services(config.services, post_upload_jobs)?;
             Ok(())
@@ -1365,34 +1377,19 @@ mod tests {
                         }
                     ]
                 },
-                post_upload: #{
-                    commands: [
-                        `echo post_upload_cmd`,
-                    ],
-                    jobs: [
-                        #{
-                            name: "post_upload_job",
-                            run_sh: `echo post_upload_job`,
-                            needs: ["some"],
-                        }
-                    ]
-                },
+                post_upload: [
+                    #{
+                        name: "post_upload_job",
+                        run_sh: `echo post_upload_job`,
+                        needs: ["some"],
+                    }
+                ],
             };
             "#;
         let mut babel = MockBabelEngine::new();
         babel
             .expect_run_sh()
             .with(predicate::eq("echo pre_upload_cmd"), predicate::eq(None))
-            .return_once(|_, _| {
-                Ok(ShResponse {
-                    exit_code: 0,
-                    stdout: "".to_string(),
-                    stderr: "".to_string(),
-                })
-            });
-        babel
-            .expect_run_sh()
-            .with(predicate::eq("echo post_upload_cmd"), predicate::eq(None))
             .return_once(|_, _| {
                 Ok(ShResponse {
                     exit_code: 0,
@@ -1511,18 +1508,13 @@ mod tests {
                 alternative_download: #{
                     run_sh: `alternative download`,
                 },
-                post_download: #{
-                    commands: [
-                        `echo post_download_cmd`,
-                    ],
-                    jobs: [
-                        #{
-                            name: "post_download_job",
-                            run_sh: `echo post_download_job`,
-                            needs: ["some"],
-                        }
-                    ]
-                },
+                post_download: [
+                    #{
+                        name: "post_download_job",
+                        run_sh: `echo post_download_job`,
+                        needs: ["some"],
+                    }
+                ],
                 services: [
                     #{
                         name: "blockchain_service",
@@ -1548,16 +1540,6 @@ mod tests {
         babel
             .expect_run_sh()
             .with(predicate::eq("echo init_cmd"), predicate::eq(None))
-            .return_once(|_, _| {
-                Ok(ShResponse {
-                    exit_code: 0,
-                    stdout: "".to_string(),
-                    stderr: "".to_string(),
-                })
-            });
-        babel
-            .expect_run_sh()
-            .with(predicate::eq("echo post_download_cmd"), predicate::eq(None))
             .return_once(|_, _| {
                 Ok(ShResponse {
                     exit_code: 0,

@@ -12,14 +12,14 @@ pub struct PluginConfig {
     pub download: Option<Download>,
     /// Alternative download configuration.
     pub alternative_download: Option<AlternativeDownload>,
-    /// List of post-download actions.
-    pub post_download: Option<Actions>,
+    /// List of post-download jobs.
+    pub post_download: Option<Vec<Job>>,
     /// List of pre-upload actions.
     pub pre_upload: Option<Actions>,
     /// Upload configuration.
     pub upload: Option<Upload>,
-    /// List of post-upload actions.
-    pub post_upload: Option<Actions>,
+    /// List of post-upload jobs.
+    pub post_upload: Option<Vec<Job>>,
     /// List of tasks to be scheduled on init.
     pub scheduled: Option<Vec<Task>>,
 }

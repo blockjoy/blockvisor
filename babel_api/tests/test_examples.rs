@@ -198,29 +198,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         });
     babel
         .expect_run_sh()
-        .with(predicate::eq("echo downloaded"), predicate::eq(None))
-        .times(2)
-        .returning(|_, _| {
-            Ok(ShResponse {
-                exit_code: 0,
-                stdout: Default::default(),
-                stderr: Default::default(),
-            })
-        });
-    babel
-        .expect_run_sh()
         .with(predicate::eq("echo uploading"), predicate::eq(None))
-        .once()
-        .returning(|_, _| {
-            Ok(ShResponse {
-                exit_code: 0,
-                stdout: Default::default(),
-                stderr: Default::default(),
-            })
-        });
-    babel
-        .expect_run_sh()
-        .with(predicate::eq("echo uploaded"), predicate::eq(None))
         .once()
         .returning(|_, _| {
             Ok(ShResponse {

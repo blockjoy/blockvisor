@@ -230,20 +230,13 @@ const PLUGIN_CONFIG = #{
         /// [optional] Run job as a different user.
         //run_as: "some_user",
     //},
-    /// [optional] post-download action
-    //post_download: #{
-        /// list of sh commands to be executed after download
-        //commands: [
-            //`echo downloaded`,
-        //],
-        /// list of sh jobs (long running tasks), to be started after download
-        //jobs: [
-            //#{
-                //name: "post_download_job",
-                //run_sh: `echo restoreDB`,
-            //}
-        //]
-    //},
+    /// [optional] post-download sh jobs, to be started after download
+    //post_download: [
+        //#{
+            //name: "post_download_job",
+            //run_sh: `echo restoreDB`,
+        //}
+    //],
     /// [optional] pre-upload action
     //pre_upload: #{
         /// list of sh commands to be executed before upload
@@ -302,20 +295,13 @@ const PLUGIN_CONFIG = #{
             //max_retries: 5,
         //},
     },
-    /// [optional] post-upload action
-    //post_upload: #{
-        /// list of sh commands to be executed after upload
-        //commands: [
-            //`echo uploaded`,
-        //],
-        /// list of sh jobs (long running tasks), to be started after upload
-        //jobs: [
-            //#{
-                //name: "post_upload_job",
-                //run_sh: `echo cleanup_after_upload`,
-            //}
-        //]
-    //},
+    /// [optional] post-upload sh jobs, to be started after upload
+    //post_upload: [
+        //#{
+            //name: "post_upload_job",
+            //run_sh: `echo cleanup_after_upload`,
+        //}
+    //],
     /// [optional] List of tasks to be scheduled on init.
     //scheduled: [
         //#{
