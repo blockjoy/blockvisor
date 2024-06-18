@@ -94,6 +94,15 @@ pub struct Service {
     pub shutdown_signal: Option<PosixSignal>,
     /// Run job as a different user.
     pub run_as: Option<String>,
+    /// Flag indicating if service uses blockchain data.
+    /// Services that uses blockchain data won't be started until all init steps and download
+    /// is finished. They are also stopped while uploading blockchain archive.
+    /// Default to true if not set.
+    #[serde(default = "default_use_blockchain_data")]
+    pub use_blockchain_data: bool,
+}
+fn default_use_blockchain_data() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -227,7 +236,11 @@ pub fn build_service_job_config(service: Service, needs: Vec<String>) -> JobConf
         })),
         shutdown_timeout_secs: service.shutdown_timeout_secs,
         shutdown_signal: service.shutdown_signal,
-        needs: Some(needs),
+        needs: if service.use_blockchain_data {
+            Some(needs)
+        } else {
+            None
+        },
         run_as: service.run_as,
     }
 }

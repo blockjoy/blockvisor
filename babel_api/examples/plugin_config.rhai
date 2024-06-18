@@ -88,6 +88,11 @@ const PLUGIN_CONFIG = #{
             shutdown_signal: "SIGINT",
             /// [optional] Run job as a different user.
             run_as: "some_user",
+            /// [optional] Flag indicating if service uses blockchain data.
+            /// Services that uses blockchain data won't be started until all init steps and download
+            /// is finished. They are also stopped while uploading blockchain archive.
+            /// If not set default to true.
+            use_blockchain_data: true,
         },
         #{
             name: "blockchain_service_b",

@@ -255,7 +255,7 @@ pub struct RestRequest {
     pub headers: Option<Vec<(String, String)>>,
 }
 
-/// Long running job configuration
+/// Long-running job configuration
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct JobConfig {
     /// Job type.

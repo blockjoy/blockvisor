@@ -500,7 +500,10 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                     .map(|_ignored: String| ())
             }
         } else {
-            let config: PluginConfig = self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?;
+            let mut config: PluginConfig = self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?;
+            config
+                .services
+                .retain(|service| service.use_blockchain_data);
             for service in &config.services {
                 self.bare.babel_engine.stop_job(&service.name)?;
             }
@@ -1344,6 +1347,11 @@ mod tests {
                         run_sh: `echo A`,
                         run_as: "some_user",
                     },
+                    #{
+                        name: "non_blockchain_service",
+                        run_sh: `echo B`,
+                        use_blockchain_data: false,
+                    },
                 ],
                 pre_upload: #{
                     commands: [
@@ -1466,6 +1474,7 @@ mod tests {
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                         run_as: Some("some_user".to_string()),
+                        use_blockchain_data: true,
                     },
                     vec!["post_upload_job".to_string()],
                 )),
@@ -1518,6 +1527,11 @@ mod tests {
                     #{
                         name: "blockchain_service",
                         run_sh: `echo A`,
+                    },
+                    #{
+                        name: "non_blockchain_service",
+                        run_sh: `echo B`,
+                        use_blockchain_data: false,
                     },
                 ],
                 scheduled: [
@@ -1633,6 +1647,7 @@ mod tests {
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                         run_as: None,
+                        use_blockchain_data: true,
                     },
                     vec!["post_download_job".to_string()],
                 )),
@@ -1642,6 +1657,30 @@ mod tests {
         babel
             .expect_start_job()
             .with(predicate::eq("blockchain_service"))
+            .once()
+            .returning(|_| Ok(()));
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("non_blockchain_service"),
+                predicate::eq(plugin_config::build_service_job_config(
+                    Service {
+                        name: "non_blockchain_service".to_string(),
+                        run_sh: "echo B".to_string(),
+                        restart_config: None,
+                        shutdown_timeout_secs: None,
+                        shutdown_signal: None,
+                        run_as: None,
+                        use_blockchain_data: false,
+                    },
+                    vec![],
+                )),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("non_blockchain_service"))
             .once()
             .returning(|_| Ok(()));
 
