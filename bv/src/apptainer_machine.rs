@@ -247,11 +247,8 @@ impl ApptainerMachine {
             let mut args = vec![
                 "instance",
                 "run",
-                "--ipc",
-                "--cleanenv",
+                "--containall",
                 "--writable",
-                "--no-mount",
-                "home,cwd",
                 "--pid-file",
                 &apptainer_pid_path,
                 "--bind",
@@ -333,7 +330,7 @@ impl ApptainerMachine {
         )
         .await?;
         let mut cmd = Command::new(APPTAINER_BIN_NAME);
-        cmd.args(["exec", "--ipc", "--cleanenv", "--userns", "--pid"]);
+        cmd.args(["exec", "--containall", "--cleanenv", "--userns"]);
         cmd.args([
             OsStr::new("--env-file"),
             self.chroot_dir.join(NODE_ENV_FILE_PATH).as_os_str(),
