@@ -345,6 +345,7 @@ where
             standalone: config.standalone,
             restarting: false,
             org_id: config.org_id,
+            apptainer_config: None,
         };
 
         let node = Node::create(
@@ -1151,6 +1152,7 @@ mod tests {
             standalone: config.standalone,
             restarting: false,
             org_id: Default::default(),
+            apptainer_config: None,
         }
     }
 
@@ -1491,6 +1493,7 @@ mod tests {
             standalone: false,
             restarting: false,
             org_id: Default::default(),
+            apptainer_config: None,
         };
         fs::create_dir_all(node_context::build_node_dir(pal.bv_root(), node_state.id)).await?;
 

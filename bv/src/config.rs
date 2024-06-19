@@ -89,7 +89,7 @@ impl SharedConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct ApptainerConfig {
     pub extra_args: Option<Vec<String>>,
     pub host_network: bool,

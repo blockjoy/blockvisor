@@ -1007,6 +1007,7 @@ pub mod tests {
                 standalone: true,
                 restarting: false,
                 org_id: Default::default(),
+                apptainer_config: None,
             }
         }
 

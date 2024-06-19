@@ -1,3 +1,4 @@
+use crate::config::ApptainerConfig;
 use babel_api::metadata::{firewall, Requirements};
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
@@ -72,6 +73,7 @@ pub struct NodeState {
     pub restarting: bool,
     #[serde(default)]
     pub org_id: String,
+    pub apptainer_config: Option<ApptainerConfig>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
