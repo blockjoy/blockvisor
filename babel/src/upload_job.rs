@@ -177,12 +177,17 @@ impl<C: BabelEngineConnector> Uploader<C> {
         };
         let manifest = connector
             .connect()
-            .get_upload_manifest((
-                slots, // with expected upload speed at least 33MB/s
-                // upload of one chunk (recommended 1GB size) should not take more than 30s,
-                // but be generous and give at least 1h
-                url_expires_secs.unwrap_or(3600 + slots * 30),
-                data_version,
+            .get_upload_manifest(with_timeout(
+                (
+                    slots, // with expected upload speed at least 33MB/s
+                    // upload of one chunk (recommended 1GB size) should not take more than 30s,
+                    // but be generous and give at least 1h
+                    url_expires_secs.unwrap_or(3600 + slots * 30),
+                    data_version,
+                ),
+                // DownloadManifest may be pretty big, so better set longer timeout that depends on number of chunks
+                bv_utils::rpc::estimate_put_download_manifest_request_timeout(slots as usize)
+                    + RPC_REQUEST_TIMEOUT,
             ))
             .await?
             .into_inner();

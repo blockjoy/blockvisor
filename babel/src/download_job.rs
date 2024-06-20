@@ -1,4 +1,3 @@
-use crate::job_runner::Runner;
 /// This module implements job runner for downloading data. It downloads data according to given
 /// manifest and destination dir. In case of recoverable errors download is retried according to given
 /// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
@@ -6,6 +5,7 @@ use crate::job_runner::Runner;
 use crate::{
     checksum,
     compression::{Coder, NoCoder, ZstdDecoder},
+    job_runner::Runner,
     job_runner::{ConnectionPool, TransferConfig},
     jobs,
     jobs::{load_job_data, save_job_data},
@@ -15,12 +15,11 @@ use async_trait::async_trait;
 use babel_api::engine::{
     Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress,
 };
+use bv_utils::rpc::{with_timeout, RPC_REQUEST_TIMEOUT};
 use bv_utils::{run_flag::RunFlag, with_retry};
 use eyre::{anyhow, bail, ensure, Context, Result};
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use reqwest::header::RANGE;
-use std::sync::Arc;
-use std::time::Duration;
 use std::{
     cmp::min,
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -30,6 +29,8 @@ use std::{
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
     slice::Iter,
+    sync::Arc,
+    time::Duration,
 };
 use tokio::sync::Semaphore;
 use tokio::task::JoinError;
@@ -155,7 +156,12 @@ impl<C: BabelEngineConnector + Copy + Send + Sync + 'static> Downloader<C> {
     ) -> Result<Self> {
         let manifest = connector
             .connect()
-            .get_download_manifest(())
+            .get_download_manifest(with_timeout(
+                (),
+                // we don't know how download manifest is big, but it can be pretty big
+                // lets give it time that should be enough for 20 000 of chunks ~ 20TB of blockchian data
+                Duration::from_secs(200) + RPC_REQUEST_TIMEOUT,
+            ))
             .await?
             .into_inner();
         manifest.validate()?;
