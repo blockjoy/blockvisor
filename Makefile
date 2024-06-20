@@ -18,6 +18,7 @@ bundle-base: build-release
 	cp target/x86_64-unknown-linux-musl/release/bv /tmp/bundle/blockvisor/bin
 	cp target/x86_64-unknown-linux-musl/release/blockvisord /tmp/bundle/blockvisor/bin
 	cp target/x86_64-unknown-linux-musl/release/installer /tmp/bundle
+	cp -r target/x86_64-unknown-linux-musl/release/sh_complete /tmp/bundle/sh_complete
 	cp bv/data/blockvisor.service /tmp/bundle/blockvisor/services
 	mkdir -p /tmp/bundle/babel/bin
 	cp target/x86_64-unknown-linux-musl/release/babel /tmp/bundle/babel/bin

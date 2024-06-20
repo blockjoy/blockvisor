@@ -688,6 +688,7 @@ dependencies = [
  "chrono",
  "cidr-utils",
  "clap",
+ "clap_complete",
  "cli-table",
  "crc",
  "cron",
@@ -892,6 +893,15 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
+]
+
+[[package]]
+name = "clap_complete"
+version = "4.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd79504325bf38b10165b02e89b4347300f855f273c4cb30c4a3209e6583275e"
+dependencies = [
+ "clap",
 ]
 
 [[package]]

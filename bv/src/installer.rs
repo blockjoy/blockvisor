@@ -18,6 +18,10 @@ use tonic::{codegen::InterceptedService, transport::Channel};
 use tracing::{debug, info, warn};
 
 const SYSTEM_SERVICES: &str = "etc/systemd/system";
+const COMPLETION_DIR_BASH: &str = "usr/local/share/bash-completion/completions";
+const COMPLETION_FILE_BASH: &str = "bv.bash";
+const COMPLETION_DIR_ZSH: &str = "usr/local/share/zsh/site-functions";
+const COMPLETION_FILE_ZSH: &str = "_bv";
 const SYSTEM_BIN: &str = "usr/bin";
 pub const INSTALL_PATH: &str = "opt/blockvisor";
 pub const BLACKLIST: &str = "blacklist";
@@ -26,6 +30,7 @@ const BACKUP_LINK: &str = "backup";
 pub const INSTALLER_BIN: &str = "installer";
 const BLOCKVISOR_BIN: &str = "blockvisor/bin";
 const BLOCKVISOR_SERVICES: &str = "blockvisor/services";
+const SH_COMPLETE: &str = "sh_complete";
 const BLOCKVISOR_CONFIG: &str = "blockvisor.json";
 const THIS_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BV_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -287,7 +292,7 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         std::os::unix::fs::symlink(&self.paths.this_version, &self.paths.current)
             .with_context(|| "failed to switch current version")?;
 
-        let symlink_all = |src, dst: &PathBuf| {
+        let symlink_all = |src, dst: &PathBuf| -> Result<()> {
             for entry in self
                 .paths
                 .current
@@ -308,9 +313,22 @@ impl<T: Timer, S: BvService> Installer<T, S> {
             }
             Ok(())
         };
-
         symlink_all(BLOCKVISOR_BIN, &self.paths.system_bin)?;
-        symlink_all(BLOCKVISOR_SERVICES, &self.paths.system_services)
+        symlink_all(BLOCKVISOR_SERVICES, &self.paths.system_services)?;
+
+        let symlink_sh_complete = |dir, file| {
+            let completion_dir = self.paths.bv_root.join(dir);
+            let _ = fs::create_dir_all(&completion_dir);
+            let completion_file = completion_dir.join(file);
+            let _ = fs::remove_file(&completion_file);
+            let _ = std::os::unix::fs::symlink(
+                self.paths.current.join(SH_COMPLETE).join(file),
+                completion_file,
+            );
+        };
+        symlink_sh_complete(COMPLETION_DIR_BASH, COMPLETION_FILE_BASH);
+        symlink_sh_complete(COMPLETION_DIR_ZSH, COMPLETION_FILE_ZSH);
+        Ok(())
     }
 
     async fn restart_and_reenable_blockvisor(&self) -> Result<()> {

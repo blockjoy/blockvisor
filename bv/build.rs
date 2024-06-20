@@ -1,9 +1,23 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+include!("src/cli.rs");
+use clap::CommandFactory;
+use std::path::Path;
+use std::{env, fs};
 
 const PROTO_DIRS: &[&str] = &["./proto"];
 
 fn main() {
+    let mut app = App::command();
+
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let mut iter = out_dir.ancestors().into_iter().step_by(3);
+    iter.next();
+    let complete_out = iter.next().unwrap().to_path_buf().join("sh_complete");
+    fs::create_dir_all(&complete_out).unwrap();
+    for shell in [clap_complete::Shell::Bash, clap_complete::Shell::Zsh] {
+        clap_complete::generate_to(shell, &mut app, "bv", &complete_out)
+            .unwrap_or_else(|_| panic!("failed to generate {shell} complete"));
+    }
+
     tonic_build::configure()
         .build_server(true)
         .build_client(true)
