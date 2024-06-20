@@ -71,10 +71,9 @@ impl pal::ServiceConnector<MqttStream> for MqttConnector {
                 let mut root_certificates = rustls::RootCertStore::empty();
                 let certificates = rustls_native_certs::load_native_certs()?;
                 for cert in certificates {
-                    root_certificates.add(&rustls::Certificate(cert.0))?;
+                    root_certificates.add(cert)?;
                 }
                 let client_config = ClientConfig::builder()
-                    .with_safe_defaults()
                     .with_root_certificates(root_certificates)
                     .with_no_client_auth();
 

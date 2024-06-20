@@ -432,8 +432,10 @@ async fn consume_reader<E: Coder>(
             bail!("reading chunk data interrupted");
         }
         let part = part?;
-        total_size += part.len();
-        parts.push(Ok(part));
+        if !part.is_empty() {
+            total_size += part.len();
+            parts.push(Ok(part));
+        }
     }
     Ok((parts, u64::try_from(total_size)?))
 }
