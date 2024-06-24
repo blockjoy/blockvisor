@@ -54,8 +54,8 @@ const PLUGIN_CONFIG = #{
                 /// [optional] Run job as a different user.
                 run_as: "some_user",
                 /// [optional] Capacity of log buffer (in lines).
-                /// If not set default to 1024.
-                log_buffer_capacity_ln: 512,
+                /// If not set default to 128.
+                log_buffer_capacity_mb: 32,
             }
         ]
     },
@@ -97,8 +97,8 @@ const PLUGIN_CONFIG = #{
             /// If not set default to true.
             use_blockchain_data: true,
             /// [optional] Capacity of log buffer (in lines).
-            /// If not set default to 1024.
-            log_buffer_capacity_ln: 2048,
+            /// If not set default to 128.
+            log_buffer_capacity_mb: 256,
         },
         #{
             name: "blockchain_service_b",
@@ -141,8 +141,8 @@ const PLUGIN_CONFIG = #{
         /// [optional] Run job as a different user.
         run_as: "some_user",
         /// [optional] Capacity of log buffer (in lines).
-        /// If not set default to 1024.
-        log_buffer_capacity_ln: 512,
+        /// If not set default to 128.
+        log_buffer_capacity_mb: 64,
     },
     /// [optional] post-download sh jobs, to be started after download
     post_download: [

@@ -275,7 +275,7 @@ pub struct JobConfig {
     /// Run job as a different user.
     pub run_as: Option<String>,
     /// Capacity of log buffer (in lines).
-    pub log_buffer_capacity_ln: Option<usize>,
+    pub log_buffer_capacity_mb: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

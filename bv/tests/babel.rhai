@@ -22,7 +22,7 @@ const METADATA = #{
         },
     },
     babel_config: #{
-        log_buffer_capacity_ln: 1024,
+        log_buffer_capacity_mb: 4,
         swap_size_mb: 512,
         ramdisks: [
             #{

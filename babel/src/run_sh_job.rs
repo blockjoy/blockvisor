@@ -141,7 +141,7 @@ mod tests {
         fs::create_dir_all(jobs_dir.join(CONFIG_SUBDIR))?;
         fs::create_dir_all(jobs_dir.join(STATUS_SUBDIR))?;
         let test_run = RunFlag::default();
-        let log_buffer = LogBuffer::new(16);
+        let log_buffer = LogBuffer::default();
         let mut log_rx = log_buffer.subscribe();
         let cmd_path = tmp_root.join("test_cmd");
         {

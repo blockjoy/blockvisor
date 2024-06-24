@@ -1937,7 +1937,7 @@ const METADATA = #{
         },
     },
     babel_config: #{
-        log_buffer_capacity_ln: 1024,
+        log_buffer_capacity_mb: 128,
         swap_size_mb: 512,
         ramdisks: []
     },
@@ -1967,7 +1967,7 @@ const METADATA = #{
         },
     },
     babel_config: #{
-        log_buffer_capacity_ln: 1024,
+        log_buffer_capacity_mb: 128,
         swap_size_mb: 512,
         ramdisks: []
     },

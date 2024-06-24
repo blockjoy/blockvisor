@@ -23,7 +23,7 @@ use tracing::info;
 
 /// Logs are forwarded asap to log server, so we don't need big buffer, only to buffer logs during some
 /// temporary log server unavailability (e.g. while updating).
-const DEFAULT_LOG_BUFFER_CAPACITY_LN: usize = 1024;
+const DEFAULT_LOG_BUFFER_CAPACITY_MB: usize = 128;
 const DEFAULT_MAX_DOWNLOAD_CONNECTIONS: usize = 3;
 const DEFAULT_MAX_UPLOAD_CONNECTIONS: usize = 3;
 const DEFAULT_MAX_RUNNERS: usize = 8;
@@ -60,7 +60,7 @@ async fn run_job(
     ))?;
     match job_config.job_type {
         JobType::RunSh(body) => {
-            let log_buffer = LogBuffer::new(DEFAULT_LOG_BUFFER_CAPACITY_LN);
+            let log_buffer = LogBuffer::default();
             let logs_dir = jobs::JOBS_DIR.join(jobs::LOGS_SUBDIR);
             if !logs_dir.exists() {
                 fs::create_dir_all(&logs_dir)?;
@@ -70,8 +70,8 @@ async fn run_job(
                 log_buffer.subscribe(),
                 logs_dir.join(&job_name),
                 job_config
-                    .log_buffer_capacity_ln
-                    .unwrap_or(DEFAULT_LOG_BUFFER_CAPACITY_LN),
+                    .log_buffer_capacity_mb
+                    .unwrap_or(DEFAULT_LOG_BUFFER_CAPACITY_MB),
             );
             join!(
                 RunShJob::new(

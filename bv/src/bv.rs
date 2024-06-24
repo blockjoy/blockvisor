@@ -971,7 +971,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec![]),
                     run_as: None,
-                    log_buffer_capacity_ln: None,
+                    log_buffer_capacity_mb: None,
                 }),
             )
             .once()
@@ -1009,7 +1009,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["init_job".to_string()]),
                     run_as: None,
-                    log_buffer_capacity_ln: None,
+                    log_buffer_capacity_mb: None,
                 }),
             )
             .once()
@@ -1037,7 +1037,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["download".to_string()]),
                     run_as: None,
-                    log_buffer_capacity_ln: None,
+                    log_buffer_capacity_mb: None,
                 }),
             )
             .once()
@@ -1065,7 +1065,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["download".to_string()]),
                     run_as: None,
-                    log_buffer_capacity_ln: None,
+                    log_buffer_capacity_mb: None,
                 }),
             )
             .once()
@@ -1114,7 +1114,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec![]),
                     run_as: None,
-                    log_buffer_capacity_ln: None,
+                    log_buffer_capacity_mb: None,
                 }),
             )
             .once()
@@ -1142,7 +1142,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["upload".to_string()]),
                     run_as: None,
-                    log_buffer_capacity_ln: None,
+                    log_buffer_capacity_mb: None,
                 }),
             )
             .once()
@@ -1170,7 +1170,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: Some(vec!["upload".to_string()]),
                     run_as: None,
-                    log_buffer_capacity_ln: None,
+                    log_buffer_capacity_mb: None,
                 }),
             )
             .once()

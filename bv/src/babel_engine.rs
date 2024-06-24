@@ -895,7 +895,7 @@ mod tests {
                     shutdown_signal: None,
                     needs: None,
                     run_as: None,
-                    log_buffer_capacity_ln: None,
+                    log_buffer_capacity_mb: None,
                 },
             )?;
             self.engine.start_job(name)?;

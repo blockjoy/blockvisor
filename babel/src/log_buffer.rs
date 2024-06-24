@@ -13,17 +13,14 @@ pub struct LogBuffer {
     rx: broadcast::Receiver<String>,
 }
 
-impl LogBuffer {
-    /// Create new LogBuffer with given capacity.
-    /// NOTE: According to `tokio::broadcast` implementation capacity is rounded up to next power of 2.
-    pub fn new(mut capacity: usize) -> Self {
-        if capacity == 0 {
-            capacity = 1; // tokio panic if it's 0, but we don't want to
-        }
-        let (tx, rx) = broadcast::channel(capacity);
+impl Default for LogBuffer {
+    fn default() -> Self {
+        let (tx, rx) = broadcast::channel(1024);
         Self { tx, rx }
     }
+}
 
+impl LogBuffer {
     pub fn subscribe(&self) -> broadcast::Receiver<String> {
         self.rx.resubscribe()
     }
@@ -105,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_logs() {
-        let log_buffer = LogBuffer::new(5);
+        let log_buffer = LogBuffer::default();
         let mut rx = log_buffer.subscribe();
         log_buffer
             .attach::<tokio::io::Empty, tokio::io::Empty>("name1", None, None)
@@ -116,7 +113,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_all_logs() {
-        let log_buffer = LogBuffer::new(5);
+        let log_buffer = LogBuffer::default();
 
         let stdout_stream = tokio_stream::iter(vec![
             tokio::io::Result::Ok("one\n".as_bytes()),
@@ -154,7 +151,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_logs_overflow() {
-        let log_buffer = LogBuffer::new(3);
+        let (tx, rx) = broadcast::channel(3);
+        let log_buffer = LogBuffer { tx, rx };
 
         let stdout_stream = tokio_stream::iter(vec![
             tokio::io::Result::Ok("one\n".as_bytes()),
