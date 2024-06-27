@@ -14,6 +14,7 @@ use tokio::fs::{self};
 use uuid::Uuid;
 
 pub const NODES_DIR: &str = "nodes";
+pub const DEFAULT_SERVICES_PATH: &str = "var/lib/babel/services.rhai";
 
 pub fn build_nodes_dir(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(NODES_DIR)
@@ -50,6 +51,7 @@ impl NodeContext {
     pub async fn copy_and_check_plugin(
         &self,
         image: &NodeImage,
+        rootfs_dir: &Path,
     ) -> Result<(String, BlockchainMetadata)> {
         fs::copy(
             blockchain::get_image_download_folder_path(&self.bv_root, image)
@@ -58,8 +60,17 @@ impl NodeContext {
         )
         .await
         .with_context(|| format!("Babel plugin not found for {image}"))?;
-        let script = fs::read_to_string(&self.plugin_script).await?;
+        self.load_script(rootfs_dir).await
+    }
+
+    pub async fn load_script(&self, rootfs_dir: &Path) -> Result<(String, BlockchainMetadata)> {
+        let mut script = fs::read_to_string(&self.plugin_script).await?;
         let metadata = rhai_plugin::read_metadata(&script)?;
+        let services_path = rootfs_dir.join(DEFAULT_SERVICES_PATH);
+        if services_path.exists() {
+            script.push_str(&fs::read_to_string(services_path).await?);
+        }
+
         Ok((script, metadata))
     }
 

@@ -36,7 +36,7 @@ const PLUGIN_CONFIG = #{
             #{
                 /// Unique job name.
                 name: "init_job",
-                /// Sh script body.
+                /// Sh script body. It shall be blocking (foreground) process.
                 run_sh: `openssl rand -hex 32 > ${global::A_DIR}/jwt.txt`,
                 /// [optional] InitJob restart policy.
                 /// If not set default to "never".
@@ -64,7 +64,7 @@ const PLUGIN_CONFIG = #{
         #{
             /// Unique service job name.
             name: "blockchain_service_a",
-            /// Sh script body
+            /// Sh script body. It shall be blocking (foreground) process.
             run_sh: `/usr/bin/blockchain_service_a start --home=${global::A_DIR} --chain=${global::NET.net_type} --rest-server --seeds ${global::NET.seeds} "$@"`,
             /// [optional] Job restart config.
             /// If not set default to:
@@ -129,7 +129,7 @@ const PLUGIN_CONFIG = #{
     },
     /// [optional] alternative download if archive for standard one is not available
     alternative_download: #{
-        /// Sh script body.
+        /// Sh script body. It shall be blocking (foreground) process.
         run_sh: `/usr/bin/wget -q -O - some_url`,
         /// [optional] InitJob restart config.
         /// If not set default to "never".
@@ -229,6 +229,9 @@ const PLUGIN_CONFIG = #{
             param: "param_value",
         }
     ],
+    /// [optional] Set to true, to disable all default services.
+    /// Default to false.
+    disable_default_services: true,
 };
 
 /// Returns blockchain application status.

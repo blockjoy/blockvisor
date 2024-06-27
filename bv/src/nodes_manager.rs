@@ -1114,13 +1114,13 @@ mod tests {
         pal.expect_available_resources()
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .returning(available_test_resources);
-        add_firewall_expectation(pal, id, IpAddr::from_str(&config.ip).unwrap());
         pal.expect_create_vm()
             .with(
                 predicate::eq(default_bv_context()),
                 predicate::eq(expected_node_state(id, config, expected_cpus, None)),
             )
             .return_once(|_, _| bail!("failed to create vm"));
+        pal.expect_cleanup_firewall_config().returning(|_| Ok(()));
     }
 
     fn expected_node_state(
@@ -1175,7 +1175,7 @@ mod tests {
             standalone: true,
             org_id: Default::default(),
         };
-        let mut vm_mock = MockTestVM::new();
+        let mut vm_mock = default_vm(test_env.tmp_root.clone());
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         vm_mock
             .expect_delete()
@@ -1202,7 +1202,7 @@ mod tests {
             standalone: false,
             org_id: Default::default(),
         };
-        let mut vm_mock = MockTestVM::new();
+        let mut vm_mock = default_vm(test_env.tmp_root.clone());
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         add_create_node_expectations(
             &mut pal,
@@ -1532,6 +1532,7 @@ mod tests {
         .await?;
 
         let mut pal = test_env.default_pal();
+        let tmp_root = test_env.tmp_root.clone();
         pal.expect_available_cpus().return_const(1usize);
         pal.expect_create_node_connection()
             .with(predicate::eq(node_state.id))
@@ -1541,8 +1542,8 @@ mod tests {
                 predicate::eq(default_bv_context()),
                 predicate::eq(node_state.clone()),
             )
-            .returning(|_, _| {
-                let mut vm = MockTestVM::new();
+            .returning(move |_, _| {
+                let mut vm = default_vm(tmp_root.clone());
                 vm.expect_state().return_const(VmState::SHUTOFF);
                 Ok(vm)
             });
@@ -1606,7 +1607,7 @@ mod tests {
             mem_size_mb: 4096,
             disk_size_gb: 3,
         };
-        let mut vm_mock = MockTestVM::new();
+        let mut vm_mock = default_vm(test_env.tmp_root.clone());
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         vm_mock.expect_release().return_once(|| Ok(()));
         add_create_node_expectations(&mut pal, 1, vec![4], node_id, node_config.clone(), vm_mock);
@@ -1632,12 +1633,13 @@ mod tests {
             Some(new_image.clone()),
         );
         expected_updated_state.requirements = UPDATED_REQUIREMENTS.clone();
+        let tmp_root = test_env.tmp_root.clone();
         pal.expect_attach_vm()
             .with(
                 predicate::eq(default_bv_context()),
                 predicate::eq(expected_updated_state),
             )
-            .return_once(|_, _| Ok(MockTestVM::new()));
+            .return_once(move |_, _| Ok(default_vm(tmp_root.clone())));
 
         let nodes = NodesManager::load(pal, config).await?;
 
@@ -1792,8 +1794,9 @@ mod tests {
             node_id,
             IpAddr::from_str(&node_config.ip).unwrap(),
         );
-        pal.expect_create_vm().return_once(|_, _| {
-            let mut mock = MockTestVM::new();
+        let tmp_root = test_env.tmp_root.clone();
+        pal.expect_create_vm().return_once(move |_, _| {
+            let mut mock = default_vm(tmp_root.clone());
             let mut seq = Sequence::new();
             mock.expect_state()
                 .times(6)

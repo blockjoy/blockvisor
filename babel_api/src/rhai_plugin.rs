@@ -4,7 +4,7 @@ use crate::{
     },
     metadata::{check_metadata, BlockchainMetadata},
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
-    plugin_config::{self, Actions, Job, PluginConfig, Service},
+    plugin_config::{self, Actions, DefaultService, Job, PluginConfig, Service},
 };
 use eyre::{anyhow, bail, Context, Error, Report, Result};
 use rhai::{
@@ -21,6 +21,7 @@ const DOWNLOAD_JOB_NAME: &str = "download";
 const UPLOAD_JOB_NAME: &str = "upload";
 const INIT_FN_NAME: &str = "init";
 const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
+const DEFAULT_SERVICES_CONST_NAME: &str = "DEFAULT_SERVICES";
 const BABEL_VERSION_CONST_NAME: &str = "BABEL_VERSION";
 
 #[derive(Debug)]
@@ -328,11 +329,18 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         let config = self
             .evaluate_var(PLUGIN_CONFIG_CONST_NAME)
             .map_err(|err| format!("{err:#}"));
+        let default_services = self
+            .evaluate_optional_var(DEFAULT_SERVICES_CONST_NAME)
+            .map_err(|err| format!("{err:#}"));
         self.rhai_engine.register_fn("default_init", move || {
             let config = config
                 .clone()
                 .map_err(<String as Into<rhai::EvalAltResult>>::into)?;
-            into_rhai_result(plugin.default_init(config))
+            let default_services = default_services
+                .clone()
+                .map_err(<String as Into<rhai::EvalAltResult>>::into)?
+                .unwrap_or_default();
+            into_rhai_result(plugin.default_init(config, default_services))
         });
     }
 
@@ -357,6 +365,19 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             Ok(value)
         } else {
             Err(anyhow!("Invalid Rhai script - missing {name} constant"))
+        }
+    }
+
+    fn evaluate_optional_var<T: for<'a> Deserialize<'a>>(&self, name: &str) -> Result<Option<T>> {
+        let mut scope = build_scope();
+        self.rhai_engine
+            .run_ast_with_scope(&mut scope, &self.bare.ast)?;
+        if let Some(dynamic) = scope.get(name) {
+            let value: T = from_dynamic(dynamic)
+                .with_context(|| format!("Invalid Rhai script - failed to deserialize {name}"))?;
+            Ok(Some(value))
+        } else {
+            Ok(None)
         }
     }
 }
@@ -399,6 +420,33 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         }
     }
 
+    fn start_default_services(&self, default_services: Vec<DefaultService>) -> Result<()> {
+        for service in default_services {
+            self.start_default_service(service)?;
+        }
+        Ok(())
+    }
+
+    fn start_default_service(&self, service: DefaultService) -> Result<()> {
+        self.create_and_start_job(
+            &service.name.clone(),
+            plugin_config::build_service_job_config(
+                Service {
+                    name: service.name,
+                    run_sh: service.run_sh,
+                    restart_config: service.restart_config,
+                    shutdown_timeout_secs: service.shutdown_timeout_secs,
+                    shutdown_signal: service.shutdown_signal,
+                    run_as: service.run_as,
+                    use_blockchain_data: false,
+                    log_buffer_capacity_mb: service.log_buffer_capacity_mb,
+                },
+                vec![],
+            ),
+        )?;
+        Ok(())
+    }
+
     fn start_services(&self, services: Vec<Service>, needs: Vec<String>) -> Result<()> {
         for service in services {
             let name = service.name.clone();
@@ -416,7 +464,14 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
             .and_then(|_| self.babel_engine.start_job(name))
     }
 
-    fn default_init(&self, config: PluginConfig) -> Result<()> {
+    fn default_init(
+        &self,
+        config: PluginConfig,
+        default_services: Vec<DefaultService>,
+    ) -> Result<()> {
+        if !config.disable_default_services {
+            self.start_default_services(default_services)?;
+        }
         let mut services_needs = self.run_actions(config.init, vec![])?;
         if !self.babel_engine.is_download_completed()? {
             if self.babel_engine.has_blockchain_archive()? {
@@ -492,8 +547,11 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 self.call_fn(init_meta.name, (Map::default(),))
             }
         } else {
-            self.bare
-                .default_init(self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?)
+            self.bare.default_init(
+                self.evaluate_var(PLUGIN_CONFIG_CONST_NAME)?,
+                self.evaluate_optional_var(DEFAULT_SERVICES_CONST_NAME)?
+                    .unwrap_or_default(),
+            )
         }
     }
 
@@ -1539,9 +1597,41 @@ mod tests {
                         param: "param_value",
                     }
                 ],
+                disable_default_services: false,
             };
+            const DEFAULT_SERVICES = [
+                #{
+                    name: "nginx",
+                    run_sh: `nginx with params`,
+                },
+            ];
             "#;
         let mut babel = MockBabelEngine::new();
+        babel
+            .expect_create_job()
+            .with(
+                predicate::eq("nginx"),
+                predicate::eq(plugin_config::build_service_job_config(
+                    Service {
+                        name: "nginx".to_string(),
+                        run_sh: "nginx with params".to_string(),
+                        restart_config: None,
+                        shutdown_timeout_secs: None,
+                        shutdown_signal: None,
+                        run_as: None,
+                        use_blockchain_data: false,
+                        log_buffer_capacity_mb: None,
+                    },
+                    vec![],
+                )),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+        babel
+            .expect_start_job()
+            .with(predicate::eq("nginx"))
+            .once()
+            .returning(|_| Ok(()));
         babel
             .expect_run_sh()
             .with(predicate::eq("echo init_cmd"), predicate::eq(None))

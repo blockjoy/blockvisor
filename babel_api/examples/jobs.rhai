@@ -1,7 +1,7 @@
 fn init() {
     let job_config_A = #{
         job_type: #{
-            // Sh script body
+            // Sh script body. It shall be blocking (foreground) process.
             run_sh: "echo \"some initial job done\"",
         },
 

@@ -198,7 +198,7 @@ pub struct UploadManifest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobType {
-    /// Shell script - takes script body as a `String`.
+    /// Shell script - takes script body as a `String`. It shall be blocking (foreground) process.
     RunSh(String),
     /// Download data - according to given manifest.
     Download {

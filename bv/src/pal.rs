@@ -155,6 +155,8 @@ pub trait VirtualMachine {
     async fn release(&mut self) -> Result<()>;
     /// Try recover VM that is in INVALID state.
     async fn recover(&mut self) -> Result<()>;
+    /// Get path to VM rootfs.
+    fn rootfs_dir(&self) -> &Path;
 }
 
 pub trait RecoverBackoff {

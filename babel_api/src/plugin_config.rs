@@ -22,6 +22,10 @@ pub struct PluginConfig {
     pub post_upload: Option<Vec<Job>>,
     /// List of tasks to be scheduled on init.
     pub scheduled: Option<Vec<Task>>,
+    /// Set to true, to disable all default services.
+    /// Default to false.
+    #[serde(default)]
+    pub disable_default_services: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -58,7 +62,7 @@ pub enum RestartPolicy {
 pub struct Job {
     /// Unique job name.
     pub name: String,
-    /// Sh script body.
+    /// Sh script body. It shall be blocking (foreground) process.
     pub run_sh: String,
     /// InitJob restart policy.
     pub restart: Option<RestartPolicy>,
@@ -82,7 +86,7 @@ pub struct Job {
 pub struct Service {
     /// Unique job name.
     pub name: String,
-    /// Sh script body.
+    /// Sh script body. It shall be blocking (foreground) process.
     pub run_sh: String,
     /// Service restart config.
     pub restart_config: Option<RestartConfig>,
@@ -109,6 +113,30 @@ fn default_use_blockchain_data() -> bool {
     true
 }
 
+/// Definition of default service that should be run on all nodes (if supported by image).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DefaultService {
+    /// Name of service. This will be used as Job name, so make sure it is unique enough,
+    /// to not collide with other jobs.
+    pub name: String,
+    /// Sh script body. It shall be blocking (foreground) process.
+    pub run_sh: String,
+    /// Service restart config.
+    pub restart_config: Option<RestartConfig>,
+    /// Job shutdown timeout - how long it may take to gracefully shutdown the job.
+    /// After given time job won't be killed, but babel will rise the error.
+    /// If not set default to 60s.
+    pub shutdown_timeout_secs: Option<u64>,
+    /// POSIX signal that will be sent to child processes on job shutdown.
+    /// See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
+    /// If not set default to `SIGTERM`.
+    pub shutdown_signal: Option<PosixSignal>,
+    /// Run job as a different user.
+    pub run_as: Option<String>,
+    /// Capacity of log buffer (in lines).
+    pub log_buffer_capacity_mb: Option<usize>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Download {
     /// Download restart config.
@@ -121,7 +149,7 @@ pub struct Download {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AlternativeDownload {
-    /// Sh script body.
+    /// Sh script body. It shall be blocking (foreground) process.
     pub run_sh: String,
     /// AlternativeDownload restart config.
     pub restart_config: Option<RestartConfig>,

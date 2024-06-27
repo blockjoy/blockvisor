@@ -79,7 +79,7 @@ pub async fn new(
     config: ApptainerConfig,
 ) -> Result<ApptainerMachine> {
     let node_dir = node_context::build_node_dir(bv_root, node_state.id);
-    let chroot_dir = node_dir.join(ROOTFS_DIR);
+    let chroot_dir = build_rootfs_dir(&node_dir);
     let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
     let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
     fs::create_dir_all(&chroot_dir).await?;
@@ -452,5 +452,9 @@ impl pal::VirtualMachine for ApptainerMachine {
         } else {
             self.start().await
         }
+    }
+
+    fn rootfs_dir(&self) -> &Path {
+        &self.chroot_dir
     }
 }
