@@ -805,7 +805,13 @@ async fn bootstrap_os_image(
     run_cmd("mkfs.ext4", [os_img_path.as_os_str()]).await?;
 
     on_rootfs(image_path, image, |mount_point| async move {
-        install_os_and_packages(debian_version, &mount_point).await
+        install_os_and_packages(debian_version, &mount_point).await?;
+        fs::create_dir_all(mount_point.join(crate::node_context::BABEL_VAR_PATH))?;
+        fs::write(
+            mount_point.join(crate::node_context::DEFAULT_SERVICES_PATH),
+            include_str!("../data/services.rhai.template"),
+        )?;
+        Ok(())
     })
     .await
 }
@@ -859,7 +865,7 @@ async fn run_in_chroot(mount_point: &Path, cmd: &str) -> Result<()> {
 /// Cleanup rootfs from babel state remnants (remove /var/lib/babel).
 async fn cleanup_rootfs(image_path: &Path, image: &NodeImage) -> Result<()> {
     on_rootfs(image_path, image, |mount_point| async move {
-        let babel_dir = mount_point.join("var/lib/babel");
+        let babel_dir = mount_point.join(crate::node_context::BABEL_VAR_PATH);
         if babel_dir.exists() {
             fs::remove_dir_all(babel_dir)?;
         }

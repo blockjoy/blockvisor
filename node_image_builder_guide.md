@@ -150,6 +150,12 @@ Also make sure that following tools, required by Babel, are available:
 - `fallocate`
 - `fuser`
 
+### Define Default Services as needed
+You can define additional services that will be automatically started on all nodes of given kind in
+`/var/lib/babel/services.rhai` file (on rootfs). See [Services Example](babel_api/examples/services.rhai) for more details.
+
+It is the place to define blockchain unrelated services like monitoring agent or proxy servers.
+
 ### Implementing/Customizing Babel Plugin for New Blockchain
 
 Once you've created the node, you should be able to find it's rhai script in `<workspace>/node/babel.rhai`.

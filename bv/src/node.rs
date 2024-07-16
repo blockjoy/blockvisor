@@ -1143,7 +1143,7 @@ pub mod tests {
         )
         .await?;
 
-        fs::create_dir_all(test_env.tmp_root.join("var/lib/babel")).await?;
+        fs::create_dir_all(test_env.tmp_root.join(node_context::BABEL_VAR_PATH)).await?;
         fs::write(
             test_env.tmp_root.join(node_context::DEFAULT_SERVICES_PATH),
             "malformed services",

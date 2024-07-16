@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 pub const NODES_DIR: &str = "nodes";
 pub const DEFAULT_SERVICES_PATH: &str = "var/lib/babel/services.rhai";
+pub const BABEL_VAR_PATH: &str = "var/lib/babel";
 
 pub fn build_nodes_dir(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(NODES_DIR)

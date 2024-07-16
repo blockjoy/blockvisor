@@ -40,7 +40,6 @@ const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
 const UMOUNT_RETRY_MAX: u32 = 2;
 const UMOUNT_BACKOFF_BASE_MS: u64 = 1000;
 const BABEL_BIN_PATH: &str = "/usr/bin/babel";
-const BABEL_VAR_PATH: &str = "var/lib/babel";
 const APPTAINER_BIN_NAME: &str = "apptainer";
 
 pub fn build_rootfs_dir(node_dir: &Path) -> PathBuf {
@@ -153,7 +152,7 @@ impl ApptainerMachine {
             )
             .await?;
             fs::create_dir_all(self.chroot_dir.join(JOURNAL_DIR.trim_start_matches('/'))).await?;
-            fs::create_dir_all(self.chroot_dir.join(BABEL_VAR_PATH)).await?;
+            fs::create_dir_all(self.chroot_dir.join(node_context::BABEL_VAR_PATH)).await?;
         }
         if self.config.cpu_limit || self.config.memory_limit {
             let mut content = String::new();
