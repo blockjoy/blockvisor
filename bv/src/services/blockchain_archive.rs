@@ -96,10 +96,15 @@ pub async fn has_download_manifest(
     let mut client = connect_blockchain_archive_service(config).await?;
     Ok(api_with_retry!(
         client,
-        client.has_blockchain_archive(pb::BlockchainArchiveServiceHasBlockchainArchiveRequest {
-            id: Some(image.clone().try_into()?),
-            network: network.clone(),
-        })
+        client.has_blockchain_archive(with_timeout(
+            pb::BlockchainArchiveServiceHasBlockchainArchiveRequest {
+                id: Some(image.clone().try_into()?),
+                network: network.clone(),
+            },
+            // checking download manifest require validity check, which may be time-consuming
+            // let's give it a minute
+            Duration::from_secs(60),
+        ))
     )
     .with_context(|| format!("cannot check download manifest for {:?}-{}", image, network))?
     .into_inner()
