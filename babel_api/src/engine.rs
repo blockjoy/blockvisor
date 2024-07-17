@@ -54,6 +54,9 @@ pub trait Engine {
     /// Get node params as key-value map.
     fn node_params(&self) -> HashMap<String, String>;
 
+    /// Get node env structure.
+    fn node_env(&self) -> NodeEnv;
+
     /// Save plugin data to persistent storage.
     fn save_data(&self, value: &str) -> Result<()>;
 
@@ -78,6 +81,35 @@ pub trait Engine {
     fn is_download_completed(&self) -> Result<bool>;
     /// Checks if blockchain archive is available.
     fn has_blockchain_archive(&self) -> Result<bool>;
+}
+
+/// Node environment/context metadata.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct NodeEnv {
+    /// Node id.
+    pub node_id: String,
+    /// Node name.
+    pub node_name: String,
+    /// Node version.
+    pub node_version: String,
+    /// Node protocol name.
+    pub protocol: String,
+    /// Node type.
+    pub node_type: String,
+    /// Node IP.
+    pub ip: String,
+    /// Node gateway IP.
+    pub gateway: String,
+    /// Indicate if node run in standalone mode.
+    pub standalone: bool,
+    /// Host id.
+    pub bv_id: String,
+    /// Host name.
+    pub bv_name: String,
+    /// API url used by host.
+    pub bv_api_url: String,
+    /// Organisation id to which node belongs to.
+    pub org_id: String,
 }
 
 /// Structure describing where decompressed data shall be written to and how many bytes.

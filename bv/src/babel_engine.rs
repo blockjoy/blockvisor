@@ -1,4 +1,3 @@
-use crate::node::NODE_REQUEST_TIMEOUT;
 /// This module wraps all Babel related functionality. In particular, it implements binding between
 /// Babel Plugin and Babel running on the node.
 ///
@@ -12,12 +11,14 @@ use crate::node::NODE_REQUEST_TIMEOUT;
 use crate::{
     babel_engine_service::{self, BabelEngineServer},
     config::SharedConfig,
+    node::NODE_REQUEST_TIMEOUT,
     node_state::{NodeImage, NodeProperties},
     pal::{BabelClient, NodeConnection},
     scheduler,
     scheduler::Task,
     services,
 };
+use babel_api::engine::NodeEnv;
 use babel_api::{
     engine::{
         HttpResponse, JobConfig, JobInfo, JobType, JobsInfo, JrpcRequest, RestRequest, ShResponse,
@@ -65,6 +66,7 @@ pub struct NodeInfo {
 #[derive(Debug)]
 pub struct BabelEngine<N, P> {
     node_info: NodeInfo,
+    node_env: NodeEnv,
     pub node_connection: N,
     api_config: SharedConfig,
     plugin: P,
@@ -80,6 +82,7 @@ pub struct BabelEngine<N, P> {
 impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     pub async fn new<F: FnOnce(Engine) -> Result<P>>(
         node_info: NodeInfo,
+        node_env: NodeEnv,
         node_connection: N,
         api_config: SharedConfig,
         plugin_builder: F,
@@ -91,11 +94,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             node_id: node_info.node_id,
             tx: engine_tx.clone(),
             params: node_info.properties.clone(),
+            node_env: node_env.clone(),
             plugin_data_path: plugin_data_path.clone(),
         };
         let plugin = plugin_builder(engine)?;
         let mut babel_engine = Self {
             node_info,
+            node_env,
             node_connection,
             api_config,
             plugin,
@@ -141,6 +146,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             node_id: self.node_info.node_id,
             tx: self.engine_tx.clone(),
             params: self.node_info.properties.clone(),
+            node_env: self.node_env.clone(),
             plugin_data_path: self.plugin_data_path.clone(),
         };
         self.plugin = plugin_builder(engine)?;
@@ -505,6 +511,7 @@ pub struct Engine {
     node_id: Uuid,
     tx: mpsc::Sender<EngineRequest>,
     params: NodeProperties,
+    node_env: NodeEnv,
     plugin_data_path: PathBuf,
 }
 
@@ -662,6 +669,10 @@ impl babel_api::engine::Engine for Engine {
 
     fn node_params(&self) -> HashMap<String, String> {
         self.params.clone()
+    }
+
+    fn node_env(&self) -> NodeEnv {
+        self.node_env.clone()
     }
 
     fn save_data(&self, value: &str) -> Result<()> {
@@ -999,9 +1010,10 @@ mod tests {
                 socket: vm_data_path.join("engine.socket"),
             };
             let (tx, rx) = mpsc::channel(16);
+            let node_id = Uuid::new_v4();
             let engine = BabelEngine::new(
                 NodeInfo {
-                    node_id: Uuid::new_v4(),
+                    node_id,
                     image: NodeImage {
                         protocol: "".to_string(),
                         node_type: "".to_string(),
@@ -1012,6 +1024,20 @@ mod tests {
                         "some value".to_string(),
                     )]),
                     network: "test".to_string(),
+                },
+                NodeEnv {
+                    node_id: node_id.to_string(),
+                    node_name: "".to_string(),
+                    node_version: "".to_string(),
+                    protocol: "".to_string(),
+                    node_type: "".to_string(),
+                    ip: "".to_string(),
+                    gateway: "".to_string(),
+                    standalone: false,
+                    bv_id: "".to_string(),
+                    bv_name: "".to_string(),
+                    bv_api_url: "".to_string(),
+                    org_id: "org_id".to_string(),
                 },
                 connection,
                 SharedConfig::new(

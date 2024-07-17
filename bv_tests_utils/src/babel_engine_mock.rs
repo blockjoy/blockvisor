@@ -1,5 +1,6 @@
 use babel_api::engine::{
-    Engine, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest, ShResponse,
+    Engine, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, NodeEnv, RestRequest,
+    ShResponse,
 };
 use eyre::Result;
 use mockall::*;
@@ -25,6 +26,7 @@ mock! {
             params: &str,
         ) -> Result<()>;
         fn node_params(&self) -> HashMap<String, String>;
+        fn node_env(&self) -> NodeEnv;
         fn save_data(&self, value: &str) -> Result<()>;
         fn load_data(&self) -> Result<String>;
         fn log(&self, level: tracing::Level, message: &str);

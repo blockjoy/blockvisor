@@ -261,6 +261,9 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         });
         let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine
+            .register_fn("node_env", move || to_dynamic(babel_engine.node_env()));
+        let babel_engine = self.bare.babel_engine.clone();
+        self.rhai_engine
             .register_fn("save_data", move |value: &str| {
                 into_rhai_result(babel_engine.save_data(value))
             });
@@ -839,7 +842,7 @@ impl From<ShResponse> for DressedShResponse {
 mod tests {
     use super::*;
     use crate::engine::{
-        HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, RestRequest,
+        HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, NodeEnv, RestRequest,
         RestartConfig, RestartPolicy, ShResponse,
     };
     use crate::metadata::{
@@ -871,6 +874,7 @@ mod tests {
                 params: &str,
             ) -> Result<()>;
             fn node_params(&self) -> HashMap<String, String>;
+            fn node_env(&self) -> NodeEnv;
             fn save_data(&self, value: &str) -> Result<()>;
             fn load_data(&self) -> Result<String>;
             fn log(&self, level: Level, message: &str);
@@ -1033,6 +1037,7 @@ mod tests {
         out += "|" + parse_hex("0xff").to_string();
         render_template("/template/path", "output/path.cfg", #{ PARAM1: "Value I"});
         out += "|" + node_params().to_json();
+        out += "|" + node_env().node_id;
         save_data("some plugin data");
         out += "|" + load_data();
         out
@@ -1260,6 +1265,20 @@ mod tests {
         babel
             .expect_node_params()
             .return_once(|| HashMap::from_iter([("key_A".to_string(), "value_A".to_string())]));
+        babel.expect_node_env().return_once(|| NodeEnv {
+            node_id: "node_id".to_string(),
+            node_name: "".to_string(),
+            node_version: "".to_string(),
+            protocol: "".to_string(),
+            node_type: "".to_string(),
+            ip: "".to_string(),
+            gateway: "".to_string(),
+            standalone: false,
+            bv_id: "".to_string(),
+            bv_name: "".to_string(),
+            bv_api_url: "".to_string(),
+            org_id: "".to_string(),
+        });
         babel
             .expect_save_data()
             .with(predicate::eq("some plugin data"))
@@ -1270,7 +1289,7 @@ mod tests {
 
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
-            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|loaded data"#,
+            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
         );
         Ok(())

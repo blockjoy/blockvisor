@@ -154,6 +154,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
   It assumes that file pointed by `template` argument exists.
   File pointed by `output` path will be overwritten if exists.
 - `node_params()` - Get node params as key-value map.
+- `node_env()` - Get node environment/context metadata, see [NodeEnv](#nodeenv).
 - `add_task(task_name, schedule, function_name, function_param)` - Schedule Rhai function with given `function_name` and `function_param` (optional), according to cron-compatible `schedule` string.
 - `delete_task(task_name)` - Delete previously scheduled task.
 - `save_data(value)` - Save plugin data to persistent storage. It takes string as argument. `to_json` can be used for more complex structures.
@@ -170,7 +171,7 @@ struct HttpResponse {
   body: String,
 }
 ```
-Above structure provice following helper functions:
+Above structure provide following helper functions:
 - `expect(expected_code)` - Check if `status_code` match expected one and then return `body` parsed as json.
 - `expect(check)` - If provided `check` function return `true`, then return `body` parsed as json (e.g. `http_resp.expect(|code| code >= 200).json_field`).
 
@@ -183,8 +184,38 @@ struct ShResponse{
   stderr: String,
 }
 ```
-Above structure provice following helper function:
+Above structure provide following helper function:
 - `unwrap()` - Check if `exit_code` is 0 and then return `stdout`.
+
+### NodeEnv
+```rust
+struct NodeEnv{
+    /// Node id.
+    node_id: String,
+    /// Node name.
+    node_name: String,
+    /// Node version.
+    node_version: String,
+    /// Node protocol name.
+    protocol: String,
+    /// Node type.
+    node_type: String,
+    /// Node IP.
+    ip: String,
+    /// Node gateway IP.
+    gateway: String,
+    /// Indicate if node run in standalone mode.
+    standalone: bool,
+    /// Host id.
+    bv_id: String,
+    /// Host name.
+    bv_name: String,
+    /// API url used by host.
+    bv_api_url: String,
+    /// Organisation id to which node belongs to.
+    org_id: String,
+}
+```
 
 ### Background Jobs
 

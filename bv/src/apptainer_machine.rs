@@ -1,7 +1,7 @@
 use crate::{
     config::ApptainerConfig,
-    node_context,
-    node_env::{NodeEnv, NODE_ENV_FILE_PATH},
+    node_context, node_env,
+    node_env::NODE_ENV_FILE_PATH,
     node_state::NodeState,
     pal,
     services::blockchain,
@@ -9,7 +9,7 @@ use crate::{
     utils::{get_process_pid, GetProcessIdError},
 };
 use async_trait::async_trait;
-use babel_api::engine::{PosixSignal, DATA_DRIVE_MOUNT_POINT};
+use babel_api::engine::{NodeEnv, PosixSignal, DATA_DRIVE_MOUNT_POINT};
 use bv_utils::{
     cmd::run_cmd,
     system::{gracefully_terminate_process, is_process_running, kill_all_processes},
@@ -175,7 +175,7 @@ impl ApptainerMachine {
             fs::write(&self.cgroups_path, content).await?;
         }
 
-        self.node_env.save(&self.chroot_dir).await?;
+        node_env::save(&self.node_env, &self.chroot_dir).await?;
         Ok(self)
     }
 
