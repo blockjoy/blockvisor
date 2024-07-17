@@ -160,7 +160,10 @@ impl Pal for ApptainerPlatform {
             NodeEnv::new(bv_context, node_state),
             node_state,
             self.babel_path.clone(),
-            self.config.clone(),
+            node_state
+                .apptainer_config
+                .clone()
+                .unwrap_or(self.config.clone()),
         )
         .await?
         .attach()
