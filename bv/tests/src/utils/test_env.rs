@@ -202,13 +202,7 @@ impl TestEnv {
         String::from_utf8(
             Command::cargo_bin("bv")
                 .unwrap()
-                .args([
-                    "node",
-                    "run",
-                    &format!("--param={sh_script}"),
-                    "sh_inside",
-                    node_id,
-                ])
+                .args(["node", "run", "--param", sh_script, "sh_inside", node_id])
                 .env("BV_ROOT", &self.bv_root)
                 .assert()
                 .success()

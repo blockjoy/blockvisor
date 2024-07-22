@@ -72,12 +72,40 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
     for (vm_id, _) in &nodes {
         test_env.bv_run(&["node", "status", vm_id], "Running");
     }
+    let (node_id, _) = nodes.first().unwrap();
+    let node_dir = build_node_dir(&test_env.bv_root, Uuid::parse_str(node_id).unwrap());
+    assert!(!test_env
+        .sh_inside(node_id, "env")
+        .trim()
+        .contains("BV_ROOT"));
+    assert_eq!("ok", test_env.sh_inside(node_id, "cat /root/test").trim());
+    assert_eq!("ok", test_env.sh_inside(node_id, "cat /tmp/test").trim());
+    fs::write(node_dir.join("data/test"), "ok").await.unwrap();
+    assert_eq!(
+        "ok",
+        test_env.sh_inside(node_id, "cat /blockjoy/test").trim()
+    );
+    assert_eq!(
+        "memory.limit = 2048000000\ncpu.cpus = \"3\"",
+        fs::read_to_string(node_dir.join("cgroups.toml"))
+            .await
+            .unwrap()
+            .trim()
+    );
+    let pid = fs::read_to_string(node_dir.join("apptainer.pid"))
+        .await
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(is_process_running(pid));
     println!("stop all nodes");
     test_env.bv_run(&["node", "stop"], "Stopped node");
     println!("check all nodes are stopped");
     for (vm_id, _) in &nodes {
         test_env.bv_run(&["node", "status", vm_id], "Stopped");
     }
+    assert!(!is_process_running(pid));
     Ok(())
 }
 
