@@ -148,11 +148,11 @@ To make implementation of Babel Plugin interface possible, BV provides following
   Call this function over each value before passing it to `run_sh`. This function is deliberately more
   restrictive than needed; it just filters out each character that is not a number or a
   string or absolutely needed to form an url or json file.
-- `render_template(template, output, params)` - This function renders configuration template with provided `params`.
+- `render_template(template, destination, params)` - This function renders configuration template with provided `params`.
   See [Tera Docs](https://tera.netlify.app/docs/#templates) for details on templating syntax.
   `params` is expected to be Map object serializable to JSON.
   It assumes that file pointed by `template` argument exists.
-  File pointed by `output` path will be overwritten if exists.
+  File pointed by `destination` path will be overwritten if exists.
 - `node_params()` - Get node params as key-value map.
 - `node_env()` - Get node environment/context metadata, see [NodeEnv](#nodeenv).
 - `add_task(task_name, schedule, function_name, function_param)` - Schedule Rhai function with given `function_name` and `function_param` (optional), according to cron-compatible `schedule` string.

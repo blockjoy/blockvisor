@@ -1,3 +1,4 @@
+use crate::apptainer_machine::ApptainerMachine;
 use crate::{
     apptainer_machine,
     bv_context::BvContext,
@@ -79,6 +80,26 @@ impl ApptainerPlatform {
             config,
         })
     }
+
+    async fn new_vm(
+        &self,
+        bv_context: &BvContext,
+        node_state: &NodeState,
+    ) -> Result<ApptainerMachine> {
+        apptainer_machine::new(
+            &self.bv_root,
+            self.bridge_ip,
+            self.mask_bits,
+            node_env::new(bv_context, node_state),
+            node_state,
+            self.babel_path.clone(),
+            node_state
+                .apptainer_config
+                .clone()
+                .unwrap_or(self.config.clone()),
+        )
+        .await
+    }
 }
 
 #[async_trait]
@@ -125,21 +146,7 @@ impl Pal for ApptainerPlatform {
         bv_context: &BvContext,
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine> {
-        apptainer_machine::new(
-            &self.bv_root,
-            self.bridge_ip,
-            self.mask_bits,
-            node_env::new(bv_context, node_state),
-            node_state,
-            self.babel_path.clone(),
-            node_state
-                .apptainer_config
-                .clone()
-                .unwrap_or(self.config.clone()),
-        )
-        .await?
-        .create()
-        .await
+        self.new_vm(bv_context, node_state).await?.create().await
     }
 
     async fn attach_vm(
@@ -147,21 +154,7 @@ impl Pal for ApptainerPlatform {
         bv_context: &BvContext,
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine> {
-        apptainer_machine::new(
-            &self.bv_root,
-            self.bridge_ip,
-            self.mask_bits,
-            node_env::new(bv_context, node_state),
-            node_state,
-            self.babel_path.clone(),
-            node_state
-                .apptainer_config
-                .clone()
-                .unwrap_or(self.config.clone()),
-        )
-        .await?
-        .attach()
-        .await
+        self.new_vm(bv_context, node_state).await?.attach().await
     }
 
     fn available_cpus(&self) -> usize {

@@ -22,7 +22,7 @@ mock! {
         fn render_template(
             &self,
             template: &Path,
-            output: &Path,
+            destination: &Path,
             params: &str,
         ) -> Result<()>;
         fn node_params(&self) -> HashMap<String, String>;

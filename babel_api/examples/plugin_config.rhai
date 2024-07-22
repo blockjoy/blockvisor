@@ -25,13 +25,27 @@ const NET =  global::NETS[node_params().NETWORK];
 
 const BABEL_VERSION = "0.9.0";
 const PLUGIN_CONFIG = #{
-    /// node init actions.
+    /// [optional] List of configuration files to be rendered from template with provided params.
+    /// See [Tera Docs](https://tera.netlify.app/docs/#templates) for details on templating syntax.
+    config_files: [
+        #{
+            /// It assumes that file pointed by `template` argument exists.
+            template: "/var/lib/babel/config.template",
+            /// File pointed by `destination` path will be overwritten if exists.
+            destination: "/etc/service.config",
+            /// Map object serializable to JSON.
+            params: #{
+                node_name: node_env().node_name
+            },
+        },
+    ],
+    /// Node init actions.
     init: #{
-        /// list of sh commands to be executed first
+        /// List of sh commands to be executed first.
         commands: [
             `mkdir -p /opt/netdata/var/cache/netdata`,
         ],
-        /// list of sh jobs (long running tasks), to be started then
+        /// List of sh jobs (long running tasks), to be started then.
         jobs: [
             #{
                 /// Unique job name.
@@ -59,7 +73,7 @@ const PLUGIN_CONFIG = #{
             }
         ]
     },
-    /// list of services to be started once init jobs and download is finished
+    /// List of services to be started once init jobs and download is finished.
     services: [
         #{
             /// Unique service job name.
@@ -105,8 +119,8 @@ const PLUGIN_CONFIG = #{
             run_sh: `/usr/bin/blockchain_service_b --chain=${global::NET.net_type} --datadir=${global::A_DIR} --snapshots=false`,
         }
     ],
-    /// [optional] download configuration
-    /// built-in download will be started once all init jobs are finished
+    /// [optional] Download configuration.
+    /// Built-in download will be started once all init jobs are finished.
     download: #{
         /// [optional] Maximum number of parallel opened connections.
         /// If not set default to 3.
@@ -127,7 +141,7 @@ const PLUGIN_CONFIG = #{
             max_retries: 5,
         },
     },
-    /// [optional] alternative download if archive for standard one is not available
+    /// [optional] Alternative download if archive for standard one is not available.
     alternative_download: #{
         /// Sh script body. It shall be blocking (foreground) process.
         run_sh: `/usr/bin/wget -q -O - some_url`,
@@ -144,14 +158,14 @@ const PLUGIN_CONFIG = #{
         /// If not set default to 128.
         log_buffer_capacity_mb: 64,
     },
-    /// [optional] post-download sh jobs, to be started after download
+    /// [optional] Post-download sh jobs, to be started after download.
     post_download: [
         #{
             name: "post_download_job",
             run_sh: `echo restoreDB`,
         }
     ],
-    /// [optional] pre-upload action
+    /// [optional] Pre-upload action.
     pre_upload: #{
         /// list of sh commands to be executed before upload
         commands: [
@@ -165,8 +179,8 @@ const PLUGIN_CONFIG = #{
             }
         ]
     },
-    /// [optional] upload configuration
-    /// built-in upload can be manually triggered with `bv node run upload`
+    /// [optional] Upload configuration.
+    /// Built-in upload can be manually triggered with `bv node run upload`.
     upload: #{
         /// [optional] List of exclude patterns. Files in `BLOCKCHAIN_DATA_PATH` directory that match any of pattern,
         /// won't be taken into account.
@@ -209,7 +223,7 @@ const PLUGIN_CONFIG = #{
             max_retries: 5,
         },
     },
-    /// [optional] post-upload sh jobs, to be started after upload
+    /// [optional] Post-upload sh jobs, to be started after upload.
     post_upload: [
         #{
             name: "post_upload_job",

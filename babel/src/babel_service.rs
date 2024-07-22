@@ -215,14 +215,14 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         &self,
         request: Request<(PathBuf, PathBuf, String)>,
     ) -> Result<Response<()>, Status> {
-        let (template, output, params) = request.into_inner();
+        let (template, destination, params) = request.into_inner();
         let render = || -> Result<()> {
             let params: serde_json::Value = serde_json::from_str(&params)?;
             let context = tera::Context::from_serialize(params)?;
             let mut tera = tera::Tera::default();
             tera.add_template_file(template, Some("template"))?;
-            let out_file = std::fs::File::create(output)?;
-            tera.render_to("template", &context, out_file)?;
+            let destination_file = std::fs::File::create(destination)?;
+            tera.render_to("template", &context, destination_file)?;
             Ok(())
         };
         render().map_err(|err| {
@@ -649,38 +649,38 @@ mod tests {
             r#"p1: {{ param1 }}, p2: {{param2}}, p3: {% if param3 %}{{ param3 }}{% else %}None{% endif %}; {% for p in vParam %}({{p}}){% endfor %}"#,
         )
         .await?;
-        let out_path = temp_dir().join("out.txt");
+        let destination_path = temp_dir().join("out.txt");
 
         let service = build_babel_service_with_defaults()?;
 
         service
             .render_template(Request::new((
                 template_path.clone(),
-                out_path.clone(),
+                destination_path.clone(),
                 r#"{"param1": "value1", "param2": 2, "param3": true, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
             )))
             .await?;
         assert_eq!(
             "p1: value1, p2: 2, p3: true; (a)(bb)(ccc)",
-            fs::read_to_string(&out_path).await?
+            fs::read_to_string(&destination_path).await?
         );
 
         service
             .render_template(Request::new((
                 template_path.clone(),
-                out_path.clone(),
+                destination_path.clone(),
                 r#"{"param1": "value1", "param2": 2, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
             )))
             .await?;
         assert_eq!(
             "p1: value1, p2: 2, p3: None; (a)(bb)(ccc)",
-            fs::read_to_string(&out_path).await?
+            fs::read_to_string(&destination_path).await?
         );
 
         service
             .render_template(Request::new((
                 template_path.clone(),
-                out_path.clone(),
+                destination_path.clone(),
                 r#"{"param1": "value1", "vParam": ["a", "bb", "ccc"]}"#.to_string(),
             )))
             .await
@@ -689,7 +689,7 @@ mod tests {
         service
             .render_template(Request::new((
                 Path::new("invalid/path").to_path_buf(),
-                out_path.clone(),
+                destination_path.clone(),
                 r#"{"param1": "value1", "param2": 2, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
             )))
             .await

@@ -1,3 +1,4 @@
+use babel_api::engine::NodeEnv;
 use babel_api::{
     self,
     engine::{HttpResponse, JobConfig, JobInfo, JobStatus, RestartConfig, ShResponse},
@@ -7,6 +8,7 @@ use babel_api::{
 use bv_tests_utils::babel_engine_mock::MockBabelEngine;
 use eyre::Context;
 use mockall::*;
+use std::path::PathBuf;
 use std::{collections::HashMap, fs, path::Path};
 
 pub fn rhai_smoke(path: &Path) -> eyre::Result<()> {
@@ -176,6 +178,29 @@ fn test_polygon_functions() {
 fn test_plugin_config() -> eyre::Result<()> {
     let mut babel = bv_tests_utils::babel_engine_mock::MockBabelEngine::new();
 
+    babel.expect_node_env().returning(|| NodeEnv {
+        node_id: "node_id".to_string(),
+        node_name: "node name".to_string(),
+        node_version: "".to_string(),
+        blockchain_type: "".to_string(),
+        node_type: "".to_string(),
+        node_ip: "".to_string(),
+        node_gateway: "".to_string(),
+        node_standalone: false,
+        bv_host_id: "".to_string(),
+        bv_host_name: "".to_string(),
+        bv_api_url: "".to_string(),
+        org_id: "".to_string(),
+    });
+    babel
+        .expect_render_template()
+        .with(
+            predicate::eq(PathBuf::from("/var/lib/babel/config.template")),
+            predicate::eq(PathBuf::from("/etc/service.config")),
+            predicate::eq(r#"{"node_name":"node name"}"#),
+        )
+        .times(2)
+        .returning(|_, _, _| Ok(()));
     babel.expect_node_params().returning(|| {
         HashMap::from_iter([
             ("NETWORK".to_string(), "main".to_string()),

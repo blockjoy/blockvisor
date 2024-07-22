@@ -242,10 +242,10 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         let babel_engine = self.bare.babel_engine.clone();
         self.rhai_engine.register_fn(
             "render_template",
-            move |template: &str, output: &str, params: Map| {
+            move |template: &str, destination: &str, params: Map| {
                 into_rhai_result(babel_engine.render_template(
                     Path::new(&template.to_string()),
-                    Path::new(&output.to_string()),
+                    Path::new(&destination.to_string()),
                     &rhai::format_map_as_json(&params),
                 ))
             },
@@ -472,6 +472,15 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         config: PluginConfig,
         default_services: Vec<DefaultService>,
     ) -> Result<()> {
+        if let Some(config_files) = config.config_files {
+            for config_file in config_files {
+                self.babel_engine.render_template(
+                    &config_file.template,
+                    &config_file.destination,
+                    &serde_json::to_string(&config_file.params)?,
+                )?;
+            }
+        }
         if !config.disable_default_services {
             self.start_default_services(default_services)?;
         }
@@ -852,6 +861,7 @@ mod tests {
     use eyre::bail;
     use mockall::*;
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     mock! {
         #[derive(Debug)]
@@ -870,7 +880,7 @@ mod tests {
             fn render_template(
                 &self,
                 template: &Path,
-                output: &Path,
+                destination: &Path,
                 params: &str,
             ) -> Result<()>;
             fn node_params(&self) -> HashMap<String, String>;
@@ -1576,6 +1586,15 @@ mod tests {
     fn test_default_init() -> Result<()> {
         let script = r#"
             const PLUGIN_CONFIG = #{
+                config_files: [
+                    #{
+                        template: "/var/lib/babel/config.template",
+                        destination: "/etc/service.config",
+                        params: #{
+                            node_name: node_env().node_name
+                        },
+                    },
+                ],
                 init: #{
                     commands: [
                         `echo init_cmd`,
@@ -1626,6 +1645,29 @@ mod tests {
             ];
             "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_node_env().returning(|| NodeEnv {
+            node_id: "node_id".to_string(),
+            node_name: "node name".to_string(),
+            node_version: "".to_string(),
+            blockchain_type: "".to_string(),
+            node_type: "".to_string(),
+            node_ip: "".to_string(),
+            node_gateway: "".to_string(),
+            node_standalone: false,
+            bv_host_id: "".to_string(),
+            bv_host_name: "".to_string(),
+            bv_api_url: "".to_string(),
+            org_id: "".to_string(),
+        });
+        babel
+            .expect_render_template()
+            .with(
+                predicate::eq(PathBuf::from("/var/lib/babel/config.template")),
+                predicate::eq(PathBuf::from("/etc/service.config")),
+                predicate::eq(r#"{"node_name":"node name"}"#),
+            )
+            .once()
+            .returning(|_, _, _| Ok(()));
         babel
             .expect_create_job()
             .with(

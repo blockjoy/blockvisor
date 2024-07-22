@@ -56,12 +56,12 @@ pub trait Babel {
 
     /// This function renders configuration template with provided `params`.
     /// It assumes that file pointed by `template` argument exists.
-    /// File pointed by `output` path will be overwritten if exists.
+    /// File pointed by `destination` path will be overwritten if exists.
     fn render_template(
         /// Path to template file.
         template: PathBuf,
         /// Path to rendered config file.
-        output: PathBuf,
+        destination: PathBuf,
         /// Parameters to be applied on template in form of serialized JSON.
         params: String,
     );

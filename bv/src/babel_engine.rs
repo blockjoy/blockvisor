@@ -402,14 +402,14 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             }
             EngineRequest::RenderTemplate {
                 template,
-                output,
+                destination,
                 params,
                 response_tx,
             } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
                     Ok(babel_client) => with_retry!(babel_client.render_template((
                         template.clone(),
-                        output.clone(),
+                        destination.clone(),
                         params.clone()
                     )))
                     .map_err(|err| self.handle_connection_errors(err))
@@ -556,7 +556,7 @@ enum EngineRequest {
     },
     RenderTemplate {
         template: PathBuf,
-        output: PathBuf,
+        destination: PathBuf,
         params: String,
         response_tx: ResponseTx<Result<()>>,
     },
@@ -656,11 +656,11 @@ impl babel_api::engine::Engine for Engine {
         ))
     }
 
-    fn render_template(&self, template: &Path, output: &Path, params: &str) -> Result<()> {
+    fn render_template(&self, template: &Path, destination: &Path, params: &str) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(EngineRequest::RenderTemplate {
             template: template.to_path_buf(),
-            output: output.to_path_buf(),
+            destination: destination.to_path_buf(),
             params: params.to_string(),
             response_tx,
         })?;
@@ -1081,9 +1081,9 @@ mod tests {
         babel_mock
             .expect_render_template()
             .withf(|req| {
-                let (template, out, params) = req.get_ref();
+                let (template, destination, params) = req.get_ref();
                 template == Path::new("template")
-                    && out == Path::new("config")
+                    && destination == Path::new("config")
                     && params == "init_params"
             })
             .return_once(|_| Ok(Response::new(())));
@@ -1175,9 +1175,9 @@ mod tests {
         babel_mock
             .expect_render_template()
             .withf(|req| {
-                let (template, out, params) = req.get_ref();
+                let (template, destination, params) = req.get_ref();
                 template == Path::new("custom_name")
-                    && out == Path::new("param")
+                    && destination == Path::new("param")
                     && params == r#"{"some_key":"some value"}"#
             })
             .return_once(|_| Ok(Response::new(())));

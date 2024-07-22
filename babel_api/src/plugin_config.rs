@@ -1,9 +1,12 @@
 use crate::engine;
 use crate::engine::{JobConfig, JobType, PosixSignal, RestartConfig};
+use rhai::Dynamic;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginConfig {
+    pub config_files: Option<Vec<ConfigFile>>,
     /// Node init actions.
     pub init: Option<Actions>,
     /// List of blockchain services.
@@ -28,7 +31,14 @@ pub struct PluginConfig {
     pub disable_default_services: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConfigFile {
+    pub template: PathBuf,
+    pub destination: PathBuf,
+    pub params: Dynamic,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
     /// Unique name of the task.
     pub name: String,
@@ -40,7 +50,7 @@ pub struct Task {
     pub param: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Actions {
     /// List of sh commands to be executed first.
     pub commands: Vec<String>,
@@ -48,7 +58,7 @@ pub struct Actions {
     pub jobs: Vec<Job>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RestartPolicy {
     /// Indicates that this job will never be restarted, whether succeeded or not - appropriate for jobs
@@ -58,7 +68,7 @@ pub enum RestartPolicy {
     OnFailure(RestartConfig),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Job {
     /// Unique job name.
     pub name: String,
@@ -82,7 +92,7 @@ pub struct Job {
     pub log_buffer_capacity_mb: Option<usize>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Service {
     /// Unique job name.
     pub name: String,
@@ -114,7 +124,7 @@ fn default_use_blockchain_data() -> bool {
 }
 
 /// Definition of default service that should be run on all nodes (if supported by image).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DefaultService {
     /// Name of service. This will be used as Job name, so make sure it is unique enough,
     /// to not collide with other jobs.
@@ -137,7 +147,7 @@ pub struct DefaultService {
     pub log_buffer_capacity_mb: Option<usize>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Download {
     /// Download restart config.
     pub restart_config: Option<RestartConfig>,
@@ -147,7 +157,7 @@ pub struct Download {
     pub max_runners: Option<usize>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AlternativeDownload {
     /// Sh script body. It shall be blocking (foreground) process.
     pub run_sh: String,
@@ -159,7 +169,7 @@ pub struct AlternativeDownload {
     pub log_buffer_capacity_mb: Option<usize>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Upload {
     /// Upload restart config.
     pub restart_config: Option<RestartConfig>,
@@ -182,7 +192,7 @@ pub struct Upload {
 }
 
 /// Type of compression used on chunk data.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Compression {
     NONE,
     ZSTD(i32),
