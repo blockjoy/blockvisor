@@ -31,6 +31,7 @@ use std::{
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
+use tokio::process::Command;
 use tonic::transport::Endpoint;
 use tonic::{transport::Channel, Code};
 use uuid::Uuid;
@@ -259,6 +260,25 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                             println!("{log}")
                         }
                     }
+                }
+                JobCommand::Logs {
+                    name,
+                    lines,
+                    follow,
+                } => {
+                    let log_path = build_node_dir(&bv_root(), id)
+                        .join("rootfs/var/lib/babel/jobs/logs")
+                        .join(&name);
+                    if !log_path.exists() {
+                        bail!("No logs for '{name}' job found!")
+                    }
+                    let mut cmd = Command::new("tail");
+                    cmd.args(["-n", &format!("{lines}")]);
+                    if follow {
+                        cmd.arg("-f");
+                    }
+                    cmd.arg(log_path.into_os_string());
+                    cmd.spawn()?.wait().await?;
                 }
             }
         }

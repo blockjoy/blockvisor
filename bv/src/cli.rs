@@ -258,6 +258,18 @@ pub enum JobCommand {
         /// Job name.
         name: String,
     },
+
+    /// Get job logs.
+    Logs {
+        /// Job name.
+        name: String,
+        /// Output the last N lines.
+        #[clap(long, short, alias = "n", default_value = "50")]
+        lines: usize,
+        /// Follow logs.
+        #[clap(long, short, alias = "f", default_value = "false")]
+        follow: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -392,6 +404,6 @@ pub struct GlobalOpts {
     verbose: u8,
 
     /// Output format
-    #[clap(long, short, global = true, value_enum, default_value = "text")]
+    #[clap(long, global = true, value_enum, default_value = "text")]
     pub format: FormatArg,
 }
