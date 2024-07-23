@@ -257,7 +257,7 @@ impl ApptainerMachine {
                 "--hostname",
                 &hostname,
                 "--no-mount",
-                "home,cwd",
+                "home,cwd,tmp",
             ];
             if self.config.cpu_limit || self.config.memory_limit {
                 args.push("--apply-cgroups");
