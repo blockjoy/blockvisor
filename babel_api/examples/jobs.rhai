@@ -100,7 +100,7 @@ fn init() {
                 // [optional] Maximum number of parallel workers.
                 max_runners: 8,
                 // [optional] Number of chunks that blockchain data should be split into.
-                // Recommended chunk size is about 1GB. Estimated by BV based on data size, if not provided.
+                // Recommended chunk size is about 500MB. Estimated by BV based on data size, if not provided.
                 number_of_chunks: 700,
                 // [optional] Seconds after which presigned urls in generated `UploadManifest` may expire.
                 url_expires_secs: 3600,

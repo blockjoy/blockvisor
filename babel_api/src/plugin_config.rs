@@ -183,7 +183,7 @@ pub struct Upload {
     /// Maximum number of parallel workers.
     pub max_runners: Option<usize>,
     /// Number of chunks that blockchain data should be split into.
-    /// Recommended chunk size is about 1GB.
+    /// Recommended chunk size is about 500MB.
     pub number_of_chunks: Option<u32>,
     /// Seconds after which presigned urls in generated `UploadManifest` may expire.
     pub url_expires_secs: Option<u32>,

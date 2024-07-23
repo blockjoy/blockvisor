@@ -36,9 +36,9 @@ use tokio::{sync::Semaphore, task::JoinError};
 use tonic::{codegen::InterceptedService, transport::Channel};
 use tracing::error;
 
-// if uploading single chunk (about 1Gb) takes more than 100min, it mean that something
+// if uploading single chunk (about 500MB) takes more than 50min, it means that something
 // is not ok
-const UPLOAD_SINGLE_CHUNK_TIMEOUT: Duration = Duration::from_secs(100 * 60);
+const UPLOAD_SINGLE_CHUNK_TIMEOUT: Duration = Duration::from_secs(50 * 60);
 const PARTS_FILENAME: &str = "upload.parts";
 
 pub fn cleanup_job(meta_dir: &Path) -> Result<()> {
@@ -172,17 +172,17 @@ impl<C: BabelEngineConnector> Uploader<C> {
             number_of_chunks
         } else {
             let (total_size, _) = sources_list(&source_dir, &exclude)?;
-            // recommended size of chunk is around 1Gb
-            1 + u32::try_from(total_size / (1024 * 1024 * 1024))?
+            // recommended size of chunk is around 500MB
+            1 + u32::try_from(total_size / (500 * 1000 * 1000))?
         };
         let manifest = connector
             .connect()
             .get_upload_manifest(with_timeout(
                 (
                     slots, // with expected upload speed at least 33MB/s
-                    // upload of one chunk (recommended 1GB size) should not take more than 30s,
+                    // upload of one chunk (recommended 500MB size) should not take more than 15s,
                     // but be generous and give at least 1h
-                    url_expires_secs.unwrap_or(3600 + slots * 30),
+                    url_expires_secs.unwrap_or(3600 + slots * 15),
                     data_version,
                 ),
                 // DownloadManifest may be pretty big, so better set longer timeout that depends on number of chunks

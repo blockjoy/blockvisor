@@ -255,7 +255,7 @@ pub enum JobType {
         /// Maximum number of parallel workers.
         max_runners: Option<usize>,
         /// Number of chunks that blockchain data should be split into.
-        /// Recommended chunk size is about 1GB.
+        /// Recommended chunk size is about 500MB.
         number_of_chunks: Option<u32>,
         /// Seconds after which presigned urls in generated `UploadManifest` may expire.
         url_expires_secs: Option<u32>,
