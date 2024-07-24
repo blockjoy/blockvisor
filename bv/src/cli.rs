@@ -223,6 +223,12 @@ pub enum NodeCommand {
         /// The id or name of the node to check. BV tries to get it from workspace if not provided.
         id_or_name: Option<String>,
     },
+
+    /// Shell-into node
+    Shell {
+        /// The id or name of the node. BV tries to get it from workspace if not provided.
+        id_or_name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

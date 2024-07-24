@@ -31,6 +31,7 @@ use std::{
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
+use tokio::process::Command;
 use tonic::transport::Endpoint;
 use tonic::{transport::Channel, Code};
 use uuid::Uuid;
@@ -404,6 +405,30 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 }
                 bail!("Node check failed");
             }
+        }
+        NodeCommand::Shell { id_or_name } => {
+            let name = match id_or_name {
+                None => {
+                    if let Ok(workspace::Workspace {
+                        active_node: Some(workspace::ActiveNode { name, .. }),
+                        ..
+                    }) = workspace::read(&std::env::current_dir()?)
+                    {
+                        name
+                    } else {
+                        bail!("<ID_OR_NAME> neither provided nor found in the workspace");
+                    }
+                }
+                Some(id_or_name) => match Uuid::parse_str(&id_or_name) {
+                    Ok(id) => client.get_node(id).await?.into_inner().name,
+                    Err(_) => id_or_name,
+                },
+            };
+
+            let mut cmd = Command::new("apptainer");
+            cmd.arg("shell");
+            cmd.arg(format!("instance://{name}"));
+            cmd.spawn()?.wait().await?;
         }
     }
     Ok(())
