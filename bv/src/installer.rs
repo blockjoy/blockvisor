@@ -613,6 +613,10 @@ mod tests {
                 &self,
                 request: tonic::Request<(Uuid, String)>,
             ) -> Result<tonic::Response<()>, tonic::Status>;
+            async fn skip_node_job(
+                &self,
+                request: tonic::Request<(Uuid, String)>,
+            ) -> Result<tonic::Response<()>, tonic::Status>;
             async fn cleanup_node_job(
                 &self,
                 request: tonic::Request<(Uuid, String)>,

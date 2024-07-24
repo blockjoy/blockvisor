@@ -236,6 +236,9 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                         }
                     }
                 }
+                JobCommand::Skip { name } => {
+                    client.skip_node_job((id, name)).await?;
+                }
                 JobCommand::Cleanup { name } => {
                     client.cleanup_node_job((id, name)).await?;
                 }
@@ -375,54 +378,30 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     }
                 }
             }
-        }
-        NodeCommand::Check { id_or_name } => {
-            let id = client
-                .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
-                .await?;
-            // prepare list of checks
-            // first go methods which SHALL and SHOULD be implemented
-            let mut methods = vec![
-                "height",
-                "block_age",
-                "name",
-                "address",
-                "consensus",
-                "staking_status",
-                "sync_status",
-                "application_status",
-            ];
             // second go test_* methods
             let caps = client.list_capabilities(id).await?.into_inner();
-            let tests_iter = caps
+            let tests = caps
                 .iter()
                 .filter(|cap| cap.starts_with("test_"))
                 .map(|cap| cap.as_str());
-            methods.extend(tests_iter);
-
             let mut errors = vec![];
-            println!("Running node checks:");
-            for method in methods {
-                let result = match client.run((id, method.to_string(), String::from(""))).await {
+            println!("Running node internal tests:");
+            for test in tests {
+                let result = match client.run((id, test.to_string(), String::default())).await {
                     Ok(_) => "ok",
-                    Err(e) if e.code() == Code::NotFound || e.message().contains("not found") => {
-                        // this is not considered an error
-                        // and will not influence exit code
-                        "not found"
-                    }
                     Err(e) => {
                         errors.push(e);
                         "failed"
                     }
                 };
-                println!("{:.<30}{:.>16}", method, result);
+                println!("{:.<30}{:.>16}", test, result);
             }
             if !errors.is_empty() {
-                eprintln!("\nGot {} errors:", errors.len());
+                eprintln!("\n{} tests failed:", errors.len());
                 for e in errors.iter() {
                     eprintln!("{e:#}");
                 }
-                bail!("Node check failed");
+                bail!("Node internal tests failed");
             }
         }
         NodeCommand::Shell { id_or_name } => {

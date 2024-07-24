@@ -161,6 +161,7 @@ pub trait JobsManagerClient {
     async fn start(&self, name: &str) -> Result<()>;
     async fn get_job_shutdown_timeout(&self, name: &str) -> Duration;
     async fn stop(&self, name: &str) -> Result<()>;
+    async fn skip(&self, name: &str) -> Result<()>;
     async fn cleanup(&self, name: &str) -> Result<()>;
     async fn info(&self, name: &str) -> Result<JobInfo>;
 }
@@ -326,6 +327,34 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
                 }
                 JobState::Inactive(status) => {
                     *status = JobStatus::Stopped;
+                }
+            }
+            jobs_context
+                .jobs_data
+                .save_status(&JobStatus::Stopped, name)?;
+        } else {
+            bail!("can't stop, job '{name}' not found")
+        }
+        Ok(())
+    }
+
+    async fn skip(&self, name: &str) -> Result<()> {
+        info!("Requested '{name} job to stop'");
+        let mut jobs_context = self.jobs_registry.lock().await;
+        if let Some(job) = jobs_context.jobs.get_mut(name) {
+            match &mut job.state {
+                JobState::Active(pid) => {
+                    terminate_job(name, *pid, &job.config).await?;
+                    job.state = JobState::Inactive(JobStatus::Finished {
+                        exit_code: Some(0),
+                        message: "Skipped".to_string(),
+                    });
+                }
+                JobState::Inactive(status) => {
+                    *status = JobStatus::Finished {
+                        exit_code: Some(0),
+                        message: "Skipped".to_string(),
+                    };
                 }
             }
             jobs_context

@@ -32,6 +32,8 @@ pub trait Babel {
     fn start_job(job_name: String);
     /// Stop background job with given unique name if running.
     fn stop_job(job_name: String);
+    /// Skip background job with given unique name if running.
+    fn skip_job(job_name: String);
     /// Cleanup background job with given unique name - remove any intermediate files,
     /// so next time it will start from scratch.
     fn cleanup_job(job_name: String);

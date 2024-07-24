@@ -274,6 +274,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(())
     }
 
+    /// Request to skip given job.
+    pub async fn skip_job(&mut self, name: &str) -> Result<()> {
+        let babel_client = self.node_connection.babel_client().await?;
+        skip_job(babel_client, name).await?;
+        Ok(())
+    }
+
     /// Request to cleanup given job.
     pub async fn cleanup_job(&mut self, name: &str) -> Result<()> {
         let babel_client = self.node_connection.babel_client().await?;
@@ -498,6 +505,16 @@ async fn stop_job(client: &mut BabelClient, job_name: &str) -> Result<(), tonic:
     let job_timeout =
         with_retry!(client.get_job_shutdown_timeout(job_name.to_string()))?.into_inner();
     with_retry!(client.stop_job(with_timeout(
+        job_name.to_string(),
+        job_timeout + NODE_REQUEST_TIMEOUT
+    )))
+    .map(|v| v.into_inner())
+}
+
+async fn skip_job(client: &mut BabelClient, job_name: &str) -> Result<(), tonic::Status> {
+    let job_timeout =
+        with_retry!(client.get_job_shutdown_timeout(job_name.to_string()))?.into_inner();
+    with_retry!(client.skip_job(with_timeout(
         job_name.to_string(),
         job_timeout + NODE_REQUEST_TIMEOUT
     )))
@@ -812,6 +829,7 @@ mod tests {
                 request: Request<String>,
             ) -> Result<Response<()>, Status>;
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
+            async fn skip_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
             async fn get_jobs(&self, request: Request<()>) -> Result<Response<JobsInfo>, Status>;

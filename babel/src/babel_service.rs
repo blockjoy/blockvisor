@@ -151,6 +151,14 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(()))
     }
 
+    async fn skip_job(&self, request: Request<String>) -> Result<Response<()>, Status> {
+        self.jobs_manager
+            .skip(&request.into_inner())
+            .await
+            .map_err(|err| Status::internal(format!("stop_job failed: {err:#}")))?;
+        Ok(Response::new(()))
+    }
+
     async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status> {
         self.jobs_manager
             .cleanup(&request.into_inner())
@@ -373,6 +381,7 @@ mod tests {
             async fn start(&self, name: &str) -> Result<()>;
             async fn get_job_shutdown_timeout(&self, name: &str) -> Duration;
             async fn stop(&self, name: &str) -> Result<()>;
+            async fn skip(&self, name: &str) -> Result<()>;
             async fn cleanup(&self, name: &str) -> Result<()>;
             async fn info(&self, name: &str) -> Result<JobInfo>;
         }

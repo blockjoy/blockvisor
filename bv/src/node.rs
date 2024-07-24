@@ -846,6 +846,7 @@ pub mod tests {
                 request: Request<String>,
             ) -> Result<Response<()>, Status>;
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
+            async fn skip_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
             async fn get_job_shutdown_timeout(&self, request: Request<String>) -> Result<Response<Duration>, Status>;

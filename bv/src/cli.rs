@@ -208,12 +208,6 @@ pub enum NodeCommand {
         id_or_name: Option<String>,
     },
 
-    /// Execute node runtime checks.
-    Check {
-        /// The id or name of the node to check. BV tries to get it from workspace if not provided.
-        id_or_name: Option<String>,
-    },
-
     /// Manage jobs on given node
     #[clap(alias = "j")]
     Job {
@@ -244,13 +238,19 @@ pub enum JobCommand {
     },
 
     /// Stop job.
-    #[clap(group(ArgGroup::new("job_input").required(true).args(&["name", "all"])))]
+    #[clap(group(ArgGroup::new("job_input").required(true).args(& ["name", "all"])))]
     Stop {
         /// Job name to be stoped.
         name: Option<String>,
         /// Stop all jobs.
         #[clap(long, short)]
         all: bool,
+    },
+
+    /// Skip job. If it's Running, it will be stopped first, then marked as Finished with 0 code.
+    Skip {
+        /// Job name to be skipped.
+        name: String,
     },
 
     /// Cleanup job - remove any intermediate files, so next time it will start from scratch.

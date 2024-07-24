@@ -605,6 +605,17 @@ where
     }
 
     #[instrument(skip(self))]
+    pub async fn skip_job(&self, id: Uuid, job_name: &str) -> Result<()> {
+        let nodes = self.nodes.read().await;
+        let mut node = nodes
+            .get(&id)
+            .ok_or_else(|| Error::NodeNotFound(id))?
+            .write()
+            .await;
+        node.babel_engine.skip_job(job_name).await
+    }
+
+    #[instrument(skip(self))]
     pub async fn cleanup_job(&self, id: Uuid, job_name: &str) -> Result<()> {
         let nodes = self.nodes.read().await;
         let mut node = nodes

@@ -70,6 +70,7 @@ trait Service {
     fn get_node_job_info(id: Uuid, job_name: String) -> babel_api::engine::JobInfo;
     fn start_node_job(id: Uuid, job_name: String);
     fn stop_node_job(id: Uuid, job_name: String);
+    fn skip_node_job(id: Uuid, job_name: String);
     fn cleanup_node_job(id: Uuid, job_name: String);
     fn get_node_id_for_name(name: String) -> String;
     fn list_capabilities(id: Uuid) -> Vec<String>;
@@ -342,6 +343,20 @@ where
         let (id, job_name) = request.into_inner();
         self.nodes_manager
             .start_job(id, &job_name)
+            .await
+            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        Ok(Response::new(()))
+    }
+
+    #[instrument(skip(self))]
+    async fn skip_node_job(
+        &self,
+        request: Request<(Uuid, String)>,
+    ) -> Result<Response<()>, Status> {
+        status_check().await?;
+        let (id, job_name) = request.into_inner();
+        self.nodes_manager
+            .skip_job(id, &job_name)
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?;
         Ok(Response::new(()))
