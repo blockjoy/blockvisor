@@ -174,9 +174,3 @@ fn start_progress_job(name) {
     });
     "job " + name + " started"
 }
-
-fn test_height_value(param) {
-    if height() < 0 {
-        throw "Invalid node height value: " + height();
-    }
-}

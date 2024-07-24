@@ -88,6 +88,7 @@ pub async fn process_host_command(
 }
 
 pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Result<()> {
+    let dev_host = bv_url.starts_with("https://api.dev") || bv_url.starts_with("http://localhost");
     let mut client = NodeClient::new(bv_url).await?;
     match command {
         NodeCommand::List { running } => {
@@ -122,6 +123,14 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             network,
             dev_mode,
         } => {
+            if dev_mode && !dev_host {
+                if let Ok(false) = ask_confirm(
+                    "Are you sure you want to create dev node(s) on non-dev host?\n",
+                    false,
+                ) {
+                    return Ok(());
+                }
+            }
             let image = parse_image(&image_id_with_fallback(image)?)?;
             let node = client
                 .client

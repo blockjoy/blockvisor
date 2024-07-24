@@ -178,6 +178,7 @@ fn test_height_value(param) {
     if height() < 0 {
         throw "Invalid node height value: " + height();
     }
+    param
 }
 ```
 
