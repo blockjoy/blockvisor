@@ -36,21 +36,21 @@ pub struct NodeDisplayInfo {
     pub gateway: String,
     pub status: NodeStatus,
     pub uptime: Option<i64>,
-    pub standalone: bool,
+    pub dev_mode: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NodeCreateRequest {
     pub image: NodeImage,
     pub network: String,
-    pub standalone: bool,
+    pub dev_mode: bool,
     pub ip: Option<String>,
     pub gateway: Option<String>,
     pub props: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct CreateStandaloneNodeRequest {}
+pub struct CreateDevNodeRequest {}
 
 #[tonic_rpc::tonic_rpc(bincode)]
 trait Service {
@@ -211,14 +211,14 @@ where
     ) -> Result<Response<NodeDisplayInfo>, Status> {
         status_check().await?;
         let req = request.into_inner();
-        let standalone = req.standalone || self.dev_mode;
-        if !standalone && (req.ip.is_some() || req.gateway.is_some()) {
+        let dev_mode = req.dev_mode || self.dev_mode;
+        if !dev_mode && (req.ip.is_some() || req.gateway.is_some()) {
             return Err(Status::invalid_argument(
-                "custom ip and gateway is allowed only in standalone mode",
+                "custom ip and gateway is allowed only in dev mode",
             ));
         }
-        Ok(Response::new(if standalone {
-            self.create_standalone_node(req)
+        Ok(Response::new(if dev_mode {
+            self.create_dev_node(req)
                 .await
                 .map_err(|err| Status::unknown(format!("{err:#}")))?
         } else {
@@ -236,7 +236,7 @@ where
         status_check().await?;
         let (id, image) = request.into_inner();
 
-        if self.is_standalone_node(id).await? {
+        if self.is_dev_node(id).await? {
             self.nodes_manager
                 .upgrade(id, image)
                 .await
@@ -244,7 +244,7 @@ where
             Ok(Response::new(()))
         } else {
             Err(Status::unimplemented(
-                "non-standalone nodes upgrade is managed by API, manual trigger for upgrade is not possible",
+                "non-dev nodes upgrade is managed by API, manual trigger for upgrade is not possible",
             ))
         }
     }
@@ -253,7 +253,7 @@ where
     async fn start_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
         status_check().await?;
         let id = request.into_inner();
-        if self.is_standalone_node(id).await? {
+        if self.is_dev_node(id).await? {
             self.nodes_manager
                 .start(id, true)
                 .await
@@ -272,7 +272,7 @@ where
     async fn stop_node(&self, request: Request<(Uuid, bool)>) -> Result<Response<()>, Status> {
         status_check().await?;
         let (id, force) = request.into_inner();
-        if self.is_standalone_node(id).await? {
+        if self.is_dev_node(id).await? {
             self.nodes_manager
                 .stop(id, force)
                 .await
@@ -291,7 +291,7 @@ where
     async fn delete_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
         status_check().await?;
         let id = request.into_inner();
-        if self.is_standalone_node(id).await? {
+        if self.is_dev_node(id).await? {
             self.nodes_manager
                 .delete(id)
                 .await
@@ -468,7 +468,7 @@ where
     P::VirtualMachine: Send + Sync,
     P::RecoveryBackoff: Send + Sync + 'static,
 {
-    async fn is_standalone_node(&self, id: Uuid) -> eyre::Result<bool, Status> {
+    async fn is_dev_node(&self, id: Uuid) -> eyre::Result<bool, Status> {
         Ok(self.dev_mode
             || self
                 .nodes_manager
@@ -479,7 +479,7 @@ where
                 .read()
                 .await
                 .state
-                .standalone)
+                .dev_mode)
     }
 
     async fn connect_to_node_service(&self) -> Result<api::NodesServiceClient, Status> {
@@ -510,7 +510,7 @@ where
                     .state
                     .started_at
                     .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                standalone: node.state.standalone,
+                dev_mode: node.state.dev_mode,
             }
         } else {
             let cache = self
@@ -529,15 +529,12 @@ where
                 uptime: cache
                     .started_at
                     .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                standalone: cache.standalone,
+                dev_mode: cache.dev_mode,
             }
         })
     }
 
-    async fn create_standalone_node(
-        &self,
-        req: NodeCreateRequest,
-    ) -> eyre::Result<NodeDisplayInfo> {
+    async fn create_dev_node(&self, req: NodeCreateRequest) -> eyre::Result<NodeDisplayInfo> {
         let id = Uuid::new_v4();
         let name = Petnames::default().generate_one(3, "-");
         let properties = parse_props(&req)?.into_iter().collect();
@@ -553,7 +550,7 @@ where
                     properties,
                     network: req.network.clone(),
                     rules: vec![],
-                    standalone: true,
+                    dev_mode: true,
                     org_id: Default::default(),
                 },
             )
@@ -565,7 +562,7 @@ where
             network: req.network,
             ip,
             gateway,
-            standalone: true,
+            dev_mode: true,
             status: NodeStatus::Stopped,
             uptime: None,
         })
@@ -624,7 +621,7 @@ where
             gateway: node.ip_gateway,
             status: NodeStatus::Stopped,
             uptime: None,
-            standalone: false,
+            dev_mode: false,
         })
     }
 

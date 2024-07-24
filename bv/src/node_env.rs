@@ -15,7 +15,7 @@ pub fn new(bv_context: &BvContext, node_state: &NodeState) -> NodeEnv {
         node_version: node_state.image.node_version.clone(),
         node_ip: node_state.network_interface.ip.to_string(),
         node_gateway: node_state.network_interface.gateway.to_string(),
-        node_standalone: node_state.standalone,
+        dev_mode: node_state.dev_mode,
         bv_host_id: bv_context.id.clone(),
         bv_host_name: bv_context.name.clone(),
         bv_api_url: bv_context.url.clone(),
@@ -36,7 +36,7 @@ pub async fn save(env: &NodeEnv, babel_root: &Path) -> eyre::Result<()> {
          NODE_VERSION=\"{}\"\n\
          NODE_IP=\"{}\"\n\
          NODE_GATEWAY=\"{}\"\n\
-         NODE_STANDALONE=\"{}\"\n",
+         DEV_MODE=\"{}\"\n",
         env.bv_host_id,
         env.bv_host_name,
         env.bv_api_url,
@@ -48,7 +48,7 @@ pub async fn save(env: &NodeEnv, babel_root: &Path) -> eyre::Result<()> {
         env.node_version,
         env.node_ip,
         env.node_gateway,
-        env.node_standalone
+        env.dev_mode
     );
     if let Ok(rust_log) = std::env::var("RUST_LOG") {
         node_env.push_str(&format!("RUST_LOG=\"{rust_log}\"\n"))

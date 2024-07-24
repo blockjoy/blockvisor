@@ -32,7 +32,7 @@ Each "Node Image" consists of:
 ALTERNATIVELY: Provision host, but without BV installed yet (add `--skip-download` flag to `bvup` call).<br>
 Then install [bundle-dev](https://github.com/blockjoy/blockvisor/releases/latest) on the host (instead of standard `bundle`).
 Download, untar, and run `./bundle/installer`.<br>
-`bundle-dev` is a special variant of BV with `blockvisord` that runs in, so called, "standalone" mode.
+`bundle-dev` is a special variant of BV with `blockvisord` that runs in, so called, "dev" mode.
 It means no regular cloud communication (only when need to download existing images) and commands handling.
 Also, other housekeeping tasks, like node recovery, metrics gathering or auto update, are disabled in that variant.<br>
 This variant may be more convenient in some cases.
@@ -103,8 +103,8 @@ __HINT 2__: You can check what blockvisor is doing on the host by running `journ
 __HINT 3__: The `bv node create` command copy RHAI script from active image (e.g. `/var/lib/blockvisor/images/example/node/1.2.3/babel.rhai`)
 to `/var/lib/blockvisor/nodes/<image_id>/babel.rhai`. Hence, editing `babel.rhai` from image won't affect created node.
 
-__HINT 4__: When using standard (not `dev`) BV bundle, it is recommended to use `--standalone` flag,
-while adding support for a new node. All commands, run on a node created in standalone mode, will bypass the API.
+__HINT 4__: When using standard (not `dev`) BV bundle, it is recommended to use `--dev-mode` flag,
+while adding support for a new node. All commands, run on a node created in dev mode, will bypass the API.
 Hence, node won't be visible for the API, as it would normally be.
 
 __HINT 5__: Once created node is started, `apptainer shell` can be used, to modify rootfs and install/update blockchain specific software.
@@ -116,7 +116,7 @@ Now doing `node_shell` in your workspace folder will run active node shell.
 
 #### Example
 ```
-bv node create --network test --standalone
+bv node create --network test --dev-mode
 ```
 Check that your node has been created:
 ```

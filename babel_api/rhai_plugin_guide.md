@@ -204,8 +204,8 @@ struct NodeEnv{
     ip: String,
     /// Node gateway IP.
     gateway: String,
-    /// Indicate if node run in standalone mode.
-    standalone: bool,
+    /// Indicate if node run in dev mode.
+    dev_mode: bool,
     /// Host id.
     bv_id: String,
     /// Host name.

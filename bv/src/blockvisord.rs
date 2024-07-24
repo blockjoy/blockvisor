@@ -314,8 +314,8 @@ where
             let mut updates = vec![];
             for (id, node) in nodes_manager.nodes_list().await.iter() {
                 if let Ok(mut node) = node.try_write() {
-                    if node.state.standalone {
-                        // don't send updates for standalone nodes
+                    if node.state.dev_mode {
+                        // don't send updates for nodes in dev mode
                         continue;
                     }
                     let status = node.status().await;

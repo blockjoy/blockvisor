@@ -120,7 +120,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             gateway,
             props,
             network,
-            standalone,
+            dev_mode,
         } => {
             let image = parse_image(&image_id_with_fallback(image)?)?;
             let node = client
@@ -128,7 +128,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 .create_node(NodeCreateRequest {
                     image,
                     network,
-                    standalone,
+                    dev_mode,
                     ip,
                     gateway,
                     props,

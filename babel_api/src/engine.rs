@@ -100,8 +100,8 @@ pub struct NodeEnv {
     pub node_ip: String,
     /// Node gateway IP.
     pub node_gateway: String,
-    /// Indicate if node run in standalone mode.
-    pub node_standalone: bool,
+    /// Indicate if node run in dev mode.
+    pub dev_mode: bool,
     /// Host id.
     pub bv_host_id: String,
     /// Host name.

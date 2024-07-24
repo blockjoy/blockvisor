@@ -68,7 +68,7 @@ pub struct NodeState {
     pub properties: NodeProperties,
     pub network: String,
     #[serde(default)]
-    pub standalone: bool,
+    pub dev_mode: bool,
     #[serde(default)]
     pub restarting: bool,
     #[serde(default)]

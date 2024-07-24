@@ -180,7 +180,7 @@ impl TestEnv {
                 ip,
                 "--network",
                 "test",
-                "--standalone",
+                "--dev-mode",
             ])
             .env("BV_ROOT", &self.bv_root);
         let output = cmd.output().unwrap();

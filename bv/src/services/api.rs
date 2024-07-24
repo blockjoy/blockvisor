@@ -302,7 +302,7 @@ where
                             rules,
                             properties,
                             network: args.network,
-                            standalone: false,
+                            dev_mode: false,
                             org_id: args.org_id,
                         },
                     )

@@ -1019,7 +1019,7 @@ pub mod tests {
                 firewall_rules: vec![],
                 properties: Default::default(),
                 network: "test".to_string(),
-                standalone: true,
+                dev_mode: true,
                 restarting: false,
                 org_id: Default::default(),
                 apptainer_config: None,

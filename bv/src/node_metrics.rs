@@ -89,12 +89,12 @@ where
             match n.try_write() {
                 Err(_) => None,
                 Ok(mut node) => {
-                    if node.status().await == NodeStatus::Running && !node.state.standalone {
+                    if node.status().await == NodeStatus::Running && !node.state.dev_mode {
                         collect_metric(&mut node.babel_engine)
                             .await
                             .map(|metric| (node.id(), metric))
                     } else {
-                        // don't collect metrics for not running or standalone nodes
+                        // don't collect metrics for not running or dev nodes
                         None
                     }
                 }

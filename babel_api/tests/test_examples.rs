@@ -186,7 +186,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         node_type: "".to_string(),
         node_ip: "".to_string(),
         node_gateway: "".to_string(),
-        node_standalone: false,
+        dev_mode: false,
         bv_host_id: "".to_string(),
         bv_host_name: "".to_string(),
         bv_api_url: "".to_string(),
