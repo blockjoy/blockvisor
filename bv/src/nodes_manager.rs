@@ -309,8 +309,10 @@ where
             )));
         }
 
-        self.check_node_requirements(&meta.requirements, &config.image, None)
-            .await?;
+        if !config.dev_mode {
+            self.check_node_requirements(&meta.requirements, &config.image, None)
+                .await?;
+        }
         let mut assigned_cpus = self
             .cpu_registry
             .lock()
@@ -396,8 +398,14 @@ where
             let new_meta =
                 Self::fetch_image_data(self.pal.clone(), self.api_config.clone(), &image).await?;
 
-            self.check_node_requirements(&new_meta.requirements, &image, Some(&data.requirements))
+            if !data.dev_mode {
+                self.check_node_requirements(
+                    &new_meta.requirements,
+                    &image,
+                    Some(&data.requirements),
+                )
                 .await?;
+            }
 
             let mut node = nodes_lock
                 .get(&id)
@@ -1172,7 +1180,7 @@ mod tests {
             rules: vec![],
             properties: Default::default(),
             network: "test".to_string(),
-            dev_mode: true,
+            dev_mode: false,
             org_id: Default::default(),
         };
         let mut vm_mock = default_vm(test_env.tmp_root.clone());
@@ -1298,7 +1306,7 @@ mod tests {
                         rules: vec![],
                         properties: Default::default(),
                         network: "test".to_string(),
-                        dev_mode: true,
+                        dev_mode: false,
                         org_id: Default::default(),
                     }
                 )
@@ -1319,7 +1327,7 @@ mod tests {
                         rules: vec![],
                         properties: Default::default(),
                         network: "test".to_string(),
-                        dev_mode: true,
+                        dev_mode: false,
                         org_id: Default::default(),
                     }
                 )
@@ -1340,7 +1348,7 @@ mod tests {
                         rules: vec![],
                         properties: Default::default(),
                         network: "test".to_string(),
-                        dev_mode: true,
+                        dev_mode: false,
                         org_id: Default::default(),
                     }
                 )
@@ -1371,7 +1379,7 @@ mod tests {
                         rules,
                         properties: Default::default(),
                         network: "test".to_string(),
-                        dev_mode: true,
+                        dev_mode: false,
                         org_id: Default::default(),
                     }
                 )
@@ -1396,7 +1404,8 @@ mod tests {
                         rules: vec![],
                         properties: Default::default(),
                         network: "test".to_string(),
-                        dev_mode: true,org_id: Default::default(),
+                        dev_mode: false,
+                        org_id: Default::default(),
                     }
                 )
                 .await
@@ -1416,7 +1425,7 @@ mod tests {
                         rules: vec![],
                         properties: Default::default(),
                         network: "invalid".to_string(),
-                        dev_mode: true,
+                        dev_mode: false,
                         org_id: Default::default(),
                     }
                 )
@@ -1589,7 +1598,7 @@ mod tests {
             rules: vec![],
             properties: Default::default(),
             network: "test".to_string(),
-            dev_mode: true,
+            dev_mode: false,
             org_id: Default::default(),
         };
         let new_image = NodeImage {
@@ -1780,7 +1789,7 @@ mod tests {
             rules: vec![],
             properties: Default::default(),
             network: "test".to_string(),
-            dev_mode: true,
+            dev_mode: false,
             org_id: Default::default(),
         };
 
