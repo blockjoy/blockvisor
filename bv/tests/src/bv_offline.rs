@@ -121,24 +121,24 @@ async fn test_bv_cmd_jobs() -> Result<()> {
     test_env.bv_run(&["node", "start", vm_id], "Started node");
 
     println!("check jobs");
-    test_env.bv_run(&["node", "job", vm_id, "ls"], "upload");
+    test_env.bv_run(&["node", "job", vm_id, "ls"], "init_job");
 
     println!("stop job");
-    test_env.bv_run(&["node", "job", vm_id, "stop", "upload"], "");
+    test_env.bv_run(&["node", "job", vm_id, "stop", "init_job"], "");
 
     println!("job info");
     test_env.bv_run(
-        &["node", "job", vm_id, "info", "upload"],
+        &["node", "job", vm_id, "info", "init_job"],
         "status:           Stopped",
     );
 
     println!("start job");
-    test_env.bv_run(&["node", "job", vm_id, "start", "upload"], "");
+    test_env.bv_run(&["node", "job", vm_id, "start", "init_job"], "");
 
-    println!("wait for upload finished");
+    println!("wait for init_job finished");
     let start = std::time::Instant::now();
     while let Err(err) = test_env.try_bv_run(
-        &["node", "job", vm_id, "info", "upload"],
+        &["node", "job", vm_id, "info", "init_job"],
         "status:           Finished with exit code 0",
     ) {
         if start.elapsed() < Duration::from_secs(120) {
@@ -150,21 +150,10 @@ async fn test_bv_cmd_jobs() -> Result<()> {
 
     assert!(fs::read_to_string(
         build_rootfs_dir(&build_node_dir(&test_env.bv_root, Uuid::parse_str(vm_id)?))
-            .join("var/lib/babel/jobs/logs/upload"),
+            .join("var/lib/babel/jobs/logs/init_job"),
     )
     .await?
-    .contains("upload|dummy_upload"));
-
-    let _ = test_env.sh_inside(vm_id, "touch /var/lib/babel/jobs/status/upload.parts");
-    println!("cleanup job");
-    test_env.bv_run(&["node", "job", vm_id, "cleanup", "upload"], "");
-    assert!(test_env
-        .sh_inside(
-            vm_id,
-            "if ! [[ -e /var/lib/babel/jobs/status/upload.parts ]]; then echo cleanup_done; fi;"
-        )
-        .contains("cleanup_done"));
-
+    .contains("init_job|dummy_init"));
     Ok(())
 }
 

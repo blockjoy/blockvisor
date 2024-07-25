@@ -1007,6 +1007,20 @@ mod tests {
             fs::rename(file_path, archive_file_path).await.unwrap();
         }
 
+        fn build_node_config(&self, name: &str, ip: &str, gateway: &str) -> NodeConfig {
+            NodeConfig {
+                name: name.to_string(),
+                image: self.test_image.clone(),
+                ip: ip.to_string(),
+                gateway: gateway.to_string(),
+                rules: vec![],
+                properties: HashMap::from_iter([("TESTING_PARAM".to_string(), "any".to_string())]),
+                network: "test".to_string(),
+                dev_mode: false,
+                org_id: Default::default(),
+            }
+        }
+
         async fn start_test_server(
             &self,
             images: Vec<(NodeImage, Vec<u8>)>,
@@ -1183,17 +1197,8 @@ mod tests {
         let config = default_config(test_env.tmp_root.clone());
 
         let first_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
-        let first_node_config = NodeConfig {
-            name: "first node name".to_string(),
-            image: test_env.test_image.clone(),
-            ip: "192.168.0.7".to_string(),
-            gateway: "192.168.0.1".to_string(),
-            rules: vec![],
-            properties: Default::default(),
-            network: "test".to_string(),
-            dev_mode: false,
-            org_id: Default::default(),
-        };
+        let first_node_config =
+            test_env.build_node_config("first node name", "192.168.0.7", "192.168.0.1");
         let mut vm_mock = default_vm(test_env.tmp_root.clone());
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         vm_mock
@@ -1210,17 +1215,8 @@ mod tests {
         );
 
         let second_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
-        let second_node_config = NodeConfig {
-            name: "second node name".to_string(),
-            image: test_env.test_image.clone(),
-            ip: "192.168.0.8".to_string(),
-            gateway: "192.168.0.1".to_string(),
-            rules: vec![],
-            properties: Default::default(),
-            network: "test".to_string(),
-            dev_mode: false,
-            org_id: Default::default(),
-        };
+        let second_node_config =
+            test_env.build_node_config("second node name", "192.168.0.8", "192.168.0.1");
         let mut vm_mock = default_vm(test_env.tmp_root.clone());
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         add_create_node_expectations(
@@ -1233,17 +1229,8 @@ mod tests {
         );
 
         let failed_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047532").unwrap();
-        let failed_node_config = NodeConfig {
-            name: "failed node name".to_string(),
-            image: test_env.test_image.clone(),
-            ip: "192.168.0.9".to_string(),
-            gateway: "192.168.0.1".to_string(),
-            rules: vec![],
-            properties: Default::default(),
-            network: "test".to_string(),
-            dev_mode: false,
-            org_id: Default::default(),
-        };
+        let failed_node_config =
+            test_env.build_node_config("failed node name", "192.168.0.9", "192.168.0.1");
         add_create_node_fail_vm_expectations(
             &mut pal,
             3,
@@ -1309,17 +1296,7 @@ mod tests {
             nodes
                 .create(
                     failed_node_id,
-                    NodeConfig {
-                        name: "node name".to_string(),
-                        image: test_env.test_image.clone(),
-                        ip: "192.168.0.7".to_string(),
-                        gateway: "192.168.0.1".to_string(),
-                        rules: vec![],
-                        properties: Default::default(),
-                        network: "test".to_string(),
-                        dev_mode: false,
-                        org_id: Default::default(),
-                    }
+                    test_env.build_node_config("node name", "192.168.0.7", "192.168.0.1")
                 )
                 .await
                 .unwrap_err()
@@ -1330,17 +1307,7 @@ mod tests {
             nodes
                 .create(
                     failed_node_id,
-                    NodeConfig {
-                        name: "node name".to_string(),
-                        image: test_env.test_image.clone(),
-                        ip: "invalid".to_string(),
-                        gateway: "192.168.0.1".to_string(),
-                        rules: vec![],
-                        properties: Default::default(),
-                        network: "test".to_string(),
-                        dev_mode: false,
-                        org_id: Default::default(),
-                    }
+                    test_env.build_node_config("node name", "invalid", "192.168.0.1")
                 )
                 .await
                 .unwrap_err()
@@ -1351,17 +1318,7 @@ mod tests {
             nodes
                 .create(
                     failed_node_id,
-                    NodeConfig {
-                        name: "node name".to_string(),
-                        image: test_env.test_image.clone(),
-                        ip: "192.168.0.9".to_string(),
-                        gateway: "invalid".to_string(),
-                        rules: vec![],
-                        properties: Default::default(),
-                        network: "test".to_string(),
-                        dev_mode: false,
-                        org_id: Default::default(),
-                    }
+                    test_env.build_node_config("node name", "192.168.0.7", "invalid")
                 )
                 .await
                 .unwrap_err()
@@ -1508,7 +1465,7 @@ mod tests {
                 disk_size_gb: 1,
             },
             firewall_rules: vec![],
-            properties: Default::default(),
+            properties: HashMap::from_iter([("TESTING_PARAM".to_string(), "any".to_string())]),
             network: "test".to_string(),
             dev_mode: false,
             restarting: false,
@@ -1601,17 +1558,7 @@ mod tests {
         let config = default_config(test_env.tmp_root.clone());
 
         let node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
-        let node_config = NodeConfig {
-            name: "node name".to_string(),
-            image: test_env.test_image.clone(),
-            ip: "192.168.0.7".to_string(),
-            gateway: "192.168.0.1".to_string(),
-            rules: vec![],
-            properties: Default::default(),
-            network: "test".to_string(),
-            dev_mode: false,
-            org_id: Default::default(),
-        };
+        let node_config = test_env.build_node_config("node name", "192.168.0.7", "192.168.0.1");
         let new_image = NodeImage {
             protocol: "testing".to_string(),
             node_type: "validator".to_string(),
@@ -1792,17 +1739,7 @@ mod tests {
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
         let node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
-        let node_config = NodeConfig {
-            name: "node name".to_string(),
-            image: test_env.test_image.clone(),
-            ip: "192.168.0.7".to_string(),
-            gateway: "192.168.0.1".to_string(),
-            rules: vec![],
-            properties: Default::default(),
-            network: "test".to_string(),
-            dev_mode: false,
-            org_id: Default::default(),
-        };
+        let node_config = test_env.build_node_config("node name", "192.168.0.7", "192.168.0.1");
 
         pal.expect_available_cpus().return_const(1usize);
         pal.expect_available_resources()

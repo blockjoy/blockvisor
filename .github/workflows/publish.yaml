@@ -22,7 +22,6 @@ jobs:
           toolchain: stable
           profile: minimal
           target: x86_64-unknown-linux-musl
-          override: true
       - name: Get Version
         run: echo GIT_VERSION=$(git describe --tags) >> $GITHUB_ENV
       - name: Setup packages

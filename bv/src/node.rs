@@ -1018,7 +1018,7 @@ pub mod tests {
                     disk_size_gb: 1,
                 },
                 firewall_rules: vec![],
-                properties: Default::default(),
+                properties: HashMap::from_iter([("TESTING_PARAM".to_string(), "any".to_string())]),
                 network: "test".to_string(),
                 dev_mode: true,
                 restarting: false,
@@ -1436,10 +1436,7 @@ pub mod tests {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
-        let mut node_state = test_env.default_node_state();
-        node_state
-            .properties
-            .insert("TESTING_PARAM".to_string(), "any".to_string());
+        let node_state = test_env.default_node_state();
 
         let images_dir =
             blockchain::get_image_download_folder_path(&test_env.tmp_root, &node_state.image);

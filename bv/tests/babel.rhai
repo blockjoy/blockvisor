@@ -65,8 +65,8 @@ const PLUGIN_CONFIG = #{
         ],
         jobs: [
             #{
-                name: "upload",
-                run_sh: `echo dummy_upload`,
+                name: "init_job",
+                run_sh: `echo dummy_init`,
             },
         ],
     },

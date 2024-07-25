@@ -1,8 +1,13 @@
 use crate::engine;
 use crate::engine::{JobConfig, JobType, PosixSignal, RestartConfig};
+use eyre::ensure;
 use rhai::Dynamic;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::PathBuf;
+
+pub const DOWNLOAD_JOB_NAME: &str = "download";
+pub const UPLOAD_JOB_NAME: &str = "upload";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginConfig {
@@ -31,6 +36,59 @@ pub struct PluginConfig {
     pub disable_default_services: bool,
 }
 
+impl PluginConfig {
+    pub fn validate(&self, default_services: &[DefaultService]) -> eyre::Result<()> {
+        // Scheduled tasks name uniqueness
+        if let Some(scheduled) = &self.scheduled {
+            let mut unique = HashSet::new();
+            ensure!(
+                scheduled.iter().all(|task| unique.insert(&task.name)),
+                "Scheduled tasks names are not unique"
+            );
+        }
+        // Jobs name uniqueness
+        let mut unique = HashSet::new();
+        unique.insert(UPLOAD_JOB_NAME);
+        unique.insert(DOWNLOAD_JOB_NAME);
+        ensure!(
+            default_services
+                .iter()
+                .all(|service| unique.insert(&service.name)),
+            "Default services names are not unique"
+        );
+        if let Some(init) = &self.init {
+            ensure!(
+                init.jobs.iter().all(|job| unique.insert(&job.name)),
+                "Init jobs names are not unique"
+            );
+        }
+        if let Some(post_download) = &self.post_download {
+            ensure!(
+                post_download.iter().all(|job| unique.insert(&job.name)),
+                "Post-download jobs names are not unique"
+            );
+        }
+        ensure!(
+            self.services
+                .iter()
+                .all(|service| unique.insert(&service.name)),
+            "Post-download jobs names are not unique"
+        );
+        if let Some(pre_upload) = &self.pre_upload {
+            ensure!(
+                pre_upload.jobs.iter().all(|job| unique.insert(&job.name)),
+                "Pre-upload jobs names are not unique"
+            );
+        }
+        if let Some(post_upload) = &self.post_upload {
+            ensure!(
+                post_upload.iter().all(|job| unique.insert(&job.name)),
+                "Post-upload jobs names are not unique"
+            );
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConfigFile {
     pub template: PathBuf,
