@@ -197,7 +197,7 @@ struct NodeEnv{
     /// Node version.
     node_version: String,
     /// Node protocol name.
-    protocol: String,
+    blockchain_type: String,
     /// Node type.
     node_type: String,
     /// Node IP.

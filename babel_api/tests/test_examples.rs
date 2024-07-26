@@ -195,7 +195,7 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel
         .expect_render_template()
         .with(
-            predicate::eq(PathBuf::from("/var/lib/babel/config.template")),
+            predicate::eq(PathBuf::from("/var/lib/babel/templates/config.template")),
             predicate::eq(PathBuf::from("/etc/service.config")),
             predicate::eq(r#"{"node_name":"node name"}"#),
         )
