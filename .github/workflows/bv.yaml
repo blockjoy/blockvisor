@@ -112,7 +112,7 @@ jobs:
           RUST_LOG="off" cargo test -p babel -p bv_utils
 
   protocols_tests:
-    name: Protocols Tests
+    name: Babel API Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
