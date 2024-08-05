@@ -10,7 +10,7 @@ use crate::{
     },
     pal::Pal,
     scheduler,
-    scheduler::{Scheduled, Scheduler},
+    scheduler::{Action, Scheduled, Scheduler},
     services::blockchain::ROOTFS_FILE,
     services::blockchain::{self, BlockchainService, BABEL_PLUGIN_NAME},
     BV_VAR_PATH,
@@ -447,6 +447,9 @@ where
                 .lock()
                 .await
                 .release(&mut node.assigned_cpus);
+        }
+        if let Err(err) = self.scheduler.tx().send(Action::DeleteNode(id)).await {
+            error!("Failed to delete node associated tasks form scheduler: {err:#}");
         }
         debug!("Node deleted");
         Ok(())

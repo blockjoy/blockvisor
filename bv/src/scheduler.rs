@@ -74,6 +74,7 @@ pub struct Scheduled {
 pub enum Action {
     Add(Scheduled),
     Delete(String),
+    DeleteNode(Uuid),
 }
 
 fn to_crone_string<S>(s: &Schedule, serializer: S) -> Result<S::Ok, S::Error>
@@ -157,6 +158,7 @@ fn handle_action(tasks: &mut Vec<(DateTime<TZ>, Scheduled)>, action: Action) {
     match action {
         Action::Add(task) => tasks.push((TZ::now(), task)),
         Action::Delete(name) => tasks.retain(|(_, task)| task.name != name),
+        Action::DeleteNode(id) => tasks.retain(|(_, task)| task.node_id != id),
     };
 }
 
