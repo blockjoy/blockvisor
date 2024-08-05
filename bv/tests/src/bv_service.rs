@@ -206,7 +206,7 @@ async fn test_bv_service_e2e() {
         .unwrap()
         .args(["--ip-range-from", "10.0.2.32", "--ip-range-to", "10.0.2.33"]) // this region will be auto-created in API
         .args([&provision_token, "--skip-download"])
-        .args(["--region", "europe-bosnia-number-1"]) // this region will be auto-created in API
+        .args(["--region", "EU1"]) // this region will be auto-created in API
         .args(["--api", url])
         .args(["--mqtt", mqtt])
         .args(["--yes", "--use-host-network"])
