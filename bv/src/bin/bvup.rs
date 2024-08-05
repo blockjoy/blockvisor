@@ -5,7 +5,7 @@ use blockvisord::{
     hosts::HostInfo,
     linux_platform::bv_root,
     self_updater,
-    services::api::pb,
+    services::api::{common, pb},
     services::{DEFAULT_API_CONNECT_TIMEOUT, DEFAULT_API_REQUEST_TIMEOUT},
     utils, BV_VAR_PATH,
 };
@@ -207,6 +207,11 @@ async fn main() -> Result<()> {
             vmm_mountpoint: Some(format!("{}", bv_root.join(BV_VAR_PATH).to_string_lossy())),
             managed_by: Some(pb::ManagedBy::Automatic.into()),
             ips,
+            tags: Some(common::Tags {
+                tags: vec![common::Tag {
+                    name: "testing".to_string(),
+                }],
+            }),
         };
 
         let mut client = pb::host_service_client::HostServiceClient::connect(

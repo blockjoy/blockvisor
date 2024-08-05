@@ -171,6 +171,7 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
         billing_amount: None,
         total_disk_space: Some(info.disk_space_bytes),
         managed_by: None,
+        update_tags: None,
     };
     api_with_retry!(client, client.update(update.clone()))?;
 

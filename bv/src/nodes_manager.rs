@@ -965,6 +965,10 @@ mod tests {
                 &self,
                 request: tonic::Request<pb::BlockchainServiceAddVersionRequest>,
             ) -> Result<tonic::Response<pb::BlockchainServiceAddVersionResponse>, tonic::Status>;
+            async fn pricing(
+                &self,
+                request: tonic::Request<pb::BlockchainServicePricingRequest>,
+            ) -> Result<tonic::Response<pb::BlockchainServicePricingResponse>, tonic::Status>;
         }
     }
 

@@ -205,7 +205,8 @@ pub async fn setup_rbac(db_url: &str) {
         ('grpc-new-host', 'node-start'),
         ('grpc-new-host', 'node-stop'),
         ('grpc-new-host', 'node-update-config'),
-        ('grpc-new-host', 'node-update-status');
+        ('grpc-new-host', 'node-update-status'),
+        ('grpc-new-host', 'billing-exempt');
         ",
         "
         insert into role_permissions (role, permission)

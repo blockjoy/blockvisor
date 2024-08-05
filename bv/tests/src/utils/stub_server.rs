@@ -1,4 +1,4 @@
-use blockvisord::services::api::pb;
+use blockvisord::services::api::{common, pb};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
@@ -76,6 +76,11 @@ impl pb::host_service_server::HostService for StubHostsServer {
                     },
                 ],
                 managed_by: pb::ManagedBy::Automatic.into(),
+                tags: Some(common::Tags {
+                    tags: vec![common::Tag {
+                        name: "testing".to_string(),
+                    }],
+                }),
             }),
             token: "awesome-token".to_string(),
             refresh: "even-more-awesomer-token".to_string(),

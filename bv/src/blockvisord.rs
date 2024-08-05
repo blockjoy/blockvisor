@@ -341,7 +341,7 @@ where
                     NodeStatus::Busy => common::ContainerStatus::Busy,
                 };
                 let mut update = pb::NodeServiceUpdateStatusRequest {
-                    id: node_id.to_string(),
+                    ids: vec![node_id.to_string()],
                     container_status: None, // We use the setter to set this field for type-safety
                     address,
                     version: None,
