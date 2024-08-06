@@ -181,8 +181,8 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
         .wait_for_job_status(vm_id, "echo", "Running", Duration::from_secs(5))
         .await;
 
-    println!("query metrics");
-    test_env.bv_run(&["node", "metrics", vm_id], "In consensus:          false");
+    println!("check node");
+    test_env.bv_run(&["node", "check", vm_id], "In consensus:   false");
 
     println!("list running node before service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");

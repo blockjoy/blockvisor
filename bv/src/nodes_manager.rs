@@ -76,6 +76,7 @@ pub struct NodeStateCache {
     pub ip: String,
     pub gateway: String,
     pub requirements: Requirements,
+    pub properties: NodeProperties,
     pub assigned_cpus: Vec<usize>,
     pub started_at: Option<DateTime<Utc>>,
     pub dev_mode: bool,
@@ -257,11 +258,11 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn create(&self, id: Uuid, config: NodeConfig) -> commands::Result<()> {
+    pub async fn create(&self, id: Uuid, config: NodeConfig) -> commands::Result<NodeStateCache> {
         let mut node_ids = self.node_ids.write().await;
-        if self.nodes.read().await.contains_key(&id) {
+        if let Some(cache) = self.node_state_cache.read().await.get(&id) {
             warn!("Node with id `{id}` exists");
-            return Ok(());
+            return Ok(cache.clone());
         }
 
         if node_ids.contains_key(&config.name) {
@@ -282,7 +283,7 @@ where
             .parse()
             .with_context(|| format!("invalid gateway `{}`", config.gateway))?;
 
-        let properties = config
+        let properties: NodeProperties = config
             .properties
             .into_iter()
             .chain([("network".to_string(), config.network.clone())])
@@ -328,6 +329,7 @@ where
             started_at: None,
             dev_mode: config.dev_mode,
             requirements: meta.requirements.clone(),
+            properties: properties.clone(),
             assigned_cpus: assigned_cpus.clone(),
         };
 
@@ -365,10 +367,10 @@ where
         self.node_state_cache
             .write()
             .await
-            .insert(id, node_state_cache);
+            .insert(id, node_state_cache.clone());
         debug!("Node with id `{}` created", id);
 
-        Ok(())
+        Ok(node_state_cache)
     }
 
     #[instrument(skip(self))]
@@ -833,6 +835,7 @@ where
                             started_at: node.state.started_at,
                             dev_mode: node.state.dev_mode,
                             requirements: node.state.requirements.clone(),
+                            properties: node.state.properties.clone(),
                             assigned_cpus: node.state.assigned_cpus.clone(),
                         },
                     );
@@ -1022,7 +1025,10 @@ mod tests {
                 ip: ip.to_string(),
                 gateway: gateway.to_string(),
                 rules: vec![],
-                properties: HashMap::from_iter([("TESTING_PARAM".to_string(), "any".to_string())]),
+                properties: HashMap::from_iter([
+                    ("TESTING_PARAM".to_string(), "any".to_string()),
+                    ("NETWORK".to_string(), "test".to_string()),
+                ]),
                 network: "test".to_string(),
                 dev_mode: false,
                 org_id: Default::default(),
@@ -1432,6 +1438,7 @@ mod tests {
                 started_at: None,
                 dev_mode: first_node_config.dev_mode,
                 requirements: TEST_NODE_REQUIREMENTS,
+                properties: first_node_config.properties,
                 assigned_cpus: vec![2],
             },
             nodes.node_state_cache(first_node_id).await?
@@ -1669,6 +1676,7 @@ mod tests {
                 started_at: None,
                 dev_mode: node_config.dev_mode,
                 requirements: TEST_NODE_REQUIREMENTS,
+                properties: node_config.properties.clone(),
                 assigned_cpus: vec![4],
             },
             nodes.node_state_cache(node_id).await?
@@ -1707,6 +1715,7 @@ mod tests {
                 started_at: None,
                 dev_mode: node_config.dev_mode,
                 requirements: UPDATED_REQUIREMENTS.clone(),
+                properties: node_config.properties,
                 assigned_cpus: vec![3, 4],
             },
             nodes.node_state_cache(node_id).await?

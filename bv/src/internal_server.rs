@@ -1,4 +1,5 @@
 use crate::apptainer_platform::ApptainerPlatform;
+use crate::node_state::NodeProperties;
 use crate::{
     cluster::ClusterData,
     config,
@@ -13,6 +14,7 @@ use crate::{
     {get_bv_status, set_bv_status, utils, ServiceStatus}, {node_metrics, BV_VAR_PATH},
 };
 use babel_api::engine::JobsInfo;
+use babel_api::metadata::Requirements;
 use chrono::Utc;
 use eyre::{anyhow, Context};
 use petname::Petnames;
@@ -36,6 +38,9 @@ pub struct NodeDisplayInfo {
     pub gateway: String,
     pub status: NodeStatus,
     pub uptime: Option<i64>,
+    pub requirements: Option<Requirements>,
+    pub properties: NodeProperties,
+    pub assigned_cpus: Vec<usize>,
     pub dev_mode: bool,
 }
 
@@ -526,6 +531,9 @@ where
                     .started_at
                     .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
                 dev_mode: node.state.dev_mode,
+                requirements: Some(node.state.requirements.clone()),
+                properties: node.state.properties.clone(),
+                assigned_cpus: node.state.assigned_cpus.clone(),
             }
         } else {
             let cache = self
@@ -545,6 +553,9 @@ where
                     .started_at
                     .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
                 dev_mode: cache.dev_mode,
+                requirements: Some(cache.requirements),
+                properties: cache.properties,
+                assigned_cpus: cache.assigned_cpus,
             }
         })
     }
@@ -554,7 +565,8 @@ where
         let name = Petnames::default().generate_one(3, "-");
         let properties = parse_props(&req)?.into_iter().collect();
         let (ip, gateway) = self.discover_ip_and_gateway(&req, id).await?;
-        self.nodes_manager
+        let cache = self
+            .nodes_manager
             .create(
                 id,
                 NodeConfig {
@@ -580,6 +592,9 @@ where
             dev_mode: true,
             status: NodeStatus::Stopped,
             uptime: None,
+            requirements: Some(cache.requirements),
+            properties: cache.properties,
+            assigned_cpus: cache.assigned_cpus,
         })
     }
 
@@ -595,6 +610,10 @@ where
                 required: false,
                 value,
             })
+            .collect::<Vec<_>>();
+        let node_properties = properties
+            .iter()
+            .map(|p| (p.name.clone(), p.value.clone()))
             .collect();
         let (host_id, org_id) = self.get_host_and_org_id().await?;
         let blockchain_id = self.get_blockchain_id(&req.image.protocol).await?;
@@ -637,6 +656,9 @@ where
             status: NodeStatus::Stopped,
             uptime: None,
             dev_mode: false,
+            requirements: None,
+            properties: node_properties,
+            assigned_cpus: vec![],
         })
     }
 

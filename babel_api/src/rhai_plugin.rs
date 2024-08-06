@@ -21,13 +21,13 @@ use std::{path::Path, sync::Arc, time::Duration};
 use tracing::Level;
 
 const INIT_FN_NAME: &str = "init";
-const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
+pub(crate) const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
 const DEFAULT_SERVICES_CONST_NAME: &str = "DEFAULT_SERVICES";
 const BABEL_VERSION_CONST_NAME: &str = "BABEL_VERSION";
 
 #[derive(Debug)]
 pub struct RhaiPlugin<E> {
-    bare: BarePlugin<E>,
+    pub(crate) bare: BarePlugin<E>,
     rhai_engine: rhai::Engine,
 }
 
@@ -43,11 +43,11 @@ impl<E: Engine + Sync + Send + 'static> Clone for RhaiPlugin<E> {
 }
 
 #[derive(Debug)]
-struct BarePlugin<E> {
-    babel_engine: Arc<E>,
-    ast: AST,
-    plugin_config: Option<PluginConfig>,
-    default_services: Vec<DefaultService>,
+pub(crate) struct BarePlugin<E> {
+    pub(crate) babel_engine: Arc<E>,
+    pub(crate) ast: AST,
+    pub(crate) plugin_config: Option<PluginConfig>,
+    pub(crate) default_services: Vec<DefaultService>,
 }
 
 impl<E: Engine + Sync + Send + 'static> Clone for BarePlugin<E> {

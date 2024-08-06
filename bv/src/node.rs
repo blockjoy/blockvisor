@@ -150,7 +150,7 @@ impl<P: Pal + Debug> Node<P> {
         scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let maybe_node = MaybeNode {
-            context: NodeContext::build(pal.as_ref(), state.id),
+            context: NodeContext::build(pal.bv_root(), state.id),
             state,
             machine: None,
             scheduler_tx,
@@ -175,7 +175,7 @@ impl<P: Pal + Debug> Node<P> {
         scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let node_id = state.id;
-        let context = NodeContext::build(pal.as_ref(), node_id);
+        let context = NodeContext::build(pal.bv_root(), node_id);
         info!("Attaching to node with ID: {node_id}");
 
         let mut node_conn = pal.create_node_connection(node_id);

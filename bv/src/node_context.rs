@@ -1,6 +1,5 @@
 use crate::{
     node_state::NodeImage,
-    pal::Pal,
     services::blockchain::{self, BABEL_PLUGIN_NAME},
     BV_VAR_PATH,
 };
@@ -35,8 +34,7 @@ pub struct NodeContext {
 }
 
 impl NodeContext {
-    pub fn build(pal: &impl Pal, id: Uuid) -> Self {
-        let bv_root = pal.bv_root();
+    pub fn build(bv_root: &Path, id: Uuid) -> Self {
         let node_dir = build_node_dir(bv_root, id);
         let nodes_dir = build_nodes_dir(bv_root);
         Self {

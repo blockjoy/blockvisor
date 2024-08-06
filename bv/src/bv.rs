@@ -10,7 +10,7 @@ use crate::{
     internal_server,
     internal_server::NodeCreateRequest,
     linux_platform::bv_root,
-    node_context::build_node_dir,
+    node_context::{build_node_dir, NodeContext},
     node_env::NODE_ENV_FILE_PATH,
     node_state::{NodeImage, NodeStatus},
     nodes_manager::NodesManager,
@@ -22,6 +22,7 @@ use crate::{
     utils, workspace, BV_VAR_PATH,
 };
 use babel_api::engine::JobStatus;
+use babel_api::rhai_plugin_linter;
 use bv_utils::cmd::{ask_confirm, run_cmd};
 use bv_utils::rpc::RPC_CONNECT_TIMEOUT;
 use cli_table::print_stdout;
@@ -351,29 +352,35 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 }
             }
         }
-        NodeCommand::Metrics { id_or_name } => {
+        NodeCommand::Check { id_or_name } => {
             let id = client
                 .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
                 .await?;
+            let node_info = client.get_node(id).await?.into_inner();
+            println!("Name:           {}", node_info.name);
+            println!("Id:             {}", node_info.id);
+            println!("Image:          {}", node_info.image);
+            println!("Status:         {}", node_info.status);
+            println!("Network:        {}", node_info.network);
+            println!("Ip:             {}", node_info.ip);
+            println!("Gateway:        {}", node_info.gateway);
+            println!("Uptime:         {}s", fmt_opt(node_info.uptime));
             let metrics = client.get_node_metrics(id).await?.into_inner();
-            println!("Block height:   {:>12}", fmt_opt(metrics.height));
-            println!("Block age:      {:>12}", fmt_opt(metrics.block_age));
-            println!("Staking Status: {:>12}", fmt_opt(metrics.staking_status));
-            println!("In consensus:   {:>12}", fmt_opt(metrics.consensus));
-            println!(
-                "App Status:     {:>12}",
-                fmt_opt(metrics.application_status)
-            );
-            println!("Sync Status:    {:>12}", fmt_opt(metrics.sync_status));
+            println!("App Status:     {}", fmt_opt(metrics.application_status));
+            println!("Block height:   {}", fmt_opt(metrics.height));
+            println!("Block age:      {}", fmt_opt(metrics.block_age));
+            println!("Staking Status: {}", fmt_opt(metrics.staking_status));
+            println!("In consensus:   {}", fmt_opt(metrics.consensus));
+            println!("Sync Status:    {}", fmt_opt(metrics.sync_status));
             if !metrics.jobs.is_empty() {
                 println!("Jobs:");
                 for (name, mut info) in metrics.jobs {
                     println!("  - \"{name}\"");
-                    println!("    Status: {}", info.status);
-                    println!("    Restarts: {}", info.restart_count);
+                    println!("    Status:         {}", info.status);
+                    println!("    Restarts:       {}", info.restart_count);
                     if let Some(progress) = info.progress {
                         println!(
-                            "    Progress: {}/{} {}",
+                            "    Progress:       {}/{} {}",
                             progress.current, progress.total, progress.message
                         );
                     }
@@ -390,30 +397,51 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     }
                 }
             }
-            // second go test_* methods
-            let caps = client.list_capabilities(id).await?.into_inner();
-            let tests = caps
-                .iter()
-                .filter(|cap| cap.starts_with("test_"))
-                .map(|cap| cap.as_str());
-            let mut errors = vec![];
-            println!("Running node internal tests:");
-            for test in tests {
-                let result = match client.run((id, test.to_string(), String::default())).await {
-                    Ok(_) => "ok",
-                    Err(e) => {
-                        errors.push(e);
-                        "failed"
-                    }
-                };
-                println!("{:.<30}{:.>16}", test, result);
+            if let Some(requirements) = node_info.requirements {
+                println!(
+                    "Requirements:   cpu: {}, memory: {}MB, disk: {}GB",
+                    requirements.vcpu_count, requirements.mem_size_mb, requirements.disk_size_gb
+                );
             }
-            if !errors.is_empty() {
-                eprintln!("\n{} tests failed:", errors.len());
-                for e in errors.iter() {
-                    eprintln!("{e:#}");
+            println!("Assigned CPUs:  {:?}", node_info.assigned_cpus);
+            // run plugin linter and test_* methods if in dev_mode
+            if node_info.dev_mode {
+                let node_context = NodeContext::build(&bv_root(), id);
+                let (script, _) = node_context
+                    .load_script(&node_context.node_dir.join(ROOTFS_DIR))
+                    .await?;
+                println!(
+                    "Plugin linter: {:?}",
+                    rhai_plugin_linter::check(&script, node_info.properties)
+                );
+                let caps = client.list_capabilities(id).await?.into_inner();
+                let tests = caps
+                    .iter()
+                    .filter(|cap| cap.starts_with("test_"))
+                    .map(|cap| cap.as_str())
+                    .collect::<Vec<_>>();
+                if !tests.is_empty() {
+                    let mut errors = vec![];
+                    println!("Running node internal tests:");
+                    for test in tests {
+                        let result =
+                            match client.run((id, test.to_string(), String::default())).await {
+                                Ok(_) => "ok",
+                                Err(e) => {
+                                    errors.push(e);
+                                    "failed"
+                                }
+                            };
+                        println!("{:.<30}{:.>16}", test, result);
+                    }
+                    if !errors.is_empty() {
+                        eprintln!("\n{} tests failed:", errors.len());
+                        for e in errors.iter() {
+                            eprintln!("{e:#}");
+                        }
+                        bail!("Node internal tests failed");
+                    }
                 }
-                bail!("Node internal tests failed");
             }
         }
         NodeCommand::Shell { id_or_name } => {

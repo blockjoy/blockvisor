@@ -202,9 +202,9 @@ pub enum NodeCommand {
         param_file: Option<PathBuf>,
     },
 
-    /// Collect metrics defining the current state of the node.
-    Metrics {
-        /// The id or name of the node whose metrics should be collected. BV tries to get it from workspace if not provided.
+    /// Check current state of the node (including metrics).
+    Check {
+        /// The id or name of the node to be checked. BV tries to get it from workspace if not provided.
         id_or_name: Option<String>,
     },
 
