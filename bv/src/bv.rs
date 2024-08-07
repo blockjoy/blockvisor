@@ -27,6 +27,7 @@ use bv_utils::cmd::{ask_confirm, run_cmd};
 use bv_utils::rpc::RPC_CONNECT_TIMEOUT;
 use cli_table::print_stdout;
 use eyre::{bail, Context, Result};
+use std::ffi::OsString;
 use std::{
     ffi::OsStr,
     fs,
@@ -281,19 +282,28 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     lines,
                     follow,
                 } => {
-                    let log_path = build_node_dir(&bv_root(), id)
+                    let logs_path = build_node_dir(&bv_root(), id)
                         .join(ROOTFS_DIR)
-                        .join("var/lib/babel/jobs/logs")
-                        .join(&name);
-                    if !log_path.exists() {
-                        bail!("No logs for '{name}' job found!")
+                        .join("var/lib/babel/jobs/logs");
+                    if let Some(name) = &name {
+                        if !logs_path.join(name).exists() {
+                            bail!("No logs for '{name}' job found!")
+                        }
                     }
                     let mut cmd = Command::new("tail");
+                    cmd.current_dir(&logs_path);
                     cmd.args(["-n", &format!("{lines}")]);
                     if follow {
                         cmd.arg("-f");
                     }
-                    cmd.arg(log_path.into_os_string());
+                    let names = if let Some(name) = name {
+                        vec![OsString::from(name)]
+                    } else {
+                        fs::read_dir(logs_path)?
+                            .map(|entry| entry.map(|entry| entry.file_name()))
+                            .collect::<Result<Vec<_>, std::io::Error>>()?
+                    };
+                    cmd.args(names);
                     cmd.spawn()?.wait().await?;
                 }
             }

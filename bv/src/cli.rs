@@ -240,7 +240,7 @@ pub enum JobCommand {
     /// Stop job.
     #[clap(group(ArgGroup::new("job_input").required(true).args(& ["name", "all"])))]
     Stop {
-        /// Job name to be stoped.
+        /// Job name to be stopped.
         name: Option<String>,
         /// Stop all jobs.
         #[clap(long, short)]
@@ -267,8 +267,8 @@ pub enum JobCommand {
 
     /// Get job logs.
     Logs {
-        /// Job name.
-        name: String,
+        /// Job name. Get all jobs logs if not specified.
+        name: Option<String>,
         /// Output the last N lines.
         #[clap(long, short, alias = "n", default_value = "50")]
         lines: usize,
