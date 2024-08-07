@@ -1,5 +1,4 @@
-use crate::engine;
-use crate::engine::{JobConfig, JobType, PosixSignal, RestartConfig};
+use crate::engine::{self, JobConfig, JobType, PosixSignal, RestartConfig};
 use eyre::ensure;
 use rhai::Dynamic;
 use serde::{Deserialize, Serialize};
@@ -11,6 +10,7 @@ pub const UPLOAD_JOB_NAME: &str = "upload";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginConfig {
+    /// List of configuration files to be rendered from template with provided params.
     pub config_files: Option<Vec<ConfigFile>>,
     /// Node init actions.
     pub init: Option<Actions>,
@@ -37,7 +37,7 @@ pub struct PluginConfig {
 }
 
 impl PluginConfig {
-    pub fn validate(&self, default_services: &[DefaultService]) -> eyre::Result<()> {
+    pub fn validate(&self, default_services: Option<&Vec<DefaultService>>) -> eyre::Result<()> {
         // Scheduled tasks name uniqueness
         if let Some(scheduled) = &self.scheduled {
             let mut unique = HashSet::new();
@@ -50,12 +50,14 @@ impl PluginConfig {
         let mut unique = HashSet::new();
         unique.insert(UPLOAD_JOB_NAME);
         unique.insert(DOWNLOAD_JOB_NAME);
-        ensure!(
-            default_services
-                .iter()
-                .all(|service| unique.insert(&service.name)),
-            "Default services names are not unique"
-        );
+        if let Some(default_services) = default_services {
+            ensure!(
+                default_services
+                    .iter()
+                    .all(|service| unique.insert(&service.name)),
+                "Default services names are not unique"
+            );
+        }
         if let Some(init) = &self.init {
             ensure!(
                 init.jobs.iter().all(|job| unique.insert(&job.name)),
@@ -89,11 +91,48 @@ impl PluginConfig {
         Ok(())
     }
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BaseConfig {
+    /// List of configuration files to be rendered from template with provided params.
+    pub config_files: Option<Vec<ConfigFile>>,
+    /// List of default services to be run in background.
+    pub services: Option<Vec<DefaultService>>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConfigFile {
+    /// It assumes that file pointed by `template` argument exists.
     pub template: PathBuf,
+    /// File pointed by `destination` path will be overwritten if exists.
     pub destination: PathBuf,
+    /// Map object serializable to JSON.
+    /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
     pub params: Dynamic,
+}
+
+/// Definition of default service that should be run on all nodes (if supported by image).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DefaultService {
+    /// Name of service. This will be used as Job name, so make sure it is unique enough,
+    /// to not collide with other jobs.
+    pub name: String,
+    /// Sh script body. It shall be blocking (foreground) process.
+    pub run_sh: String,
+    /// Service restart config.
+    pub restart_config: Option<RestartConfig>,
+    /// Job shutdown timeout - how long it may take to gracefully shutdown the job.
+    /// After given time job won't be killed, but babel will rise the error.
+    /// If not set default to 60s.
+    pub shutdown_timeout_secs: Option<u64>,
+    /// POSIX signal that will be sent to child processes on job shutdown.
+    /// See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
+    /// If not set default to `SIGTERM`.
+    pub shutdown_signal: Option<PosixSignal>,
+    /// Run job as a different user.
+    pub run_as: Option<String>,
+    /// Capacity of log buffer (in lines).
+    pub log_buffer_capacity_mb: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -179,30 +218,6 @@ pub struct Service {
 }
 fn default_use_blockchain_data() -> bool {
     true
-}
-
-/// Definition of default service that should be run on all nodes (if supported by image).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DefaultService {
-    /// Name of service. This will be used as Job name, so make sure it is unique enough,
-    /// to not collide with other jobs.
-    pub name: String,
-    /// Sh script body. It shall be blocking (foreground) process.
-    pub run_sh: String,
-    /// Service restart config.
-    pub restart_config: Option<RestartConfig>,
-    /// Job shutdown timeout - how long it may take to gracefully shutdown the job.
-    /// After given time job won't be killed, but babel will rise the error.
-    /// If not set default to 60s.
-    pub shutdown_timeout_secs: Option<u64>,
-    /// POSIX signal that will be sent to child processes on job shutdown.
-    /// See [man7](https://man7.org/linux/man-pages/man7/signal.7.html) for possible values.
-    /// If not set default to `SIGTERM`.
-    pub shutdown_signal: Option<PosixSignal>,
-    /// Run job as a different user.
-    pub run_as: Option<String>,
-    /// Capacity of log buffer (in lines).
-    pub log_buffer_capacity_mb: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

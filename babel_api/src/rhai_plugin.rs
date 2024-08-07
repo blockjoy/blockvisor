@@ -5,7 +5,7 @@ use crate::{
     metadata::{check_metadata, BlockchainMetadata},
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
     plugin_config::{
-        self, Actions, DefaultService, Job, PluginConfig, Service, DOWNLOAD_JOB_NAME,
+        self, Actions, BaseConfig, ConfigFile, Job, PluginConfig, Service, DOWNLOAD_JOB_NAME,
         UPLOAD_JOB_NAME,
     },
 };
@@ -22,7 +22,7 @@ use tracing::Level;
 
 const INIT_FN_NAME: &str = "init";
 pub(crate) const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
-const DEFAULT_SERVICES_CONST_NAME: &str = "DEFAULT_SERVICES";
+const BASE_CONFIG_CONST_NAME: &str = "BASE_CONFIG";
 const BABEL_VERSION_CONST_NAME: &str = "BABEL_VERSION";
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ pub(crate) struct BarePlugin<E> {
     pub(crate) babel_engine: Arc<E>,
     pub(crate) ast: AST,
     pub(crate) plugin_config: Option<PluginConfig>,
-    pub(crate) default_services: Vec<DefaultService>,
+    pub(crate) base_config: Option<BaseConfig>,
 }
 
 impl<E: Engine + Sync + Send + 'static> Clone for BarePlugin<E> {
@@ -56,7 +56,7 @@ impl<E: Engine + Sync + Send + 'static> Clone for BarePlugin<E> {
             babel_engine: self.babel_engine.clone(),
             ast: self.ast.clone(),
             plugin_config: self.plugin_config.clone(),
-            default_services: self.default_services.clone(),
+            base_config: self.base_config.clone(),
         }
     }
 }
@@ -128,19 +128,23 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
 
         let mut scope = build_scope();
         rhai_engine.run_ast_with_scope(&mut scope, &ast)?;
-        let default_services = if let Some(dynamic) = scope.get(DEFAULT_SERVICES_CONST_NAME) {
-            let value: Vec<DefaultService> = from_dynamic(dynamic).with_context(|| {
-                format!("Invalid Rhai script - failed to deserialize {DEFAULT_SERVICES_CONST_NAME}")
+        let base_config = if let Some(dynamic) = scope.get(BASE_CONFIG_CONST_NAME) {
+            let value: BaseConfig = from_dynamic(dynamic).with_context(|| {
+                format!("Invalid Rhai script - failed to deserialize {BASE_CONFIG_CONST_NAME}")
             })?;
-            value
+            Some(value)
         } else {
-            Default::default()
+            None
         };
         let plugin_config = if let Some(dynamic) = scope.get(PLUGIN_CONFIG_CONST_NAME) {
             let value: PluginConfig = from_dynamic(dynamic).with_context(|| {
                 format!("Invalid Rhai script - failed to deserialize {PLUGIN_CONFIG_CONST_NAME}")
             })?;
-            value.validate(&default_services)?;
+            value.validate(
+                base_config
+                    .as_ref()
+                    .and_then(|config| config.services.as_ref()),
+            )?;
             Some(value)
         } else {
             None
@@ -151,7 +155,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                 babel_engine,
                 ast,
                 plugin_config,
-                default_services,
+                base_config,
             },
             rhai_engine,
         };
@@ -406,24 +410,43 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         }
     }
 
+    fn render_configs_files(&self, config_files: Option<Vec<ConfigFile>>) -> Result<()> {
+        if let Some(config_files) = config_files {
+            for config_file in config_files {
+                self.babel_engine.render_template(
+                    &config_file.template,
+                    &config_file.destination,
+                    &serde_json::to_string(&config_file.params)?,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     fn start_default_services(&self) -> Result<()> {
-        for service in self.default_services.clone() {
-            self.create_and_start_job(
-                &service.name.clone(),
-                plugin_config::build_service_job_config(
-                    Service {
-                        name: service.name,
-                        run_sh: service.run_sh,
-                        restart_config: service.restart_config,
-                        shutdown_timeout_secs: service.shutdown_timeout_secs,
-                        shutdown_signal: service.shutdown_signal,
-                        run_as: service.run_as,
-                        use_blockchain_data: false,
-                        log_buffer_capacity_mb: service.log_buffer_capacity_mb,
-                    },
-                    vec![],
-                ),
-            )?;
+        if let Some(services) = self
+            .base_config
+            .as_ref()
+            .and_then(|config| config.services.clone())
+        {
+            for service in services {
+                self.create_and_start_job(
+                    &service.name.clone(),
+                    plugin_config::build_service_job_config(
+                        Service {
+                            name: service.name,
+                            run_sh: service.run_sh,
+                            restart_config: service.restart_config,
+                            shutdown_timeout_secs: service.shutdown_timeout_secs,
+                            shutdown_signal: service.shutdown_signal,
+                            run_as: service.run_as,
+                            use_blockchain_data: false,
+                            log_buffer_capacity_mb: service.log_buffer_capacity_mb,
+                        },
+                        vec![],
+                    ),
+                )?;
+            }
         }
         Ok(())
     }
@@ -449,15 +472,10 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         let Some(config) = self.plugin_config.clone() else {
             bail!("Missing {PLUGIN_CONFIG_CONST_NAME} constant")
         };
-        if let Some(config_files) = config.config_files {
-            for config_file in config_files {
-                self.babel_engine.render_template(
-                    &config_file.template,
-                    &config_file.destination,
-                    &serde_json::to_string(&config_file.params)?,
-                )?;
-            }
+        if let Some(base_config) = &self.base_config {
+            self.render_configs_files(base_config.config_files.clone())?;
         }
+        self.render_configs_files(config.config_files)?;
         if !config.disable_default_services {
             self.start_default_services()?;
         }
@@ -1560,7 +1578,7 @@ mod tests {
             const PLUGIN_CONFIG = #{
                 config_files: [
                     #{
-                        template: "/var/lib/babel/config.template",
+                        template: "/var/lib/babel/templates/config.template",
                         destination: "/etc/service.config",
                         params: #{
                             node_name: node_env().node_name
@@ -1609,16 +1627,27 @@ mod tests {
                 ],
                 disable_default_services: false,
             };
-            const DEFAULT_SERVICES = [
-                #{
-                    name: "nginx",
-                    run_sh: `nginx with params`,
-                },
-            ];
+            const BASE_CONFIG = #{
+              config_files: [
+                  #{
+                      template: "/var/lib/babel/templates/base_config.template",
+                      destination: "/etc/default_service.config",
+                      params: #{
+                          node_id: node_env().node_id
+                      },
+                  },
+              ],
+              services: [
+                  #{
+                      name: "nginx",
+                      run_sh: `nginx with params`,
+                  },
+              ]
+            }
             "#;
         let mut babel = MockBabelEngine::new();
         babel.expect_node_env().returning(|| NodeEnv {
-            node_id: "node_id".to_string(),
+            node_id: "node-id".to_string(),
             node_name: "node name".to_string(),
             node_version: "".to_string(),
             blockchain_type: "".to_string(),
@@ -1634,7 +1663,18 @@ mod tests {
         babel
             .expect_render_template()
             .with(
-                predicate::eq(PathBuf::from("/var/lib/babel/config.template")),
+                predicate::eq(PathBuf::from(
+                    "/var/lib/babel/templates/base_config.template",
+                )),
+                predicate::eq(PathBuf::from("/etc/default_service.config")),
+                predicate::eq(r#"{"node_id":"node-id"}"#),
+            )
+            .once()
+            .returning(|_, _, _| Ok(()));
+        babel
+            .expect_render_template()
+            .with(
+                predicate::eq(PathBuf::from("/var/lib/babel/templates/config.template")),
                 predicate::eq(PathBuf::from("/etc/service.config")),
                 predicate::eq(r#"{"node_name":"node name"}"#),
             )

@@ -13,7 +13,7 @@ use tokio::fs::{self};
 use uuid::Uuid;
 
 pub const NODES_DIR: &str = "nodes";
-pub const DEFAULT_SERVICES_PATH: &str = "var/lib/babel/services.rhai";
+pub const BASE_CONFIG_PATH: &str = "var/lib/babel/base.rhai";
 pub const BABEL_VAR_PATH: &str = "var/lib/babel";
 
 pub fn build_nodes_dir(bv_root: &Path) -> PathBuf {
@@ -65,9 +65,9 @@ impl NodeContext {
     pub async fn load_script(&self, rootfs_dir: &Path) -> Result<(String, BlockchainMetadata)> {
         let mut script = fs::read_to_string(&self.plugin_script).await?;
         let metadata = rhai_plugin::read_metadata(&script)?;
-        let services_path = rootfs_dir.join(DEFAULT_SERVICES_PATH);
-        if services_path.exists() {
-            script.push_str(&fs::read_to_string(services_path).await?);
+        let base_config_path = rootfs_dir.join(BASE_CONFIG_PATH);
+        if base_config_path.exists() {
+            script.push_str(&fs::read_to_string(base_config_path).await?);
         }
 
         Ok((script, metadata))

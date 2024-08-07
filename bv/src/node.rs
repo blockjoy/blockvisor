@@ -1149,7 +1149,7 @@ pub mod tests {
 
         fs::create_dir_all(test_env.tmp_root.join(node_context::BABEL_VAR_PATH)).await?;
         fs::write(
-            test_env.tmp_root.join(node_context::DEFAULT_SERVICES_PATH),
+            test_env.tmp_root.join(node_context::BASE_CONFIG_PATH),
             "malformed services",
         )
         .await?;
@@ -1166,17 +1166,19 @@ pub mod tests {
             .to_string()
         );
 
-        let services = r#"
-            const DEFAULT_SERVICES = [
-                #{
-                    name: "nginx",
-                    run_sh: `nginx with params`,
-                },
-            ];
+        let base_config = r#"
+            const BASE_CONFIG = #{
+              services: [
+                  #{
+                      name: "nginx",
+                      run_sh: `nginx with params`,
+                  },
+              ]
+            }
             "#;
         fs::write(
-            test_env.tmp_root.join(node_context::DEFAULT_SERVICES_PATH),
-            services,
+            test_env.tmp_root.join(node_context::BASE_CONFIG_PATH),
+            base_config,
         )
         .await?;
 

@@ -76,7 +76,7 @@ used during debugging issues, not printed by default
 - `/var/lib/babel/jobs_monitor.socket`
 - `/var/lib/babel/node_env`
 - `/var/lib/babel/post_setup.sh`
-- `/var/lib/babel/services.rhai` default services definition
+- `/var/lib/babel/base.rhai` base config definition
 - `/blockjoy/.babel_jobs/` archive jobs (e.g. download) metadata dir, in particular `download.completed` file
 - `/blockjoy/blockchain_data/` directory where blockchain data are downloaded (uploaded from)
 

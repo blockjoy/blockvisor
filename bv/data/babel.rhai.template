@@ -120,11 +120,11 @@ const NET =  global::NETS[node_params().NETWORK];
 const BABEL_VERSION = "{{ babel_version }}";
 const PLUGIN_CONFIG = #{
     /// [optional] List of configuration files to be rendered from template with provided params.
-    /// See [Tera Docs](https://tera.netlify.app/docs/#templates) for details on templating syntax.
+    /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
     //config_files: [
         //#{
             /// It assumes that file pointed by `template` argument exists.
-            //template: "/var/lib/babel/config.template",
+            //template: "/var/lib/babel/templates/config.template",
             /// File pointed by `destination` path will be overwritten if exists.
             //destination: "/etc/service.config",
             /// Map object serializable to JSON.

@@ -152,7 +152,7 @@ Also make sure that following tools, required by Babel, are available:
 
 ### Define Default Services as needed
 You can define additional services that will be automatically started on all nodes of given kind in
-`/var/lib/babel/services.rhai` file (on rootfs). See [Services Example](babel_api/examples/services.rhai) for more details.
+`/var/lib/babel/base.rhai` file (on rootfs). See [Services Example](babel_api/examples/base.rhai) for more details.
 
 It is the place to define blockchain unrelated services like monitoring agent or proxy servers.
 

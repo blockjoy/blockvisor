@@ -883,8 +883,8 @@ async fn bootstrap_os_image(
         install_os_and_packages(debian_version, &mount_point).await?;
         fs::create_dir_all(mount_point.join(crate::node_context::BABEL_VAR_PATH))?;
         fs::write(
-            mount_point.join(crate::node_context::DEFAULT_SERVICES_PATH),
-            include_str!("../data/services.rhai.template"),
+            mount_point.join(crate::node_context::BASE_CONFIG_PATH),
+            include_str!("../data/base.rhai.template"),
         )?;
         Ok(())
     })
