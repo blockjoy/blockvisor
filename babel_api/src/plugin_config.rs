@@ -308,7 +308,6 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
     if let Some(download) = download {
         JobConfig {
             job_type: JobType::Download {
-                destination: None,
                 max_connections: download.max_connections,
                 max_runners: download.max_runners,
             },
@@ -326,7 +325,6 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
     } else {
         JobConfig {
             job_type: JobType::Download {
-                destination: None,
                 max_connections: None,
                 max_runners: None,
             },
@@ -403,7 +401,6 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
     if let Some(upload) = value {
         JobConfig {
             job_type: JobType::Upload {
-                source: None,
                 exclude: upload.exclude,
                 compression: match upload.compression {
                     None => Some(DEFAULT_COMPRESSION),
@@ -430,7 +427,6 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
     } else {
         JobConfig {
             job_type: JobType::Upload {
-                source: None,
                 exclude: None,
                 compression: Some(DEFAULT_COMPRESSION),
                 max_connections: None,

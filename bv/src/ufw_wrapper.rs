@@ -1,6 +1,6 @@
+use crate::firewall::{Direction, Protocol, Rule};
 use crate::pal::NodeFirewallConfig;
 use async_trait::async_trait;
-use babel_api::metadata::firewall::{Direction, Protocol};
 use eyre::{bail, Result};
 use serde_variant::to_variant_name;
 use uuid::Uuid;
@@ -93,7 +93,7 @@ struct RuleArgs {
 impl RuleArgs {
     fn from_rules(config: NodeFirewallConfig) -> Vec<Self> {
         let mut rule_args = Vec::default();
-        for rule in config.config.rules.into_iter().rev() {
+        for rule in config.config.rules.iter().rev() {
             let proto = rule.protocol.as_ref().and_then(|proto| {
                 if &Protocol::Both != proto {
                     Some(variant_to_string(proto))
@@ -101,34 +101,24 @@ impl RuleArgs {
                     None
                 }
             });
-            let ips = rule.ips.map_or("any".to_string(), |ip| ip);
-            let name = format!("{} {}", config.id, rule.name);
-            let (ip_from, ip_to) = match rule.direction {
-                Direction::Out => (config.ip.to_string(), ips),
-                Direction::In => (ips, config.ip.to_string()),
-            };
 
-            if rule.ports.is_empty() {
-                rule_args.push(Self {
-                    policy: variant_to_string(&rule.action),
-                    direction: rule.direction,
-                    protocol: proto,
-                    ip_from,
-                    ip_to,
-                    port: None,
-                    name,
-                });
+            if rule.ips.is_empty() {
+                Self::from_rule(
+                    &config,
+                    rule.clone(),
+                    proto,
+                    "any".to_string(),
+                    &mut rule_args,
+                );
             } else {
-                for port in &rule.ports {
-                    rule_args.push(Self {
-                        policy: variant_to_string(&rule.action),
-                        direction: rule.direction.clone(),
-                        protocol: proto.clone(),
-                        ip_from: ip_from.clone(),
-                        ip_to: ip_to.clone(),
-                        port: Some(port.to_string()),
-                        name: name.clone(),
-                    });
+                for ip in &rule.ips {
+                    Self::from_rule(
+                        &config,
+                        rule.clone(),
+                        proto.clone(),
+                        ip.clone(),
+                        &mut rule_args,
+                    );
                 }
             }
         }
@@ -151,6 +141,44 @@ impl RuleArgs {
             name: format!("{} default out", config.id),
         });
         rule_args
+    }
+
+    fn from_rule(
+        config: &NodeFirewallConfig,
+        rule: Rule,
+        proto: Option<String>,
+        ip: String,
+        rule_args: &mut Vec<RuleArgs>,
+    ) {
+        let name = format!("{} {}", config.id, rule.name);
+        let (ip_from, ip_to) = match rule.direction {
+            Direction::Out => (config.ip.to_string(), ip),
+            Direction::In => (ip, config.ip.to_string()),
+        };
+
+        if rule.ports.is_empty() {
+            rule_args.push(Self {
+                policy: variant_to_string(&rule.action),
+                direction: rule.direction,
+                protocol: proto,
+                ip_from,
+                ip_to,
+                port: None,
+                name,
+            });
+        } else {
+            for port in &rule.ports {
+                rule_args.push(Self {
+                    policy: variant_to_string(&rule.action),
+                    direction: rule.direction.clone(),
+                    protocol: proto.clone(),
+                    ip_from: ip_from.clone(),
+                    ip_to: ip_to.clone(),
+                    port: Some(port.to_string()),
+                    name: name.clone(),
+                });
+            }
+        }
     }
 
     fn as_vec<'a>(&'a self, iface: &'a str) -> Vec<&'a str> {
@@ -192,8 +220,8 @@ async fn dry_run(runner: &impl UfwRunner, args: &[&str]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use babel_api::metadata::firewall;
-    use babel_api::metadata::firewall::{Action, Rule};
+    use crate::firewall;
+    use crate::firewall::{Action, Rule};
     use mockall::*;
     use std::net::IpAddr;
     use std::str::FromStr;
@@ -357,7 +385,7 @@ mod tests {
                 action: Action::Allow,
                 direction: Direction::Out,
                 protocol: None,
-                ips: Some("ip.is.validated.before".to_string()),
+                ips: vec!["ip.is.validated.before".to_string()],
                 ports: vec![7],
             },
             Rule {
@@ -365,7 +393,7 @@ mod tests {
                 action: Action::Allow,
                 direction: Direction::In,
                 protocol: Some(Protocol::Tcp),
-                ips: Some("ip.is.validated.before".to_string()),
+                ips: vec!["ip.is.validated.before".to_string()],
                 ports: vec![144, 77],
             },
             Rule {
@@ -373,7 +401,7 @@ mod tests {
                 action: Action::Allow,
                 direction: Direction::Out,
                 protocol: None,
-                ips: None,
+                ips: vec![],
                 ports: vec![],
             },
             Rule {
@@ -381,7 +409,7 @@ mod tests {
                 action: Action::Allow,
                 direction: Direction::Out,
                 protocol: None,
-                ips: None,
+                ips: vec![],
                 ports: vec![7],
             },
         ];

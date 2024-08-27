@@ -2,10 +2,8 @@ use crate::{
     config::ApptainerConfig,
     node_context, node_env,
     node_env::NODE_ENV_FILE_PATH,
-    node_state::NodeState,
+    node_state::{NodeState, VmConfig},
     pal,
-    services::blockchain,
-    services::blockchain::ROOTFS_FILE,
     utils::{get_process_pid, GetProcessIdError},
 };
 use async_trait::async_trait;
@@ -13,9 +11,8 @@ use babel_api::engine::{NodeEnv, PosixSignal, DATA_DRIVE_MOUNT_POINT};
 use bv_utils::{
     cmd::run_cmd,
     system::{gracefully_terminate_process, is_process_running, kill_all_processes},
-    with_retry,
 };
-use eyre::{anyhow, bail, Result};
+use eyre::{anyhow, bail, Context, Result};
 use std::{
     ffi::OsStr,
     fmt::Debug,
@@ -37,10 +34,11 @@ const APPTAINER_PID_FILE: &str = "apptainer.pid";
 const JOURNAL_DIR: &str = "/run/systemd/journal";
 const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
-const UMOUNT_RETRY_MAX: u32 = 2;
-const UMOUNT_BACKOFF_BASE_MS: u64 = 1000;
 const BABEL_BIN_PATH: &str = "/usr/bin/babel";
 const APPTAINER_BIN_NAME: &str = "apptainer";
+const BASE_CONFIG_PATH: &str = "var/lib/babel/base.rhai";
+pub const PLUGIN_PATH: &str = "var/lib/babel/plugin.rhai";
+const BABEL_VAR_PATH: &str = "var/lib/babel";
 
 pub fn build_rootfs_dir(node_dir: &Path) -> PathBuf {
     node_dir.join(ROOTFS_DIR)
@@ -56,13 +54,13 @@ pub struct ApptainerMachine {
     apptainer_pid: Option<Pid>,
     babel_pid: Option<Pid>,
     data_dir: PathBuf,
-    os_img_path: PathBuf,
+    image_uri: String,
     vm_id: Uuid,
     vm_name: String,
     ip: IpAddr,
     mask_bits: u8,
     gateway: IpAddr,
-    requirements: babel_api::metadata::Requirements,
+    vm_config: VmConfig,
     cpus: Vec<usize>,
     config: ApptainerConfig,
     node_env: NodeEnv,
@@ -84,15 +82,6 @@ pub async fn new(
     fs::create_dir_all(&chroot_dir).await?;
     let data_dir = node_dir.join(DATA_DIR);
     fs::create_dir_all(&data_dir).await?;
-    let os_img_path = node_dir.join(ROOTFS_FILE);
-    if !os_img_path.exists() {
-        fs::copy(
-            blockchain::get_image_download_folder_path(bv_root, &node_state.image)
-                .join(ROOTFS_FILE),
-            &os_img_path,
-        )
-        .await?;
-    }
     Ok(ApptainerMachine {
         node_dir,
         babel_path,
@@ -102,13 +91,13 @@ pub async fn new(
         apptainer_pid: None,
         babel_pid: None,
         data_dir,
-        os_img_path,
+        image_uri: node_state.image.uri.clone(),
         vm_id: node_state.id,
         vm_name: node_state.name.clone(),
-        ip: node_state.network_interface.ip,
+        ip: node_state.ip,
         mask_bits,
         gateway,
-        requirements: node_state.requirements.clone(),
+        vm_config: node_state.vm_config.clone(),
         cpus: node_state.assigned_cpus.clone(),
         config,
         node_env,
@@ -116,50 +105,39 @@ pub async fn new(
 }
 
 impl ApptainerMachine {
-    pub async fn create(self) -> Result<Self> {
-        let mut mounted = vec![];
-        let vm = self.try_create(&mut mounted).await;
-        if vm.is_err() {
-            for mount_point in mounted {
-                let mount_point = mount_point.to_string_lossy().to_string();
-                if let Err(err) = with_retry!(
-                    run_cmd("umount", [&mount_point]),
-                    UMOUNT_RETRY_MAX,
-                    UMOUNT_BACKOFF_BASE_MS
-                ) {
-                    error!("after create failed, can't umount {mount_point}: {err:#}")
-                }
-            }
-        }
-        vm
-    }
-
-    async fn try_create(self, mounted: &mut Vec<PathBuf>) -> Result<Self> {
-        if !is_mounted(&self.chroot_dir).await? {
+    pub async fn create(&self) -> Result<()> {
+        if !is_built(&self.chroot_dir).await? {
             run_cmd(
-                "mount",
+                "apptainer",
                 [
-                    self.os_img_path.clone().into_os_string(),
-                    self.chroot_dir.clone().into_os_string(),
+                    OsStr::new("build"),
+                    OsStr::new("--sandbox"),
+                    &self.chroot_dir.clone().into_os_string(),
+                    OsStr::new(&self.image_uri),
                 ],
             )
             .await
-            .map_err(|err| anyhow!("failed to mount '{}': {err:#}", self.os_img_path.display()))?;
-            mounted.push(self.chroot_dir.clone());
+            .map_err(|err| {
+                anyhow!(
+                    "failed to build '{}' from `{}`: {err:#}",
+                    self.vm_id,
+                    self.image_uri
+                )
+            })?;
             fs::create_dir_all(
                 self.chroot_dir
                     .join(DATA_DRIVE_MOUNT_POINT.trim_start_matches('/')),
             )
             .await?;
             fs::create_dir_all(self.chroot_dir.join(JOURNAL_DIR.trim_start_matches('/'))).await?;
-            fs::create_dir_all(self.chroot_dir.join(node_context::BABEL_VAR_PATH)).await?;
+            fs::create_dir_all(self.chroot_dir.join(BABEL_VAR_PATH)).await?;
         }
         if self.config.cpu_limit || self.config.memory_limit {
             let mut content = String::new();
             if self.config.memory_limit {
                 content += &format!(
                     "memory.limit = {}\n",
-                    self.requirements.mem_size_mb * 1_000_000,
+                    self.vm_config.mem_size_mb * 1_000_000,
                 )
             }
             if self.config.cpu_limit {
@@ -176,17 +154,17 @@ impl ApptainerMachine {
         }
 
         node_env::save(&self.node_env, &self.chroot_dir).await?;
-        Ok(self)
+        Ok(())
     }
 
-    pub async fn attach(self) -> Result<Self> {
-        let mut vm = self.create().await?;
-        vm.load_apptainer_pid().await?;
-        if vm.is_container_running().await {
-            vm.stop_babel(false).await?;
-            vm.start_babel().await?;
+    pub async fn attach(&mut self) -> Result<()> {
+        self.create().await?;
+        self.load_apptainer_pid().await?;
+        if self.is_container_running().await {
+            self.stop_babel(false).await?;
+            self.start_babel().await?;
         }
-        Ok(vm)
+        Ok(())
     }
 
     async fn load_apptainer_pid(&mut self) -> Result<()> {
@@ -361,43 +339,21 @@ impl ApptainerMachine {
         }
         Ok(())
     }
-
-    async fn umount_all(&mut self) -> Result<()> {
-        let chroot_dir = self.chroot_dir.to_string_lossy();
-        let chroot_dir = chroot_dir.trim_end_matches('/');
-        let mount_points = run_cmd("df", ["--all", "--output=target"])
-            .await
-            .map_err(|err| anyhow!("can't check if root fs is mounted, df: {err:#}"))?;
-        let mut mount_points = mount_points
-            .split_whitespace()
-            .filter(|mount_point| mount_point.starts_with(chroot_dir))
-            .collect::<Vec<_>>();
-        mount_points.sort_by_key(|k| std::cmp::Reverse(k.len()));
-        if !mount_points.is_empty() {
-            let _ = run_cmd("fuser", ["-km", chroot_dir]).await;
-            for mount_point in mount_points {
-                with_retry!(
-                    run_cmd("umount", [mount_point]),
-                    UMOUNT_RETRY_MAX,
-                    UMOUNT_BACKOFF_BASE_MS
-                )
-                .map_err(|err| anyhow!("failed to umount {mount_point}: {err:#}"))?;
-            }
-        }
-        Ok(())
-    }
 }
 
-async fn is_mounted(path: &Path) -> Result<bool> {
-    let df_out = run_cmd("df", ["--all", "--output=target"])
+async fn is_built(path: &Path) -> Result<bool> {
+    let labels_out: serde_json::Value = run_cmd("apptainer", ["-d", "--json"])
         .await
-        .map_err(|err| {
-            anyhow!(
-                "can't check if {} fs is mounted, df: {err:#}",
+        .with_context(|| {
+            format!(
+                "can't check if {} vm is already built, `apptainer -d`",
                 path.display()
             )
+        })
+        .and_then(|out| {
+            serde_json::from_str(&out).with_context(|| "invalid `apptainer -d` output")
         })?;
-    Ok(df_out.contains(path.to_string_lossy().trim_end_matches('/')))
+    Ok(labels_out["data"]["attributes"]["deffile"].is_string())
 }
 
 #[async_trait]
@@ -418,7 +374,6 @@ impl pal::VirtualMachine for ApptainerMachine {
         if self.shutdown().await.is_err() {
             self.force_shutdown().await?;
         }
-        self.umount_all().await?;
         if self.node_dir.exists() {
             fs::remove_dir_all(&self.node_dir).await?;
         }
@@ -442,8 +397,17 @@ impl pal::VirtualMachine for ApptainerMachine {
         self.start_babel().await
     }
 
-    async fn release(&mut self) -> Result<()> {
-        self.umount_all().await
+    async fn upgrade(&mut self, node_state: &NodeState) -> Result<()> {
+        // TODO MJR implement backup and recovery
+        if self.is_container_running().await {
+            bail!("can't upgrade running vm")
+        }
+        fs::remove_dir_all(&self.chroot_dir).await?;
+        fs::create_dir_all(&self.chroot_dir).await?;
+        self.image_uri = node_state.image.uri.clone();
+        self.vm_config = node_state.vm_config.clone();
+        self.cpus = node_state.assigned_cpus.clone();
+        self.create().await
     }
 
     async fn recover(&mut self) -> Result<()> {
@@ -466,7 +430,12 @@ impl pal::VirtualMachine for ApptainerMachine {
         }
     }
 
-    fn rootfs_dir(&self) -> &Path {
-        &self.chroot_dir
+    async fn plugin(&self) -> Result<String> {
+        let mut script = fs::read_to_string(self.chroot_dir.join(PLUGIN_PATH)).await?;
+        let base_config_path = self.chroot_dir.join(BASE_CONFIG_PATH);
+        if base_config_path.exists() {
+            script.push_str(&fs::read_to_string(base_config_path).await?);
+        }
+        Ok(script)
     }
 }

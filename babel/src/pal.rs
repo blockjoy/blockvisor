@@ -1,6 +1,6 @@
 use crate::BabelEngineClient;
 use async_trait::async_trait;
-use babel_api::metadata::RamdiskConfiguration;
+use babel_api::utils::RamdiskConfiguration;
 use bv_utils::run_flag::RunFlag;
 
 /// Trait that allows to inject custom babel_engine implementation.
@@ -26,10 +26,6 @@ pub trait BabelPal {
     type Connector: BabelEngineConnector;
     fn connector(&self) -> Self::Connector;
     async fn setup_node(&self) -> eyre::Result<()>;
-    async fn set_ram_disks(&self, ram_disks: Option<Vec<RamdiskConfiguration>>)
-        -> eyre::Result<()>;
-    async fn is_ram_disks_set(
-        &self,
-        ram_disks: Option<Vec<RamdiskConfiguration>>,
-    ) -> eyre::Result<bool>;
+    async fn set_ram_disks(&self, ram_disks: Vec<RamdiskConfiguration>) -> eyre::Result<()>;
+    async fn is_ram_disks_set(&self, ram_disks: Vec<RamdiskConfiguration>) -> eyre::Result<bool>;
 }

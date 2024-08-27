@@ -564,7 +564,6 @@ version = "1.14.2"
 dependencies = [
  "bv_tests_utils",
  "chrono",
- "cidr-utils",
  "eyre",
  "futures-core",
  "lazy_static",

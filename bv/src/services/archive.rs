@@ -1,46 +1,38 @@
 use crate::{
     api_with_retry,
     config::SharedConfig,
-    node_state::NodeImage,
     services::{
         self,
-        api::{common, pb, pb::blockchain_archive_service_client},
+        api::{pb, pb::archive_service_client},
         ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService,
     },
 };
-use babel_api::{
-    engine::{
-        Checksum, Chunk, Compression, DownloadManifest, DownloadMetadata, FileLocation, Slot,
-        UploadSlots,
-    },
-    metadata::firewall,
+use babel_api::engine::{
+    Checksum, Chunk, Compression, DownloadManifest, DownloadMetadata, FileLocation, Slot,
+    UploadSlots,
 };
 use bv_utils::rpc::with_timeout;
 use eyre::{anyhow, bail, Context, Result};
-use reqwest::Url;
 use std::{path::PathBuf, str::FromStr, time::Duration};
 use tonic::transport::Channel;
 use tracing::info;
+use url::Url;
 
-type BlockchainArchiveServiceClient =
-    blockchain_archive_service_client::BlockchainArchiveServiceClient<AuthenticatedService>;
+type ArchiveServiceClient = archive_service_client::ArchiveServiceClient<AuthenticatedService>;
 
 async fn connect_blockchain_archive_service(
     config: &SharedConfig,
 ) -> Result<
     ApiClient<
-        BlockchainArchiveServiceClient,
+        ArchiveServiceClient,
         impl ApiServiceConnector,
-        impl Fn(Channel, ApiInterceptor) -> BlockchainArchiveServiceClient + Clone,
+        impl Fn(Channel, ApiInterceptor) -> ArchiveServiceClient + Clone,
     >,
 > {
     ApiClient::build_with_default_connector(config, |channel, api_interceptor| {
-        blockchain_archive_service_client::BlockchainArchiveServiceClient::with_interceptor(
-            channel,
-            api_interceptor,
-        )
-        .send_compressed(tonic::codec::CompressionEncoding::Gzip)
-        .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
+        archive_service_client::ArchiveServiceClient::with_interceptor(channel, api_interceptor)
+            .send_compressed(tonic::codec::CompressionEncoding::Gzip)
+            .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
     })
     .await
     .with_context(|| "cannot connect to blockchain archive service")
@@ -48,8 +40,7 @@ async fn connect_blockchain_archive_service(
 
 pub async fn put_download_manifest(
     config: &SharedConfig,
-    image: NodeImage,
-    network: String,
+    archive_id: String,
     manifest: DownloadManifest,
     data_version: u64,
 ) -> Result<()> {
@@ -84,10 +75,10 @@ pub async fn put_download_manifest(
             }
         })
         .collect();
-    let manifest = pb::BlockchainArchiveServicePutDownloadManifestRequest {
-        id: Some(image.try_into()?),
-        network,
+    let manifest = pb::ArchiveServicePutDownloadManifestRequest {
+        archive_id,
         data_version,
+        org_id: None,
         total_size: manifest.total_size,
         compression,
         chunks,
@@ -102,16 +93,15 @@ pub async fn put_download_manifest(
 
 pub async fn get_download_metadata(
     config: &SharedConfig,
-    image: NodeImage,
-    network: String,
+    archive_id: String,
 ) -> Result<DownloadMetadata> {
     let mut client = connect_blockchain_archive_service(config).await?;
     api_with_retry!(
         client,
         client.get_download_metadata(with_timeout(
-            pb::BlockchainArchiveServiceGetDownloadMetadataRequest {
-                id: Some(image.clone().try_into()?),
-                network: network.clone(),
+            pb::ArchiveServiceGetDownloadMetadataRequest {
+                archive_id: archive_id.clone(),
+                org_id: None,
                 data_version: None,
             },
             // checking download manifest require validity check, which may be time-consuming
@@ -119,15 +109,14 @@ pub async fn get_download_metadata(
             Duration::from_secs(60),
         ))
     )
-    .with_context(|| format!("cannot get download metadata for {:?}-{}", image, network))?
+    .with_context(|| "cannot get download metadata")?
     .into_inner()
     .try_into()
 }
 
 pub async fn get_download_chunks(
     config: &SharedConfig,
-    image: NodeImage,
-    network: String,
+    archive_id: String,
     data_version: u64,
     chunk_indexes: Vec<u32>,
 ) -> Result<Vec<Chunk>> {
@@ -135,9 +124,9 @@ pub async fn get_download_chunks(
     api_with_retry!(
         client,
         client.get_download_chunks(with_timeout(
-            pb::BlockchainArchiveServiceGetDownloadChunksRequest {
-                id: Some(image.clone().try_into()?),
-                network: network.clone(),
+            pb::ArchiveServiceGetDownloadChunksRequest {
+                archive_id: archive_id.clone(),
+                org_id: None,
                 data_version,
                 chunk_indexes: chunk_indexes.clone(),
             },
@@ -146,12 +135,7 @@ pub async fn get_download_chunks(
             Duration::from_secs(60),
         ))
     )
-    .with_context(|| {
-        format!(
-            "cannot get download chunks for {:?}-{}/{}",
-            image, network, data_version
-        )
-    })?
+    .with_context(|| "cannot get download chunks")?
     .into_inner()
     .chunks
     .into_iter()
@@ -159,18 +143,14 @@ pub async fn get_download_chunks(
     .collect::<Result<Vec<_>>>()
 }
 
-pub async fn has_download_manifest(
-    config: &SharedConfig,
-    image: NodeImage,
-    network: String,
-) -> Result<bool> {
+pub async fn has_blockchain_archive(config: &SharedConfig, archive_id: String) -> Result<bool> {
     let mut client = connect_blockchain_archive_service(config).await?;
     if let Err(err) = api_with_retry!(
         client,
         client.get_download_metadata(with_timeout(
-            pb::BlockchainArchiveServiceGetDownloadMetadataRequest {
-                id: Some(image.clone().try_into()?),
-                network: network.clone(),
+            pb::ArchiveServiceGetDownloadMetadataRequest {
+                archive_id: archive_id.clone(),
+                org_id: None,
                 data_version: None,
             },
             // checking download manifest require validity check, which may be time-consuming
@@ -181,11 +161,7 @@ pub async fn has_download_manifest(
         if err.code() == tonic::Code::NotFound {
             Ok(false)
         } else {
-            bail!(
-                "cannot check download metadata for {:?}-{}: {err:#}",
-                image,
-                network
-            );
+            bail!("cannot check blockchain archive: {err:#}");
         }
     } else {
         Ok(true)
@@ -194,8 +170,7 @@ pub async fn has_download_manifest(
 
 pub async fn get_upload_slots(
     config: &SharedConfig,
-    image: NodeImage,
-    network: String,
+    archive_id: String,
     data_version: Option<u64>,
     slots: Vec<u32>,
     url_expires: u32,
@@ -204,9 +179,9 @@ pub async fn get_upload_slots(
     api_with_retry!(
         client,
         client.get_upload_slots(with_timeout(
-            pb::BlockchainArchiveServiceGetUploadSlotsRequest {
-                id: Some(image.clone().try_into()?),
-                network: network.clone(),
+            pb::ArchiveServiceGetUploadSlotsRequest {
+                archive_id: archive_id.clone(),
+                org_id: None,
                 data_version,
                 slot_indexes: slots.clone(),
                 url_expires: Some(url_expires),
@@ -216,65 +191,9 @@ pub async fn get_upload_slots(
             services::DEFAULT_API_REQUEST_TIMEOUT + Duration::from_secs(slots.len() as u64 / 200),
         ))
     )
-    .with_context(|| format!("cannot retrieve upload slots for {:?}-{}", image, network))?
+    .with_context(|| "cannot retrieve upload slots")?
     .into_inner()
     .try_into()
-}
-
-impl TryFrom<common::FirewallAction> for firewall::Action {
-    type Error = eyre::Error;
-    fn try_from(value: common::FirewallAction) -> Result<Self, Self::Error> {
-        Ok(match value {
-            common::FirewallAction::Unspecified => {
-                bail!("Invalid Action")
-            }
-            common::FirewallAction::Allow => firewall::Action::Allow,
-            common::FirewallAction::Deny => firewall::Action::Deny,
-            common::FirewallAction::Reject => firewall::Action::Reject,
-        })
-    }
-}
-
-impl TryFrom<common::FirewallDirection> for firewall::Direction {
-    type Error = eyre::Error;
-    fn try_from(value: common::FirewallDirection) -> Result<Self, Self::Error> {
-        Ok(match value {
-            common::FirewallDirection::Unspecified => {
-                bail!("Invalid Direction")
-            }
-            common::FirewallDirection::Inbound => firewall::Direction::In,
-            common::FirewallDirection::Outbound => firewall::Direction::Out,
-        })
-    }
-}
-
-impl TryFrom<common::FirewallProtocol> for firewall::Protocol {
-    type Error = eyre::Error;
-    fn try_from(value: common::FirewallProtocol) -> Result<Self, Self::Error> {
-        Ok(match value {
-            common::FirewallProtocol::Unspecified => bail!("Invalid Protocol"),
-            common::FirewallProtocol::Tcp => firewall::Protocol::Tcp,
-            common::FirewallProtocol::Udp => firewall::Protocol::Udp,
-            common::FirewallProtocol::Both => firewall::Protocol::Both,
-        })
-    }
-}
-
-impl TryFrom<common::FirewallRule> for firewall::Rule {
-    type Error = eyre::Error;
-    fn try_from(rule: common::FirewallRule) -> Result<Self, Self::Error> {
-        let action = rule.action().try_into()?;
-        let direction = rule.direction().try_into()?;
-        let protocol = Some(rule.protocol().try_into()?);
-        Ok(Self {
-            name: rule.name,
-            action,
-            direction,
-            protocol,
-            ips: rule.ips,
-            ports: rule.ports.into_iter().map(|p| p as u16).collect(),
-        })
-    }
 }
 
 impl From<pb::compression::Compression> for Compression {
@@ -296,10 +215,10 @@ impl TryFrom<pb::checksum::Checksum> for Checksum {
     }
 }
 
-impl TryFrom<pb::BlockchainArchiveServiceGetDownloadMetadataResponse> for DownloadMetadata {
+impl TryFrom<pb::ArchiveServiceGetDownloadMetadataResponse> for DownloadMetadata {
     type Error = eyre::Error;
     fn try_from(
-        metadata: pb::BlockchainArchiveServiceGetDownloadMetadataResponse,
+        metadata: pb::ArchiveServiceGetDownloadMetadataResponse,
     ) -> Result<Self, Self::Error> {
         let compression = if let Some(pb::Compression {
             compression: Some(compression),
@@ -377,20 +296,9 @@ impl From<Checksum> for pb::Checksum {
     }
 }
 
-impl TryFrom<pb::UploadSlot> for Slot {
+impl TryFrom<pb::ArchiveServiceGetUploadSlotsResponse> for UploadSlots {
     type Error = eyre::Report;
-    fn try_from(value: pb::UploadSlot) -> Result<Self> {
-        Ok(Self {
-            index: value.index,
-            key: value.key,
-            url: Url::parse(&value.url)?,
-        })
-    }
-}
-
-impl TryFrom<pb::BlockchainArchiveServiceGetUploadSlotsResponse> for UploadSlots {
-    type Error = eyre::Report;
-    fn try_from(slots: pb::BlockchainArchiveServiceGetUploadSlotsResponse) -> Result<Self> {
+    fn try_from(slots: pb::ArchiveServiceGetUploadSlotsResponse) -> Result<Self> {
         Ok(Self {
             slots: slots
                 .slots
@@ -398,6 +306,17 @@ impl TryFrom<pb::BlockchainArchiveServiceGetUploadSlotsResponse> for UploadSlots
                 .map(|slot| slot.try_into())
                 .collect::<Result<Vec<_>>>()?,
             data_version: slots.data_version,
+        })
+    }
+}
+
+impl TryFrom<pb::UploadSlot> for Slot {
+    type Error = eyre::Report;
+    fn try_from(value: pb::UploadSlot) -> Result<Self> {
+        Ok(Self {
+            index: value.index,
+            key: value.key,
+            url: Url::parse(&value.url)?,
         })
     }
 }

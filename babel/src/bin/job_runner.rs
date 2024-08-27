@@ -111,7 +111,6 @@ async fn run_job(
             );
         }
         JobType::Download {
-            destination,
             max_connections,
             max_runners,
         } => {
@@ -131,8 +130,7 @@ async fn run_job(
                     job_config.restart,
                     Downloader::new(
                         connector,
-                        destination
-                            .unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
+                        babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf(),
                         build_transfer_config(
                             &job_name,
                             None,
@@ -146,7 +144,6 @@ async fn run_job(
             }
         }
         JobType::Upload {
-            source,
             exclude,
             compression,
             max_connections,
@@ -160,7 +157,7 @@ async fn run_job(
                 job_config.restart,
                 Uploader::new(
                     connector,
-                    source.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
+                    babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf(),
                     exclude.unwrap_or_default(),
                     number_of_chunks,
                     url_expires_secs,

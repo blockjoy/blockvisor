@@ -2,7 +2,6 @@ use crate::{
     engine::{
         self, Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse,
     },
-    metadata::{check_metadata, BlockchainMetadata},
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
     plugin_config::{
         self, Actions, BaseConfig, ConfigFile, Job, PluginConfig, Service, DOWNLOAD_JOB_NAME,
@@ -61,24 +60,10 @@ impl<E: Engine + Sync + Send + 'static> Clone for BarePlugin<E> {
     }
 }
 
-pub fn read_metadata(script: &str) -> Result<BlockchainMetadata> {
-    find_metadata_in_ast(
-        &new_rhai_engine()
-            .compile(script)
-            .with_context(|| "Rhai syntax error")?,
-    )
-}
-
 fn new_rhai_engine() -> rhai::Engine {
     let mut engine = rhai::Engine::new();
     engine.set_max_expr_depths(64, 32);
     engine
-}
-
-fn find_metadata_in_ast(ast: &AST) -> Result<BlockchainMetadata> {
-    let meta = find_const_in_ast(ast, "METADATA")?;
-    check_metadata(&meta)?;
-    Ok(meta)
 }
 
 fn build_scope() -> rhai::Scope<'static> {
@@ -581,10 +566,6 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
 }
 
 impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
-    fn metadata(&self) -> Result<BlockchainMetadata> {
-        find_metadata_in_ast(&self.bare.ast)
-    }
-
     fn capabilities(&self) -> Vec<String> {
         let mut capabilities: Vec<_> = self
             .bare
@@ -677,7 +658,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 })
             })
         }) {
-            Ok(ApplicationStatus::Initializing)
+            Ok(ApplicationStatus::Starting)
         } else {
             Ok(from_dynamic(
                 &self.call_fn::<_, Dynamic>("application_status", ())?,
@@ -888,9 +869,7 @@ mod tests {
         HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, NodeEnv, RestRequest,
         RestartConfig, RestartPolicy, ShResponse,
     };
-    use crate::metadata::{
-        firewall, BabelConfig, NetConfiguration, NetType, RamdiskConfiguration, Requirements,
-    };
+    use crate::plugin::NodeHealth;
     use crate::plugin_config::{AlternativeDownload, Job};
     use eyre::bail;
     use mockall::*;
@@ -997,7 +976,7 @@ mod tests {
         }
 
         fn application_status() {
-            "broadcasting"
+            #{custom: #{state: "delinquent", health: "unhealthy"}}
         }
 
         fn sync_status() {
@@ -1029,7 +1008,10 @@ mod tests {
         assert_eq!("node address", &plugin.address()?);
         assert!(plugin.consensus()?);
         assert_eq!(
-            ApplicationStatus::Broadcasting,
+            ApplicationStatus::Custom {
+                state: "delinquent".to_string(),
+                health: Some(NodeHealth::Unhealthy),
+            },
             plugin.application_status()?
         );
         assert_eq!(SyncStatus::Synced, plugin.sync_status()?);
@@ -1152,7 +1134,6 @@ mod tests {
                 predicate::eq("download_job_name"),
                 predicate::eq(JobConfig {
                     job_type: JobType::Download {
-                        destination: None,
                         max_connections: None,
                         max_runners: None,
                     },
@@ -1331,7 +1312,8 @@ mod tests {
             node_id: "node_id".to_string(),
             node_name: "".to_string(),
             node_version: "".to_string(),
-            blockchain_type: "".to_string(),
+            blockchain_name: "".to_string(),
+            blockchain_network: "".to_string(),
             node_type: "".to_string(),
             node_ip: "".to_string(),
             node_gateway: "".to_string(),
@@ -1415,7 +1397,7 @@ mod tests {
             };
 
             fn application_status() {
-                "broadcasting"
+                #{custom: #{state: "delinquent"}}
             }
             "#;
         let mut babel = MockBabelEngine::new();
@@ -1476,13 +1458,13 @@ mod tests {
 
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(ApplicationStatus::Downloading, plugin.application_status()?);
-        assert_eq!(
-            ApplicationStatus::Initializing,
-            plugin.application_status()?
-        );
+        assert_eq!(ApplicationStatus::Starting, plugin.application_status()?);
         assert_eq!(ApplicationStatus::Uploading, plugin.application_status()?);
         assert_eq!(
-            ApplicationStatus::Broadcasting,
+            ApplicationStatus::Custom {
+                state: "delinquent".to_string(),
+                health: None
+            },
             plugin.application_status()?
         );
         Ok(())
@@ -1744,7 +1726,8 @@ mod tests {
             node_id: "node-id".to_string(),
             node_name: "node name".to_string(),
             node_version: "".to_string(),
-            blockchain_type: "".to_string(),
+            blockchain_name: "".to_string(),
+            blockchain_network: "".to_string(),
             node_type: "".to_string(),
             node_ip: "".to_string(),
             node_gateway: "".to_string(),
@@ -1961,10 +1944,6 @@ mod tests {
     #[test]
     fn test_errors_handling() -> Result<()> {
         let script = r#"
-        const METADATA = #{
-    // invalid metadata
-};
-
     fn custom_method_with_exception(param) {
         throw "some Rhai exception";
         ""
@@ -2002,156 +1981,6 @@ mod tests {
                 plugin.call_custom_method("no_method", "").unwrap_err()
             )
         );
-        assert_eq!(
-            "Invalid Rhai script - failed to deserialize METADATA",
-            plugin.metadata().unwrap_err().to_string()
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_metadata() -> Result<()> {
-        let meta_rhai = r#"
-const METADATA = #{
-    // comments are allowed
-    kernel: "5.10.174-build.1+fc.ufw",
-    min_babel_version: "0.0.9",
-    node_version: "node_v",
-    protocol: "proto",
-    node_type: "n_type",
-    description: "node description",
-    requirements: #{
-        vcpu_count: 2,
-        mem_size_mb: 1024,
-        disk_size_gb: 10,
-    },
-    nets: #{
-        test: #{
-            url: "test_url",
-            net_type: "test",
-            some_custom: "metadata",
-        },
-        main: #{
-            url: "main_url",
-            net_type: "main",
-        },
-    },
-    babel_config: #{
-        log_buffer_capacity_mb: 128,
-        swap_size_mb: 1024,
-        ramdisks: [
-            #{
-                ram_disk_mount_point: "/mnt/ramdisk",
-                ram_disk_size_mb: 512,
-            },
-        ],
-    },
-    firewall: #{
-        default_in: "deny",
-        default_out: "allow",
-        rules: [
-            #{
-                name: "Rule A",
-                action: "allow",
-                direction: "in",
-                protocol: "tcp",
-                ips: "192.168.0.1/24",
-                ports: [77, 1444, 8080],
-            },
-            #{
-                name: "Rule B",
-                action: "deny",
-                direction: "out",
-                protocol: "udp",
-                ips: "192.167.0.1/24",
-                ports: [77],
-            },
-            #{
-                name: "Rule C",
-                action: "reject",
-                direction: "out",
-                ips: "192.169.0.1/24",
-                ports: [],
-            },
-        ],
-    },
-};
-fn any_function() {}
-"#;
-        let meta_rust = BlockchainMetadata {
-            kernel: "5.10.174-build.1+fc.ufw".to_string(),
-            node_version: "node_v".to_string(),
-            protocol: "proto".to_string(),
-            node_type: "n_type".to_string(),
-            description: Some("node description".to_string()),
-            requirements: Requirements {
-                vcpu_count: 2,
-                mem_size_mb: 1024,
-                disk_size_gb: 10,
-            },
-            nets: HashMap::from_iter([
-                (
-                    "test".to_string(),
-                    NetConfiguration {
-                        url: "test_url".to_string(),
-                        net_type: NetType::Test,
-                        meta: HashMap::from_iter([(
-                            "some_custom".to_string(),
-                            "metadata".to_string(),
-                        )]),
-                    },
-                ),
-                (
-                    "main".to_string(),
-                    NetConfiguration {
-                        url: "main_url".to_string(),
-                        net_type: NetType::Main,
-                        meta: Default::default(),
-                    },
-                ),
-            ]),
-            min_babel_version: "0.0.9".to_string(),
-            babel_config: BabelConfig {
-                swap_size_mb: 1024,
-                swap_file_location: "/swapfile".to_string(),
-                ramdisks: Some(vec![RamdiskConfiguration {
-                    ram_disk_mount_point: "/mnt/ramdisk".to_string(),
-                    ram_disk_size_mb: 512,
-                }]),
-            },
-            firewall: firewall::Config {
-                default_in: firewall::Action::Deny,
-                default_out: firewall::Action::Allow,
-                rules: vec![
-                    firewall::Rule {
-                        name: "Rule A".to_string(),
-                        action: firewall::Action::Allow,
-                        direction: firewall::Direction::In,
-                        protocol: Some(firewall::Protocol::Tcp),
-                        ips: Some("192.168.0.1/24".to_string()),
-                        ports: vec![77, 1444, 8080],
-                    },
-                    firewall::Rule {
-                        name: "Rule B".to_string(),
-                        action: firewall::Action::Deny,
-                        direction: firewall::Direction::Out,
-                        protocol: Some(firewall::Protocol::Udp),
-                        ips: Some("192.167.0.1/24".to_string()),
-                        ports: vec![77],
-                    },
-                    firewall::Rule {
-                        name: "Rule C".to_string(),
-                        action: firewall::Action::Reject,
-                        direction: firewall::Direction::Out,
-                        protocol: None,
-                        ips: Some("192.169.0.1/24".to_string()),
-                        ports: vec![],
-                    },
-                ],
-            },
-        };
-        let plugin = RhaiPlugin::new(meta_rhai, MockBabelEngine::new())?;
-        assert_eq!(meta_rust, plugin.metadata()?);
         Ok(())
     }
 }

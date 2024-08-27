@@ -1,7 +1,7 @@
 use crate::{pal, BabelEngineClient};
 use async_trait::async_trait;
 use babel_api::babel::babel_server::Babel;
-use babel_api::metadata::RamdiskConfiguration;
+use babel_api::utils::RamdiskConfiguration;
 use bv_utils::cmd::{run_cmd, CmdError};
 use bv_utils::rpc::RPC_REQUEST_TIMEOUT;
 use bv_utils::run_flag::RunFlag;
@@ -70,11 +70,7 @@ impl pal::BabelPal for Pal {
         Ok(())
     }
 
-    async fn set_ram_disks(
-        &self,
-        ram_disks: Option<Vec<RamdiskConfiguration>>,
-    ) -> eyre::Result<()> {
-        let ram_disks = ram_disks.unwrap_or_default();
+    async fn set_ram_disks(&self, ram_disks: Vec<RamdiskConfiguration>) -> eyre::Result<()> {
         let df_out = df_tmpfs().await?;
         for disk in ram_disks {
             if df_out.contains(&disk.ram_disk_mount_point) {
@@ -100,11 +96,7 @@ impl pal::BabelPal for Pal {
         Ok(())
     }
 
-    async fn is_ram_disks_set(
-        &self,
-        ram_disks: Option<Vec<RamdiskConfiguration>>,
-    ) -> eyre::Result<bool> {
-        let ram_disks = ram_disks.unwrap_or_default();
+    async fn is_ram_disks_set(&self, ram_disks: Vec<RamdiskConfiguration>) -> eyre::Result<bool> {
         let df_out = df_tmpfs().await?;
         Ok(ram_disks
             .iter()

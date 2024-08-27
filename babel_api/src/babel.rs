@@ -1,9 +1,9 @@
+use crate::utils::BabelConfig;
 use crate::{
     engine::{
         Chunk, DownloadManifest, DownloadMetadata, HttpResponse, JobConfig, JobInfo, JobsInfo,
         JrpcRequest, RestRequest, ShResponse, UploadSlots,
     },
-    metadata::BabelConfig,
     utils::{Binary, BinaryStatus},
 };
 use std::{path::PathBuf, time::Duration};
