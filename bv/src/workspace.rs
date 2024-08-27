@@ -1,4 +1,4 @@
-use crate::{linux_platform::bv_root, node_context, node_state::NodeImage};
+use crate::{linux_platform::bv_root, node_context};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::{fs, os::unix, path::Path};
@@ -9,7 +9,6 @@ const BV_WORKSPACE_FILENAME: &str = ".bv-workspace";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Workspace {
-    pub active_image: Option<NodeImage>,
     pub active_node: Option<ActiveNode>,
 }
 
@@ -64,14 +63,6 @@ pub fn unset_active_node(path: &Path, id: Uuid) -> Result<()> {
     Ok(())
 }
 
-pub fn set_active_image(path: &Path, image: NodeImage) -> Result<()> {
-    let ws_path = path.join(BV_WORKSPACE_FILENAME);
-    let mut workspace: Workspace = serde_json::from_str(&fs::read_to_string(&ws_path)?)?;
-    workspace.active_image = Some(image);
-    fs::write(ws_path, serde_json::to_string(&workspace)?)?;
-    Ok(())
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -84,7 +75,6 @@ pub mod tests {
         assert!(tmp_dir.join(VSCODE_WORKSPACE_FILENAME).exists());
         assert!(tmp_dir.join(BV_WORKSPACE_FILENAME).exists());
         let workspace = read(&tmp_dir)?;
-        assert!(workspace.active_image.is_none());
         assert!(workspace.active_node.is_none());
         Ok(())
     }
@@ -93,25 +83,9 @@ pub mod tests {
     pub fn test_active() -> Result<()> {
         let tmp_dir = TempDir::new()?.to_path_buf();
         create(&tmp_dir)?;
-        set_active_image(
-            &tmp_dir,
-            NodeImage {
-                protocol: "any_protocol".to_string(),
-                node_type: "node".to_string(),
-                node_version: "7.7.7".to_string(),
-            },
-        )?;
         let uid = Uuid::new_v4();
         set_active_node(&tmp_dir, uid, "some_crazy_pet_name")?;
         let workspace = read(&tmp_dir)?;
-        assert_eq!(
-            Some(NodeImage {
-                protocol: "any_protocol".to_string(),
-                node_type: "node".to_string(),
-                node_version: "7.7.7".to_string(),
-            }),
-            workspace.active_image
-        );
         assert_eq!(
             Some(ActiveNode {
                 id: uid,

@@ -5,12 +5,7 @@ use crate::src::utils::{
 use assert_cmd::Command;
 use assert_fs::TempDir;
 use blockvisord::config::ApptainerConfig;
-use blockvisord::{
-    config::Config,
-    node_state::{NodeImage, NodeState},
-    services::api::{common, pb},
-    services::blockchain,
-};
+use blockvisord::{config::Config, node_state::NodeState, services::api::pb};
 use predicates::prelude::*;
 use serial_test::serial;
 use std::{fs, net::ToSocketAddrs, path::Path, str};
@@ -186,7 +181,7 @@ async fn test_bv_service_e2e() {
 
     const OLD_IMAGE_VERSION: &str = "0.0.2";
     const OLD_IMAGE: &str = "testing/validator/0.0.2";
-    const NEW_IMAGE_VERSION: &str = "0.0.3";
+    // const NEW_IMAGE_VERSION: &str = "0.0.3";
     println!("add blockchain");
     let blockchain_query = r#"INSERT INTO blockchains (id, name, display_name, visibility, ticker) values ('ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'Testing', 'Testing', 'public', 'TEST');
         INSERT INTO blockchain_node_types (id, blockchain_id, node_type, visibility) VALUES ('206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'validator', 'public');
@@ -244,36 +239,6 @@ async fn test_bv_service_e2e() {
         None,
     );
 
-    println!("get blockchain id");
-    let mut client = pb::blockchain_service_client::BlockchainServiceClient::connect(url)
-        .await
-        .unwrap();
-
-    let list_blockchains = pb::BlockchainServiceListRequest {
-        org_ids: vec![],
-        offset: 0,
-        limit: 4,
-        search: None,
-        sort: vec![],
-    };
-    let list = client
-        .list(with_auth(list_blockchains, &auth_token))
-        .await
-        .unwrap()
-        .into_inner();
-    let blockchain = list.blockchains.first().unwrap();
-    println!("got blockchain: {:?}", blockchain);
-
-    println!("removing {NEW_IMAGE_VERSION} image from cache to download it again");
-    let folder = blockchain::get_image_download_folder_path(
-        Path::new("/"),
-        &NodeImage {
-            protocol: "testing".to_string(),
-            node_type: "validator".to_string(),
-            node_version: NEW_IMAGE_VERSION.to_string(),
-        },
-    );
-    let _ = tokio::fs::remove_dir_all(&folder).await;
     let stdout = bv_run(&[
         "node",
         "create",
@@ -316,23 +281,23 @@ async fn test_bv_service_e2e() {
     )
     .await;
 
-    println!("give user 'blockjoy-admin' so ity can add new blockchain version");
-    let org_query = r#"INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'blockjoy-admin');"#;
-    println!("add new image version {NEW_IMAGE_VERSION} - trigger auto upgrade");
-    execute_sql_insert(db_url, org_query);
-    client
-        .add_version(with_auth(
-            pb::BlockchainServiceAddVersionRequest {
-                blockchain_id: blockchain.id.clone(),
-                version: NEW_IMAGE_VERSION.to_string(),
-                description: None,
-                node_type: common::NodeType::Validator.into(),
-                properties: vec![],
-            },
-            &auth_token,
-        ))
-        .await
-        .unwrap();
+    // println!("give user 'blockjoy-admin' so ity can add new blockchain version");
+    // let org_query = r#"INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'blockjoy-admin');"#;
+    // println!("add new image version {NEW_IMAGE_VERSION} - trigger auto upgrade");
+    // execute_sql_insert(db_url, org_query);
+    // client
+    //     .add_version(with_auth(
+    //         pb::BlockchainServiceAddVersionRequest {
+    //             blockchain_id: blockchain.id.clone(),
+    //             version: NEW_IMAGE_VERSION.to_string(),
+    //             description: None,
+    //             node_type: common::NodeType::Validator.into(),
+    //             properties: vec![],
+    //         },
+    //         &auth_token,
+    //     ))
+    //     .await
+    //     .unwrap();
 
     // Note(luuk): nodes no longer auto upgrade by default when a new version
     // is created. One day we will add a endpoint to do this and we can
@@ -399,7 +364,7 @@ async fn node_version(id: &str) -> String {
     )))
     .await
     {
-        node_state.image.node_version
+        node_state.software_version
     } else {
         Default::default()
     }

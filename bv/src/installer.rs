@@ -517,7 +517,7 @@ mod tests {
     use crate::hosts;
     use crate::internal_server;
     use crate::node_metrics;
-    use crate::node_state::{NodeImage, NodeStatus};
+    use crate::node_state::NodeStatus;
     use assert_fs::TempDir;
     use babel_api::engine::JobsInfo;
     use bv_tests_utils::rpc::test_channel;
@@ -569,12 +569,8 @@ mod tests {
             ) -> Result<tonic::Response<Vec<internal_server::NodeDisplayInfo>>, tonic::Status>;
             async fn create_node(
                 &self,
-                request: tonic::Request<internal_server::NodeCreateRequest>,
+                request: tonic::Request<internal_server::CreateNodeRequest>,
             ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
-            async fn upgrade_node(
-                &self,
-                request: tonic::Request<(Uuid, NodeImage)>,
-            ) -> Result<tonic::Response<()>, tonic::Status>;
             async fn delete_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn start_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn stop_node(&self, request: tonic::Request<(Uuid, bool)>) -> Result<tonic::Response<()>, tonic::Status>;

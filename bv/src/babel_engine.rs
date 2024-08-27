@@ -62,7 +62,6 @@ pub struct NodeInfo {
     pub node_id: Uuid,
     pub image: NodeImage,
     pub properties: NodeProperties,
-    pub network: String,
 }
 
 #[derive(Debug)]
@@ -158,8 +157,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(())
     }
 
-    pub fn update_node_image(&mut self, node_image: NodeImage) {
+    pub fn update_node_info(&mut self, node_image: NodeImage, properties: NodeProperties) {
         self.node_info.image = node_image;
+        self.node_info.properties = properties;
     }
 
     /// Returns the height of the blockchain (in blocks).
@@ -445,10 +445,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             }
             EngineRequest::HasBlockchainArchive { response_tx } => {
                 let _ = response_tx.send(
-                    services::blockchain_archive::has_download_manifest(
+                    services::archive::has_blockchain_archive(
                         &self.api_config,
-                        self.node_info.image.clone(),
-                        self.node_info.network.clone(),
+                        self.node_info.image.archive_id.clone(),
                     )
                     .await,
                 );
@@ -524,17 +523,15 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     ) -> std::result::Result<(), Error> {
         let babel_client = self.node_connection.babel_client().await?;
         if let JobType::Download { .. } = &job_config.job_type {
-            if !services::blockchain_archive::has_download_manifest(
+            if !services::archive::has_blockchain_archive(
                 &self.api_config,
-                self.node_info.image.clone(),
-                self.node_info.network.clone(),
+                self.node_info.image.archive_id.clone(),
             )
             .await?
             {
                 bail!(
-                    "manifest not available for {:?}-{}",
-                    self.node_info.image,
-                    self.node_info.network
+                    "manifest not available for {}",
+                    self.node_info.image.archive_id,
                 )
             }
         }
@@ -895,7 +892,7 @@ mod tests {
     use async_trait::async_trait;
     use babel_api::{
         engine::{Engine, JobInfo, JobStatus, JobType, RestartPolicy},
-        metadata::BabelConfig,
+        utils::BabelConfig,
     };
     use bv_tests_utils::{rpc::test_channel, start_test_server};
     use mockall::*;
@@ -987,10 +984,6 @@ mod tests {
     }
 
     impl Plugin for DummyPlugin {
-        fn metadata(&self) -> Result<babel_api::metadata::BlockchainMetadata> {
-            self.engine.run_sh("metadata", None)?;
-            bail!("no metadata") // test also some error propagation
-        }
         fn capabilities(&self) -> Vec<String> {
             self.engine.run_sh("capabilities", None).unwrap();
             vec!["some_method".to_string()]
@@ -1029,7 +1022,10 @@ mod tests {
         }
         fn application_status(&self) -> Result<ApplicationStatus> {
             self.engine.run_sh("application_status", None)?;
-            Ok(ApplicationStatus::Disabled)
+            Ok(ApplicationStatus::Custom {
+                state: "disabled".to_string(),
+                health: None,
+            })
         }
         fn sync_status(&self) -> Result<SyncStatus> {
             self.engine.run_sh("sync_status", None)?;
@@ -1160,21 +1156,22 @@ mod tests {
                 NodeInfo {
                     node_id,
                     image: NodeImage {
-                        protocol: "".to_string(),
-                        node_type: "".to_string(),
-                        node_version: "".to_string(),
+                        id: "".to_string(),
+                        config_id: "".to_string(),
+                        archive_id: "".to_string(),
+                        uri: "".to_string(),
                     },
                     properties: HashMap::from_iter([(
                         "some_key".to_string(),
                         "some value".to_string(),
                     )]),
-                    network: "test".to_string(),
                 },
                 NodeEnv {
                     node_id: node_id.to_string(),
                     node_name: "".to_string(),
                     node_version: "".to_string(),
-                    blockchain_type: "".to_string(),
+                    blockchain_name: "".to_string(),
+                    blockchain_network: "".to_string(),
                     node_type: "".to_string(),
                     node_ip: "".to_string(),
                     node_gateway: "".to_string(),
@@ -1423,7 +1420,10 @@ mod tests {
         assert_eq!("dummy address", test_env.engine.address().await?);
         assert!(test_env.engine.consensus().await?);
         assert_eq!(
-            ApplicationStatus::Disabled,
+            ApplicationStatus::Custom {
+                state: "disabled".to_string(),
+                health: None
+            },
             test_env.engine.application_status().await?
         );
         assert_eq!(SyncStatus::Syncing, test_env.engine.sync_status().await?);

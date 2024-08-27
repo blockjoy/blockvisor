@@ -146,7 +146,9 @@ impl Pal for ApptainerPlatform {
         bv_context: &BvContext,
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine> {
-        self.new_vm(bv_context, node_state).await?.create().await
+        let vm = self.new_vm(bv_context, node_state).await?;
+        vm.create().await?;
+        Ok(vm)
     }
 
     async fn attach_vm(
@@ -154,7 +156,9 @@ impl Pal for ApptainerPlatform {
         bv_context: &BvContext,
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine> {
-        self.new_vm(bv_context, node_state).await?.attach().await
+        let mut vm = self.new_vm(bv_context, node_state).await?;
+        vm.attach().await?;
+        Ok(vm)
     }
 
     async fn available_cpus(&self) -> usize {
@@ -184,7 +188,7 @@ impl Pal for ApptainerPlatform {
                     fs_extra::dir::get_size(&data_img_path).with_context(|| {
                         format!("can't check size of '{}'", data_img_path.display())
                     })?;
-                let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
+                let declared_data_size = data.vm_config.disk_size_gb * 1_000_000_000;
                 debug!("id: {id}; declared: {declared_data_size}; actual: {actual_data_size}");
                 if declared_data_size > actual_data_size {
                     correction += declared_data_size - actual_data_size;

@@ -9,6 +9,7 @@ pub mod cli;
 pub mod cluster;
 pub mod commands;
 pub mod config;
+pub mod firewall;
 pub mod hosts;
 pub mod installer;
 pub mod internal_server;

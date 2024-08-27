@@ -1,59 +1,3 @@
-const METADATA = #{
-    // comments are allowed
-    min_babel_version: "0.0.9",
-    kernel: "5.10.174-build.1+fc.ufw",
-    node_version: "1.15.9",
-    protocol: "testing",
-    node_type: "validator",
-    description: "testing blockchain validator",
-    requirements: #{
-        vcpu_count: 1,
-        mem_size_mb: 2048,
-        disk_size_gb: 1,
-    },
-    nets: #{
-        test: #{
-            url: "https://testnet-api.helium.wtf/v1/",
-            net_type: "test",
-        },
-        main: #{
-            url: "https://rpc.ankr.com/eth",
-            net_type: "main",
-        },
-    },
-    babel_config: #{
-        log_buffer_capacity_mb: 4,
-        swap_size_mb: 512,
-        ramdisks: [
-            #{
-                ram_disk_mount_point: "/mnt/ramdisk",
-                ram_disk_size_mb: 512,
-            },
-        ]
-    },
-    firewall: #{
-        default_in: "deny",
-        default_out: "allow",
-        rules: [
-            #{
-                name: "Allowed incoming tcp traffic on port",
-                action: "allow",
-                direction: "in",
-                protocol: "tcp",
-                ports: [24567], // ufw allow in proto tcp port 24567
-            },
-            #{
-                name: "Allowed incoming udp traffic on ip and port",
-                action: "allow",
-                direction: "in",
-                protocol: "udp",
-                ips: "192.168.0.1",
-                ports: [24567], //ufw allow in proto udp from 192.168.0.1 port 24567
-            },
-        ],
-    },
-};
-
 const API_HOST = "http://localhost:4467/";
 
 const BABEL_VERSION = "0.9.0";
@@ -135,10 +79,6 @@ fn staking_status() {
     "staking"
 }
 
-fn info(param) {
-    param
-}
-
 fn download(param) {
     start_job("download", #{
         job_type: #{
@@ -193,4 +133,8 @@ fn start_progress_job(name) {
         restart: "never",
     });
     "job " + name + " started"
+}
+
+fn info(param) {
+    param
 }

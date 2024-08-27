@@ -3,7 +3,7 @@ use crate::{
     BV_VAR_PATH,
 };
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};
-use eyre::{anyhow, Context, Result};
+use eyre::{Context, Result};
 use std::{
     env,
     path::{Path, PathBuf},
@@ -98,14 +98,14 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector + Clone> SelfUpdater<T, C> 
         )
         .await
         .with_context(|| "cannot connect to bundle service")?;
-        let resp: pb::BundleServiceListBundleVersionsResponse = api_with_retry!(
+        let resp: pb::BundleServiceListVersionsResponse = api_with_retry!(
             client,
-            client.list_bundle_versions(pb::BundleServiceListBundleVersionsRequest {})
+            client.list_versions(pb::BundleServiceListVersionsRequest {})
         )
         .with_context(|| "cannot list bundle versions")?
         .into_inner();
         let mut versions = resp
-            .identifiers
+            .ids
             .into_iter()
             .map(|bundle_id| semver::Version::parse(&bundle_id.version))
             .collect::<Result<Vec<_>, _>>()
@@ -133,20 +133,18 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector + Clone> SelfUpdater<T, C> 
             pb::bundle_service_client::BundleServiceClient::with_interceptor,
         )
         .await?;
-        let archive = api_with_retry!(
+        let url = api_with_retry!(
             client,
             client.retrieve(tonic::Request::new(pb::BundleServiceRetrieveRequest {
                 id: Some(bundle.clone()),
             }))
         )?
         .into_inner()
-        .location
-        .ok_or_else(|| anyhow!("missing location"))?;
+        .url;
 
         let bundle_path = self.download_path.join(BUNDLE);
         let _ = fs::remove_dir_all(&bundle_path).await;
 
-        let url = archive.url.clone();
         utils::download_archive(&url, self.download_path.join(BUNDLE_FILE))
             .await
             .with_context(|| format!("failed to download bundle from `{url}`"))?
@@ -165,7 +163,7 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector + Clone> SelfUpdater<T, C> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::{api::common, ApiInterceptor, AuthToken};
+    use crate::services::{ApiInterceptor, AuthToken};
     use assert_fs::TempDir;
     use async_trait::async_trait;
     use bv_tests_utils::{rpc::test_channel, start_test_server};
@@ -189,15 +187,10 @@ mod tests {
                 request: tonic::Request<pb::BundleServiceRetrieveRequest>,
             ) -> Result<tonic::Response<pb::BundleServiceRetrieveResponse>, tonic::Status>;
             /// List all available bundle versions
-            async fn list_bundle_versions(
+            async fn list_versions(
                 &self,
-                request: tonic::Request<pb::BundleServiceListBundleVersionsRequest>,
-            ) -> Result<tonic::Response<pb::BundleServiceListBundleVersionsResponse>, tonic::Status>;
-            /// Delete bundle from storage
-            async fn delete(
-                &self,
-                request: tonic::Request<pb::BundleServiceDeleteRequest>,
-            ) -> Result<tonic::Response<pb::BundleServiceDeleteResponse>, tonic::Status>;
+                request: tonic::Request<pb::BundleServiceListVersionsRequest>,
+            ) -> Result<tonic::Response<pb::BundleServiceListVersionsResponse>, tonic::Status>;
         }
     }
 
@@ -335,22 +328,17 @@ mod tests {
         let _ = test_env.updater.get_versions().await.unwrap_err();
 
         let mut bundles_mock = MockTestBundleService::new();
-        bundles_mock
-            .expect_list_bundle_versions()
-            .once()
-            .returning(|_| {
-                let reply = pb::BundleServiceListBundleVersionsResponse {
-                    identifiers: vec![],
-                };
-                Ok(Response::new(reply))
-            });
+        bundles_mock.expect_list_versions().once().returning(|_| {
+            let reply = pb::BundleServiceListVersionsResponse { ids: vec![] };
+            Ok(Response::new(reply))
+        });
         let expected_bundle_id = bundle_id.clone();
         bundles_mock
-            .expect_list_bundle_versions()
+            .expect_list_versions()
             .once()
             .returning(move |_| {
-                let reply = pb::BundleServiceListBundleVersionsResponse {
-                    identifiers: vec![
+                let reply = pb::BundleServiceListVersionsResponse {
+                    ids: vec![
                         pb::BundleIdentifier {
                             version: "1.2.3".to_string(),
                         },
@@ -398,17 +386,13 @@ mod tests {
         let mut bundles_mock = MockTestBundleService::new();
         bundles_mock.expect_retrieve().once().returning(|_| {
             let reply = pb::BundleServiceRetrieveResponse {
-                location: Some(common::ArchiveLocation {
-                    url: "invalid_url".to_string(),
-                }),
+                url: "invalid_url".to_string(),
             };
             Ok(Response::new(reply))
         });
         let url = server.url();
         bundles_mock.expect_retrieve().once().returning(move |_| {
-            let reply = pb::BundleServiceRetrieveResponse {
-                location: Some(common::ArchiveLocation { url: url.clone() }),
-            };
+            let reply = pb::BundleServiceRetrieveResponse { url: url.clone() };
             Ok(Response::new(reply))
         });
         let bundle_server = test_env.start_test_server(bundles_mock);
@@ -443,9 +427,7 @@ mod tests {
         let mut bundles_mock = MockTestBundleService::new();
         let url = server.url();
         bundles_mock.expect_retrieve().once().returning(move |_| {
-            let reply = pb::BundleServiceRetrieveResponse {
-                location: Some(common::ArchiveLocation { url: url.clone() }),
-            };
+            let reply = pb::BundleServiceRetrieveResponse { url: url.clone() };
             Ok(Response::new(reply))
         });
         let bundle_server = test_env.start_test_server(bundles_mock);
@@ -491,11 +473,11 @@ mod tests {
         let mut bundles_mock = MockTestBundleService::new();
         let expected_bundle_id = bundle_id.clone();
         bundles_mock
-            .expect_list_bundle_versions()
+            .expect_list_versions()
             .once()
             .returning(move |_| {
-                let reply = pb::BundleServiceListBundleVersionsResponse {
-                    identifiers: vec![expected_bundle_id.clone()],
+                let reply = pb::BundleServiceListVersionsResponse {
+                    ids: vec![expected_bundle_id.clone()],
                 };
                 Ok(Response::new(reply))
             });
@@ -509,9 +491,7 @@ mod tests {
                 },
             )
             .returning(move |_| {
-                let reply = pb::BundleServiceRetrieveResponse {
-                    location: Some(common::ArchiveLocation { url: url.clone() }),
-                };
+                let reply = pb::BundleServiceRetrieveResponse { url: url.clone() };
                 Ok(Response::new(reply))
             });
         let bundle_server = test_env.start_test_server(bundles_mock);
@@ -549,12 +529,12 @@ mod tests {
         let mut bundles_mock = MockTestBundleService::new();
         let expected_bundle_id = bundle_id.clone();
         bundles_mock
-            .expect_list_bundle_versions()
+            .expect_list_versions()
             .once()
             .returning(move |_| {
-                let reply: pb::BundleServiceListBundleVersionsResponse =
-                    pb::BundleServiceListBundleVersionsResponse {
-                        identifiers: vec![expected_bundle_id.clone()],
+                let reply: pb::BundleServiceListVersionsResponse =
+                    pb::BundleServiceListVersionsResponse {
+                        ids: vec![expected_bundle_id.clone()],
                     };
                 Ok(Response::new(reply))
             });

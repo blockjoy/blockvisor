@@ -1,98 +1,3 @@
-const METADATA = #{
-    /// A semver version of the babel program, indicating the minimum version of the babel
-    /// program that a babel script is compatible with.
-    min_babel_version: "{{ babel_version }}",
-    /// Version of Linux kernel to use in VM.
-    kernel: "5.10.174-build.1+fc.ufw",
-    /// A semver version of the blockchain node program.
-    node_version: "0.0.1",
-    /// Name of the blockchain protocol.
-    protocol: "{{ protocol }}",
-    /// Type of the node (validator, beacon, etc).
-    node_type: "{{ node_type }}",
-    /// [optional] Some description of the node.
-    description: "{{ protocol }} {{ node_type }}",
-    /// Blockchain resource requirements.
-    requirements: #{
-        /// Virtual cores to share with VM
-        vcpu_count: 1,
-        /// RAM allocated to VM in MB
-        mem_size_mb: 2048,
-        /// Size of data drive for storing blockchain data (not to be confused with OS drive)
-        disk_size_gb: 1,
-    },
-    /// Supported blockchain networks.
-    nets: #{
-        /// Key is the name of blockchain network
-        test: #{
-            /// Url for given blockchain network.
-            url: "https://testnet-api.helium.wtf/v1/",
-            /// Blockchain network type.
-            /// Allowed values: "dev", "test", "main"
-            net_type: "test",
-            /// [optional] Custom network metadata can also be added.
-            /// example: beacon_nodes_csv: "http://beacon01.goerli.eth.blockjoy.com,http://beacon02.goerli.eth.blockjoy.com?789",
-        },
-        main: #{
-            url: "https://rpc.ankr.com/eth",
-            net_type: "main",
-        },
-    },
-    /// Configuration of Babel - agent running inside VM.
-    babel_config: #{
-        /// Size of swap file created on the node, in MB.
-        swap_size_mb: 512,
-        /// Location of swap file.
-        swap_file_location: "/swapfile",
-        /// Set RAM disks inside VM
-        ramdisks: [
-            #{
-                /// Path to mount RAM disk to.
-                ram_disk_mount_point: "/mnt/ramdisk",
-                /// RAM disk size, in MB.
-                ram_disk_size_mb: 512,
-            },
-        ]
-    },
-    /// Node firewall configuration.
-    firewall: #{
-        /// Fallback action for inbound traffic used when packet doesn't match any rule.
-        /// Allowed values: "allow", "deny", "reject"
-        default_in: "deny",
-        /// Fallback action for outbound traffic used when packet doesn't match any rule.
-        /// Allowed values: "allow", "deny", "reject"
-        default_out: "allow",
-        /// Set of rules to be applied.
-        rules: [
-            #{
-                /// Unique rule name.
-                name: "Allowed incoming tcp traffic on port",
-                /// Action applied on packet that match rule.
-                /// Allowed values: "allow", "deny", "reject"
-                action: "allow",
-                /// Traffic direction for which rule applies.
-                /// Allowed values: "out", "in"
-                direction: "in",
-                /// [optional] Protocol - "both" by default.
-                /// Allowed values: "tcp", "udp", "both"
-                protocol: "tcp",
-                /// [optional] Ip(s) compliant with CIDR notation.
-                /// ips: "192.167.0.1/24",
-                /// List of ports. Empty means all.
-                ports: [24567], /// ufw allow in proto tcp port 24567
-            },
-            #{
-                name: "Allowed incoming udp traffic on ip and port",
-                action: "allow",
-                direction: "in",
-                protocol: "udp",
-                ips: "192.168.0.1",
-                ports: [24567], /// ufw allow in proto udp from 192.168.0.1 port 24567
-            },
-        ],
-    },
-};
-
 /// You can define some constants to use in the code
 const NETS = #{
     /// Key is the name of blockchain network
@@ -354,7 +259,7 @@ const PLUGIN_CONFIG = #{
 /// Returns blockchain application status.
 /// SHALL be implemented
 fn application_status() {
-    /// "uploading", "downloading", "initializing" statuses are automatically handled by BV if BABEL_CONFIG const is defined
+    /// "uploading", "downloading", "starting" statuses are automatically handled by BV if BABEL_CONFIG const is defined
     let result = run_jrpc(#{
             host: global::API_HOST,
             method: "health.health",
@@ -362,9 +267,9 @@ fn application_status() {
         }).expect(200);
 
     if result.healthy != "false" || result.result.checks.bootstrapped.error == "subnets not bootstrapped" {
-        "broadcasting"
+        #{custom: #{state: "broadcasting", health: "healthy"}};
     } else {
-        "delinquent"
+        #{custom: #{state: "delinquent", health: "healthy"}};
     }
 }
 

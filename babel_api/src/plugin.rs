@@ -1,13 +1,9 @@
-use crate::metadata::BlockchainMetadata;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 
 /// Interface to be implemented by babel plugin.
 /// Babel plugin adds support for some blockchain type.
 pub trait Plugin {
-    /// Get blockchain metadata.
-    fn metadata(&self) -> Result<BlockchainMetadata>;
-
     /// Get list of supported method names.
     fn capabilities(&self) -> Vec<String>;
 
@@ -79,27 +75,25 @@ pub enum SyncStatus {
 #[serde(rename_all = "snake_case")]
 pub enum ApplicationStatus {
     Provisioning,
-    Broadcasting,
-    Cancelled,
-    Delegating,
-    Delinquent,
-    Disabled,
-    Earning,
-    Electing,
-    Elected,
-    Exported,
-    Ingesting,
-    Mining,
-    Minting,
-    Processing,
-    Relaying,
     DeletePending,
     Deleting,
     Deleted,
     ProvisioningPending,
     UpdatePending,
     Updating,
-    Initializing,
+    Starting,
     Downloading,
     Uploading,
+    Custom {
+        state: String,
+        health: Option<NodeHealth>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeHealth {
+    Healthy,
+    Neutral,
+    Unhealthy,
 }

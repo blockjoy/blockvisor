@@ -14,7 +14,7 @@ pub mod run_sh_job;
 pub mod upload_job;
 pub mod utils;
 
-use babel_api::metadata::BabelConfig;
+use babel_api::utils::BabelConfig;
 use eyre::{Context, Result};
 use std::path::Path;
 use tokio::fs;

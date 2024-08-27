@@ -14,7 +14,7 @@ use blockvisord::{
     nodes_manager::NodesDataCache,
     pal::{AvailableResources, NodeFirewallConfig, RecoverBackoff},
     pal::{CommandsStream, Pal, ServiceConnector},
-    services::{self, blockchain::IMAGES_DIR, ApiInterceptor, AuthToken},
+    services::{self, ApiInterceptor, AuthToken},
     BV_VAR_PATH,
 };
 use bv_utils::{logging::setup_logging, rpc::DefaultTimeout, run_flag::RunFlag};
@@ -60,11 +60,6 @@ impl TestEnv {
         let _ = fs::remove_dir_all(&bv_root); // remove remnants if any
         let vars_path = bv_root.join(BV_VAR_PATH);
         fs::create_dir_all(&vars_path)?;
-        // link to pre downloaded images in /var/lib/blockvisord/images
-        std::os::unix::fs::symlink(
-            Path::new("/").join(BV_VAR_PATH).join(IMAGES_DIR),
-            vars_path.join(IMAGES_DIR),
-        )?;
         fs::create_dir_all(bv_root.join("usr"))?;
         // link to /usr/bin where apptainer is expected
         std::os::unix::fs::symlink(
@@ -339,7 +334,7 @@ impl Pal for DummyPlatform {
         bv_context: &BvContext,
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine> {
-        apptainer_machine::new(
+        let vm = apptainer_machine::new(
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
             24,
@@ -353,9 +348,9 @@ impl Pal for DummyPlatform {
                 memory_limit: true,
             },
         )
-        .await?
-        .create()
-        .await
+        .await?;
+        vm.create().await?;
+        Ok(vm)
     }
 
     async fn attach_vm(
@@ -363,7 +358,7 @@ impl Pal for DummyPlatform {
         bv_context: &BvContext,
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine> {
-        apptainer_machine::new(
+        let mut vm = apptainer_machine::new(
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
             24,
@@ -377,9 +372,9 @@ impl Pal for DummyPlatform {
                 memory_limit: true,
             },
         )
-        .await?
-        .attach()
-        .await
+        .await?;
+        vm.attach().await?;
+        Ok(vm)
     }
 
     async fn available_cpus(&self) -> usize {

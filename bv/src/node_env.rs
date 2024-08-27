@@ -10,11 +10,12 @@ pub fn new(bv_context: &BvContext, node_state: &NodeState) -> NodeEnv {
     NodeEnv {
         node_id: node_state.id.to_string(),
         node_name: node_state.name.clone(),
-        node_type: node_state.image.node_type.clone(),
-        blockchain_type: node_state.image.protocol.clone(),
-        node_version: node_state.image.node_version.clone(),
-        node_ip: node_state.network_interface.ip.to_string(),
-        node_gateway: node_state.network_interface.gateway.to_string(),
+        node_type: serde_json::to_string(&node_state.image_key.node_type).unwrap_or_default(),
+        blockchain_name: node_state.blockchain_name.clone(),
+        blockchain_network: node_state.image_key.network.clone(),
+        node_version: node_state.software_version.clone(),
+        node_ip: node_state.ip.to_string(),
+        node_gateway: node_state.gateway.to_string(),
         dev_mode: node_state.dev_mode,
         bv_host_id: bv_context.id.clone(),
         bv_host_name: bv_context.name.clone(),
@@ -32,7 +33,8 @@ pub async fn save(env: &NodeEnv, babel_root: &Path) -> eyre::Result<()> {
          NODE_NAME=\"{}\"\n\
          NODE_TYPE=\"{}\"\n\
          ORG_ID=\"{}\"\n\
-         BLOCKCHAIN_TYPE=\"{}\"\n\
+         BLOCKCHAIN_NAME=\"{}\"\n\
+         BLOCKCHAIN_NETWORK=\"{}\"\n\
          NODE_VERSION=\"{}\"\n\
          NODE_IP=\"{}\"\n\
          NODE_GATEWAY=\"{}\"\n\
@@ -44,7 +46,8 @@ pub async fn save(env: &NodeEnv, babel_root: &Path) -> eyre::Result<()> {
         env.node_name,
         env.node_type,
         env.org_id,
-        env.blockchain_type,
+        env.blockchain_name,
+        env.blockchain_network,
         env.node_version,
         env.node_ip,
         env.node_gateway,

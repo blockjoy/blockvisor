@@ -72,8 +72,8 @@ impl LinuxPlatform {
                 (sys.total_memory() / 1_000_000, sys.cpus().len()),
                 |(available_mem_size_mb, available_vcpu_count), (_, data)| {
                     (
-                        available_mem_size_mb - data.requirements.mem_size_mb,
-                        available_vcpu_count - data.requirements.vcpu_count,
+                        available_mem_size_mb - data.vm_config.mem_size_mb,
+                        available_vcpu_count - data.vm_config.vcpu_count,
                     )
                 },
             );

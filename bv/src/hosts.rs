@@ -66,7 +66,7 @@ impl HostInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HostMetrics {
-    pub used_cpu_count: u32,
+    pub used_cpu_count: u64,
     pub used_memory_bytes: u64,
     pub used_disk_space_bytes: u64,
     pub used_ips: Vec<String>,
@@ -94,7 +94,7 @@ impl HostMetrics {
     pub async fn collect(nodes_data_cache: NodesDataCache, pal: &impl Pal) -> Result<Self> {
         let used_ips = nodes_data_cache
             .iter()
-            .map(|(_, data)| data.ip.clone())
+            .map(|(_, data)| data.ip.to_string())
             .collect();
         let disk_space_correction = pal
             .used_disk_space_correction(nodes_data_cache)
@@ -116,7 +116,7 @@ impl HostMetrics {
 
             let load = sys.load_average();
             Ok(HostMetrics {
-                used_cpu_count: sys.global_cpu_info().cpu_usage() as u32,
+                used_cpu_count: sys.global_cpu_info().cpu_usage() as u64,
                 used_memory_bytes: saturating_sub_bytes(mem.total, mem.free).as_u64(),
                 used_disk_space_bytes: bv_utils::system::find_disk_by_path(
                     &sys,
@@ -149,9 +149,9 @@ impl HostMetrics {
 impl pb::MetricsServiceHostRequest {
     pub fn new(host_id: String, metrics: HostMetrics) -> Self {
         let metrics = pb::HostMetrics {
-            used_cpu: Some(metrics.used_cpu_count),
-            used_memory: Some(metrics.used_memory_bytes),
-            used_disk_space: Some(metrics.used_disk_space_bytes),
+            used_cpu_percent: Some(metrics.used_cpu_count),
+            used_mem_bytes: Some(metrics.used_memory_bytes),
+            used_disk_bytes: Some(metrics.used_disk_space_bytes),
             load_one: Some(metrics.load_one),
             load_five: Some(metrics.load_five),
             load_fifteen: Some(metrics.load_fifteen),
@@ -176,7 +176,7 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
     let update = pb::HostServiceUpdateRequest {
         id: config.read().await.id,
         name: Some(info.name),
-        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        bv_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         os: Some(info.os),
         os_version: Some(info.os_version),
         region: None,

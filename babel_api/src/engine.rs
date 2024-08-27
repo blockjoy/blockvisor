@@ -100,8 +100,10 @@ pub struct NodeEnv {
     pub node_name: String,
     /// Node version.
     pub node_version: String,
-    /// Node protocol name.
-    pub blockchain_type: String,
+    /// Node blockchain name.
+    pub blockchain_name: String,
+    /// Node blockchain network.
+    pub blockchain_network: String,
     /// Node type.
     pub node_type: String,
     /// Node IP.
@@ -260,8 +262,6 @@ pub enum JobType {
     RunSh(String),
     /// Download data - according to given manifest.
     Download {
-        /// Destination directory for downloaded files.
-        destination: Option<PathBuf>,
         /// Maximum number of parallel opened connections.
         max_connections: Option<usize>,
         /// Maximum number of parallel workers.
@@ -269,8 +269,6 @@ pub enum JobType {
     },
     /// Upload data - according to given manifest.
     Upload {
-        /// Source directory with files to be uploaded.
-        source: Option<PathBuf>,
         /// List of exclude patterns. Files in `source` directory that match any of pattern,
         /// won't be taken into account.
         exclude: Option<Vec<String>>,

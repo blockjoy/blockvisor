@@ -2,22 +2,23 @@ use crate::{
     api_with_retry, command_failed, commands,
     commands::Error,
     config::SharedConfig,
-    get_bv_status,
-    node_state::NodeImage,
-    nodes_manager,
+    firewall, get_bv_status,
+    node_state::{self, BlockchainImageKey, NodeState, NodeStatus},
     nodes_manager::NodesManager,
     pal::Pal,
     services::{ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService},
     ServiceStatus,
 };
+use babel_api::utils::{BabelConfig, RamdiskConfiguration};
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
-    blockchain_archive_service_client, blockchain_service_client, command_service_client,
+    archive_service_client, blockchain_service_client, command_service_client,
     discovery_service_client, host_service_client, metrics_service_client, node_command::Command,
     node_service_client,
 };
 use std::{
+    collections::HashMap,
     fmt::Debug,
     {str::FromStr, sync::Arc},
 };
@@ -59,8 +60,7 @@ lazy_static::lazy_static! {
 
 pub type BlockchainServiceClient =
     blockchain_service_client::BlockchainServiceClient<AuthenticatedService>;
-pub type BlockchainArchiveServiceClient =
-    blockchain_archive_service_client::BlockchainArchiveServiceClient<AuthenticatedService>;
+pub type ArchiveServiceClient = archive_service_client::ArchiveServiceClient<AuthenticatedService>;
 pub type DiscoveryServiceClient =
     discovery_service_client::DiscoveryServiceClient<AuthenticatedService>;
 pub type HostsServiceClient = host_service_client::HostServiceClient<AuthenticatedService>;
@@ -271,36 +271,12 @@ where
     match node_command.command {
         Some(cmd) => match cmd {
             Command::Create(args) => {
-                let image: NodeImage = args
-                    .image
-                    .ok_or_else(|| anyhow!("Image not provided"))?
-                    .into();
-                let properties = args
-                    .properties
-                    .into_iter()
-                    .map(|p| (p.name, p.value))
-                    .collect();
-                let rules = args
-                    .rules
-                    .into_iter()
-                    .map(|rule| rule.try_into())
-                    .collect::<Result<Vec<_>>>()?;
-                nodes_manager
-                    .create(
-                        node_id,
-                        nodes_manager::NodeConfig {
-                            name: args.node_name,
-                            image,
-                            ip: args.ip,
-                            gateway: args.gateway,
-                            rules,
-                            properties,
-                            network: args.network,
-                            dev_mode: false,
-                            org_id: args.org_id,
-                        },
-                    )
-                    .await?;
+                let mut node_state: NodeState = args
+                    .node
+                    .ok_or_else(|| anyhow!("Missing node details"))?
+                    .try_into()?;
+                node_state.image.uri = args.image_uri;
+                nodes_manager.create(node_state).await?;
                 API_CREATE_COUNTER.increment(1);
                 API_CREATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
@@ -325,23 +301,40 @@ where
                 API_RESTART_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Upgrade(args) => {
-                let image: NodeImage = args
-                    .image
-                    .ok_or_else(|| anyhow!("Image not provided"))?
-                    .into();
-                nodes_manager.upgrade(node_id, image).await?;
+                let mut node_config: NodeState = args
+                    .node
+                    .ok_or_else(|| anyhow!("Missing node details"))?
+                    .try_into()?;
+                node_config.image.uri = args.image_uri;
+                nodes_manager.upgrade(node_config).await?;
                 API_UPGRADE_COUNTER.increment(1);
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
-            Command::Update(pb::NodeUpdate { rules, org_id }) => {
+            Command::Update(pb::NodeUpdate {
+                new_name,
+                new_firewall,
+                new_org_id,
+                new_org_name,
+                new_properties,
+                ..
+            }) => {
+                let firewall_config = if let Some(firewall_config) = new_firewall {
+                    Some(firewall_config.try_into()?)
+                } else {
+                    None
+                };
                 nodes_manager
                     .update(
                         node_id,
-                        rules
-                            .into_iter()
-                            .map(|rule| rule.try_into())
-                            .collect::<Result<Vec<_>>>()?,
-                        org_id,
+                        new_name,
+                        firewall_config,
+                        new_org_id,
+                        new_org_name,
+                        HashMap::from_iter(
+                            new_properties
+                                .into_iter()
+                                .map(|prop| (prop.key, prop.value)),
+                        ),
                     )
                     .await?;
                 API_UPDATE_COUNTER.increment(1);
@@ -368,28 +361,6 @@ fn process_host_command(host_command: pb::HostCommand) -> commands::Result<()> {
     Ok(())
 }
 
-impl From<common::ImageIdentifier> for NodeImage {
-    fn from(image: common::ImageIdentifier) -> Self {
-        Self {
-            protocol: image.protocol.to_lowercase(),
-            node_type: image.node_type().to_string(),
-            node_version: image.node_version.to_lowercase(),
-        }
-    }
-}
-
-impl TryFrom<NodeImage> for common::ImageIdentifier {
-    type Error = eyre::Error;
-
-    fn try_from(image: NodeImage) -> Result<Self, Self::Error> {
-        Ok(Self {
-            protocol: image.protocol,
-            node_type: common::NodeType::from_str(&image.node_type)?.into(),
-            node_version: image.node_version,
-        })
-    }
-}
-
 impl std::fmt::Display for common::NodeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = self.as_str_name();
@@ -398,11 +369,189 @@ impl std::fmt::Display for common::NodeType {
     }
 }
 
+//TODO mJR remove?
 impl FromStr for common::NodeType {
     type Err = eyre::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let str = format!("NODE_TYPE_{}", s.to_uppercase());
         Self::from_str_name(&str).ok_or_else(|| anyhow!("Invalid NodeType {s}"))
+    }
+}
+
+impl TryFrom<common::FirewallConfig> for firewall::Config {
+    type Error = eyre::Error;
+    fn try_from(config: common::FirewallConfig) -> Result<Self, Self::Error> {
+        let default_in = config.default_in().try_into()?;
+        let default_out = config.default_out().try_into()?;
+
+        let rules = config
+            .rules
+            .into_iter()
+            .map(|rule| rule.try_into())
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            default_in,
+            default_out,
+            rules,
+        })
+    }
+}
+
+impl TryFrom<common::FirewallAction> for firewall::Action {
+    type Error = eyre::Error;
+    fn try_from(value: common::FirewallAction) -> Result<Self, Self::Error> {
+        Ok(match value {
+            common::FirewallAction::Unspecified => {
+                bail!("Invalid Action")
+            }
+            common::FirewallAction::Allow => firewall::Action::Allow,
+            common::FirewallAction::Drop => firewall::Action::Deny,
+            common::FirewallAction::Reject => firewall::Action::Reject,
+        })
+    }
+}
+
+impl TryFrom<common::FirewallDirection> for firewall::Direction {
+    type Error = eyre::Error;
+    fn try_from(value: common::FirewallDirection) -> Result<Self, Self::Error> {
+        Ok(match value {
+            common::FirewallDirection::Unspecified => {
+                bail!("Invalid Direction")
+            }
+            common::FirewallDirection::Inbound => firewall::Direction::In,
+            common::FirewallDirection::Outbound => firewall::Direction::Out,
+        })
+    }
+}
+
+impl TryFrom<common::FirewallProtocol> for firewall::Protocol {
+    type Error = eyre::Error;
+    fn try_from(value: common::FirewallProtocol) -> Result<Self, Self::Error> {
+        Ok(match value {
+            common::FirewallProtocol::Unspecified => bail!("Invalid Protocol"),
+            common::FirewallProtocol::Tcp => firewall::Protocol::Tcp,
+            common::FirewallProtocol::Udp => firewall::Protocol::Udp,
+            common::FirewallProtocol::Both => firewall::Protocol::Both,
+        })
+    }
+}
+
+impl TryFrom<common::FirewallRule> for firewall::Rule {
+    type Error = eyre::Error;
+    fn try_from(rule: common::FirewallRule) -> Result<Self, Self::Error> {
+        let action = rule.action().try_into()?;
+        let direction = rule.direction().try_into()?;
+        let protocol = Some(rule.protocol().try_into()?);
+        Ok(Self {
+            name: rule.key,
+            action,
+            direction,
+            protocol,
+            ips: rule.ips.into_iter().map(|ip| ip.ip).collect(),
+            ports: rule.ports.into_iter().map(|p| p.port as u16).collect(),
+        })
+    }
+}
+
+impl From<common::VmConfig> for node_state::VmConfig {
+    fn from(value: common::VmConfig) -> Self {
+        Self {
+            vcpu_count: value.cpu_count as usize,
+            mem_size_mb: value.mem_size_bytes / 1_000_000,
+            disk_size_gb: value.disk_size_bytes / 1_000_000_000,
+            babel_config: BabelConfig {
+                ramdisks: value
+                    .ramdisks
+                    .into_iter()
+                    .map(|ramdisk| RamdiskConfiguration {
+                        ram_disk_mount_point: ramdisk.mount,
+                        ram_disk_size_mb: ramdisk.size_bytes / 1_000_000,
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl TryFrom<common::VersionKey> for BlockchainImageKey {
+    type Error = eyre::Error;
+    fn try_from(key: common::VersionKey) -> Result<Self, Self::Error> {
+        let node_type = key.node_type().try_into()?;
+        Ok(Self {
+            blockchain_key: key.blockchain_key,
+            node_type,
+            network: key.network,
+            software: key.software,
+        })
+    }
+}
+
+impl TryFrom<pb::Node> for NodeState {
+    type Error = eyre::Error;
+    fn try_from(node: pb::Node) -> Result<Self, Self::Error> {
+        let config = node
+            .config
+            .as_ref()
+            .ok_or_else(|| anyhow!("Missing node config"))?;
+        let image = node_state::NodeImage {
+            id: node.image_id,
+            config_id: node.config_id,
+            archive_id: config.archive_id.clone(),
+            uri: Default::default(),
+        };
+        let blockchain = config
+            .blockchain
+            .as_ref()
+            .ok_or_else(|| anyhow!("Missing blockchain"))?;
+        let properties = blockchain
+            .properties
+            .clone()
+            .into_iter()
+            .map(|p| (p.key, p.value))
+            .collect();
+        let firewall = config
+            .firewall
+            .clone()
+            .map(|config| config.try_into())
+            .unwrap_or(Ok(Default::default()))?;
+        let vm = config
+            .vm
+            .clone()
+            .ok_or_else(|| anyhow!("Missing vm config"))?;
+        Ok(Self {
+            id: Uuid::from_str(&node.id)?,
+            name: node.node_name,
+            image,
+            vm_config: vm.into(),
+            ip: node
+                .ip_address
+                .parse()
+                .with_context(|| format!("invalid ip `{}`", node.ip_address))?,
+            gateway: node
+                .ip_gateway
+                .parse()
+                .with_context(|| format!("invalid gateway `{}`", node.ip_gateway))?,
+            firewall,
+            properties,
+            expected_status: NodeStatus::Stopped,
+            started_at: None,
+            initialized: false,
+            dev_mode: false,
+            restarting: false,
+            blockchain_id: node.blockchain_id,
+            image_key: node
+                .blockchain_version_key
+                .ok_or_else(|| anyhow!("Missing blockchain_version_key"))?
+                .try_into()?,
+            blockchain_name: node.blockchain_name,
+            software_version: node.blockchain_software_version,
+            org_id: node.org_id,
+            display_name: node.display_name,
+            org_name: node.org_name,
+            dns_name: node.dns_name,
+            assigned_cpus: vec![],
+            apptainer_config: None,
+        })
     }
 }

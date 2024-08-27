@@ -16,3 +16,17 @@ pub enum Binary {
     Bin(Vec<u8>),
     Checksum(u32),
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct BabelConfig {
+    /// RAM disks configuration.
+    pub ramdisks: Vec<RamdiskConfiguration>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RamdiskConfiguration {
+    /// Path to mount RAM disk to.
+    pub ram_disk_mount_point: String,
+    /// RAM disk size, in MB.
+    pub ram_disk_size_mb: u64,
+}

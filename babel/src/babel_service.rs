@@ -5,7 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::{
     engine::{HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest, ShResponse},
-    metadata::BabelConfig,
+    utils::BabelConfig,
 };
 use eyre::{anyhow, ContextCompat, Result};
 use futures_util::StreamExt;
@@ -393,7 +393,7 @@ mod tests {
     use crate::chroot_platform::{UdsConnector, UdsServer};
     use assert_fs::TempDir;
     use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
-    use babel_api::metadata::RamdiskConfiguration;
+    use babel_api::utils::RamdiskConfiguration;
     use bv_tests_utils::start_test_server;
     use mockall::*;
     use serde_json::json;
@@ -438,17 +438,11 @@ mod tests {
             Ok(())
         }
 
-        async fn set_ram_disks(
-            &self,
-            _ram_disks: Option<Vec<RamdiskConfiguration>>,
-        ) -> eyre::Result<()> {
+        async fn set_ram_disks(&self, _ram_disks: Vec<RamdiskConfiguration>) -> eyre::Result<()> {
             Ok(())
         }
 
-        async fn is_ram_disks_set(
-            &self,
-            _ram_disks: Option<Vec<RamdiskConfiguration>>,
-        ) -> Result<bool> {
+        async fn is_ram_disks_set(&self, _ram_disks: Vec<RamdiskConfiguration>) -> Result<bool> {
             Ok(false)
         }
     }
