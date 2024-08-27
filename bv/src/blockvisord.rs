@@ -319,55 +319,57 @@ where
             let now = Instant::now();
             let mut updates = vec![];
             for (id, node) in nodes_manager.nodes_list().await.iter() {
-                if let MaybeNode::Node(node) = node {
-                    if let Ok(mut node) = node.try_write() {
-                        if node.state.dev_mode {
-                            // don't send updates for nodes in dev mode
-                            continue;
-                        }
-                        let status = node.status().await;
-                        let maybe_address = if status == NodeStatus::Running
-                            && node.babel_engine.has_capability("address")
-                        {
-                            node.babel_engine.address().await.ok()
+                match node {
+                    MaybeNode::Node(node) => {
+                        if let Ok(node) = node.try_read() {
+                            if node.state.dev_mode {
+                                // don't send updates for nodes in dev mode
+                                continue;
+                            }
+                            let status = node.status().await;
+                            debug!(
+                                "Collected node `{id}` info: s={status}, c={}",
+                                node.state.image.config_id
+                            );
+                            updates.push((node.id(), node.state.image.config_id.clone(), status));
                         } else {
-                            None
-                        };
-                        debug!("Collected node `{id}` info: s={status}, a={maybe_address:?}");
-                        updates.push((node.id(), status, maybe_address));
-                    } else {
-                        debug!("Skipping node info collection, node `{id}` busy");
+                            debug!("Skipping node info collection, node `{id}` busy");
+                        }
                     }
-                } else {
-                    debug!("Collected node `{id}` info: s=Broken, a=None");
-                    updates.push((*id, NodeStatus::Failed, None));
+                    MaybeNode::BrokenNode(state) => {
+                        debug!(
+                            "Collected node `{id}` info: s=Broken, a={}",
+                            state.image.config_id
+                        );
+                        updates.push((*id, state.image.config_id.clone(), NodeStatus::Failed));
+                    }
                 }
             }
 
-            for (node_id, status, address) in updates {
+            for (node_id, config_id, status) in updates {
                 let container_status = match status {
                     NodeStatus::Running => common::ContainerStatus::Running,
                     NodeStatus::Stopped => common::ContainerStatus::Stopped,
                     NodeStatus::Failed => common::ContainerStatus::Failed,
                     NodeStatus::Busy => common::ContainerStatus::Busy,
                 };
-                let mut update = pb::NodeServiceUpdateStatusRequest {
-                    ids: vec![node_id.to_string()],
+                let mut report = pb::NodeServiceReportStatusRequest {
+                    id: node_id.to_string(),
+                    p2p_address: None,
                     container_status: None, // We use the setter to set this field for type-safety
-                    address,
-                    version: None,
+                    config_id,
                 };
-                update.set_container_status(container_status);
+                report.set_container_status(container_status);
 
-                if updates_cache.get(&node_id) == Some(&update) {
-                    debug!("Skipping node update: {update:?}");
+                if updates_cache.get(&node_id) == Some(&report) {
+                    debug!("Skipping node update: {report:?}");
                     continue;
                 }
 
-                match Self::send_node_status_update(&config, update.clone()).await {
+                match Self::report_node_status(&config, report.clone()).await {
                     Ok(_) => {
                         // cache to not send the same data if it has not changed
-                        updates_cache.insert(node_id, update);
+                        updates_cache.insert(node_id, report);
                     }
                     Err(e) => warn!("Cannot send node `{node_id}` info update: {e:#}"),
                 }
@@ -485,9 +487,9 @@ where
     }
 
     // Send node info update to control plane
-    async fn send_node_status_update(
+    async fn report_node_status(
         config: &SharedConfig,
-        update: pb::NodeServiceUpdateStatusRequest,
+        report: pb::NodeServiceReportStatusRequest,
     ) -> Result<()> {
         let mut client = services::ApiClient::build_with_default_connector(
             config,
@@ -495,7 +497,7 @@ where
         )
         .await
         .with_context(|| "Error connecting to api".to_string())?;
-        api_with_retry!(client, client.update_status(update.clone()))
+        api_with_retry!(client, client.report_status(report.clone()))
             .with_context(|| "Cannot send node update".to_string())?;
         Ok(())
     }

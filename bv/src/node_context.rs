@@ -1,9 +1,4 @@
-use crate::{
-    node_state::NodeImage,
-    services::blockchain::{self, BABEL_PLUGIN_NAME},
-    BV_VAR_PATH,
-};
-use babel_api::{metadata::BlockchainMetadata, rhai_plugin};
+use crate::BV_VAR_PATH;
 use eyre::{Context, Result};
 use std::{
     fmt::Debug,
@@ -13,8 +8,6 @@ use tokio::fs::{self};
 use uuid::Uuid;
 
 pub const NODES_DIR: &str = "nodes";
-pub const BASE_CONFIG_PATH: &str = "var/lib/babel/base.rhai";
-pub const BABEL_VAR_PATH: &str = "var/lib/babel";
 
 pub fn build_nodes_dir(bv_root: &Path) -> PathBuf {
     bv_root.join(BV_VAR_PATH).join(NODES_DIR)
@@ -26,9 +19,7 @@ pub fn build_node_dir(bv_root: &Path, id: Uuid) -> PathBuf {
 
 #[derive(Debug)]
 pub struct NodeContext {
-    pub bv_root: PathBuf,
     pub plugin_data: PathBuf,
-    pub plugin_script: PathBuf,
     pub nodes_dir: PathBuf,
     pub node_dir: PathBuf,
 }
@@ -38,39 +29,10 @@ impl NodeContext {
         let node_dir = build_node_dir(bv_root, id);
         let nodes_dir = build_nodes_dir(bv_root);
         Self {
-            bv_root: bv_root.to_path_buf(),
             plugin_data: node_dir.join("plugin.data"),
-            plugin_script: node_dir.join(BABEL_PLUGIN_NAME),
             nodes_dir,
             node_dir,
         }
-    }
-
-    /// copy plugin script into nodes state and read metadata form it
-    pub async fn copy_and_check_plugin(
-        &self,
-        image: &NodeImage,
-        rootfs_dir: &Path,
-    ) -> Result<(String, BlockchainMetadata)> {
-        fs::copy(
-            blockchain::get_image_download_folder_path(&self.bv_root, image)
-                .join(BABEL_PLUGIN_NAME),
-            &self.plugin_script,
-        )
-        .await
-        .with_context(|| format!("Babel plugin not found for {image}"))?;
-        self.load_script(rootfs_dir).await
-    }
-
-    pub async fn load_script(&self, rootfs_dir: &Path) -> Result<(String, BlockchainMetadata)> {
-        let mut script = fs::read_to_string(&self.plugin_script).await?;
-        let metadata = rhai_plugin::read_metadata(&script)?;
-        let base_config_path = rootfs_dir.join(BASE_CONFIG_PATH);
-        if base_config_path.exists() {
-            script.push_str(&fs::read_to_string(base_config_path).await?);
-        }
-
-        Ok((script, metadata))
     }
 
     pub async fn delete(&self) -> Result<()> {

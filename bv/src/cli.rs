@@ -59,13 +59,6 @@ pub enum Command {
         command: WorkspaceCommand,
     },
 
-    /// Manage blockchain node images
-    #[clap(alias = "i")]
-    Image {
-        #[clap(subcommand)]
-        command: ImageCommand,
-    },
-
     /// Manage host cluster connections
     #[clap(alias = "p2p")]
     Cluster {
@@ -87,14 +80,6 @@ pub enum NodeCommand {
     /// Create node
     #[clap(alias = "c")]
     Create {
-        /// Node IP Address
-        #[clap(long)]
-        ip: Option<String>,
-
-        /// Gateway IP Address
-        #[clap(long)]
-        gateway: Option<String>,
-
         /// The properties that are passed to the node. These are used for running certain babel
         /// commands. For example, the ether nodes require that at least one property whose name
         /// starts with `key` is passed here like so: `bv node create --props '{"key1": "asdf"}'`.
@@ -105,8 +90,8 @@ pub enum NodeCommand {
         #[clap(long)]
         network: String,
 
-        /// Node Image identifier
-        image: Option<String>,
+        /// Node 'triple' identifier
+        triple: String,
 
         /// Create node in dev mode - without involvement of the API.
         /// Non-dev mode mean that BV CLI acts like the API frontend. Once node is created
@@ -115,17 +100,6 @@ pub enum NodeCommand {
         /// be aware of the node existence or any operation on it.
         #[clap(long, default_value = "false")]
         dev_mode: bool,
-    },
-
-    /// Upgrade node
-    #[clap(alias = "u")]
-    Upgrade {
-        /// Node Image identifier
-        image: String,
-
-        /// Node id or name
-        #[clap(required(false))]
-        id_or_names: Vec<String>,
     },
 
     /// Start node
@@ -301,9 +275,6 @@ pub enum ChainCommand {
         /// Blockchain protocol name (e.g. helium, eth)
         protocol: String,
 
-        /// Blockchain node type (e.g. validator)
-        r#type: String,
-
         /// Display the first N items
         #[clap(long, short, default_value = "10")]
         number: usize,
@@ -324,13 +295,6 @@ pub enum WorkspaceCommand {
     SetActiveNode {
         /// The id or name of the node
         id_or_name: String,
-    },
-
-    /// Set active image for current workspace (override previously set).
-    #[clap(alias = "i")]
-    SetActiveImage {
-        /// The id of node image
-        image_id: String,
     },
 }
 

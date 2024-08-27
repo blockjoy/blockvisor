@@ -1,4 +1,5 @@
 use babel_api::engine::NodeEnv;
+use babel_api::plugin::NodeHealth;
 use babel_api::{
     self,
     engine::{HttpResponse, JobConfig, JobInfo, JobStatus, RestartConfig, ShResponse},
@@ -167,7 +168,10 @@ fn test_polygon_functions() {
     let plugin = rhai_plugin::RhaiPlugin::new(&script, dummy_babel).unwrap();
     assert_eq!("addr", plugin.address().unwrap());
     assert_eq!(
-        ApplicationStatus::Broadcasting,
+        ApplicationStatus::Custom {
+            state: "broadcasting".to_string(),
+            health: Some(NodeHealth::Healthy),
+        },
         plugin.application_status().unwrap()
     );
     assert_eq!(161, plugin.height().unwrap());
@@ -182,7 +186,8 @@ fn test_plugin_config() -> eyre::Result<()> {
         node_id: "node_id".to_string(),
         node_name: "node name".to_string(),
         node_version: "".to_string(),
-        blockchain_type: "".to_string(),
+        blockchain_name: "".to_string(),
+        blockchain_network: "".to_string(),
         node_type: "".to_string(),
         node_ip: "".to_string(),
         node_gateway: "".to_string(),
@@ -277,7 +282,6 @@ fn test_plugin_config() -> eyre::Result<()> {
             predicate::eq("download"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::Download {
-                    destination: None,
                     max_connections: Some(5),
                     max_runners: Some(8),
                 },
@@ -463,7 +467,6 @@ fn test_plugin_config() -> eyre::Result<()> {
             predicate::eq("upload"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::Upload {
-                    source: None,
                     exclude: Some(vec![
                         "**/something_to_ignore*".to_string(),
                         ".gitignore".to_string(),
@@ -617,7 +620,10 @@ fn test_plugin_config() -> eyre::Result<()> {
     plugin.init().unwrap();
     plugin.upload().unwrap();
     assert_eq!(
-        ApplicationStatus::Broadcasting,
+        ApplicationStatus::Custom {
+            state: "broadcasting".to_string(),
+            health: Some(NodeHealth::Healthy),
+        },
         plugin.application_status().unwrap()
     );
     Ok(())

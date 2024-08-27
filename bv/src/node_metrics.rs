@@ -5,6 +5,7 @@ use crate::node_state::NodeStatus;
 use crate::nodes_manager::{MaybeNode, NodesManager};
 use crate::pal::{NodeConnection, Pal};
 use crate::services::api::{common, pb};
+use babel_api::plugin::NodeHealth;
 use babel_api::{
     engine::{JobStatus, JobsInfo},
     plugin::{ApplicationStatus, StakingStatus, SyncStatus},
@@ -132,7 +133,7 @@ pub async fn collect_metric<N: NodeConnection>(
                 jobs,
             })
         }
-        Some(ApplicationStatus::Initializing) => None,
+        Some(ApplicationStatus::Starting) => None,
         _ => {
             let height = match babel_engine.has_capability("height") {
                 true => timeout(babel_engine.height()).await.ok(),
@@ -210,27 +211,27 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
                     .into_iter()
                     .map(|(name, info)| {
                         let (status, exit_code, message) = match info.status {
-                            JobStatus::Pending { .. } => (pb::NodeJobStatus::Pending, None, None),
-                            JobStatus::Running => (pb::NodeJobStatus::Running, None, None),
+                            JobStatus::Pending { .. } => (common::NodeJobStatus::Pending, None, None),
+                            JobStatus::Running => (common::NodeJobStatus::Running, None, None),
                             JobStatus::Finished { exit_code, message } => (
                                 if exit_code == Some(0) {
-                                    pb::NodeJobStatus::Finished
+                                    common::NodeJobStatus::Finished
                                 } else {
-                                    pb::NodeJobStatus::Failed
+                                    common::NodeJobStatus::Failed
                                 },
                                 exit_code,
                                 Some(message),
                             ),
-                            JobStatus::Stopped => (pb::NodeJobStatus::Stopped, None, None),
+                            JobStatus::Stopped => (common::NodeJobStatus::Stopped, None, None),
                         };
-                        pb::NodeJob {
+                        common::NodeJob {
                             name,
                             status: status.into(),
                             exit_code,
                             message,
                             logs: info.logs,
                             restarts: info.restart_count as u64,
-                            progress: info.progress.map(|progress| pb::NodeJobProgress {
+                            progress: info.progress.map(|progress| common::NodeJobProgress {
                                 total: Some(progress.total),
                                 current: Some(progress.current),
                                 message: Some(progress.message),
@@ -243,15 +244,14 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
                     block_age: v.block_age,
                     consensus: v.consensus,
                     staking_status: None,
-                    application_status: None,
+                    node_status: v
+                        .application_status
+                        .map(|application_status| application_status.into()),
                     sync_status: None,
                     jobs,
                 };
                 if let Some(v) = v.staking_status.map(Into::into) {
                     metrics.set_staking_status(v);
-                }
-                if let Some(v) = v.application_status.map(Into::into) {
-                    metrics.set_application_status(v);
                 }
                 if let Some(v) = v.sync_status.map(Into::into) {
                     metrics.set_sync_status(v);
@@ -279,30 +279,77 @@ impl From<StakingStatus> for common::StakingStatus {
 impl From<ApplicationStatus> for common::NodeStatus {
     fn from(value: ApplicationStatus) -> Self {
         match value {
-            ApplicationStatus::Provisioning => common::NodeStatus::Provisioning,
-            ApplicationStatus::Broadcasting => common::NodeStatus::Broadcasting,
-            ApplicationStatus::Cancelled => common::NodeStatus::Cancelled,
-            ApplicationStatus::Delegating => common::NodeStatus::Delegating,
-            ApplicationStatus::Delinquent => common::NodeStatus::Delinquent,
-            ApplicationStatus::Disabled => common::NodeStatus::Disabled,
-            ApplicationStatus::Earning => common::NodeStatus::Earning,
-            ApplicationStatus::Electing => common::NodeStatus::Electing,
-            ApplicationStatus::Elected => common::NodeStatus::Elected,
-            ApplicationStatus::Exported => common::NodeStatus::Exported,
-            ApplicationStatus::Ingesting => common::NodeStatus::Ingesting,
-            ApplicationStatus::Mining => common::NodeStatus::Mining,
-            ApplicationStatus::Minting => common::NodeStatus::Minting,
-            ApplicationStatus::Processing => common::NodeStatus::Processing,
-            ApplicationStatus::Relaying => common::NodeStatus::Relaying,
-            ApplicationStatus::Deleting => common::NodeStatus::Deleting,
-            ApplicationStatus::Updating => common::NodeStatus::Updating,
-            ApplicationStatus::DeletePending => common::NodeStatus::DeletePending,
-            ApplicationStatus::Deleted => common::NodeStatus::Deleted,
-            ApplicationStatus::ProvisioningPending => common::NodeStatus::ProvisioningPending,
-            ApplicationStatus::UpdatePending => common::NodeStatus::UpdatePending,
-            ApplicationStatus::Initializing => common::NodeStatus::Initializing,
-            ApplicationStatus::Downloading => common::NodeStatus::Downloading,
-            ApplicationStatus::Uploading => common::NodeStatus::Uploading,
+            ApplicationStatus::Provisioning => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::Provisioning.into(),
+                )),
+            },
+            ApplicationStatus::Deleting => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::Deleting.into(),
+                )),
+            },
+            ApplicationStatus::Updating => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::Updating.into(),
+                )),
+            },
+            ApplicationStatus::DeletePending => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::DeletePending.into(),
+                )),
+            },
+            ApplicationStatus::Deleted => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::Deleted.into(),
+                )),
+            },
+            ApplicationStatus::ProvisioningPending => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::Creating.into(),
+                )),
+            },
+            ApplicationStatus::UpdatePending => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::UpdatePending.into(),
+                )),
+            },
+            ApplicationStatus::Starting => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::Starting.into(),
+                )),
+            },
+            ApplicationStatus::Downloading => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::Downloading.into(),
+                )),
+            },
+            ApplicationStatus::Uploading => common::NodeStatus {
+                status: Some(common::node_status::Status::State(
+                    common::NodeState::Uploading.into(),
+                )),
+            },
+            ApplicationStatus::Custom { state, health } => {
+                let tone: common::NodeHealth = health.unwrap_or(NodeHealth::Neutral).into();
+                common::NodeStatus {
+                    status: Some(common::node_status::Status::Custom(
+                        common::CustomNodeState {
+                            state,
+                            health: tone.into(),
+                        },
+                    )),
+                }
+            }
+        }
+    }
+}
+
+impl From<NodeHealth> for common::NodeHealth {
+    fn from(value: NodeHealth) -> Self {
+        match value {
+            NodeHealth::Unhealthy => common::NodeHealth::Unhealthy,
+            NodeHealth::Neutral => common::NodeHealth::Neutral,
+            NodeHealth::Healthy => common::NodeHealth::Healthy,
         }
     }
 }

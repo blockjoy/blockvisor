@@ -260,7 +260,7 @@ const PLUGIN_CONFIG = #{
 /// Returns blockchain application status.
 /// SHALL be implemented
 fn application_status() {
-    /// "uploading", "downloading", "initializing" statuses are automatically handled by BV if BABEL_CONFIG const is defined
+    /// "uploading", "downloading", "starting" statuses are automatically handled by BV if BABEL_CONFIG const is defined
     let result = run_jrpc(#{
             host: global::API_HOST,
             method: "health.health",
@@ -268,8 +268,8 @@ fn application_status() {
         }).expect(200);
 
     if result.healthy != "false" || result.result.checks.bootstrapped.error == "subnets not bootstrapped" {
-        "broadcasting"
+        #{custom: #{state: "broadcasting", health: "healthy"}};
     } else {
-        "delinquent"
+        #{custom: #{state: "delinquent", health: "healthy"}};
     }
 }

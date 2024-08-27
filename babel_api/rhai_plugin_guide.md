@@ -11,13 +11,11 @@ See [The Rhai Book](https://rhai.rs/book) for more details on Rhai language itse
 
 ### Core of All Babel Plugins
 
-1. `const METADATA` - Static image specification like blockchain protocol name, but also include default node configuration.
-2. `const PLUGIN_CONFIG` - The easiest way to describe node initialization and background services. Define this constant
+1. `const PLUGIN_CONFIG` - The easiest way to describe node initialization and background services. Define this constant
 as described in [PLUGIN_CONFIG](#plugin_config) chapter, to use default implementation for `init()` and `upload()` functions.
-3. While image specification is statically defined in `METADATA`, dynamic node configuration is accessible via `node_params()`
-function, in particular `node_params().NETWORK`. This can and should be used in order
+2. Dynamic node configuration is accessible via `node_params()` function. This can and should be used in order
 to change the behavior of the script according to the node configuration.
-4. While blockchain data are typically huge, BV provides built-in facility for efficient uploading and downloading
+3. While blockchain data are typically huge, BV provides built-in facility for efficient uploading and downloading
 blockchain archives.
 <br>See [Blockchain Data Archives](#blockchain-data-archives) chapter for more details.
 
@@ -26,12 +24,6 @@ blockchain archives.
 To add some specific blockchain support Babel Plugin must tell BV how to use blockchain specific tools inside the image,
 to properly setup and maintain blockchain node. This chapter describe interface that needs to be implemented by script
 for this purpose.
-
-### Blockchain METADATA
-
-First thing that Babel Plugin SHALL provide is Blockchain Metadata structure that describe static properties
-of the blockchain. In Rhai script it is done by declaring `METADATA` constant.
-See [example](examples/metadata.rhai) with comments for more details.
 
 ### PLUGIN_CONFIG
 
@@ -291,17 +283,6 @@ Typically, download job is started in `init()` before other blockchain services 
 download job config options. 
 
 ## Common Use Cases
-
-### Referencing METADATA in Functions
-
-METADATA is regular Rhai constant, so it can be easily reference in functions.
-
-**Example:**
-```
-fn some_function() {
-    let net_url = global::METADATA.nets[node_params().NETWORK].url;
-}
-```
 
 ### Add Custom HTTP Headers to JRPC and REST Requests
 

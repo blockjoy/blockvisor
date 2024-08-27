@@ -1,38 +1,34 @@
 use crate::{
     api_with_retry,
-    node_state::NodeImage,
     services::{
-        api::{common, pb, pb::blockchain_service_client},
+        api::{
+            common,
+            pb::{self, blockchain_service_client, image_service_client},
+        },
         ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService,
     },
-    utils, BV_VAR_PATH,
 };
-use eyre::{anyhow, Context, Result};
-use std::path::{Path, PathBuf};
-use tokio::{
-    fs::{self, File},
-    io::AsyncWriteExt,
-};
+use eyre::{anyhow, bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use tonic::transport::Channel;
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
-pub const IMAGES_DIR: &str = "images";
-pub const BABEL_ARCHIVE_IMAGE_NAME: &str = "blockjoy.gz";
-pub const BABEL_IMAGE_NAME: &str = "blockjoy";
-pub const BABEL_PLUGIN_NAME: &str = "babel.rhai";
-pub const ROOTFS_FILE: &str = "os.img";
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
+pub enum NodeType {
+    Rpc,
+}
 
 pub struct BlockchainService<C> {
     connector: C,
-    bv_root: PathBuf,
 }
 
 type BlockchainServiceClient =
     blockchain_service_client::BlockchainServiceClient<AuthenticatedService>;
+type ImageServiceClient = image_service_client::ImageServiceClient<AuthenticatedService>;
 
 impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
-    pub async fn new(connector: C, bv_root: PathBuf) -> Result<Self> {
-        Ok(Self { connector, bv_root })
+    pub async fn new(connector: C) -> Result<Self> {
+        Ok(Self { connector })
     }
 
     async fn connect_blockchain_service(
@@ -52,104 +48,125 @@ impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
         .with_context(|| "cannot connect to blockchain service")
     }
 
+    async fn connect_image_service(
+        &self,
+    ) -> Result<
+        ApiClient<
+            ImageServiceClient,
+            impl ApiServiceConnector,
+            impl Fn(Channel, ApiInterceptor) -> ImageServiceClient + Clone,
+        >,
+    > {
+        ApiClient::build(
+            self.connector.clone(),
+            image_service_client::ImageServiceClient::with_interceptor,
+        )
+        .await
+        .with_context(|| "cannot connect to image service")
+    }
+
     #[instrument(skip(self))]
-    pub async fn list_image_versions(
+    pub async fn get_image_id(
         &mut self,
-        protocol: &str,
-        node_type: &str,
-    ) -> Result<Vec<String>> {
-        info!("Listing versions...");
-        let mut client = self.connect_blockchain_service().await?;
-        let mut req = pb::BlockchainServiceListImageVersionsRequest {
-            protocol: protocol.to_string(),
-            node_type: 0,
+        blockchain_key: &str,
+        node_type: NodeType,
+        network: String,
+        software: String,
+        version: Option<String>,
+        build_version: Option<u64>,
+    ) -> Result<String> {
+        info!("Getting image id...");
+        let blockchain = self.get_blockchain(blockchain_key).await?;
+        if let Some(version) = &version {
+            if blockchain
+                .versions
+                .iter()
+                .any(|value| value.software_version == *version)
+            {
+                bail!("blockchain version `{version}` not found");
+            }
+        }
+        let mut client = self.connect_image_service().await?;
+        let node_type: common::NodeType = node_type.into();
+        let req = pb::ImageServiceGetImageRequest {
+            version_key: Some(common::VersionKey {
+                blockchain_key: blockchain_key.to_string(),
+                node_type: node_type.into(),
+                network,
+                software,
+            }),
+            org_id: None,
+            software_version: version,
+            build_version,
         };
-        req.set_node_type(node_type.parse()?);
 
-        let resp = api_with_retry!(client, client.list_image_versions(req.clone()))?.into_inner();
+        let resp = api_with_retry!(client, client.get_image(req.clone()))?.into_inner();
 
-        let mut versions: Vec<String> = resp
-            .identifiers
+        Ok(resp.image.ok_or(anyhow!("image not found"))?.id)
+    }
+
+    #[instrument(skip(self))]
+    pub async fn list_blockchain_versions(&mut self, blockchain_key: &str) -> Result<Vec<String>> {
+        info!("Getting blockchain versions...");
+        let blockchain = self.get_blockchain(blockchain_key).await?;
+        blockchain
+            .versions
             .into_iter()
-            .map(|id| id.node_version)
-            .collect();
-        // sort desc
-        versions.sort_by(|a, b| utils::semver_cmp(b, a));
-
-        Ok(versions)
+            .map(|version| {
+                Ok(format!(
+                    "{}/{}",
+                    version
+                        .version_key
+                        .ok_or_else(|| anyhow!("Missing blockchain_version_key"))?
+                        .node_type(),
+                    version.software_version
+                ))
+            })
+            .collect::<Result<Vec<_>>>()
     }
 
-    #[instrument(skip(self))]
-    pub async fn download_babel_plugin(&mut self, image: &NodeImage) -> Result<()> {
-        info!("Downloading plugin...");
+    async fn get_blockchain(&mut self, name: &str) -> Result<pb::Blockchain> {
         let mut client = self.connect_blockchain_service().await?;
-        let rhai_content = api_with_retry!(
-            client,
-            client.get_plugin(tonic::Request::new(pb::BlockchainServiceGetPluginRequest {
-                id: Some(image.clone().try_into()?),
-            }))
-        )?
-        .into_inner()
-        .plugin
-        .ok_or_else(|| anyhow!("missing plugin"))?
-        .rhai_content;
+        let req = pb::BlockchainServiceListBlockchainsRequest {
+            org_ids: vec![],
+            offset: 0,
+            limit: 2,
+            search: Some(pb::BlockchainSearch {
+                operator: common::SearchOperator::Or.into(),
+                id: None,
+                name: Some(name.to_string()),
+                display_name: None,
+            }),
+            sort: vec![],
+        };
 
-        let folder = get_image_download_folder_path(&self.bv_root, image);
-        fs::create_dir_all(&folder).await?;
-        let path = folder.join(BABEL_PLUGIN_NAME);
-        let mut f = File::create(path).await?;
-        f.write_all(&rhai_content).await?;
-        debug!("Done downloading plugin");
+        let mut blockchains =
+            api_with_retry!(client, client.list_blockchains(req.clone()))?.into_inner();
 
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    pub async fn download_image(&mut self, image: &NodeImage) -> Result<()> {
-        info!("Downloading image...");
-        let mut client = self.connect_blockchain_service().await?;
-        let archive: common::ArchiveLocation = api_with_retry!(
-            client,
-            client.get_image(tonic::Request::new(pb::BlockchainServiceGetImageRequest {
-                id: Some(image.clone().try_into()?),
-            }))
-        )?
-        .into_inner()
-        .location
-        .ok_or_else(|| anyhow!("missing location"))?;
-
-        let folder = get_image_download_folder_path(&self.bv_root, image);
-        fs::create_dir_all(&folder).await?;
-        let path = folder.join(ROOTFS_FILE);
-        let gz = folder.join(BABEL_ARCHIVE_IMAGE_NAME);
-        utils::download_archive_with_retry(&archive.url, gz)
-            .await?
-            .ungzip()
-            .await?;
-        tokio::fs::rename(folder.join(BABEL_IMAGE_NAME), path).await?;
-        debug!("Done downloading image");
-
-        Ok(())
+        if blockchains.blockchain_count > 1 {
+            bail!("multiple blockchains found with the same name");
+        }
+        blockchains
+            .blockchains
+            .pop()
+            .ok_or(anyhow!("blockchain with name `{name}` not found"))
     }
 }
 
-pub fn get_image_download_folder_path(bv_root: &Path, image: &NodeImage) -> PathBuf {
-    bv_root
-        .join(BV_VAR_PATH)
-        .join(IMAGES_DIR)
-        .join(&image.protocol)
-        .join(&image.node_type)
-        .join(&image.node_version)
+impl From<NodeType> for common::NodeType {
+    fn from(value: NodeType) -> Self {
+        match value {
+            NodeType::Rpc => common::NodeType::Rpc,
+        }
+    }
 }
 
-pub async fn is_image_cache_valid(bv_root: &Path, image: &NodeImage) -> Result<bool> {
-    let folder = get_image_download_folder_path(bv_root, image);
-
-    let root = folder.join(ROOTFS_FILE);
-    let plugin = folder.join(BABEL_PLUGIN_NAME);
-    if !root.exists() || !plugin.exists() {
-        return Ok(false);
+impl TryFrom<common::NodeType> for NodeType {
+    type Error = eyre::Error;
+    fn try_from(value: common::NodeType) -> Result<Self, Self::Error> {
+        Ok(match value {
+            common::NodeType::Unspecified => bail!("Invalid Protocol"),
+            common::NodeType::Rpc => NodeType::Rpc,
+        })
     }
-
-    Ok(fs::metadata(root).await?.len() > 0 && fs::metadata(plugin).await?.len() > 0)
 }

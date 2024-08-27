@@ -1,6 +1,7 @@
 use crate::{babel_engine::NodeInfo, config::SharedConfig, services};
 use async_trait::async_trait;
 use babel_api::engine::{Chunk, DownloadManifest, DownloadMetadata, UploadSlots};
+use eyre::Context;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -23,18 +24,22 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
     ) -> eyre::Result<Response<()>, Status> {
         let (manifest, data_version) = request.into_inner();
         debug!(
-            "putting DownloadManifest to API for {}/{}/{}",
-            self.node_info.image, self.node_info.network, data_version
+            "putting DownloadManifest to API from node {} (archive_id={}/{})",
+            self.node_info.node_id, self.node_info.image.archive_id, data_version,
         );
-        if let Err(err) = services::blockchain_archive::put_download_manifest(
+        if let Err(err) = services::archive::put_download_manifest(
             &self.config,
-            self.node_info.image.clone(),
-            self.node_info.network.clone(),
+            self.node_info.image.archive_id.clone(),
             manifest,
             data_version,
         )
         .await
-        {
+        .with_context(|| {
+            format!(
+                "put_download_manifest for node {} (archive_id={})",
+                self.node_info.node_id, self.node_info.image.archive_id
+            )
+        }) {
             warn!("{err:#}");
             Err(Status::internal(err.to_string()))
         } else {
@@ -47,16 +52,20 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         _request: Request<()>,
     ) -> eyre::Result<Response<DownloadMetadata>, Status> {
         debug!(
-            "getting DownloadMetadata from API for {}/{}",
-            self.node_info.image, self.node_info.network
+            "getting DownloadMetadata from API for node {} (archive_id={})",
+            self.node_info.node_id, self.node_info.image.archive_id
         );
-        match services::blockchain_archive::get_download_metadata(
+        match services::archive::get_download_metadata(
             &self.config,
-            self.node_info.image.clone(),
-            self.node_info.network.clone(),
+            self.node_info.image.archive_id.clone(),
         )
         .await
-        {
+        .with_context(|| {
+            format!(
+                "get_download_manifest for node {} (archive_id={})",
+                self.node_info.node_id, self.node_info.image.archive_id
+            )
+        }) {
             Err(err) => {
                 warn!("{err:#}");
                 Err(Status::internal(err.to_string()))
@@ -70,13 +79,12 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
     ) -> eyre::Result<Response<Vec<Chunk>>, Status> {
         let (data_version, chunk_indexes) = request.into_inner();
         debug!(
-            "getting DownloadChunks from API for {}/{}/{}",
-            self.node_info.image, self.node_info.network, data_version
+            "getting DownloadChunks from API for node {} (archive_id={}/{})",
+            self.node_info.node_id, self.node_info.image.archive_id, data_version,
         );
-        match services::blockchain_archive::get_download_chunks(
+        match services::archive::get_download_chunks(
             &self.config,
-            self.node_info.image.clone(),
-            self.node_info.network.clone(),
+            self.node_info.image.archive_id.clone(),
             data_version,
             chunk_indexes,
         )
@@ -95,23 +103,25 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         request: Request<(Option<u64>, Vec<u32>, u32)>,
     ) -> eyre::Result<Response<UploadSlots>, Status> {
         let (data_version, slots, url_expires_secs) = request.into_inner();
+        let slots_count = slots.len();
         debug!(
-            "getting UploadSlots from API for {}/{}/{:?} with {} slots",
-            self.node_info.image,
-            self.node_info.network,
-            data_version,
-            slots.len()
+            "getting UploadSlots from API for node {} (archive_id={}/{:?}, lots={})",
+            self.node_info.node_id, self.node_info.image.archive_id, data_version, slots_count
         );
-        match services::blockchain_archive::get_upload_slots(
+        match services::archive::get_upload_slots(
             &self.config,
-            self.node_info.image.clone(),
-            self.node_info.network.clone(),
+            self.node_info.image.archive_id.clone(),
             data_version,
             slots,
             url_expires_secs,
         )
         .await
-        {
+        .with_context(|| {
+            format!(
+                "get_upload_slots for node {} (archive_id={}/{:?}, lots={})",
+                self.node_info.node_id, self.node_info.image.archive_id, data_version, slots_count
+            )
+        }) {
             Err(err) => {
                 warn!("{err:#}");
                 Err(Status::internal(err.to_string()))

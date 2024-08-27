@@ -4,11 +4,10 @@
 /// It defines `Pal` trait which is top level abstraction that contains definitions of sub layers.
 ///
 use crate::{
-    bv_context::BvContext, config::SharedConfig, node_state::NodeState,
+    bv_context::BvContext, config::SharedConfig, firewall, node_state::NodeState,
     nodes_manager::NodesDataCache, services,
 };
 use async_trait::async_trait;
-use babel_api::metadata::{firewall, Requirements};
 use eyre::Result;
 use std::{fmt::Debug, net::IpAddr, path::Path};
 use tonic::{codegen::InterceptedService, transport::Channel};
@@ -92,7 +91,16 @@ pub struct NodeFirewallConfig {
     pub iface: String,
     pub config: firewall::Config,
 }
-pub type AvailableResources = Requirements;
+
+#[derive(Debug)]
+pub struct AvailableResources {
+    /// Virtual cores to share with VM.
+    pub vcpu_count: usize,
+    /// RAM allocated to VM in MB.
+    pub mem_size_mb: u64,
+    /// Size of data drive for storing blockchain data (not to be confused with OS drive).
+    pub disk_size_gb: u64,
+}
 
 #[async_trait]
 pub trait ServiceConnector<S> {
@@ -155,12 +163,12 @@ pub trait VirtualMachine {
     async fn force_shutdown(&mut self) -> Result<()>;
     /// Start the VM.
     async fn start(&mut self) -> Result<()>;
-    /// Release the VM and all associated resources.
-    async fn release(&mut self) -> Result<()>;
+    /// Upgrade VM according to expected node_state.
+    async fn upgrade(&mut self, node_state: &NodeState) -> Result<()>;
     /// Try recover VM that is in INVALID state.
     async fn recover(&mut self) -> Result<()>;
-    /// Get path to VM rootfs.
-    fn rootfs_dir(&self) -> &Path;
+    /// Get plugin script content.
+    async fn plugin(&self) -> Result<String>;
 }
 
 pub trait RecoverBackoff {

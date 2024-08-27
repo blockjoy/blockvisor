@@ -1,5 +1,7 @@
 use crate::config::ApptainerConfig;
-use babel_api::metadata::{firewall, Requirements};
+use crate::firewall;
+use crate::services::blockchain::NodeType;
+use babel_api::utils::BabelConfig;
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
 use eyre::{Context, Result};
@@ -32,54 +34,86 @@ impl fmt::Display for NodeStatus {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct NodeImage {
-    pub protocol: String,
-    pub node_type: String,
-    pub node_version: String,
+    pub id: String,
+    pub config_id: String,
+    pub archive_id: String,
+    pub uri: String,
 }
 
-impl fmt::Display for NodeImage {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}/{}/{}",
-            self.protocol, self.node_type, self.node_version
-        )
-    }
-}
-
-// Data that we store in data file
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct NodeState {
+pub struct NodeInfo {
     pub id: Uuid,
     pub name: String,
+    pub status: NodeStatus,
+
+    pub uptime: Option<i64>,
+    pub requirements: Option<VmConfig>,
+    pub properties: NodeProperties,
+    pub assigned_cpus: Vec<usize>,
+    pub dev_mode: bool,
+}
+
+// NodeData that we store in state file
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct NodeState {
+    // static properties
+    pub id: Uuid,
+    pub name: String,
+    pub blockchain_id: String,
+    pub image_key: BlockchainImageKey,
+    pub dev_mode: bool,
+    // potentially configurable
+    pub ip: IpAddr,
+    pub gateway: IpAddr,
+
+    // dynamic
+    pub properties: NodeProperties,
+    pub firewall: firewall::Config,
+
+    // dynamic-description
+    pub display_name: String,
+    pub org_id: String,
+    pub org_name: String,
+    pub blockchain_name: String,
+    pub dns_name: String,
+
+    // upgradeable
+    pub software_version: String,
+    pub vm_config: VmConfig,
+    pub image: NodeImage,
+
+    // internal state
+    pub assigned_cpus: Vec<usize>,
     pub expected_status: NodeStatus,
     #[serde(default, with = "ts_seconds_option")]
     /// Time when node was started, None if node should not be running now
     pub started_at: Option<DateTime<Utc>>,
-    #[serde(default)]
     pub initialized: bool,
-    pub image: NodeImage,
-    pub network_interface: NetInterface,
-    #[serde(default)]
-    pub assigned_cpus: Vec<usize>,
-    pub requirements: Requirements,
-    pub firewall_rules: Vec<firewall::Rule>,
-    #[serde(default)]
-    pub properties: NodeProperties,
-    pub network: String,
-    #[serde(default)]
-    pub dev_mode: bool,
-    #[serde(default)]
     pub restarting: bool,
-    #[serde(default)]
-    pub org_id: String,
     pub apptainer_config: Option<ApptainerConfig>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub struct NetInterface {
-    pub ip: IpAddr,
-    pub gateway: IpAddr,
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BlockchainImageKey {
+    /// The key identifier to a blockchain.
+    pub blockchain_key: String,
+    /// The node type of this version.
+    pub node_type: NodeType,
+    /// The network name for this version (e.g. mainnet or testnet).
+    pub network: String,
+    /// A unique identifier to the software (e.g. reth or geth).
+    pub software: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct VmConfig {
+    /// Virtual cores to share with VM.
+    pub vcpu_count: usize,
+    /// RAM allocated to VM in MB.
+    pub mem_size_mb: u64,
+    /// Size of data drive for storing blockchain data (not to be confused with OS drive).
+    pub disk_size_gb: u64,
+    pub babel_config: BabelConfig,
 }
 
 impl NodeState {

@@ -2,32 +2,22 @@ use crate::{
     command_failed,
     commands::{self, into_internal, Error},
     config::SharedConfig,
+    firewall,
     node::Node,
     node_context::{build_nodes_dir, NODES_DIR},
     node_metrics,
-    node_state::{
-        NetInterface, NodeImage, NodeProperties, NodeState, NodeStatus, NODE_STATE_FILENAME,
-    },
+    node_state::{NodeImage, NodeProperties, NodeState, NodeStatus, VmConfig, NODE_STATE_FILENAME},
     pal::Pal,
     scheduler,
     scheduler::{Action, Scheduled, Scheduler},
-    services::blockchain::ROOTFS_FILE,
-    services::blockchain::{self, BlockchainService, BABEL_PLUGIN_NAME},
     BV_VAR_PATH,
 };
-use babel_api::{
-    engine::JobInfo,
-    engine::JobsInfo,
-    metadata::{firewall, BlockchainMetadata, Requirements},
-    rhai_plugin,
-};
-use chrono::{DateTime, Utc};
+use babel_api::{engine::JobInfo, engine::JobsInfo};
 use eyre::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt::Debug,
-    net::IpAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -62,46 +52,14 @@ pub struct NodesManager<P: Pal + Debug> {
     nodes: Arc<RwLock<HashMap<Uuid, MaybeNode<P>>>>,
     scheduler: Scheduler,
     cpu_registry: Mutex<CpuRegistry>,
-    node_state_cache: RwLock<HashMap<Uuid, NodeStateCache>>,
+    node_state_cache: RwLock<HashMap<Uuid, NodeState>>,
     node_ids: RwLock<HashMap<String, Uuid>>,
     state: RwLock<State>,
     state_path: PathBuf,
     pal: Arc<P>,
 }
 
-/// Container with some shallow information about the node
-///
-/// This information is [mostly] immutable, and we can cache it for
-/// easier access in case some node is locked, and we cannot access
-/// it's actual data right away
-#[derive(Clone, Debug, PartialEq)]
-pub struct NodeStateCache {
-    pub name: String,
-    pub image: NodeImage,
-    pub network: String,
-    pub ip: String,
-    pub gateway: String,
-    pub requirements: Requirements,
-    pub properties: NodeProperties,
-    pub assigned_cpus: Vec<usize>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub dev_mode: bool,
-}
-
-pub type NodesDataCache = Vec<(Uuid, NodeStateCache)>;
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct NodeConfig {
-    pub name: String,
-    pub image: NodeImage,
-    pub ip: String,
-    pub gateway: String,
-    pub rules: Vec<firewall::Rule>,
-    pub properties: NodeProperties,
-    pub network: String,
-    pub dev_mode: bool,
-    pub org_id: String,
-}
+pub type NodesDataCache = Vec<(Uuid, NodeState)>;
 
 #[derive(Error, Debug)]
 pub enum BabelError {
@@ -266,129 +224,74 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn create(&self, id: Uuid, config: NodeConfig) -> commands::Result<NodeStateCache> {
+    pub async fn create(&self, mut desired_state: NodeState) -> commands::Result<NodeState> {
+        let id = desired_state.id;
         let mut node_ids = self.node_ids.write().await;
         if let Some(cache) = self.node_state_cache.read().await.get(&id) {
             warn!("Node with id `{id}` exists");
             return Ok(cache.clone());
         }
 
-        if node_ids.contains_key(&config.name) {
+        if node_ids.contains_key(&desired_state.name) {
             command_failed!(Error::Internal(anyhow!(
                 "Node with name `{}` exists",
-                config.name
+                desired_state.name
             )));
         }
 
-        check_user_firewall_rules(&config.rules)?;
-
-        let ip: IpAddr = config
-            .ip
-            .parse()
-            .with_context(|| format!("invalid ip `{}`", config.ip))?;
-        let gateway: IpAddr = config
-            .gateway
-            .parse()
-            .with_context(|| format!("invalid gateway `{}`", config.gateway))?;
-
-        let properties: NodeProperties = config
-            .properties
-            .into_iter()
-            .chain([("network".to_string(), config.network.clone())])
-            .map(|(k, v)| (k.to_uppercase(), v))
-            .collect();
+        check_firewall_rules(&desired_state.firewall.rules)?;
+        if !desired_state.dev_mode {
+            self.check_node_requirements(&desired_state, None).await?;
+        }
 
         for n in self.nodes.read().await.values() {
             let node_ip = match n {
-                MaybeNode::Node(node) => node.read().await.state.network_interface.ip,
-                MaybeNode::BrokenNode(state) => state.network_interface.ip,
+                MaybeNode::Node(node) => node.read().await.state.ip,
+                MaybeNode::BrokenNode(state) => state.ip,
             };
-            if node_ip == ip {
+            if node_ip == desired_state.ip {
                 command_failed!(Error::Internal(anyhow!(
-                    "Node with ip address `{ip}` exists"
+                    "Node with ip address `{}` exists",
+                    desired_state.ip
                 )));
             }
         }
 
-        let meta = Self::fetch_image_data(self.pal.clone(), self.api_config.clone(), &config.image)
-            .await
-            .with_context(|| "fetch image data failed")?;
-
-        if !meta.nets.contains_key(&config.network) {
-            command_failed!(Error::Internal(anyhow!(
-                "invalid network name '{}'",
-                config.network
-            )));
-        }
-
-        if !config.dev_mode {
-            self.check_node_requirements(&meta.requirements, &config.image, None)
-                .await?;
-        }
         let mut assigned_cpus = self
             .cpu_registry
             .lock()
             .await
-            .acquire(meta.requirements.vcpu_count)?;
-
-        let node_state_cache = NodeStateCache {
-            name: config.name.clone(),
-            image: config.image.clone(),
-            network: config.network.clone(),
-            ip: ip.to_string(),
-            gateway: gateway.to_string(),
-            started_at: None,
-            dev_mode: config.dev_mode,
-            requirements: meta.requirements.clone(),
-            properties: properties.clone(),
-            assigned_cpus: assigned_cpus.clone(),
-        };
-
-        let node_state = NodeState {
-            id,
-            name: config.name.clone(),
-            image: config.image,
-            expected_status: NodeStatus::Stopped,
-            started_at: None,
-            network_interface: NetInterface { ip, gateway },
-            assigned_cpus: assigned_cpus.clone(),
-            requirements: meta.requirements,
-            properties,
-            network: config.network,
-            firewall_rules: config.rules,
-            initialized: false,
-            dev_mode: config.dev_mode,
-            restarting: false,
-            org_id: config.org_id,
-            apptainer_config: None,
-        };
-
+            .acquire(desired_state.vm_config.vcpu_count)?;
+        desired_state.assigned_cpus = assigned_cpus.clone();
         let node = Node::create(
             self.pal.clone(),
             self.api_config.clone(),
-            node_state,
+            desired_state,
             self.scheduler.tx(),
         )
         .await;
         if node.is_err() {
             self.cpu_registry.lock().await.release(&mut assigned_cpus);
         }
+        let node = node?;
+        let node_state = node.state.clone();
         self.nodes
             .write()
             .await
-            .insert(id, MaybeNode::Node(RwLock::new(node?)));
-        node_ids.insert(config.name, id);
+            .insert(id, MaybeNode::Node(RwLock::new(node)));
+        node_ids.insert(node_state.name.clone(), id);
         self.node_state_cache
             .write()
             .await
-            .insert(id, node_state_cache.clone());
+            .insert(id, node_state.clone());
         debug!("Node with id `{}` created", id);
 
-        Ok(node_state_cache)
+        Ok(node_state)
     }
 
     #[instrument(skip(self))]
-    pub async fn upgrade(&self, id: Uuid, image: NodeImage) -> commands::Result<()> {
+    pub async fn upgrade(&self, desired_state: NodeState) -> commands::Result<()> {
+        let id = desired_state.id;
         let nodes_lock = self.nodes.read().await;
         let MaybeNode::Node(node_lock) =
             nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?
@@ -398,43 +301,74 @@ where
             )));
         };
         let data = node_lock.read().await.state.clone();
-        if image != data.image {
-            if image.protocol != data.image.protocol {
+        if desired_state.image.id != data.image.id {
+            let node = node_lock.read().await.state.clone();
+
+            if desired_state.blockchain_id != node.blockchain_id {
                 command_failed!(Error::Internal(anyhow!(
                     "Cannot upgrade protocol to `{}`",
-                    image.protocol
+                    desired_state.blockchain_id
                 )));
             }
-            if image.node_type != data.image.node_type {
+            if desired_state.image_key.node_type != node.image_key.node_type {
                 command_failed!(Error::Internal(anyhow!(
-                    "Cannot upgrade node type to `{}`",
-                    image.node_type
+                    "Cannot upgrade node type to `{:?}`",
+                    desired_state.image_key.node_type
                 )));
             }
-            let new_meta =
-                Self::fetch_image_data(self.pal.clone(), self.api_config.clone(), &image).await?;
-
-            if !data.dev_mode {
-                self.check_node_requirements(
-                    &new_meta.requirements,
-                    &image,
-                    Some(&data.requirements),
-                )
-                .await?;
+            if desired_state.image.archive_id != node.image.archive_id {
+                command_failed!(Error::Internal(anyhow!(
+                    "Cannot upgrade node to version that uses different data set `{}`",
+                    desired_state.image.archive_id
+                )));
+            }
+            if !node.dev_mode {
+                self.check_node_requirements(&desired_state, Some(&node.vm_config))
+                    .await?;
             }
 
             let mut node = node_lock.write().await;
-            let mut cpu_registry = self.cpu_registry.lock().await;
-            cpu_registry.release(&mut node.state.assigned_cpus);
-            node.state.assigned_cpus = cpu_registry.acquire(new_meta.requirements.vcpu_count)?;
-            node.upgrade(&image).await?;
+            self.update_cpu_assignment(
+                &mut node.state.assigned_cpus,
+                desired_state.vm_config.vcpu_count,
+            )
+            .await?;
+            let res = node.upgrade(desired_state).await;
+            if res.is_err() {
+                let cpu_count = node.state.vm_config.vcpu_count;
+                if let Err(err) = self
+                    .update_cpu_assignment(&mut node.state.assigned_cpus, cpu_count)
+                    .await
+                {
+                    error!(
+                        "failed to rollback cpu assignment, after unsuccessful upgrade of node {}: {err:#}",
+                        node.state.id
+                    );
+                }
+                res.with_context(|| format!("node {} upgrade failed", node.state.id))?;
+            } else {
+                self.node_state_cache
+                    .write()
+                    .await
+                    .insert(id, node.state.clone());
+            }
+        }
+        Ok(())
+    }
 
-            let mut cache = self.node_state_cache.write().await;
-            cache.entry(id).and_modify(|data| {
-                data.image = image;
-                data.requirements.clone_from(&node.state.requirements);
-                data.assigned_cpus.clone_from(&node.state.assigned_cpus);
-            });
+    async fn update_cpu_assignment(
+        &self,
+        assigned_cpus: &mut Vec<usize>,
+        new_cpu_count: usize,
+    ) -> Result<()> {
+        if assigned_cpus.len() != new_cpu_count {
+            let mut cpu_registry = self.cpu_registry.lock().await;
+            if assigned_cpus.len() > new_cpu_count {
+                cpu_registry.release(&mut assigned_cpus.drain(new_cpu_count..).collect());
+            } else {
+                let diff = new_cpu_count - assigned_cpus.len();
+                assigned_cpus.append(&mut cpu_registry.acquire(diff)?);
+            }
         }
         Ok(())
     }
@@ -519,17 +453,29 @@ where
     pub async fn update(
         &self,
         id: Uuid,
-        rules: Vec<firewall::Rule>,
-        org_id: String,
+        new_name: Option<String>,
+        firewall_config: Option<firewall::Config>,
+        new_org_id: Option<String>,
+        new_org_name: Option<String>,
+        new_properties: NodeProperties,
     ) -> commands::Result<()> {
-        check_user_firewall_rules(&rules)?;
+        if let Some(config) = firewall_config.as_ref() {
+            check_firewall_rules(&config.rules)?;
+        }
         let nodes_lock = self.nodes.read().await;
         let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
         let MaybeNode::Node(node_lock) = maybe_node else {
             command_failed!(Error::Internal(anyhow!("Cannot update broken node `{id}`")));
         };
         let mut node = node_lock.write().await;
-        node.update(rules, org_id).await
+        node.update(
+            new_name,
+            firewall_config,
+            new_org_id,
+            new_org_name,
+            new_properties,
+        )
+        .await
     }
 
     #[instrument(skip(self))]
@@ -719,9 +665,8 @@ where
     #[instrument(skip(self))]
     async fn check_node_requirements(
         &self,
-        requirements: &Requirements,
-        image: &NodeImage,
-        tolerance: Option<&Requirements>,
+        state: &NodeState,
+        tolerance: Option<&VmConfig>,
     ) -> commands::Result<()> {
         let mut available = self
             .pal
@@ -735,28 +680,19 @@ where
             available.vcpu_count += tol.vcpu_count;
         }
 
-        // take into account additional copy of os.img made while creating vm
-        let os_image_size_gb =
-            blockchain::get_image_download_folder_path(self.pal.bv_root(), image)
-                .join(ROOTFS_FILE)
-                .metadata()
-                .with_context(|| format!("can't check '{ROOTFS_FILE}' size for {image}"))?
-                .len()
-                / 1_000_000_000;
-        if requirements.disk_size_gb + os_image_size_gb > available.disk_size_gb {
+        if state.vm_config.disk_size_gb > available.disk_size_gb {
             command_failed!(Error::Internal(anyhow!(
-                "Not enough disk space to allocate for the node: required={}+{}, available={}",
-                requirements.disk_size_gb,
-                os_image_size_gb,
+                "Not enough disk space to allocate for the node: required={}, available={}",
+                state.vm_config.disk_size_gb,
                 available.disk_size_gb
             )));
         }
-        if requirements.mem_size_mb > available.mem_size_mb {
+        if state.vm_config.mem_size_mb > available.mem_size_mb {
             command_failed!(Error::Internal(anyhow!(
                 "Not enough memory to allocate for the node"
             )));
         }
-        if requirements.vcpu_count > available.vcpu_count {
+        if state.vm_config.vcpu_count > available.vcpu_count {
             command_failed!(Error::Internal(anyhow!(
                 "Not enough vcpu to allocate for the node"
             )));
@@ -764,7 +700,20 @@ where
         Ok(())
     }
 
-    pub async fn node_state_cache(&self, id: Uuid) -> commands::Result<NodeStateCache> {
+    #[instrument(skip(self))]
+    async fn image(&self, id: Uuid) -> commands::Result<NodeImage> {
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        Ok(match maybe_node {
+            MaybeNode::Node(node_lock) => {
+                let node = node_lock.read().await;
+                node.state.image.clone()
+            }
+            MaybeNode::BrokenNode(state) => state.image.clone(),
+        })
+    }
+
+    pub async fn node_state_cache(&self, id: Uuid) -> commands::Result<NodeState> {
         let cache = self
             .node_state_cache
             .read()
@@ -798,7 +747,7 @@ where
     ) -> Result<(
         HashMap<Uuid, MaybeNode<P>>,
         HashMap<String, Uuid>,
-        HashMap<Uuid, NodeStateCache>,
+        HashMap<Uuid, NodeState>,
     )> {
         info!("Reading nodes config dir: {}", nodes_dir.display());
         let mut nodes = HashMap::new();
@@ -834,21 +783,7 @@ where
                     let id = state.id;
                     let name = state.name.clone();
                     node_ids.insert(name.clone(), id);
-                    node_state_cache.insert(
-                        id,
-                        NodeStateCache {
-                            name,
-                            ip: state.network_interface.ip.to_string(),
-                            gateway: state.network_interface.gateway.to_string(),
-                            image: state.image.clone(),
-                            network: state.network.clone(),
-                            started_at: state.started_at,
-                            dev_mode: state.dev_mode,
-                            requirements: state.requirements.clone(),
-                            properties: state.properties.clone(),
-                            assigned_cpus: state.assigned_cpus.clone(),
-                        },
-                    );
+                    node_state_cache.insert(id, state.clone());
                     nodes.insert(
                         id,
                         match Node::attach(
@@ -881,55 +816,15 @@ where
 
         Ok((nodes, node_ids, node_state_cache))
     }
-
-    #[instrument(skip(pal, api_config))]
-    pub async fn fetch_image_data(
-        pal: Arc<P>,
-        api_config: SharedConfig,
-        image: &NodeImage,
-    ) -> Result<BlockchainMetadata> {
-        let bv_root = pal.bv_root();
-        let folder = blockchain::get_image_download_folder_path(bv_root, image);
-        let rhai_path = folder.join(BABEL_PLUGIN_NAME);
-
-        let script = if !blockchain::is_image_cache_valid(bv_root, image)
-            .await
-            .with_context(|| format!("Failed to check image cache: `{image:?}`"))?
-        {
-            let mut blockchain_service = BlockchainService::new(
-                pal.create_api_service_connector(&api_config),
-                bv_root.to_path_buf(),
-            )
-            .await
-            .with_context(|| "cannot connect to blockchain service")?;
-            blockchain_service
-                .download_babel_plugin(image)
-                .await
-                .with_context(|| "cannot download babel plugin")?;
-            blockchain_service
-                .download_image(image)
-                .await
-                .with_context(|| "cannot download image")?;
-            fs::read_to_string(rhai_path).await.map_err(into_internal)?
-        } else {
-            fs::read_to_string(rhai_path).await.map_err(into_internal)?
-        };
-        let meta = rhai_plugin::read_metadata(&script)?;
-        info!(
-            "Fetched node image with requirements: {:?}",
-            &meta.requirements
-        );
-        Ok(meta)
-    }
 }
 
-fn check_user_firewall_rules(rules: &[firewall::Rule]) -> commands::Result<()> {
+fn check_firewall_rules(rules: &[firewall::Rule]) -> commands::Result<()> {
     if rules.len() > MAX_SUPPORTED_RULES {
         command_failed!(Error::Internal(anyhow!(
             "Can't configure more than {MAX_SUPPORTED_RULES} rules!"
         )));
     }
-    babel_api::metadata::check_firewall_rules(rules)?;
+    crate::firewall::check_rules(rules)?;
     Ok(())
 }
 
@@ -940,74 +835,54 @@ fn name_not_found(name: &str) -> eyre::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_state::NetInterface;
-    use crate::pal::NodeFirewallConfig;
     use crate::scheduler::Task;
-    use crate::{
-        node::tests::*,
-        node_context, pal,
-        pal::VmState,
-        services::{
-            api::{common, pb},
-            blockchain::ROOTFS_FILE,
-        },
-    };
+    use crate::{node::tests::*, node_context, pal, pal::VmState, services::api::pb};
     use assert_fs::TempDir;
-    use bv_tests_utils::start_test_server;
-    use bv_utils::cmd::run_cmd;
     use eyre::bail;
     use mockall::*;
-    use std::ffi::OsStr;
     use std::net::IpAddr;
     use std::str::FromStr;
 
     mock! {
-        pub TestBlockchainService {}
+        pub TestImageService {}
 
         #[tonic::async_trait]
-        impl pb::blockchain_service_server::BlockchainService for TestBlockchainService {
-            async fn get(
+        impl pb::image_service_server::ImageService for TestImageService {
+            async fn add_image(
                 &self,
-                request: tonic::Request<pb::BlockchainServiceGetRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServiceGetResponse>, tonic::Status>;
+                request: tonic::Request<pb::ImageServiceAddImageRequest>,
+            ) -> Result<tonic::Response<pb::ImageServiceAddImageResponse>, tonic::Status>;
             async fn get_image(
                 &self,
-                request: tonic::Request<pb::BlockchainServiceGetImageRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServiceGetImageResponse>, tonic::Status>;
-            async fn get_plugin(
+                request: tonic::Request<pb::ImageServiceGetImageRequest>,
+            ) -> Result<tonic::Response<pb::ImageServiceGetImageResponse>, tonic::Status>;
+            async fn list_archives(
                 &self,
-                request: tonic::Request<pb::BlockchainServiceGetPluginRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServiceGetPluginResponse>, tonic::Status>;
-            async fn get_requirements(
+                request: tonic::Request<pb::ImageServiceListArchivesRequest>,
+            ) -> Result<
+                tonic::Response<pb::ImageServiceListArchivesResponse>,
+                tonic::Status,
+            >;
+            async fn update_archive(
                 &self,
-                request: tonic::Request<pb::BlockchainServiceGetRequirementsRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServiceGetRequirementsResponse>, tonic::Status>;
-            async fn list(
+                request: tonic::Request<pb::ImageServiceUpdateArchiveRequest>,
+            ) -> Result<
+                tonic::Response<pb::ImageServiceUpdateArchiveResponse>,
+                tonic::Status,
+            >;
+            async fn update_image(
                 &self,
-                request: tonic::Request<pb::BlockchainServiceListRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServiceListResponse>, tonic::Status>;
-            async fn list_image_versions(
-                &self,
-                request: tonic::Request<pb::BlockchainServiceListImageVersionsRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServiceListImageVersionsResponse>, tonic::Status>;
-            async fn add_node_type(
-                &self,
-                request: tonic::Request<pb::BlockchainServiceAddNodeTypeRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServiceAddNodeTypeResponse>, tonic::Status>;
-            async fn add_version(
-                &self,
-                request: tonic::Request<pb::BlockchainServiceAddVersionRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServiceAddVersionResponse>, tonic::Status>;
-            async fn pricing(
-                &self,
-                request: tonic::Request<pb::BlockchainServicePricingRequest>,
-            ) -> Result<tonic::Response<pb::BlockchainServicePricingResponse>, tonic::Status>;
+                request: tonic::Request<pb::ImageServiceUpdateImageRequest>,
+            ) -> Result<
+                tonic::Response<pb::ImageServiceUpdateImageResponse>,
+                tonic::Status,
+            >;
         }
     }
 
     struct TestEnv {
         tmp_root: PathBuf,
-        test_image: NodeImage,
+        default_script: String,
         _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
 
@@ -1018,11 +893,9 @@ mod tests {
 
             Ok(Self {
                 tmp_root,
-                test_image: NodeImage {
-                    protocol: "testing".to_string(),
-                    node_type: "validator".to_string(),
-                    node_version: "1.2.3".to_string(),
-                },
+                default_script: fs::read_to_string(testing_babel_path_absolute())
+                    .await
+                    .unwrap(),
                 _async_panic_checker: Default::default(),
             })
         }
@@ -1030,104 +903,9 @@ mod tests {
         fn default_pal(&self) -> MockTestPal {
             default_pal(self.tmp_root.clone())
         }
-
-        async fn generate_dummy_archive(&self) {
-            let mut file_path = self.tmp_root.join(ROOTFS_FILE).into_os_string();
-            fs::write(&file_path, "dummy archive content")
-                .await
-                .unwrap();
-            let archive_file_path = &self.tmp_root.join("blockjoy.gz");
-            run_cmd("gzip", [OsStr::new("-kf"), &file_path])
-                .await
-                .unwrap();
-            file_path.push(".gz");
-            fs::rename(file_path, archive_file_path).await.unwrap();
-        }
-
-        fn build_node_config(&self, name: &str, ip: &str, gateway: &str) -> NodeConfig {
-            NodeConfig {
-                name: name.to_string(),
-                image: self.test_image.clone(),
-                ip: ip.to_string(),
-                gateway: gateway.to_string(),
-                rules: vec![],
-                properties: HashMap::from_iter([
-                    ("TESTING_PARAM".to_string(), "any".to_string()),
-                    ("NETWORK".to_string(), "test".to_string()),
-                ]),
-                network: "test".to_string(),
-                dev_mode: false,
-                org_id: Default::default(),
-            }
-        }
-
-        async fn start_test_server(
-            &self,
-            images: Vec<(NodeImage, Vec<u8>)>,
-        ) -> (
-            bv_tests_utils::rpc::TestServer,
-            mockito::ServerGuard,
-            Vec<mockito::Mock>,
-        ) {
-            self.generate_dummy_archive().await;
-            let mut http_server = mockito::Server::new();
-            let mut http_mocks = vec![];
-
-            // expect image retrieve and download for all images, but only once
-            let mut blockchain = MockTestBlockchainService::new();
-            for (test_image, rhai_content) in images {
-                let node_image = Some(common::ImageIdentifier {
-                    protocol: test_image.protocol.clone(),
-                    node_type: common::NodeType::from_str(&test_image.node_type)
-                        .unwrap()
-                        .into(),
-                    node_version: test_image.node_version.clone(),
-                });
-                let expected_image = node_image.clone();
-                let resp = tonic::Response::new(pb::BlockchainServiceGetPluginResponse {
-                    plugin: Some(common::RhaiPlugin {
-                        identifier: expected_image.clone(),
-                        rhai_content,
-                    }),
-                });
-                blockchain
-                    .expect_get_plugin()
-                    .withf(move |req| req.get_ref().id == expected_image)
-                    .return_once(move |_| Ok(resp));
-                let url = http_server.url();
-                let expected_image = node_image.clone();
-                blockchain
-                    .expect_get_image()
-                    .withf(move |req| req.get_ref().id == expected_image)
-                    .return_once(move |_| {
-                        Ok(tonic::Response::new(
-                            pb::BlockchainServiceGetImageResponse {
-                                location: Some(common::ArchiveLocation {
-                                    url: format!("{url}/image"),
-                                }),
-                            },
-                        ))
-                    });
-                http_mocks.push(
-                    http_server
-                        .mock("GET", "/image")
-                        .with_body_from_file(&*self.tmp_root.join("blockjoy.gz").to_string_lossy())
-                        .create(),
-                );
-            }
-
-            (
-                start_test_server!(
-                    &self.tmp_root,
-                    pb::blockchain_service_server::BlockchainServiceServer::new(blockchain)
-                ),
-                http_server,
-                http_mocks,
-            )
-        }
     }
 
-    const TEST_NODE_REQUIREMENTS: Requirements = Requirements {
+    const TEST_NODE_REQUIREMENTS: pal::AvailableResources = pal::AvailableResources {
         vcpu_count: 1,
         mem_size_mb: 2048,
         disk_size_gb: 1,
@@ -1142,21 +920,17 @@ mod tests {
     fn add_create_node_expectations(
         pal: &mut MockTestPal,
         expected_index: u32,
-        expected_cpus: Vec<usize>,
-        id: Uuid,
-        config: NodeConfig,
+        state: NodeState,
         vm_mock: MockTestVM,
     ) {
+        let id = state.id;
         pal.expect_available_resources()
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .once()
             .returning(available_test_resources);
-        add_firewall_expectation(pal, id, IpAddr::from_str(&config.ip).unwrap());
+        add_firewall_expectation(pal, state.clone());
         pal.expect_create_vm()
-            .with(
-                predicate::eq(default_bv_context()),
-                predicate::eq(expected_node_state(id, config, expected_cpus, None)),
-            )
+            .with(predicate::eq(default_bv_context()), predicate::eq(state))
             .return_once(move |_, _| Ok(vm_mock));
         pal.expect_create_node_connection()
             .with(predicate::eq(id))
@@ -1166,9 +940,7 @@ mod tests {
     fn add_create_node_fail_vm_expectations(
         pal: &mut MockTestPal,
         expected_index: u32,
-        expected_cpus: Vec<usize>,
-        id: Uuid,
-        config: NodeConfig,
+        state: NodeState,
     ) {
         pal.expect_available_resources()
             .withf(move |req| expected_index - 1 == req.len() as u32)
@@ -1188,45 +960,19 @@ mod tests {
             .withf(move |req| expected_index - 1 == req.len() as u32)
             .returning(available_test_resources);
         pal.expect_create_vm()
-            .with(
-                predicate::eq(default_bv_context()),
-                predicate::eq(expected_node_state(id, config, expected_cpus, None)),
-            )
+            .with(predicate::eq(default_bv_context()), predicate::eq(state))
             .return_once(|_, _| bail!("failed to create vm"));
         pal.expect_cleanup_firewall_config().returning(|_| Ok(()));
     }
 
-    fn expected_node_state(
-        id: Uuid,
-        config: NodeConfig,
-        expected_cpus: Vec<usize>,
-        image: Option<NodeImage>,
-    ) -> NodeState {
-        NodeState {
-            id,
-            name: config.name,
-            expected_status: NodeStatus::Stopped,
-            started_at: None,
-            initialized: false,
-            image: image.unwrap_or(config.image),
-            network_interface: NetInterface {
-                ip: IpAddr::from_str(&config.ip).unwrap(),
-                gateway: IpAddr::from_str(&config.gateway).unwrap(),
-            },
-            assigned_cpus: expected_cpus,
-            requirements: TEST_NODE_REQUIREMENTS,
-            firewall_rules: config.rules,
-            properties: config
-                .properties
-                .into_iter()
-                .chain([("NETWORK".to_string(), config.network.clone())])
-                .collect(),
-            network: config.network,
-            dev_mode: config.dev_mode,
-            restarting: false,
-            org_id: Default::default(),
-            apptainer_config: None,
-        }
+    pub fn build_node_state(name: &str, ip: &str, gateway: &str) -> NodeState {
+        let mut state = default_node_state();
+        state.id = Uuid::new_v4();
+        state.expected_status = NodeStatus::Stopped;
+        state.name = name.to_string();
+        state.ip = IpAddr::from_str(ip).unwrap();
+        state.gateway = IpAddr::from_str(gateway).unwrap();
+        state
     }
 
     #[tokio::test]
@@ -1236,73 +982,48 @@ mod tests {
         pal.expect_available_cpus().return_const(3usize);
         let config = default_config(test_env.tmp_root.clone());
 
-        let first_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
-        let first_node_config =
-            test_env.build_node_config("first node name", "192.168.0.7", "192.168.0.1");
-        let mut vm_mock = default_vm(test_env.tmp_root.clone());
+        let mut first_node_state =
+            build_node_state("first node name", "192.168.0.7", "192.168.0.1");
+        first_node_state.assigned_cpus = vec![2];
+        let mut vm_mock = MockTestVM::new();
+        let script = test_env.default_script.clone();
+        vm_mock
+            .expect_plugin()
+            .returning(move || Ok(script.clone()));
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         vm_mock
             .expect_delete()
             .once()
             .returning(|| bail!("delete VM failed"));
         vm_mock.expect_delete().once().returning(|| Ok(()));
-        add_create_node_expectations(
-            &mut pal,
-            1,
-            vec![2],
-            first_node_id,
-            first_node_config.clone(),
-            vm_mock,
-        );
+        add_create_node_expectations(&mut pal, 1, first_node_state.clone(), vm_mock);
 
-        let second_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
-        let second_node_config =
-            test_env.build_node_config("second node name", "192.168.0.8", "192.168.0.1");
-        let mut vm_mock = default_vm(test_env.tmp_root.clone());
+        let mut second_node_state =
+            build_node_state("second node name", "192.168.0.8", "192.168.0.1");
+        second_node_state.assigned_cpus = vec![1];
+        let mut vm_mock = MockTestVM::new();
+        let script = test_env.default_script.clone();
+        vm_mock
+            .expect_plugin()
+            .returning(move || Ok(script.clone()));
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
-        add_create_node_expectations(
-            &mut pal,
-            2,
-            vec![1],
-            second_node_id,
-            second_node_config.clone(),
-            vm_mock,
-        );
+        add_create_node_expectations(&mut pal, 2, second_node_state.clone(), vm_mock);
 
-        let failed_node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047532").unwrap();
-        let failed_node_config =
-            test_env.build_node_config("failed node name", "192.168.0.9", "192.168.0.1");
-        add_create_node_fail_vm_expectations(
-            &mut pal,
-            3,
-            vec![0],
-            failed_node_id,
-            failed_node_config.clone(),
-        );
+        let mut failed_node_state =
+            build_node_state("failed node name", "192.168.0.9", "192.168.0.1");
+        failed_node_state.assigned_cpus = vec![0];
+        add_create_node_fail_vm_expectations(&mut pal, 3, failed_node_state.clone());
 
         let nodes = NodesManager::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
 
-        let (test_server, _http_server, http_mocks) = test_env
-            .start_test_server(vec![(
-                test_env.test_image.clone(),
-                include_bytes!("../tests/babel.rhai").to_vec(),
-            )])
-            .await;
-
-        nodes
-            .create(first_node_id, first_node_config.clone())
-            .await?;
-        nodes
-            .create(second_node_id, second_node_config.clone())
-            .await?;
-        nodes
-            .create(second_node_id, second_node_config.clone())
-            .await?;
+        nodes.create(first_node_state.clone()).await?;
+        nodes.create(second_node_state.clone()).await?;
+        nodes.create(second_node_state.clone()).await?;
         assert_eq!(
             "BV internal error: failed to check available resources",
             nodes
-                .create(failed_node_id, failed_node_config.clone())
+                .create(failed_node_state.clone())
                 .await
                 .unwrap_err()
                 .to_string()
@@ -1310,7 +1031,7 @@ mod tests {
         assert_eq!(
             "BV internal error: Not enough memory to allocate for the node",
             nodes
-                .create(failed_node_id, failed_node_config.clone())
+                .create(failed_node_state.clone())
                 .await
                 .unwrap_err()
                 .to_string()
@@ -1318,16 +1039,18 @@ mod tests {
         assert_eq!(
             "BV internal error: failed to create vm",
             nodes
-                .create(failed_node_id, failed_node_config.clone())
+                .create(failed_node_state.clone())
                 .await
                 .unwrap_err()
                 .to_string()
         );
         assert_eq!(1, nodes.cpu_registry.lock().await.0.len());
+        let mut duplicated_node_state = first_node_state.clone();
+        duplicated_node_state.id = Uuid::new_v4();
         assert_eq!(
             "BV internal error: Node with name `first node name` exists",
             nodes
-                .create(failed_node_id, first_node_config.clone())
+                .create(duplicated_node_state)
                 .await
                 .unwrap_err()
                 .to_string()
@@ -1335,32 +1058,7 @@ mod tests {
         assert_eq!(
             "BV internal error: Node with ip address `192.168.0.7` exists",
             nodes
-                .create(
-                    failed_node_id,
-                    test_env.build_node_config("node name", "192.168.0.7", "192.168.0.1")
-                )
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-        assert_eq!(
-            "BV internal error: invalid ip `invalid`: invalid IP address syntax",
-            nodes
-                .create(
-                    failed_node_id,
-                    test_env.build_node_config("node name", "invalid", "192.168.0.1")
-                )
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-        assert_eq!(
-            "BV internal error: invalid gateway `invalid`: invalid IP address syntax",
-            nodes
-                .create(
-                    failed_node_id,
-                    test_env.build_node_config("node name", "192.168.0.7", "invalid")
-                )
+                .create(build_node_state("node name", "192.168.0.7", "192.168.0.1"))
                 .await
                 .unwrap_err()
                 .to_string()
@@ -1371,114 +1069,55 @@ mod tests {
                 action: firewall::Action::Allow,
                 direction: firewall::Direction::Out,
                 protocol: None,
-                ips: None,
+                ips: vec![],
                 ports: vec![],
             })
             .collect::<Vec<_>>();
+        let mut too_many_rules_state = build_node_state("node name", "192.168.0.9", "192.168.0.1");
+        too_many_rules_state.firewall.rules = rules;
         assert_eq!(
             "BV internal error: Can't configure more than 128 rules!",
             nodes
-                .create(
-                    failed_node_id,
-                    NodeConfig {
-                        name: "node name".to_string(),
-                        image: test_env.test_image.clone(),
-                        ip: "192.168.0.9".to_string(),
-                        gateway: "192.168.0.1".to_string(),
-                        rules,
-                        properties: Default::default(),
-                        network: "test".to_string(),
-                        dev_mode: false,
-                        org_id: Default::default(),
-                    }
-                )
+                .create(too_many_rules_state)
                 .await
                 .unwrap_err()
                 .to_string()
         );
-        assert_eq!(
-            "BV internal error: fetch image data failed: cannot download babel plugin: Invalid NodeType invalid",
-            nodes
-                .create(
-                    failed_node_id,
-                    NodeConfig {
-                        name: "node name".to_string(),
-                        image: NodeImage {
-                            protocol: "testing".to_string(),
-                            node_type: "invalid".to_string(),
-                            node_version: "1.2.3".to_string(),
-                        },
-                        ip: "192.168.0.9".to_string(),
-                        gateway: "192.168.0.1".to_string(),
-                        rules: vec![],
-                        properties: Default::default(),
-                        network: "test".to_string(),
-                        dev_mode: false,
-                        org_id: Default::default(),
-                    }
-                )
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-        assert_eq!(
-            "BV internal error: invalid network name 'invalid'",
-            nodes
-                .create(
-                    failed_node_id,
-                    NodeConfig {
-                        name: "node name".to_string(),
-                        image: test_env.test_image.clone(),
-                        ip: "192.168.0.9".to_string(),
-                        gateway: "192.168.0.1".to_string(),
-                        rules: vec![],
-                        properties: Default::default(),
-                        network: "invalid".to_string(),
-                        dev_mode: false,
-                        org_id: Default::default(),
-                    }
-                )
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-
         assert_eq!(2, nodes.nodes_list().await.len());
         assert_eq!(
-            second_node_id,
-            nodes.node_id_for_name(&second_node_config.name).await?
+            second_node_state.id,
+            nodes.node_id_for_name(&second_node_state.name).await?
         );
-        assert_eq!(NodeStatus::Stopped, nodes.status(first_node_id).await?);
-        assert_eq!(NodeStatus::Stopped, nodes.status(second_node_id).await?);
         assert_eq!(
             NodeStatus::Stopped,
-            nodes.expected_status(first_node_id).await?
+            nodes.status(first_node_state.id).await?
         );
         assert_eq!(
-            NodeStateCache {
-                name: first_node_config.name,
-                image: first_node_config.image,
-                network: first_node_config.network,
-                ip: first_node_config.ip,
-                gateway: first_node_config.gateway,
-                started_at: None,
-                dev_mode: first_node_config.dev_mode,
-                requirements: TEST_NODE_REQUIREMENTS,
-                properties: first_node_config.properties,
-                assigned_cpus: vec![2],
-            },
-            nodes.node_state_cache(first_node_id).await?
+            NodeStatus::Stopped,
+            nodes.status(second_node_state.id).await?
+        );
+        assert_eq!(
+            NodeStatus::Stopped,
+            nodes.expected_status(first_node_state.id).await?
+        );
+        assert_eq!(
+            first_node_state,
+            nodes.node_state_cache(first_node_state.id).await?
         );
 
         assert_eq!(
             "BV internal error: delete VM failed",
-            nodes.delete(first_node_id).await.unwrap_err().to_string()
+            nodes
+                .delete(first_node_state.id)
+                .await
+                .unwrap_err()
+                .to_string()
         );
         nodes
             .scheduler
             .tx()
             .send(Action::Add(Scheduled {
-                node_id: first_node_id,
+                node_id: first_node_state.id,
                 name: "task".to_string(),
                 schedule: cron::Schedule::from_str("1 * * * * * *").unwrap(),
                 task: Task::PluginFnCall {
@@ -1488,18 +1127,14 @@ mod tests {
             }))
             .await
             .unwrap();
-        nodes.delete(first_node_id).await.unwrap();
+        nodes.delete(first_node_state.id).await.unwrap();
         assert!(!nodes
             .node_state_cache
             .read()
             .await
-            .contains_key(&first_node_id));
+            .contains_key(&first_node_state.id));
         assert!(nodes.scheduler.stop().await.unwrap().is_empty());
 
-        for mock in http_mocks {
-            mock.assert();
-        }
-        test_server.assert().await;
         Ok(())
     }
 
@@ -1510,31 +1145,7 @@ mod tests {
         pal.expect_available_cpus().return_const(1usize);
         let config = default_config(test_env.tmp_root.clone());
 
-        let node_state = NodeState {
-            id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
-            name: "first node".to_string(),
-            expected_status: NodeStatus::Stopped,
-            started_at: None,
-            initialized: false,
-            image: test_env.test_image.clone(),
-            network_interface: NetInterface {
-                ip: IpAddr::from_str("192.168.0.9").unwrap(),
-                gateway: IpAddr::from_str("192.168.0.1").unwrap(),
-            },
-            assigned_cpus: vec![0],
-            requirements: Requirements {
-                vcpu_count: 1,
-                mem_size_mb: 1024,
-                disk_size_gb: 1,
-            },
-            firewall_rules: vec![],
-            properties: HashMap::from_iter([("TESTING_PARAM".to_string(), "any".to_string())]),
-            network: "test".to_string(),
-            dev_mode: false,
-            restarting: false,
-            org_id: Default::default(),
-            apptainer_config: None,
-        };
+        let node_state = default_node_state();
         fs::create_dir_all(node_context::build_node_dir(pal.bv_root(), node_state.id)).await?;
 
         let nodes = NodesManager::load(pal, config).await?;
@@ -1549,20 +1160,6 @@ mod tests {
         make_node_dir(&nodes_dir, invalid_node_state.id).await;
         invalid_node_state.save(&nodes_dir).await?;
 
-        fs::copy(
-            testing_babel_path_absolute(),
-            make_node_dir(&nodes_dir, node_state.id)
-                .await
-                .join("babel.rhai"),
-        )
-        .await?;
-        fs::copy(
-            testing_babel_path_absolute(),
-            make_node_dir(&nodes_dir, invalid_node_state.id)
-                .await
-                .join("babel.rhai"),
-        )
-        .await?;
         fs::create_dir_all(nodes_dir.join("4931bafa-92d9-4521-9fc6-a77eee047533"))
             .await
             .unwrap();
@@ -1573,18 +1170,20 @@ mod tests {
         .await?;
 
         let mut pal = test_env.default_pal();
-        let tmp_root = test_env.tmp_root.clone();
         pal.expect_available_cpus().return_const(1usize);
         pal.expect_create_node_connection()
             .with(predicate::eq(node_state.id))
             .returning(dummy_connection_mock);
+        let testing_babel_script = test_env.default_script.clone();
         pal.expect_attach_vm()
             .with(
                 predicate::eq(default_bv_context()),
                 predicate::eq(node_state.clone()),
             )
             .returning(move |_, _| {
-                let mut vm = default_vm(tmp_root.clone());
+                let mut vm = MockTestVM::new();
+                let script = testing_babel_script.clone();
+                vm.expect_plugin().returning(move || Ok(script.clone()));
                 vm.expect_state().return_const(VmState::SHUTOFF);
                 Ok(vm)
             });
@@ -1603,14 +1202,14 @@ mod tests {
         let nodes = NodesManager::load(pal, config).await?;
         assert_eq!(2, nodes.nodes_list().await.len());
         assert_eq!(
-            "first node",
+            "node name",
             nodes.node_state_cache(node_state.id).await?.name
         );
         assert_eq!(
-            NodeStatus::Stopped,
+            NodeStatus::Running,
             nodes.expected_status(node_state.id).await?
         );
-        assert_eq!(node_state.id, nodes.node_id_for_name("first node").await?);
+        assert_eq!(node_state.id, nodes.node_id_for_name("node name").await?);
         assert_eq!(
             NodeStatus::Failed,
             nodes.status(invalid_node_state.id).await?
@@ -1628,7 +1227,7 @@ mod tests {
             nodes.status(invalid_node_state.id).await.unwrap()
         );
         assert_eq!(
-            NodeStatus::Stopped,
+            NodeStatus::Running,
             nodes.expected_status(invalid_node_state.id).await.unwrap()
         );
         assert_eq!(
@@ -1649,27 +1248,32 @@ mod tests {
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
 
-        let node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
-        let node_config = test_env.build_node_config("node name", "192.168.0.7", "192.168.0.1");
-        let new_image = NodeImage {
-            protocol: "testing".to_string(),
-            node_type: "validator".to_string(),
-            node_version: "3.2.1".to_string(),
-        };
-        let cpu_devourer_image = NodeImage {
-            protocol: "testing".to_string(),
-            node_type: "validator".to_string(),
-            node_version: "3.4.7".to_string(),
-        };
-        const UPDATED_REQUIREMENTS: Requirements = Requirements {
-            vcpu_count: 2,
-            mem_size_mb: 4096,
-            disk_size_gb: 3,
-        };
-        let mut vm_mock = default_vm(test_env.tmp_root.clone());
+        let mut node_state = build_node_state("node name", "192.168.0.7", "192.168.0.1");
+        node_state.assigned_cpus = vec![4];
+        let mut new_state = node_state.clone();
+        new_state.initialized = false;
+        new_state.image.id = "new-image-id".to_string();
+        new_state.software_version = "3.2.1".to_string();
+        new_state.image.uri = "new.uri".to_string();
+        new_state.vm_config.vcpu_count = 2;
+        new_state.vm_config.mem_size_mb = 4096;
+        new_state.vm_config.disk_size_gb = 3;
+        new_state.assigned_cpus = vec![4, 3];
+        let mut vm_mock = MockTestVM::new();
+        let script = test_env.default_script.clone();
+        vm_mock
+            .expect_plugin()
+            .once()
+            .returning(move || Ok(script.clone()));
+        let script = test_env.default_script.clone();
+        vm_mock.expect_plugin().once().returning(move || {
+            let mut truncated = script.clone();
+            truncated.truncate(truncated.len() - 30); // truncate info function
+            Ok(truncated)
+        });
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
-        vm_mock.expect_release().return_once(|| Ok(()));
-        add_create_node_expectations(&mut pal, 1, vec![4], node_id, node_config.clone(), vm_mock);
+        vm_mock.expect_upgrade().return_once(|_| Ok(()));
+        add_create_node_expectations(&mut pal, 1, node_state.clone(), vm_mock);
         pal.expect_available_resources()
             .withf(move |req| 1 == req.len() as u32)
             .once()
@@ -1679,79 +1283,27 @@ mod tests {
             .withf(move |req| 1 == req.len() as u32)
             .times(2)
             .returning(|_| {
-                Ok(Requirements {
+                Ok(pal::AvailableResources {
                     vcpu_count: 5,
                     mem_size_mb: 4096,
                     disk_size_gb: 4,
                 })
             });
-        pal.expect_apply_firewall_config()
-            .once()
-            .with(predicate::eq(NodeFirewallConfig {
-                id: node_id,
-                ip: IpAddr::from_str(&node_config.ip).unwrap(),
-                iface: "bvbr7".to_string(),
-                config: firewall::Config {
-                    default_in: firewall::Action::Deny,
-                    default_out: firewall::Action::Allow,
-                    rules: vec![],
-                },
-            }))
-            .returning(|_| Ok(()));
-        let mut expected_updated_state = expected_node_state(
-            node_id,
-            node_config.clone(),
-            vec![3, 4],
-            Some(new_image.clone()),
-        );
-        expected_updated_state.initialized = false;
-        let tmp_root = test_env.tmp_root.clone();
         pal.expect_attach_vm()
             .with(
                 predicate::eq(default_bv_context()),
-                predicate::eq(expected_updated_state),
+                predicate::eq(new_state.clone()),
             )
-            .return_once(move |_, _| Ok(default_vm(tmp_root.clone())));
+            .return_once(move |_, _| Ok(MockTestVM::new()));
+        add_firewall_expectation(&mut pal, new_state.clone());
 
         let nodes = NodesManager::load(pal, config).await?;
 
-        let (test_server, _http_server, http_mocks) = test_env
-            .start_test_server(vec![
-                (
-                    test_env.test_image.clone(),
-                    include_bytes!("../tests/babel.rhai").to_vec(),
-                ),
-                (
-                    new_image.clone(),
-                    format!("{} requirements: #{{ vcpu_count: {}, mem_size_mb: {}, disk_size_gb: {}}}}};",
-                            UPGRADED_IMAGE_RHAI_TEMPLATE, UPDATED_REQUIREMENTS.vcpu_count, UPDATED_REQUIREMENTS.mem_size_mb, UPDATED_REQUIREMENTS.disk_size_gb).into_bytes(),
-                ),
-                (
-                    cpu_devourer_image.clone(),
-                    CPU_DEVOURER_IMAGE_RHAI.to_owned().into_bytes(),
-                ),
-            ])
-            .await;
-
-        nodes.create(node_id, node_config.clone()).await?;
-        assert_eq!(
-            NodeStateCache {
-                name: node_config.name.clone(),
-                image: node_config.image.clone(),
-                network: node_config.network.clone(),
-                ip: node_config.ip.clone(),
-                gateway: node_config.gateway.clone(),
-                started_at: None,
-                dev_mode: node_config.dev_mode,
-                requirements: TEST_NODE_REQUIREMENTS,
-                properties: node_config.properties.clone(),
-                assigned_cpus: vec![4],
-            },
-            nodes.node_state_cache(node_id).await?
-        );
+        nodes.create(node_state.clone()).await?;
+        assert_eq!(node_state, nodes.node_state_cache(node_state.id).await?);
         {
             let mut nodes_list = nodes.nodes.write().await;
-            let MaybeNode::Node(node) = nodes_list.get_mut(&node_id).unwrap() else {
+            let MaybeNode::Node(node) = nodes_list.get_mut(&node_state.id).unwrap() else {
                 panic!("unexpected broken node")
             };
             let mut node = node.write().await;
@@ -1761,88 +1313,66 @@ mod tests {
         assert_eq!(
             "BV internal error: failed to get available resources",
             nodes
-                .upgrade(node_id, new_image.clone())
+                .upgrade(new_state.clone())
                 .await
                 .unwrap_err()
                 .to_string()
         );
-        nodes.upgrade(node_id, new_image.clone()).await?;
+        nodes.upgrade(new_state.clone()).await?;
         let not_found_id = Uuid::new_v4();
+        let mut not_found_state = new_state.clone();
+        not_found_state.id = not_found_id;
         assert_eq!(
             format!("Node with {not_found_id} not found"),
             nodes
-                .upgrade(not_found_id, new_image.clone())
+                .upgrade(not_found_state)
                 .await
                 .unwrap_err()
                 .to_string()
         );
-        assert_eq!(
-            NodeStateCache {
-                name: node_config.name,
-                image: new_image.clone(),
-                network: node_config.network,
-                ip: node_config.ip,
-                gateway: node_config.gateway,
-                started_at: None,
-                dev_mode: node_config.dev_mode,
-                requirements: UPDATED_REQUIREMENTS.clone(),
-                properties: node_config.properties,
-                assigned_cpus: vec![3, 4],
-            },
-            nodes.node_state_cache(node_id).await?
-        );
+        assert_eq!(new_state, nodes.node_state_cache(new_state.id).await?);
         {
             let mut nodes_list = nodes.nodes.write().await;
-            let MaybeNode::Node(node) = nodes_list.get_mut(&node_id).unwrap() else {
+            let MaybeNode::Node(node) = nodes_list.get_mut(&node_state.id).unwrap() else {
                 panic!("unexpected broken node")
             };
             let node = node.write().await;
             assert!(!node.state.initialized);
             assert!(!node.babel_engine.has_capability("info"));
         }
+
+        new_state.image.id = "another-id".to_string();
+        let mut cpu_devourer_node_state = new_state.clone();
+        cpu_devourer_node_state.vm_config.vcpu_count = 2048;
         assert_eq!(
             "BV internal error: Not enough vcpu to allocate for the node",
             nodes
-                .upgrade(node_id, cpu_devourer_image.clone())
+                .upgrade(cpu_devourer_node_state.clone())
                 .await
                 .unwrap_err()
                 .to_string()
         );
+        let mut new_proto_node_state = new_state.clone();
+        new_proto_node_state.blockchain_id = "different_chain".to_string();
         assert_eq!(
-            "BV internal error: Cannot upgrade protocol to `differen_chain`",
+            "BV internal error: Cannot upgrade protocol to `different_chain`",
             nodes
-                .upgrade(
-                    node_id,
-                    NodeImage {
-                        protocol: "differen_chain".to_string(),
-                        node_type: "validator".to_string(),
-                        node_version: "1.2.3".to_string(),
-                    }
-                )
+                .upgrade(new_proto_node_state)
                 .await
                 .unwrap_err()
                 .to_string()
         );
+        let mut new_archive_node_state = new_state.clone();
+        new_archive_node_state.image.archive_id = "different_archive".to_string();
         assert_eq!(
-            "BV internal error: Cannot upgrade node type to `node`",
+            "BV internal error: Cannot upgrade node to version that uses different data set `different_archive`",
             nodes
-                .upgrade(
-                    node_id,
-                    NodeImage {
-                        protocol: "testing".to_string(),
-                        node_type: "node".to_string(),
-                        node_version: "1.2.3".to_string(),
-                    }
-                )
+                .upgrade(new_archive_node_state)
                 .await
                 .unwrap_err()
                 .to_string()
         );
 
-        for mock in http_mocks {
-            mock.assert();
-        }
-        test_server.assert().await;
         Ok(())
     }
 
@@ -1851,23 +1381,25 @@ mod tests {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
-        let node_id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap();
-        let node_config = test_env.build_node_config("node name", "192.168.0.7", "192.168.0.1");
+        let mut node_state = default_node_state();
+        node_state.expected_status = NodeStatus::Stopped;
+        let node_id = node_state.id;
 
         pal.expect_available_cpus().return_const(1usize);
         pal.expect_available_resources()
             .withf(move |req| req.is_empty())
             .once()
             .returning(available_test_resources);
-        add_firewall_expectation(
-            &mut pal,
-            node_id,
-            IpAddr::from_str(&node_config.ip).unwrap(),
-        );
-        let tmp_root = test_env.tmp_root.clone();
+        add_firewall_expectation(&mut pal, node_state.clone());
+        let script = test_env.default_script.clone();
         pal.expect_create_vm().return_once(move |_, _| {
-            let mut mock = default_vm(tmp_root.clone());
+            let mut mock = MockTestVM::new();
+            let script = script.clone();
             let mut seq = Sequence::new();
+            mock.expect_plugin()
+                .times(1)
+                .in_sequence(&mut seq)
+                .returning(move || Ok(script.clone()));
             mock.expect_state()
                 .times(6)
                 .in_sequence(&mut seq)
@@ -1925,13 +1457,7 @@ mod tests {
             nodes: NodesManager::load(pal, config).await?,
         };
 
-        let (test_server, _http_server, http_mocks) = test_env
-            .start_test_server(vec![(
-                test_env.test_image.clone(),
-                include_bytes!("../tests/babel.rhai").to_vec(),
-            )])
-            .await;
-        sut.nodes.create(node_id, node_config.clone()).await?;
+        sut.nodes.create(node_state.clone()).await?;
         // no recovery needed - node is expected to be stopped
         sut.nodes.recover().await;
 
@@ -1967,11 +1493,6 @@ mod tests {
         .await;
         sut.nodes.recover().await;
 
-        for mock in http_mocks {
-            mock.assert();
-        }
-        test_server.assert().await;
-
         Ok(())
     }
 
@@ -1989,60 +1510,4 @@ mod tests {
             call_on_node(&mut *node.write().await);
         }
     }
-
-    const UPGRADED_IMAGE_RHAI_TEMPLATE: &str = r#"
-const METADATA = #{
-    min_babel_version: "0.0.9",
-    kernel: "5.10.174-build.1+fc.ufw",
-    node_version: "1.15.9",
-    protocol: "testing",
-    node_type: "validator",
-    nets: #{
-        test: #{
-            url: "https://testnet-api.helium.wtf/v1/",
-            net_type: "test",
-        },
-    },
-    babel_config: #{
-        log_buffer_capacity_mb: 128,
-        swap_size_mb: 512,
-        ramdisks: []
-    },
-    firewall: #{
-        default_in: "deny",
-        default_out: "allow",
-        rules: [],
-    },
-"#;
-
-    const CPU_DEVOURER_IMAGE_RHAI: &str = r#"
-const METADATA = #{
-    min_babel_version: "0.0.9",
-    kernel: "5.10.174-build.1+fc.ufw",
-    node_version: "1.15.9",
-    protocol: "huge_blockchain",
-    node_type: "validator",
-    requirements: #{
-        vcpu_count: 2048,
-        mem_size_mb: 2048,
-        disk_size_gb: 1,
-    },
-    nets: #{
-        test: #{
-            url: "https://testnet-api.helium.wtf/v1/",
-            net_type: "test",
-        },
-    },
-    babel_config: #{
-        log_buffer_capacity_mb: 128,
-        swap_size_mb: 512,
-        ramdisks: []
-    },
-    firewall: #{
-        default_in: "deny",
-        default_out: "allow",
-        rules: [],
-    },
-};
-"#;
 }

@@ -4,55 +4,42 @@ use crate::{
     config,
     config::SharedConfig,
     hosts,
-    node_state::{NodeImage, NodeProperties, NodeStatus},
-    nodes_manager::{self, MaybeNode, NodeConfig, NodesManager},
+    node_state::{NodeImage, NodeProperties, NodeState, NodeStatus},
+    nodes_manager::{self, MaybeNode, NodesManager},
     pal::Pal,
-    services,
-    services::api::{self, common, pb},
-    {get_bv_status, set_bv_status, utils, ServiceStatus}, {node_metrics, BV_VAR_PATH},
+    services::{
+        self,
+        api::{self, common, pb},
+        blockchain::NodeType,
+    },
+    {get_bv_status, set_bv_status, ServiceStatus}, {node_metrics, BV_VAR_PATH},
 };
 use babel_api::engine::JobsInfo;
-use babel_api::metadata::Requirements;
-use chrono::Utc;
 use eyre::{anyhow, Context};
-use petname::Petnames;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::str::FromStr;
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 use tonic::{Request, Response, Status};
-use tracing::{info, instrument};
+use tracing::instrument;
 use uuid::Uuid;
 
 // Data that we display in cli
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NodeDisplayInfo {
-    pub id: Uuid,
-    pub name: String,
-    pub image: NodeImage,
-    pub network: String,
-    pub ip: String,
-    pub gateway: String,
     pub status: NodeStatus,
-    pub uptime: Option<i64>,
-    pub requirements: Option<Requirements>,
-    pub properties: NodeProperties,
-    pub assigned_cpus: Vec<usize>,
-    pub dev_mode: bool,
+    pub state: NodeState,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct NodeCreateRequest {
-    pub image: NodeImage,
+pub struct CreateNodeRequest {
+    pub blockchain_name: String,
     pub network: String,
-    pub dev_mode: bool,
-    pub ip: Option<String>,
-    pub gateway: Option<String>,
-    pub props: Option<String>,
+    pub node_type: Option<NodeType>,
+    pub software: String,
+    pub version: Option<String>,
+    pub build_version: Option<u64>,
+    pub properties: NodeProperties,
 }
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct CreateDevNodeRequest {}
 
 #[tonic_rpc::tonic_rpc(bincode)]
 trait Service {
@@ -63,8 +50,7 @@ trait Service {
     fn get_node_status(id: Uuid) -> NodeStatus;
     fn get_node(id: Uuid) -> NodeDisplayInfo;
     fn get_nodes() -> Vec<NodeDisplayInfo>;
-    fn create_node(request: NodeCreateRequest) -> NodeDisplayInfo;
-    fn upgrade_node(id: Uuid, image: NodeImage);
+    fn create_node(req: CreateNodeRequest) -> NodeDisplayInfo;
     fn start_node(id: Uuid);
     fn stop_node(id: Uuid, force: bool);
     fn delete_node(id: Uuid);
@@ -211,46 +197,14 @@ where
     #[instrument(skip(self), ret(Debug))]
     async fn create_node(
         &self,
-        request: Request<NodeCreateRequest>,
+        request: Request<CreateNodeRequest>,
     ) -> Result<Response<NodeDisplayInfo>, Status> {
         status_check().await?;
-        let req = request.into_inner();
-        let dev_mode = req.dev_mode || self.dev_mode;
-        if !dev_mode && (req.ip.is_some() || req.gateway.is_some()) {
-            return Err(Status::invalid_argument(
-                "custom ip and gateway is allowed only in dev mode",
-            ));
-        }
-        Ok(Response::new(if dev_mode {
-            self.create_dev_node(req)
+        Ok(Response::new(
+            self.create_node(request.into_inner())
                 .await
-                .map_err(|err| Status::unknown(format!("{err:#}")))?
-        } else {
-            self.create_node_with_api(req)
-                .await
-                .map_err(|err| Status::unknown(format!("{err:#}")))?
-        }))
-    }
-
-    #[instrument(skip(self), ret(Debug))]
-    async fn upgrade_node(
-        &self,
-        request: Request<(Uuid, NodeImage)>,
-    ) -> Result<Response<()>, Status> {
-        status_check().await?;
-        let (id, image) = request.into_inner();
-
-        if self.is_dev_node(id).await? {
-            self.nodes_manager
-                .upgrade(id, image)
-                .await
-                .map_err(|e| Status::unknown(format!("{e:#}")))?;
-            Ok(Response::new(()))
-        } else {
-            Err(Status::unimplemented(
-                "non-dev nodes upgrade is managed by API, manual trigger for upgrade is not possible",
-            ))
-        }
+                .map_err(|err| Status::unknown(format!("{err:#}")))?,
+        ))
     }
 
     #[instrument(skip(self), ret(Debug))]
@@ -519,21 +473,8 @@ where
                 if let Ok(node) = node_lock.try_read() {
                     let status = node.status().await;
                     NodeDisplayInfo {
-                        id: node.state.id,
-                        name: node.state.name.clone(),
-                        image: node.state.image.clone(),
-                        network: node.state.network.clone(),
+                        state: node.state.clone(),
                         status,
-                        ip: node.state.network_interface.ip.to_string(),
-                        gateway: node.state.network_interface.gateway.to_string(),
-                        uptime: node
-                            .state
-                            .started_at
-                            .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                        dev_mode: node.state.dev_mode,
-                        requirements: Some(node.state.requirements.clone()),
-                        properties: node.state.properties.clone(),
-                        assigned_cpus: node.state.assigned_cpus.clone(),
                     }
                 } else {
                     let cache = self
@@ -542,115 +483,51 @@ where
                         .await
                         .map_err(|e| Status::unknown(format!("{e:#}")))?;
                     NodeDisplayInfo {
-                        id,
-                        name: cache.name,
-                        image: cache.image,
-                        network: cache.network,
+                        state: cache,
                         status: NodeStatus::Busy,
-                        ip: cache.ip,
-                        gateway: cache.gateway,
-                        uptime: cache
-                            .started_at
-                            .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                        dev_mode: cache.dev_mode,
-                        requirements: Some(cache.requirements),
-                        properties: cache.properties,
-                        assigned_cpus: cache.assigned_cpus,
                     }
                 }
             }
             MaybeNode::BrokenNode(state) => NodeDisplayInfo {
-                id,
-                name: state.name.clone(),
-                image: state.image.clone(),
-                network: state.network.clone(),
+                state: state.clone(),
                 status: NodeStatus::Failed,
-                ip: state.network_interface.ip.to_string(),
-                gateway: state.network_interface.gateway.to_string(),
-                uptime: state
-                    .started_at
-                    .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                dev_mode: state.dev_mode,
-                requirements: Some(state.requirements.clone()),
-                properties: state.properties.clone(),
-                assigned_cpus: state.assigned_cpus.clone(),
             },
         })
     }
 
-    async fn create_dev_node(&self, req: NodeCreateRequest) -> eyre::Result<NodeDisplayInfo> {
-        let id = Uuid::new_v4();
-        let name = Petnames::default().generate_one(3, "-");
-        let properties = parse_props(&req)?.into_iter().collect();
-        let (ip, gateway) = self.discover_ip_and_gateway(&req, id).await?;
-        let cache = self
-            .nodes_manager
-            .create(
-                id,
-                NodeConfig {
-                    name: name.clone(),
-                    image: req.image.clone(),
-                    ip: ip.clone(),
-                    gateway: gateway.clone(),
-                    properties,
-                    network: req.network.clone(),
-                    rules: vec![],
-                    dev_mode: true,
-                    org_id: Default::default(),
-                },
+    async fn create_node(&self, req: CreateNodeRequest) -> eyre::Result<NodeDisplayInfo> {
+        // map properties into api format
+        let properties = req
+            .properties
+            .clone()
+            .into_iter()
+            .map(|(key, value)| common::ImagePropertyValue { key, value })
+            .collect::<Vec<_>>();
+        let (host_id, org_id) = self.get_host_and_org_id().await?;
+        let node_type = req.node_type.unwrap_or(NodeType::Rpc);
+        let image_id = self
+            .get_image_id(
+                &req.blockchain_name,
+                node_type,
+                req.network,
+                req.software,
+                req.version,
+                req.build_version,
             )
             .await?;
-        Ok(NodeDisplayInfo {
-            id,
-            name,
-            image: req.image,
-            network: req.network,
-            ip,
-            gateway,
-            dev_mode: true,
-            status: NodeStatus::Stopped,
-            uptime: None,
-            requirements: Some(cache.requirements),
-            properties: cache.properties,
-            assigned_cpus: cache.assigned_cpus,
-        })
-    }
-
-    async fn create_node_with_api(&self, req: NodeCreateRequest) -> eyre::Result<NodeDisplayInfo> {
-        // map properties into api format
-        let properties = parse_props(&req)?
-            .into_iter()
-            .map(|(key, value)| pb::NodeProperty {
-                name: key.clone(),
-                display_name: format!("BV CLI {key}"),
-                ui_type: common::UiType::Text.into(),
-                disabled: false,
-                required: false,
-                value,
-            })
-            .collect::<Vec<_>>();
-        let node_properties = properties
-            .iter()
-            .map(|p| (p.name.clone(), p.value.clone()))
-            .collect();
-        let (host_id, org_id) = self.get_host_and_org_id().await?;
-        let blockchain_id = self.get_blockchain_id(&req.image.protocol).await?;
 
         let mut node_client = self.connect_to_node_service().await?;
         let mut created_nodes = node_client
             .create(pb::NodeServiceCreateRequest {
                 old_node_id: None,
                 org_id,
-                blockchain_id,
-                version: req.image.node_version.clone(),
-                node_type: common::NodeType::from_str(&req.image.node_type)?.into(),
-                properties,
-                network: req.network.clone(),
-                placement: Some(pb::NodePlacement {
-                    placement: Some(pb::node_placement::Placement::HostId(host_id)),
+                placement: Some(common::NodePlacement {
+                    placement: Some(common::node_placement::Placement::HostId(host_id)),
                 }),
-                allow_ips: vec![],
-                deny_ips: vec![],
+                set_properties: properties,
+                image_id,
+                add_rules: vec![],
+                tags: None,
             })
             .await
             .with_context(|| "create node via API failed")?
@@ -663,69 +540,59 @@ where
             _ => Err(anyhow!("unexpected multiple node creation response")),
         }?;
 
-        Ok(NodeDisplayInfo {
-            id: Uuid::parse_str(&node.id).with_context(|| {
-                format!("node_create received invalid node id from API: {}", node.id)
-            })?,
-            name: node.node_name,
-            image: req.image,
-            network: req.network,
-            ip: node.ip,
-            gateway: node.ip_gateway,
-            status: NodeStatus::Stopped,
-            uptime: None,
-            dev_mode: false,
-            requirements: None,
-            properties: node_properties,
-            assigned_cpus: vec![],
-        })
-    }
+        let config = node.config.as_ref();
 
-    /// Try to auto-discover ip and gateway for the node.
-    async fn discover_ip_and_gateway(
-        &self,
-        req: &NodeCreateRequest,
-        id: Uuid,
-    ) -> eyre::Result<(String, String)> {
-        let net = utils::discover_net_params(&self.config.read().await.iface)
-            .await
+        let requirements = config
+            .and_then(|config| config.vm.as_ref().map(|vm| vm.clone().into()))
             .unwrap_or_default();
-        let gateway = match &req.gateway {
-            None => {
-                let gateway = net
-                    .gateway
-                    .clone()
-                    .ok_or(anyhow!("can't auto discover gateway - provide it manually",))?;
-                info!("Auto-discovered gateway `{gateway} for node '{id}'");
-                gateway
-            }
-            Some(gateway) => gateway.clone(),
-        };
-        let ip = match &req.ip {
-            None => {
-                let mut used_ips = vec![];
-                used_ips.push(gateway.clone());
-                if let Some(host_ip) = &net.ip {
-                    used_ips.push(host_ip.clone());
-                }
-                for (_, node) in self.nodes_manager.nodes_list().await.iter() {
-                    used_ips.push(
-                        match node {
-                            MaybeNode::Node(node) => node.read().await.state.network_interface.ip,
-                            MaybeNode::BrokenNode(state) => state.network_interface.ip,
-                        }
-                        .to_string(),
-                    );
-                }
-                let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {
-                    anyhow!("failed to auto assign ip - provide it manually : {err:#}")
-                })?;
-                info!("Auto-assigned ip `{ip}` for node '{id}'");
-                ip
-            }
-            Some(ip) => ip.clone(),
-        };
-        Ok((ip, gateway))
+        let firewall = config
+            .and_then(|config| config.firewall.clone().map(|config| config.try_into()))
+            .unwrap_or(Ok(Default::default()))?;
+
+        Ok(NodeDisplayInfo {
+            state: NodeState {
+                id: Uuid::parse_str(&node.id).with_context(|| {
+                    format!("node_create received invalid node id from API: {}", node.id)
+                })?,
+                name: node.node_name,
+                blockchain_id: node.blockchain_id,
+                dev_mode: false,
+                ip: node.ip_address.parse()?,
+                gateway: node.ip_gateway.parse()?,
+
+                properties: req.properties,
+                firewall,
+
+                display_name: node.display_name,
+                org_id: node.org_id,
+                org_name: node.org_name,
+                blockchain_name: node.blockchain_name,
+                image_key: node
+                    .blockchain_version_key
+                    .ok_or_else(|| anyhow!("Missing blockchain_version_key"))?
+                    .try_into()?,
+                dns_name: node.dns_name,
+
+                software_version: node.blockchain_software_version,
+                vm_config: requirements,
+                image: NodeImage {
+                    id: node.image_id,
+                    config_id: node.config_id,
+                    archive_id: config
+                        .map(|config| config.archive_id.clone())
+                        .unwrap_or_default(),
+                    uri: Default::default(),
+                },
+
+                assigned_cpus: vec![],
+                expected_status: NodeStatus::Stopped,
+                started_at: None,
+                initialized: false,
+                restarting: false,
+                apptainer_config: None,
+            },
+            status: NodeStatus::Stopped,
+        })
     }
 
     /// Get org_id associated with this host.
@@ -752,44 +619,28 @@ where
         ))
     }
 
-    /// Find blockchain id by protocol name.
-    async fn get_blockchain_id(&self, protocol: &str) -> eyre::Result<String> {
-        let protocol = protocol.to_lowercase();
-        let mut blockchain_client = services::connect_to_api_service(
-            &self.config,
-            pb::blockchain_service_client::BlockchainServiceClient::with_interceptor,
+    /// Find image id by protocol name and version.
+    async fn get_image_id(
+        &self,
+        protocol: &str,
+        node_type: NodeType,
+        network: String,
+        software: String,
+        version: Option<String>,
+        build_version: Option<u64>,
+    ) -> eyre::Result<String> {
+        services::blockchain::BlockchainService::new(services::DefaultConnector {
+            config: self.config.clone(),
+        })
+        .await?
+        .get_image_id(
+            &protocol.to_lowercase(),
+            node_type,
+            network,
+            software,
+            version,
+            build_version,
         )
         .await
-        .with_context(|| "error connecting to api")?;
-        let mut blockchains = blockchain_client
-            .list(pb::BlockchainServiceListRequest {
-                org_ids: vec![],
-                offset: 0,
-                limit: 16,
-                search: Some(pb::BlockchainSearch {
-                    operator: common::SearchOperator::And.into(),
-                    id: None,
-                    name: Some(protocol.clone()),
-                    display_name: None,
-                }),
-                sort: vec![],
-            })
-            .await
-            .with_context(|| "can't fetch blockchains list")?
-            .into_inner();
-        Ok(blockchains
-            .blockchains
-            .pop()
-            .ok_or(anyhow!("blockchain id not found for {protocol}"))?
-            .id)
     }
-}
-
-fn parse_props(req: &NodeCreateRequest) -> eyre::Result<HashMap<String, String>> {
-    Ok(req
-        .props
-        .as_deref()
-        .map(serde_json::from_str::<HashMap<String, String>>)
-        .transpose()?
-        .unwrap_or_default())
 }

@@ -11,8 +11,8 @@ use tonic::{
 };
 
 pub mod api;
+pub mod archive;
 pub mod blockchain;
-pub mod blockchain_archive;
 pub mod crypt;
 pub mod mqtt;
 

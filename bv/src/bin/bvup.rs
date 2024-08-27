@@ -193,7 +193,7 @@ async fn main() -> Result<()> {
         let create = pb::HostServiceCreateRequest {
             provision_token: cmd_args.provision_token.unwrap(),
             name: host_info.name.clone(),
-            version: crate_version!().to_string(),
+            bv_version: crate_version!().to_string(),
             cpu_count,
             mem_size_bytes: host_info.memory_bytes,
             disk_size_bytes: host_info.disk_space_bytes,
