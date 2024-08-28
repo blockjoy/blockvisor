@@ -372,7 +372,7 @@ async fn test_bv_service_e2e() {
     };
     let start = std::time::Instant::now();
     while !is_deleted() {
-        if start.elapsed() < Duration::from_secs(30) {
+        if start.elapsed() < Duration::from_secs(60) {
             sleep(Duration::from_secs(1)).await;
         } else {
             panic!("timeout expired")

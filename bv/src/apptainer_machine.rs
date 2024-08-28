@@ -229,9 +229,22 @@ impl ApptainerMachine {
 
     async fn stop_container(&mut self) -> Result<()> {
         if self.is_container_running() {
-            run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &self.vm_name]).await?;
+            if let Err(err) = run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &self.vm_name]).await
+            {
+                if run_cmd(APPTAINER_BIN_NAME, ["instance", "list", &self.vm_name])
+                    .await?
+                    .contains(&self.vm_name)
+                {
+                    return Err(err.into());
+                } else {
+                    warn!("container stop failed, but finally after all instance is gone: {err:#}");
+                }
+            }
         }
         self.apptainer_pid = None;
+        if self.apptainer_pid_path.exists() {
+            fs::remove_file(&self.apptainer_pid_path).await?;
+        }
         Ok(())
     }
 
