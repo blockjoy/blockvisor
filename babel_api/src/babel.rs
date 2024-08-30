@@ -1,8 +1,7 @@
-use crate::engine::UploadManifest;
 use crate::{
     engine::{
-        DownloadManifest, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest,
-        ShResponse,
+        Chunk, DownloadManifest, DownloadMetadata, HttpResponse, JobConfig, JobInfo, JobsInfo,
+        JrpcRequest, RestRequest, ShResponse, UploadSlots,
     },
     metadata::BabelConfig,
     utils::{Binary, BinaryStatus},
@@ -82,14 +81,16 @@ pub trait JobsMonitor {
 pub trait BabelEngine {
     /// Send `DownloadManifest` blueprint to API.
     fn put_download_manifest(manifest: DownloadManifest);
-    /// Send `DownloadManifest` blueprint to API.
-    fn get_download_manifest() -> DownloadManifest;
-    /// Send `DownloadManifest` blueprint to API.
-    fn get_upload_manifest(
-        slots: u32,
-        url_expires_secs: u32,
+    /// Get `DownloadMetadata` from API.
+    fn get_download_metadata() -> DownloadMetadata;
+    /// Get `Chunk`s to download from API.
+    fn get_download_chunks(data_version: u64, chunk_indexes: Vec<u32>) -> Vec<Chunk>;
+    /// Get upload `Slot`s from API.
+    fn get_upload_slots(
         data_version: Option<u64>,
-    ) -> UploadManifest;
+        slots: Vec<u32>,
+        url_expires_secs: u32,
+    ) -> UploadSlots;
     /// Notify about finished job, so upgrade can be retried.
     fn upgrade_blocking_jobs_finished();
     /// Sent error message to blockvisord so alert can be triggered.

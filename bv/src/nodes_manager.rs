@@ -926,7 +926,6 @@ mod tests {
             api::{common, pb},
             blockchain::ROOTFS_FILE,
         },
-        utils,
     };
     use assert_fs::TempDir;
     use bv_tests_utils::start_test_server;
@@ -984,7 +983,7 @@ mod tests {
     struct TestEnv {
         tmp_root: PathBuf,
         test_image: NodeImage,
-        _async_panic_checker: utils::tests::AsyncPanicChecker,
+        _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
 
     impl TestEnv {

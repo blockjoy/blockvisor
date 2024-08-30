@@ -128,7 +128,7 @@ async fn run_job(
                 ArchiveJobRunner::new(
                     bv_utils::timer::SysTimer,
                     job_config.restart,
-                    Downloader::prepare(
+                    Downloader::new(
                         connector,
                         destination
                             .unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
@@ -138,8 +138,7 @@ async fn run_job(
                             max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
                             max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
                         )?,
-                    )
-                    .await?,
+                    ),
                 )
                 .run(run, &job_name, &jobs::JOBS_DIR)
                 .await;
@@ -158,7 +157,7 @@ async fn run_job(
             ArchiveJobRunner::new(
                 bv_utils::timer::SysTimer,
                 job_config.restart,
-                Uploader::prepare(
+                Uploader::new(
                     connector,
                     source.unwrap_or(babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf()),
                     exclude.unwrap_or_default(),
@@ -171,8 +170,7 @@ async fn run_job(
                         max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
                         max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
                     )?,
-                )
-                .await?,
+                )?,
             )
             .run(run, &job_name, &jobs::JOBS_DIR)
             .await;

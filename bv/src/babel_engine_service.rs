@@ -1,6 +1,6 @@
 use crate::{babel_engine::NodeInfo, config::SharedConfig, services};
 use async_trait::async_trait;
-use babel_api::engine::{DownloadManifest, UploadManifest};
+use babel_api::engine::{Chunk, DownloadManifest, DownloadMetadata, UploadSlots};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -38,15 +38,15 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         }
     }
 
-    async fn get_download_manifest(
+    async fn get_download_metadata(
         &self,
         _request: Request<()>,
-    ) -> eyre::Result<Response<DownloadManifest>, Status> {
+    ) -> eyre::Result<Response<DownloadMetadata>, Status> {
         debug!(
-            "getting DownloadManifest from API for {}/{}",
+            "getting DownloadMetadata from API for {}/{}",
             self.node_info.image, self.node_info.network
         );
-        match services::blockchain_archive::get_download_manifest(
+        match services::blockchain_archive::get_download_metadata(
             &self.config,
             self.node_info.image.clone(),
             self.node_info.network.clone(),
@@ -57,26 +57,54 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
                 warn!("{err:#}");
                 Err(Status::internal(err.to_string()))
             }
-            Ok(manifest) => Ok(Response::new(manifest)),
+            Ok(metadata) => Ok(Response::new(metadata)),
+        }
+    }
+    async fn get_download_chunks(
+        &self,
+        request: Request<(u64, Vec<u32>)>,
+    ) -> eyre::Result<Response<Vec<Chunk>>, Status> {
+        let (data_version, chunk_indexes) = request.into_inner();
+        debug!(
+            "getting DownloadChunks from API for {}/{}/{}",
+            self.node_info.image, self.node_info.network, data_version
+        );
+        match services::blockchain_archive::get_download_chunks(
+            &self.config,
+            self.node_info.image.clone(),
+            self.node_info.network.clone(),
+            data_version,
+            chunk_indexes,
+        )
+        .await
+        {
+            Err(err) => {
+                warn!("{err:#}");
+                Err(Status::internal(err.to_string()))
+            }
+            Ok(chunks) => Ok(Response::new(chunks)),
         }
     }
 
-    async fn get_upload_manifest(
+    async fn get_upload_slots(
         &self,
-        request: Request<(u32, u32, Option<u64>)>,
-    ) -> eyre::Result<Response<UploadManifest>, Status> {
-        let (slots, url_expires_secs, data_version) = request.into_inner();
+        request: Request<(Option<u64>, Vec<u32>, u32)>,
+    ) -> eyre::Result<Response<UploadSlots>, Status> {
+        let (data_version, slots, url_expires_secs) = request.into_inner();
         debug!(
-            "getting UploadManifest from API for {}/{}/{:?} with {} slots",
-            self.node_info.image, self.node_info.network, data_version, slots
+            "getting UploadSlots from API for {}/{}/{:?} with {} slots",
+            self.node_info.image,
+            self.node_info.network,
+            data_version,
+            slots.len()
         );
-        match services::blockchain_archive::get_upload_manifest(
+        match services::blockchain_archive::get_upload_slots(
             &self.config,
             self.node_info.image.clone(),
             self.node_info.network.clone(),
+            data_version,
             slots,
             url_expires_secs,
-            data_version,
         )
         .await
         {
@@ -84,7 +112,7 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
                 warn!("{err:#}");
                 Err(Status::internal(err.to_string()))
             }
-            Ok(manifest) => Ok(Response::new(manifest)),
+            Ok(slots) => Ok(Response::new(slots)),
         }
     }
 

@@ -221,7 +221,7 @@ pub mod tests {
     use super::*;
     use crate::pal::BabelEngineConnector;
     use assert_fs::TempDir;
-    use babel_api::engine::{PosixSignal, UploadManifest};
+    use babel_api::engine::{Chunk, DownloadMetadata, PosixSignal, UploadSlots};
     use babel_api::{babel::babel_engine_client::BabelEngineClient, engine::DownloadManifest};
     use eyre::Result;
     use mockall::mock;
@@ -238,13 +238,15 @@ pub mod tests {
         #[tonic::async_trait]
         impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngine {
             async fn put_download_manifest(&self, request: Request<DownloadManifest>) -> Result<Response<()>, Status>;
-            async fn get_download_manifest(&self, request: Request<()>) -> Result<Response<DownloadManifest>, Status>;
-            async fn get_upload_manifest(&self, request: Request<(u32, u32, Option<u64>)>) -> Result<Response<UploadManifest>, Status>;
+            async fn get_download_metadata(&self, request: Request<()>) -> Result<Response<DownloadMetadata>, Status>;
+            async fn get_download_chunks(&self, request: Request<(u64, Vec<u32>)>) -> Result<Response<Vec<Chunk>>, Status>;
+            async fn get_upload_slots(&self, request: Request<(Option<u64>, Vec<u32>, u32)>) -> Result<Response<UploadSlots>, Status>;
             async fn upgrade_blocking_jobs_finished(&self, request: Request<()>) -> Result<Response<()>, Status>;
             async fn bv_error(&self, request: Request<String>) -> Result<Response<()>, Status>;
         }
     }
 
+    #[derive(Clone)]
     pub struct DummyConnector {
         pub tmp_dir: PathBuf,
     }

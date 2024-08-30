@@ -1,8 +1,11 @@
 use crate::{download_job, upload_job};
-use babel_api::engine::{JobConfig, JobProgress, JobStatus, JobType, BLOCKCHAIN_DATA_PATH};
+use babel_api::engine::{Chunk, JobConfig, JobProgress, JobStatus, JobType, BLOCKCHAIN_DATA_PATH};
+use bv_utils::run_flag::RunFlag;
 use chrono::{DateTime, Local};
 use eyre::{Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
+use std::fs::File;
+use std::io::{BufRead, Write};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -189,4 +192,38 @@ pub fn status_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
 pub fn progress_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
     let filename = format!("{}.progress", name);
     jobs_status_dir.join(filename)
+}
+
+pub fn load_chunks(path: &Path) -> Result<Vec<Chunk>> {
+    let mut chunks = vec![];
+    if path.exists() {
+        let file = File::open(path)?;
+        for line in std::io::BufReader::new(file).lines() {
+            chunks.push(serde_json::from_str::<Chunk>(&line?)?);
+        }
+    }
+    Ok(chunks)
+}
+
+pub fn save_chunk(path: &Path, chunk: &Chunk) -> Result<()> {
+    let mut file = fs::File::options().append(true).create(true).open(path)?;
+    let mut chunk_serialized = serde_json::to_string(chunk)?;
+    chunk_serialized.push('\n');
+    file.write_all(chunk_serialized.as_bytes())
+        .with_context(|| format!("{}:{chunk:?}", path.display()))?;
+    Ok(())
+}
+
+pub struct RunnersState {
+    pub result: Result<()>,
+    pub run: RunFlag,
+}
+
+impl RunnersState {
+    pub fn handle_error(&mut self, err: eyre::Report) {
+        if self.result.is_ok() {
+            self.result = Err(err);
+            self.run.stop();
+        }
+    }
 }

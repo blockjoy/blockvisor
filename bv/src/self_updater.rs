@@ -229,7 +229,7 @@ mod tests {
         updater: SelfUpdater<MockAsyncTimer, TestConnector>,
         blacklist_path: PathBuf,
         tmp_root: PathBuf,
-        _async_panic_checker: utils::tests::AsyncPanicChecker,
+        _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
 
     impl TestEnv {

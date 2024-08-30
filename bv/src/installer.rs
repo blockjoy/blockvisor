@@ -536,7 +536,6 @@ mod tests {
     use crate::internal_server;
     use crate::node_metrics;
     use crate::node_state::{NodeImage, NodeStatus};
-    use crate::utils;
     use assert_fs::TempDir;
     use babel_api::engine::JobsInfo;
     use bv_tests_utils::rpc::test_channel;
@@ -670,7 +669,7 @@ mod tests {
     /// from other threads will be propagated.
     struct TestEnv {
         tmp_root: PathBuf,
-        _async_panic_checker: utils::tests::AsyncPanicChecker,
+        _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
 
     impl TestEnv {

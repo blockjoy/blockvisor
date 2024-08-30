@@ -176,6 +176,7 @@ pub enum Checksum {
 ///```
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Chunk {
+    pub index: u32,
     /// Persistent chunk key
     pub key: String,
     /// Pre-signed download url (may be temporary),
@@ -208,13 +209,27 @@ pub struct DownloadManifest {
     pub chunks: Vec<Chunk>,
 }
 
+/// Download manifest metadata.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DownloadMetadata {
+    /// Total size of uncompressed data
+    pub total_size: u64,
+    /// Chunk compression type or none
+    pub compression: Option<Compression>,
+    /// Number of chunks
+    pub chunks: u32,
+    /// Archive version number.
+    pub data_version: u64,
+}
+
 /// Slot represents destination for chunk to be uploaded.
 /// This is just placeholder that MAY be used to upload chunk.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Slot {
+    pub index: u32,
     /// Persistent slot/chunk key
     pub key: String,
-    /// Pre-signed upload url (may be temporary)
+    /// Pre-signed upload url (maybe temporary)
     pub url: Url,
 }
 
@@ -222,8 +237,11 @@ pub struct Slot {
 /// of pre-signed upload urls for each chunk to be uploaded.
 /// This is just placeholder that MAY be used to upload data represented then by `DownloadManifest`.
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
-pub struct UploadManifest {
+pub struct UploadSlots {
+    /// Version number for uploaded data. Auto-assigned if `None`.
     pub slots: Vec<Slot>,
+    /// Archive version number.
+    pub data_version: u64,
 }
 
 /// Type of long-running job.
@@ -399,30 +417,7 @@ pub struct ShResponse {
     pub stderr: String,
 }
 
-impl DownloadManifest {
-    /// Validate manifest internal consistency.
-    pub fn validate(&self) -> Result<()> {
-        for chunk in &self.chunks {
-            ensure!(
-                !chunk.destinations.is_empty(),
-                anyhow!("corrupted manifest - expected at least one destination file in chunk")
-            );
-        }
-        let destinations_total_size = self.chunks.iter().fold(0, |acc, item| {
-            acc + item
-                .destinations
-                .iter()
-                .fold(0, |acc, destination| acc + destination.size)
-        });
-        ensure!(
-            self.total_size == destinations_total_size,
-            anyhow!("corrupted manifest - total size {} is different than sum of all destinations sizes {destinations_total_size}", self.total_size)
-        );
-        Ok(())
-    }
-}
-
-impl UploadManifest {
+impl UploadSlots {
     /// Validate manifest internal consistency.
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -522,7 +517,7 @@ impl fmt::Debug for DownloadManifest {
     }
 }
 
-impl fmt::Debug for UploadManifest {
+impl fmt::Debug for UploadSlots {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "UploadManifest(slots: [{:?}, ...])", self.slots.first())
     }

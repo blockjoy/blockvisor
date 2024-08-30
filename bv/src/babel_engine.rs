@@ -773,11 +773,7 @@ fn escape_sh_char(c: char) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        config::Config,
-        pal::BabelClient,
-        utils::{self},
-    };
+    use crate::{config::Config, pal::BabelClient};
     use assert_fs::TempDir;
     use async_trait::async_trait;
     use babel_api::{
@@ -1012,7 +1008,7 @@ mod tests {
         data_path: PathBuf,
         engine: BabelEngine<TestConnection, DummyPlugin>,
         rx: mpsc::Receiver<scheduler::Action>,
-        _async_panic_checker: utils::tests::AsyncPanicChecker,
+        _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
 
     impl TestEnv {

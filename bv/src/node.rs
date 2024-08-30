@@ -635,7 +635,6 @@ pub mod tests {
         },
         scheduler,
         services::{self, blockchain::BABEL_PLUGIN_NAME, ApiInterceptor, AuthToken},
-        utils,
     };
     use assert_fs::TempDir;
     use async_trait::async_trait;
@@ -980,7 +979,7 @@ pub mod tests {
         tmp_root: PathBuf,
         nodes_dir: PathBuf,
         tx: mpsc::Sender<scheduler::Action>,
-        _async_panic_checker: utils::tests::AsyncPanicChecker,
+        _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
 
     impl TestEnv {
