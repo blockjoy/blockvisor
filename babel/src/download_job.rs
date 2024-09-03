@@ -42,16 +42,26 @@ use tracing::error;
 const DOWNLOAD_SINGLE_PART_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const COMPLETED_FILENAME: &str = "download.completed";
 const CHUNKS_FILENAME: &str = "download.chunks";
+const PARTS_FILENAME: &str = "download.parts";
 const METADATA_FILENAME: &str = "download.metadata";
 
 pub fn cleanup_job(meta_dir: &Path, destination_dir: &Path) -> Result<()> {
     let chunks_path = meta_dir.join(CHUNKS_FILENAME);
     if chunks_path.exists() {
-        remove_remnants(load_chunks(&chunks_path)?, destination_dir)?;
         fs::remove_file(&chunks_path).with_context(|| {
             format!(
                 "failed to cleanup download chunks file `{}`",
                 chunks_path.display()
+            )
+        })?;
+    }
+    let parts_path = meta_dir.join(PARTS_FILENAME);
+    if parts_path.exists() {
+        remove_remnants(load_chunks(&parts_path)?, destination_dir)?;
+        fs::remove_file(&parts_path).with_context(|| {
+            format!(
+                "failed to cleanup download parts file `{}`",
+                parts_path.display()
             )
         })?;
     }
@@ -275,6 +285,7 @@ struct ParallelChunkDownloaders<'a, C> {
     config: TransferConfig,
     futures: FuturesUnordered<BoxFuture<'a, Result<Result<()>, JoinError>>>,
     chunks: Vec<Chunk>,
+    parts_path: PathBuf,
     data_version: u64,
     connection_pool: ConnectionPool,
 }
@@ -292,6 +303,7 @@ impl<'a, C: BabelEngineConnector + Clone + Send + Sync + 'static> ParallelChunkD
         let connection_pool = Arc::new(Semaphore::new(config.max_connections));
         let mut chunk_indexes = HashSet::from_iter(0..total_chunks_count);
         chunk_indexes.retain(|index| !downloaded_indexes.contains(index));
+        let parts_path = config.archive_jobs_meta_dir.join(PARTS_FILENAME);
         Self {
             connector,
             run,
@@ -300,6 +312,7 @@ impl<'a, C: BabelEngineConnector + Clone + Send + Sync + 'static> ParallelChunkD
             config,
             futures: FuturesUnordered::new(),
             chunks: Default::default(),
+            parts_path,
             data_version,
             connection_pool,
         }
@@ -329,6 +342,7 @@ impl<'a, C: BabelEngineConnector + Clone + Send + Sync + 'static> ParallelChunkD
                     // skip already downloaded chunks
                     continue;
                 };
+                save_chunk(&self.parts_path, &chunk)?;
                 let downloader = ChunkDownloader::new(
                     self.connector.clone(),
                     chunk,
@@ -1570,197 +1584,197 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test]
-    // async fn test_remnants_after_fail() -> Result<()> {
-    //     let mut test_env = setup_test_env()?;
-    //
-    //     let mut mock = MockBabelEngine::new();
-    //     let metadata = DownloadMetadata {
-    //         total_size: 924,
-    //         compression: None,
-    //         chunks: 2,
-    //         data_version: 0,
-    //     };
-    //     let meta = metadata.clone();
-    //     mock.expect_get_download_metadata()
-    //         .once()
-    //         .returning(move |_| Ok(Response::new(meta.clone())));
-    //     let chunks = vec![Chunk {
-    //         index: 0,
-    //         key: "first_chunk".to_string(),
-    //         url: test_env.url("first_chunk"),
-    //         checksum: Checksum::Blake3([
-    //             85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8, 190, 219,
-    //             61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
-    //         ]),
-    //         size: 600,
-    //         destinations: vec![
-    //             FileLocation {
-    //                 path: PathBuf::from("zero.file"),
-    //                 pos: 0,
-    //                 size: 100,
-    //             },
-    //             FileLocation {
-    //                 path: PathBuf::from("first.file"),
-    //                 pos: 0,
-    //                 size: 200,
-    //             },
-    //             FileLocation {
-    //                 path: PathBuf::from("second.file"),
-    //                 pos: 0,
-    //                 size: 300,
-    //             },
-    //         ],
-    //     }];
-    //     mock.expect_get_download_chunks()
-    //         .once()
-    //         .returning(move |_| Ok(Response::new(chunks.clone())));
-    //
-    //     let chunks = vec![Chunk {
-    //         index: 1,
-    //         key: "second_chunk".to_string(),
-    //         url: test_env.url("second_chunk"),
-    //         checksum: Checksum::Sha1([0u8; 20]),
-    //         size: 324,
-    //         destinations: vec![FileLocation {
-    //             path: PathBuf::from("third.file"),
-    //             pos: 0,
-    //             size: 324,
-    //         }],
-    //     }];
-    //     mock.expect_get_download_chunks()
-    //         .once()
-    //         .returning(move |_| Ok(Response::new(chunks.clone())));
-    //
-    //     let another_meta = DownloadMetadata {
-    //         total_size: 1,
-    //         compression: None,
-    //         chunks: 1,
-    //         data_version: 0,
-    //     };
-    //     let meta = another_meta.clone();
-    //     mock.expect_get_download_metadata()
-    //         .once()
-    //         .returning(move |_| Ok(Response::new(meta.clone())));
-    //     let chunks = vec![Chunk {
-    //         index: 0,
-    //         key: "first_chunk".to_string(),
-    //         url: test_env.url("first_chunk"),
-    //         checksum: Checksum::Blake3([
-    //             85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8, 190, 219,
-    //             61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
-    //         ]),
-    //         size: 1,
-    //         destinations: vec![FileLocation {
-    //             path: PathBuf::from("zero.file"),
-    //             pos: 0,
-    //             size: 1,
-    //         }],
-    //     }];
-    //     mock.expect_get_download_chunks()
-    //         .once()
-    //         .returning(move |_| Ok(Response::new(chunks.clone())));
-    //
-    //     test_env
-    //         .server
-    //         .mock("GET", "/first_chunk")
-    //         .match_header("range", "bytes=0-149")
-    //         .with_header("content-type", "application/octet-stream")
-    //         .with_body([vec![0u8; 100], vec![1u8; 50]].concat())
-    //         .create();
-    //     test_env
-    //         .server
-    //         .mock("GET", "/first_chunk")
-    //         .match_header("range", "bytes=150-299")
-    //         .with_header("content-type", "application/octet-stream")
-    //         .with_body(vec![1u8; 150])
-    //         .create();
-    //     test_env
-    //         .server
-    //         .mock("GET", "/first_chunk")
-    //         .match_header("range", "bytes=300-449")
-    //         .with_header("content-type", "application/octet-stream")
-    //         .with_body(vec![2u8; 150])
-    //         .create();
-    //     test_env
-    //         .server
-    //         .mock("GET", "/first_chunk")
-    //         .match_header("range", "bytes=450-599")
-    //         .with_header("content-type", "application/octet-stream")
-    //         .with_body(vec![2u8; 150])
-    //         .create();
-    //     test_env
-    //         .server
-    //         .mock("GET", "/second_chunk")
-    //         .match_header("range", "bytes=0-149")
-    //         .with_header("content-type", "application/octet-stream")
-    //         .with_body(vec![3u8; 150])
-    //         .create();
-    //     test_env
-    //         .server
-    //         .mock("GET", "/second_chunk")
-    //         .match_header("range", "bytes=150-299")
-    //         .with_header("content-type", "application/octet-stream")
-    //         .with_body(vec![3u8; 150])
-    //         .create();
-    //     test_env
-    //         .server
-    //         .mock("GET", "/second_chunk")
-    //         .match_header("range", "bytes=300-323")
-    //         .with_header("content-type", "application/octet-stream")
-    //         .with_body(vec![3u8; 24])
-    //         .create();
-    //     let server = test_env.start_server(mock).await;
-    //
-    //     let mut job = test_env.download_job();
-    //     job.runner.config.max_runners = 1;
-    //     assert_eq!(
-    //         JobStatus::Finished {
-    //             exit_code: Some(-1),
-    //             message: "job 'name' failed with: chunk 'second_chunk' download failed: chunk checksum mismatch - expected [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], actual [223, 133, 134, 120, 124, 112, 193, 150, 43, 123, 78, 114, 164, 121, 55, 99, 61, 88, 63, 101]".to_string()
-    //         },
-    //         job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
-    //     );
-    //
-    //     assert!(test_env.dest_dir.join("zero.file").exists());
-    //     assert!(test_env.dest_dir.join("first.file").exists());
-    //     assert!(test_env.dest_dir.join("second.file").exists());
-    //     assert!(test_env.dest_dir.join("third.file").exists());
-    //     assert!(test_env.chunks_path.exists());
-    //     assert_eq!(
-    //         load_job_data::<DownloadMetadata>(&test_env.metadata_path).unwrap(),
-    //         metadata
-    //     );
-    //     assert!(!test_env.completed_path.exists());
-    //     assert!(test_env.download_progress_path.exists());
-    //     let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
-    //     assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
-    //
-    //     fs::remove_file(&test_env.metadata_path).ok();
-    //     assert_eq!(
-    //         JobStatus::Finished {
-    //             exit_code: Some(-1),
-    //             message: "job 'name' failed with: chunk 'first_chunk' download failed: server responded with 501 Not Implemented".to_string()
-    //         },
-    //         test_env.download_job().run(RunFlag::default(), "name", &test_env.tmp_dir).await
-    //     );
-    //     assert!(!test_env.dest_dir.join("zero.file").exists());
-    //     assert!(!test_env.dest_dir.join("first.file").exists());
-    //     assert!(!test_env.dest_dir.join("second.file").exists());
-    //     assert!(!test_env.dest_dir.join("third.file").exists());
-    //     assert!(test_env.chunks_path.exists());
-    //     assert_eq!(
-    //         load_job_data::<DownloadMetadata>(&test_env.metadata_path).unwrap(),
-    //         another_meta
-    //     );
-    //     assert!(!test_env.completed_path.exists());
-    //     assert!(test_env.download_progress_path.exists());
-    //     let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
-    //     assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
-    //
-    //     server.assert().await;
-    //     Ok(())
-    // }
+    #[tokio::test]
+    async fn test_remnants_after_fail() -> Result<()> {
+        let mut test_env = setup_test_env()?;
+
+        let mut mock = MockBabelEngine::new();
+        let metadata = DownloadMetadata {
+            total_size: 924,
+            compression: None,
+            chunks: 2,
+            data_version: 0,
+        };
+        let meta = metadata.clone();
+        mock.expect_get_download_metadata()
+            .once()
+            .returning(move |_| Ok(Response::new(meta.clone())));
+        let chunks = vec![Chunk {
+            index: 0,
+            key: "first_chunk".to_string(),
+            url: test_env.url("first_chunk"),
+            checksum: Checksum::Blake3([
+                85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8, 190, 219,
+                61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
+            ]),
+            size: 600,
+            destinations: vec![
+                FileLocation {
+                    path: PathBuf::from("zero.file"),
+                    pos: 0,
+                    size: 100,
+                },
+                FileLocation {
+                    path: PathBuf::from("first.file"),
+                    pos: 0,
+                    size: 200,
+                },
+                FileLocation {
+                    path: PathBuf::from("second.file"),
+                    pos: 0,
+                    size: 300,
+                },
+            ],
+        }];
+        mock.expect_get_download_chunks()
+            .once()
+            .returning(move |_| Ok(Response::new(chunks.clone())));
+
+        let chunks = vec![Chunk {
+            index: 1,
+            key: "second_chunk".to_string(),
+            url: test_env.url("second_chunk"),
+            checksum: Checksum::Sha1([0u8; 20]),
+            size: 324,
+            destinations: vec![FileLocation {
+                path: PathBuf::from("third.file"),
+                pos: 0,
+                size: 324,
+            }],
+        }];
+        mock.expect_get_download_chunks()
+            .once()
+            .returning(move |_| Ok(Response::new(chunks.clone())));
+
+        let another_meta = DownloadMetadata {
+            total_size: 1,
+            compression: None,
+            chunks: 1,
+            data_version: 0,
+        };
+        let meta = another_meta.clone();
+        mock.expect_get_download_metadata()
+            .once()
+            .returning(move |_| Ok(Response::new(meta.clone())));
+        let chunks = vec![Chunk {
+            index: 0,
+            key: "first_chunk".to_string(),
+            url: test_env.url("first_chunk"),
+            checksum: Checksum::Blake3([
+                85, 66, 30, 123, 210, 245, 146, 94, 153, 129, 249, 169, 140, 22, 44, 8, 190, 219,
+                61, 95, 17, 159, 253, 17, 201, 75, 37, 225, 103, 226, 202, 150,
+            ]),
+            size: 1,
+            destinations: vec![FileLocation {
+                path: PathBuf::from("zero.file"),
+                pos: 0,
+                size: 1,
+            }],
+        }];
+        mock.expect_get_download_chunks()
+            .once()
+            .returning(move |_| Ok(Response::new(chunks.clone())));
+
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body([vec![0u8; 100], vec![1u8; 50]].concat())
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=150-299")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![1u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=300-449")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![2u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/first_chunk")
+            .match_header("range", "bytes=450-599")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![2u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=0-149")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=150-299")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 150])
+            .create();
+        test_env
+            .server
+            .mock("GET", "/second_chunk")
+            .match_header("range", "bytes=300-323")
+            .with_header("content-type", "application/octet-stream")
+            .with_body(vec![3u8; 24])
+            .create();
+        let server = test_env.start_server(mock).await;
+
+        let mut job = test_env.download_job();
+        job.runner.config.max_runners = 1;
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "job 'name' failed with: chunk 'second_chunk' download failed: chunk checksum mismatch - expected [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], actual [223, 133, 134, 120, 124, 112, 193, 150, 43, 123, 78, 114, 164, 121, 55, 99, 61, 88, 63, 101]".to_string()
+            },
+            job.run(RunFlag::default(), "name", &test_env.tmp_dir).await
+        );
+
+        assert!(test_env.dest_dir.join("zero.file").exists());
+        assert!(test_env.dest_dir.join("first.file").exists());
+        assert!(test_env.dest_dir.join("second.file").exists());
+        assert!(test_env.dest_dir.join("third.file").exists());
+        assert!(test_env.chunks_path.exists());
+        assert_eq!(
+            load_job_data::<DownloadMetadata>(&test_env.metadata_path).unwrap(),
+            metadata
+        );
+        assert!(!test_env.completed_path.exists());
+        assert!(test_env.download_progress_path.exists());
+        let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
+        assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
+
+        fs::remove_file(&test_env.metadata_path).ok();
+        assert_eq!(
+            JobStatus::Finished {
+                exit_code: Some(-1),
+                message: "job 'name' failed with: chunk 'first_chunk' download failed: server responded with 501 Not Implemented".to_string()
+            },
+            test_env.download_job().run(RunFlag::default(), "name", &test_env.tmp_dir).await
+        );
+        assert!(!test_env.dest_dir.join("zero.file").exists());
+        assert!(!test_env.dest_dir.join("first.file").exists());
+        assert!(!test_env.dest_dir.join("second.file").exists());
+        assert!(!test_env.dest_dir.join("third.file").exists());
+        assert!(!test_env.chunks_path.exists());
+        assert_eq!(
+            load_job_data::<DownloadMetadata>(&test_env.metadata_path).unwrap(),
+            another_meta
+        );
+        assert!(!test_env.completed_path.exists());
+        assert!(test_env.download_progress_path.exists());
+        let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
+        assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
+
+        server.assert().await;
+        Ok(())
+    }
 
     #[test]
     fn test_required_disk_space() {

@@ -66,7 +66,7 @@ const PLUGIN_CONFIG = #{
         jobs: [
             #{
                 name: "init_job",
-                run_sh: `echo dummy_init`,
+                run_sh: `echo dummy_init && sleep 1`,
             },
         ],
     },
