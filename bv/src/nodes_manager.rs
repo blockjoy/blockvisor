@@ -1637,7 +1637,7 @@ mod tests {
             vec![3, 4],
             Some(new_image.clone()),
         );
-        expected_updated_state.requirements = UPDATED_REQUIREMENTS.clone();
+        expected_updated_state.initialized = false;
         let tmp_root = test_env.tmp_root.clone();
         pal.expect_attach_vm()
             .with(
