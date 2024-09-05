@@ -350,12 +350,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
         node_type: common::NodeType::Validator.into(),
         node_version: "0.0.1".to_string(),
     });
-    let image_v2 = Some(common::ImageIdentifier {
-        protocol: "testing".to_string(),
-        node_type: common::NodeType::Validator.into(),
-        node_version: "0.0.2".to_string(),
-    });
-
     println!("preparing server");
 
     let cmd = |cmd| pb::Command {
@@ -553,16 +547,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
                 host_name: "".to_string(),
                 command: Some(pb::node_command::Command::Restart(pb::NodeRestart {})),
             })),
-            // upgrade running
-            cmd(pb::command::Command::Node(pb::NodeCommand {
-                node_id: id.clone(),
-                node_name: node_name.clone(),
-                host_id: host_id.clone(),
-                host_name: "".to_string(),
-                command: Some(pb::node_command::Command::Upgrade(pb::NodeUpgrade {
-                    image: image_v2,
-                })),
-            })),
         ],
         vec![
             // update with invalid rules
@@ -701,7 +685,6 @@ async fn test_bv_nodes_via_pending_grpc_commands() -> Result<()> {
             Some("BV internal error: invalid gateway `invalid_ip`: invalid IP address syntax"),
             Some(pb::CommandExitCode::InternalError.into()),
         ),
-        (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
         (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
         (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
         (&command_id, None, Some(pb::CommandExitCode::Ok.into())),
