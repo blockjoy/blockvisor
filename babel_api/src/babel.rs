@@ -80,7 +80,7 @@ pub trait JobsMonitor {
 #[tonic_rpc::tonic_rpc(bincode)]
 pub trait BabelEngine {
     /// Send `DownloadManifest` blueprint to API.
-    fn put_download_manifest(manifest: DownloadManifest);
+    fn put_download_manifest(manifest: DownloadManifest, data_version: u64);
     /// Get `DownloadMetadata` from API.
     fn get_download_metadata() -> DownloadMetadata;
     /// Get `Chunk`s to download from API.

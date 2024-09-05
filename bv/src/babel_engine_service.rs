@@ -19,15 +19,16 @@ struct BabelEngineService {
 impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
     async fn put_download_manifest(
         &self,
-        request: Request<DownloadManifest>,
+        request: Request<(DownloadManifest, u64)>,
     ) -> eyre::Result<Response<()>, Status> {
         debug!("putting DownloadManifest to API...");
-        let manifest = request.into_inner();
+        let (manifest, data_version) = request.into_inner();
         if let Err(err) = services::blockchain_archive::put_download_manifest(
             &self.config,
             self.node_info.image.clone(),
             self.node_info.network.clone(),
             manifest,
+            data_version,
         )
         .await
         {

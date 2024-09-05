@@ -178,7 +178,10 @@ impl<C: BabelEngineConnector + Send> Runner for Uploader<C> {
             );
         let mut client = self.connector.connect();
         client
-            .put_download_manifest(with_timeout(blueprint.manifest, custom_timeout))
+            .put_download_manifest(with_timeout(
+                (blueprint.manifest, blueprint.data_version),
+                custom_timeout,
+            ))
             .await
             .with_context(|| "failed to send DownloadManifest blueprint back to API")?;
 
@@ -884,7 +887,7 @@ mod tests {
             .returning(move |_| Ok(Response::new(slots.clone())));
         mock.expect_put_download_manifest()
             .once()
-            .withf(move |req| *req.get_ref() == expected_manifest)
+            .withf(move |req| *req.get_ref() == (expected_manifest.clone(), 0))
             .returning(|_| Ok(Response::new(())));
         let server = test_env.start_server(mock).await;
         assert_eq!(
@@ -1026,7 +1029,7 @@ mod tests {
             .returning(move |_| Ok(Response::new(slots.clone())));
         mock.expect_put_download_manifest()
             .once()
-            .withf(move |req| *req.get_ref() == expected_manifest)
+            .withf(move |req| *req.get_ref() == (expected_manifest.clone(), 0))
             .returning(|_| Ok(Response::new(())));
         let server = test_env.start_server(mock).await;
 
@@ -1090,7 +1093,7 @@ mod tests {
             .returning(move |_| Ok(Response::new(slots.clone())));
         mock.expect_put_download_manifest()
             .once()
-            .withf(move |req| *req.get_ref() == expected_manifest)
+            .withf(move |req| *req.get_ref() == (expected_manifest.clone(), 0))
             .returning(|_| Ok(Response::new(())));
         let server = test_env.start_server(mock).await;
 
@@ -1131,7 +1134,7 @@ mod tests {
             .returning(move |_| Ok(Response::new(slots.clone())));
         mock.expect_put_download_manifest()
             .once()
-            .withf(move |req| *req.get_ref() == expected_manifest)
+            .withf(move |req| *req.get_ref() == (expected_manifest.clone(), 0))
             .returning(|_| Ok(Response::new(())));
         let server = test_env.start_server(mock).await;
 

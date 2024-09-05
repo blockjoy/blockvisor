@@ -51,6 +51,7 @@ pub async fn put_download_manifest(
     image: NodeImage,
     network: String,
     manifest: DownloadManifest,
+    data_version: u64,
 ) -> Result<()> {
     info!("Putting download manifest...");
     let mut client = connect_blockchain_archive_service(config).await?;
@@ -86,6 +87,7 @@ pub async fn put_download_manifest(
     let manifest = pb::BlockchainArchiveServicePutDownloadManifestRequest {
         id: Some(image.try_into()?),
         network,
+        data_version,
         total_size: manifest.total_size,
         compression,
         chunks,

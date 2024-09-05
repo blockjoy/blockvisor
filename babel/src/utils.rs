@@ -237,7 +237,7 @@ pub mod tests {
 
         #[tonic::async_trait]
         impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngine {
-            async fn put_download_manifest(&self, request: Request<DownloadManifest>) -> Result<Response<()>, Status>;
+            async fn put_download_manifest(&self, request: Request<(DownloadManifest, u64)>) -> Result<Response<()>, Status>;
             async fn get_download_metadata(&self, request: Request<()>) -> Result<Response<DownloadMetadata>, Status>;
             async fn get_download_chunks(&self, request: Request<(u64, Vec<u32>)>) -> Result<Response<Vec<Chunk>>, Status>;
             async fn get_upload_slots(&self, request: Request<(Option<u64>, Vec<u32>, u32)>) -> Result<Response<UploadSlots>, Status>;
