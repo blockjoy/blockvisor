@@ -440,6 +440,13 @@ impl<P: Pal + Debug> Node<P> {
         self.babel_engine
             .update_plugin(|engine| RhaiPlugin::new(&script, engine))
             .await?;
+        self.pal
+            .apply_firewall_config(NodeFirewallConfig {
+                id: self.state.id,
+                ip: self.state.network_interface.ip,
+                config: build_firewall_rules(&self.state.firewall_rules, &self.metadata.firewall),
+            })
+            .await?;
 
         if need_to_restart {
             self.start().await?;

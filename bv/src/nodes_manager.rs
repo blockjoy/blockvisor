@@ -917,6 +917,7 @@ fn name_not_found(name: &str) -> eyre::Error {
 mod tests {
     use super::*;
     use crate::node_state::NetInterface;
+    use crate::pal::NodeFirewallConfig;
     use crate::scheduler::Task;
     use crate::{
         node::tests::*,
@@ -1631,6 +1632,18 @@ mod tests {
                     disk_size_gb: 4,
                 })
             });
+        pal.expect_apply_firewall_config()
+            .once()
+            .with(predicate::eq(NodeFirewallConfig {
+                id: node_id,
+                ip: IpAddr::from_str(&node_config.ip).unwrap(),
+                config: firewall::Config {
+                    default_in: firewall::Action::Deny,
+                    default_out: firewall::Action::Allow,
+                    rules: vec![],
+                },
+            }))
+            .returning(|_| Ok(()));
         let mut expected_updated_state = expected_node_state(
             node_id,
             node_config.clone(),
