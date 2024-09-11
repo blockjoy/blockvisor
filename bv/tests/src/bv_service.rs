@@ -347,6 +347,13 @@ async fn test_bv_service_e2e() {
     //     }
     // }
 
+    // TODO uncomment when API part is ready
+    // test_env::bv_run(
+    //     &["node", "run", "config_check", &auto_updated_node_id],
+    //     "ok",
+    //     None,
+    // );
+
     check_upload_and_download(&auto_updated_node_id);
 
     assert_eq!(OLD_IMAGE_VERSION, node_version(&not_updated_node_id).await);

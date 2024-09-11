@@ -159,6 +159,8 @@ To make implementation of Babel Plugin interface possible, BV provides following
 - `delete_task(task_name)` - Delete previously scheduled task.
 - `save_data(value)` - Save plugin data to persistent storage. It takes string as argument. `to_json` can be used for more complex structures.
 - `load_data()` - Load plugin data from persistent storage. Returns string (as it was passed to `save_data`).
+- `put_secret(key, value)` - Put plugin secret data to encrypted cloud storage. It takes string `key` and BLOB `value` as arguments. Use `to_blob` if you want to store simple string.
+- `get_secret(key)` - Get plugin secret data from encrypted cloud storage. It takes string `key` and returns BLOB (as it was passed to `put_secret`). Use `as_string` if you expect simple string.
 - `DATA_DRIVE_MOUNT_POINT` - Globally available constant, containing absolute path to directory where data drive is mounted.
 - `BLOCKCHAIN_DATA_PATH` - Globally available constant, containing absolute path to directory where blockchain data are stored.
   This is the path, where blockchain data archives are downloaded to, and where are uploaded from.
@@ -390,6 +392,33 @@ fn custom_function(arg) {
         save_data(info.to_json());
     };
     info.some_field
+}
+```
+
+### Put and Get Plugin Secrets
+
+Plugin specific secrets (e.g. node key or config) can be persisted in encrypted cloud storage with `put/get_secret` functions. It takes/returns BLOB for given key.
+
+**Example:**
+```
+fn custom_function(arg) {
+    let peer_key;
+    let peer_id;
+    try {
+        peer_key = get_secret("key");
+        peer_id = get_secret("id").as_string();
+    } (err) catch {
+        if err == "not_found" {
+            peer_key = blob(7, 6, 5, 4, 3, 2, 1);
+            peer_id = "generated-id";
+            put_secret("key", peer_key);
+            put_secret("id", peer_id.to_blob());
+        } else {
+           throw err;
+        }
+    };
+    // do stuff with peer_key and peer_id
+    arg
 }
 ```
 

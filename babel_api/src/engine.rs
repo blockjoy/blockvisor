@@ -81,6 +81,10 @@ pub trait Engine {
     fn is_download_completed(&self) -> Result<bool>;
     /// Checks if blockchain archive is available.
     fn has_blockchain_archive(&self) -> Result<bool>;
+    /// Get plugin secret from remote encrypted storage
+    fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
+    /// Put plugin secret to remote encrypted storage
+    fn put_secret(&self, name: &str, value: &[u8]) -> Result<()>;
 }
 
 /// Node environment/context metadata.

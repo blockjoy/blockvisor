@@ -621,6 +621,7 @@ where
         let mut node_client = self.connect_to_node_service().await?;
         let mut created_nodes = node_client
             .create(pb::NodeServiceCreateRequest {
+                old_node_id: None,
                 org_id,
                 blockchain_id,
                 version: req.image.node_version.clone(),

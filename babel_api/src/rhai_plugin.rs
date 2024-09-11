@@ -292,6 +292,21 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             into_rhai_result(babel_engine.load_data())
         });
         let babel_engine = engine.clone();
+        rhai_engine.register_fn("put_secret", move |name: &str, value: Vec<u8>| {
+            into_rhai_result(babel_engine.put_secret(name, &value))
+        });
+        let babel_engine = engine.clone();
+        rhai_engine.register_fn(
+            "get_secret",
+            move |name: &str| -> std::result::Result<Vec<u8>, Box<rhai::EvalAltResult>> {
+                if let Some(value) = into_rhai_result(babel_engine.get_secret(name))? {
+                    Ok(value)
+                } else {
+                    Err("not_found".into())
+                }
+            },
+        );
+        let babel_engine = engine.clone();
         rhai_engine.register_fn(
             "add_task",
             move |task_name: &str, schedule: &str, function_name: &str, function_param: &str| {
@@ -888,6 +903,8 @@ mod tests {
             fn delete_task(&self, task_name: &str) -> Result<()>;
             fn is_download_completed(&self) -> Result<bool>;
             fn has_blockchain_archive(&self) -> Result<bool>;
+            fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
+            fn put_secret(&self, name: &str, value: &[u8]) -> Result<()>;
         }
     }
 
@@ -1040,6 +1057,14 @@ mod tests {
         out += "|" + node_env().node_id;
         save_data("some plugin data");
         out += "|" + load_data();
+        put_secret("secret_key", "some plugin secret".to_blob());
+        try {
+            get_secret("secret_key_0")
+        } catch (err) {
+            if err == "not_found" {
+                out += "|" + get_secret("secret_key").as_string();
+            }
+        }
         out
     }
 "#;
@@ -1286,10 +1311,25 @@ mod tests {
         babel
             .expect_load_data()
             .return_once(|| Ok("loaded data".to_string()));
+        babel
+            .expect_put_secret()
+            .with(
+                predicate::eq("secret_key"),
+                predicate::eq("some plugin secret".as_bytes()),
+            )
+            .return_once(|_, _| Ok(()));
+        babel
+            .expect_get_secret()
+            .with(predicate::eq("secret_key_0"))
+            .return_once(|_| Ok(None));
+        babel
+            .expect_get_secret()
+            .with(predicate::eq("secret_key"))
+            .return_once(|_| Ok(Some("psecret".as_bytes().to_vec())));
 
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
-            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data"#,
+            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data|psecret"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
         );
         Ok(())

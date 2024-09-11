@@ -151,4 +151,12 @@ impl Engine for LinterEngine {
     fn has_blockchain_archive(&self) -> eyre::Result<bool> {
         Ok(true)
     }
+
+    fn get_secret(&self, _name: &str) -> eyre::Result<Option<Vec<u8>>> {
+        Ok(Default::default())
+    }
+
+    fn put_secret(&self, _name: &str, _value: &[u8]) -> eyre::Result<()> {
+        Ok(())
+    }
 }

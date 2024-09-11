@@ -13,6 +13,7 @@ use tonic::{
 pub mod api;
 pub mod blockchain;
 pub mod blockchain_archive;
+pub mod crypt;
 pub mod mqtt;
 
 pub const DEFAULT_API_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);

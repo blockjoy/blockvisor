@@ -451,6 +451,26 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     .await,
                 );
             }
+            EngineRequest::GetSecret { name, response_tx } => {
+                let _ = response_tx.send(
+                    services::crypt::get_key(&self.api_config, self.node_info.node_id, &name).await,
+                );
+            }
+            EngineRequest::PutSecret {
+                name,
+                value,
+                response_tx,
+            } => {
+                let _ = response_tx.send(
+                    services::crypt::put_key(
+                        &self.api_config,
+                        self.node_info.node_id,
+                        &name,
+                        &value,
+                    )
+                    .await,
+                );
+            }
         }
     }
 
@@ -584,6 +604,15 @@ enum EngineRequest {
     },
     HasBlockchainArchive {
         response_tx: ResponseTx<Result<bool>>,
+    },
+    GetSecret {
+        name: String,
+        response_tx: ResponseTx<Result<Option<Vec<u8>>>>,
+    },
+    PutSecret {
+        name: String,
+        value: Vec<u8>,
+        response_tx: ResponseTx<Result<()>>,
     },
 }
 
@@ -747,6 +776,25 @@ impl babel_api::engine::Engine for Engine {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx
             .blocking_send(EngineRequest::HasBlockchainArchive { response_tx })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx.blocking_send(EngineRequest::GetSecret {
+            response_tx,
+            name: name.to_owned(),
+        })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn put_secret(&self, name: &str, value: &[u8]) -> Result<()> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx.blocking_send(EngineRequest::PutSecret {
+            response_tx,
+            name: name.to_owned(),
+            value: value.to_vec(),
+        })?;
         response_rx.blocking_recv()?
     }
 }
@@ -1268,7 +1316,13 @@ mod tests {
                 param: "scheduled_param".to_string(),
             },
         });
-        assert_eq!(expected_action, test_env.rx.try_recv().unwrap());
+        assert_eq!(
+            expected_action,
+            timeout(Duration::from_secs(15), test_env.rx.recv())
+                .await
+                .unwrap()
+                .unwrap()
+        );
         assert_eq!(
             scheduler::Action::Delete("task_name".to_string()),
             timeout(Duration::from_secs(15), test_env.rx.recv())

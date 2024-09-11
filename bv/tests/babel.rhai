@@ -157,6 +157,19 @@ fn download(param) {
     "Download started!"
 }
 
+fn config_check(param) {
+    try {
+        let config = get_config("config_key");
+    } catch (err) {
+        if err == "not_found" {
+            put_config("config_key", "config-value".to_blob());
+            let config = get_config("config_key").as_string();
+            return if config == "config-value" {"ok"} else {"got unexpected config: $config"}
+        }
+    }
+    throw "first get_config should fail"
+}
+
 fn sh_inside(param) {
     let res = run_sh(param);
     if res.exit_code != 0 {
