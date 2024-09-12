@@ -162,6 +162,7 @@ pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::utils::Binary, S
             babel_api::utils::Binary::Checksum(checksum) => {
                 expected_checksum = Some(checksum);
             }
+            _ => {}
         }
     }
     writer

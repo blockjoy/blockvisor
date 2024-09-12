@@ -19,12 +19,14 @@ use crate::{
     services,
 };
 use babel_api::engine::NodeEnv;
+use babel_api::utils::Binary;
 use babel_api::{
     engine::{
         HttpResponse, JobConfig, JobInfo, JobType, JobsInfo, JrpcRequest, RestRequest, ShResponse,
     },
     plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
 };
+use bv_utils::system::bytes_into_bin;
 use bv_utils::{
     rpc::with_timeout,
     {run_flag::RunFlag, with_retry},
@@ -39,7 +41,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc;
-use tonic::Status;
+use tonic::{Status, Streaming};
 use tracing::{debug, error, info, instrument, trace, warn, Level};
 use uuid::Uuid;
 
@@ -471,6 +473,34 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     .await,
                 );
             }
+            EngineRequest::FileRead { path, response_tx } => {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
+                    Ok(babel_client) => {
+                        stream_into_bytes(
+                            with_retry!(babel_client.file_read(path.clone()))
+                                .map_err(|err| self.handle_connection_errors(err))
+                                .map(|stream| stream.into_inner()),
+                        )
+                        .await
+                    }
+                    Err(err) => Err(err),
+                });
+            }
+            EngineRequest::FileWrite {
+                path,
+                content,
+                response_tx,
+            } => {
+                let bin = bytes_into_bin(path, content);
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
+                    Ok(babel_client) => {
+                        with_retry!(babel_client.file_write(tokio_stream::iter(bin.clone())))
+                            .map_err(|err| self.handle_connection_errors(err))
+                            .map(|result| result.into_inner())
+                    }
+                    Err(err) => Err(err),
+                });
+            }
         }
     }
 
@@ -519,6 +549,17 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             .map_err(|err| self.handle_connection_errors(err))
             .map(|v| v.into_inner())
     }
+}
+
+async fn stream_into_bytes(stream: Result<Streaming<Binary>>) -> Result<Vec<u8>> {
+    let mut stream = stream?;
+    let mut content = vec![];
+    while let Some(bytes) = stream.message().await? {
+        if let Binary::Bin(mut bytes) = bytes {
+            content.append(&mut bytes);
+        }
+    }
+    Ok(content)
 }
 
 async fn stop_job(client: &mut BabelClient, job_name: &str) -> Result<(), tonic::Status> {
@@ -612,6 +653,15 @@ enum EngineRequest {
     PutSecret {
         name: String,
         value: Vec<u8>,
+        response_tx: ResponseTx<Result<()>>,
+    },
+    FileRead {
+        path: PathBuf,
+        response_tx: ResponseTx<Result<Vec<u8>>>,
+    },
+    FileWrite {
+        path: PathBuf,
+        content: Vec<u8>,
         response_tx: ResponseTx<Result<()>>,
     },
 }
@@ -788,12 +838,31 @@ impl babel_api::engine::Engine for Engine {
         response_rx.blocking_recv()?
     }
 
-    fn put_secret(&self, name: &str, value: &[u8]) -> Result<()> {
+    fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(EngineRequest::PutSecret {
             response_tx,
             name: name.to_owned(),
-            value: value.to_vec(),
+            value,
+        })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn file_read(&self, path: &Path) -> Result<Vec<u8>> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx.blocking_send(EngineRequest::FileRead {
+            response_tx,
+            path: path.to_path_buf(),
+        })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn file_write(&self, path: &Path, content: Vec<u8>) -> Result<()> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx.blocking_send(EngineRequest::FileWrite {
+            response_tx,
+            path: path.to_path_buf(),
+            content,
         })?;
         response_rx.blocking_recv()?
     }
@@ -830,7 +899,9 @@ mod tests {
     };
     use bv_tests_utils::{rpc::test_channel, start_test_server};
     use mockall::*;
+    use std::pin::Pin;
     use tokio::time::timeout;
+    use tokio_stream::Stream;
     use tonic::{Request, Response, Streaming};
 
     mock! {
@@ -897,6 +968,16 @@ mod tests {
                 &self,
                 request: Request<()>,
             ) -> Result<Response<bool>, Status>;
+            async fn file_write(
+                &self,
+                request: Request<Streaming<babel_api::utils::Binary>>,
+            ) -> Result<Response<()>, Status>;
+            type FileReadStream =
+                Pin<Box<dyn Stream<Item = Result<babel_api::utils::Binary, Status>> + Send>>;
+            async fn file_read(
+                &self,
+                request: Request<PathBuf>,
+            ) -> Result<Response<<Self as babel_api::babel::babel_server::Babel>::FileReadStream>, Status>;
         }
     }
 

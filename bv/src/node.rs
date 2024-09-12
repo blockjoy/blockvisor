@@ -11,7 +11,6 @@ use crate::{
     pal::{self, NodeConnection, NodeFirewallConfig, Pal, RecoverBackoff, VirtualMachine},
     scheduler,
     services::blockchain::{self, ROOTFS_FILE},
-    utils,
 };
 use babel_api::{
     engine::JobStatus,
@@ -618,7 +617,7 @@ async fn check_job_runner(
     job_runner_path: &Path,
 ) -> Result<()> {
     // check and update job_runner
-    let (job_runner_bin, checksum) = utils::load_bin(job_runner_path).await?;
+    let (job_runner_bin, checksum) = bv_utils::system::load_bin(job_runner_path).await?;
     let client = connection.babel_client().await?;
     let job_runner_status = with_retry!(client.check_job_runner(checksum))?.into_inner();
     if job_runner_status != babel_api::utils::BinaryStatus::Ok {
@@ -654,6 +653,7 @@ pub mod tests {
     use bv_tests_utils::{rpc::test_channel, start_test_server};
     use bv_utils::rpc::DefaultTimeout;
     use chrono::SubsecRound;
+    use core::pin::Pin;
     use mockall::*;
     use std::collections::HashMap;
     use std::{
@@ -662,6 +662,7 @@ pub mod tests {
         str::FromStr,
         time::Duration,
     };
+    use tokio_stream::Stream;
     use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
     pub fn testing_babel_path_absolute() -> String {
@@ -884,6 +885,16 @@ pub mod tests {
                 &self,
                 request: Request<()>,
             ) -> Result<Response<bool>, Status>;
+            async fn file_write(
+                &self,
+                request: Request<Streaming<babel_api::utils::Binary>>,
+            ) -> Result<Response<()>, Status>;
+            type FileReadStream =
+                Pin<Box<dyn Stream<Item = Result<babel_api::utils::Binary, Status>> + Send>>;
+            async fn file_read(
+                &self,
+                request: Request<PathBuf>,
+            ) -> Result<Response<<Self as babel_api::babel::babel_server::Babel>::FileReadStream>, Status>;
         }
     }
 

@@ -156,7 +156,15 @@ impl Engine for LinterEngine {
         Ok(Default::default())
     }
 
-    fn put_secret(&self, _name: &str, _value: &[u8]) -> eyre::Result<()> {
+    fn put_secret(&self, _name: &str, _value: Vec<u8>) -> eyre::Result<()> {
+        Ok(())
+    }
+
+    fn file_read(&self, _path: &Path) -> eyre::Result<Vec<u8>> {
+        Ok(Default::default())
+    }
+
+    fn file_write(&self, _path: &Path, _value: Vec<u8>) -> eyre::Result<()> {
         Ok(())
     }
 }

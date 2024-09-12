@@ -354,6 +354,12 @@ async fn test_bv_service_e2e() {
     //     None,
     // );
 
+    test_env::bv_run(
+        &["node", "run", "file_access_check", &auto_updated_node_id],
+        "ok",
+        None,
+    );
+
     check_upload_and_download(&auto_updated_node_id);
 
     assert_eq!(OLD_IMAGE_VERSION, node_version(&not_updated_node_id).await);

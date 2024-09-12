@@ -84,7 +84,11 @@ pub trait Engine {
     /// Get plugin secret from remote encrypted storage
     fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
     /// Put plugin secret to remote encrypted storage
-    fn put_secret(&self, name: &str, value: &[u8]) -> Result<()>;
+    fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()>;
+    /// Read file located on node filesystem.
+    fn file_read(&self, path: &Path) -> Result<Vec<u8>>;
+    /// Write file into node filesystem.
+    fn file_write(&self, path: &Path, content: Vec<u8>) -> Result<()>;
 }
 
 /// Node environment/context metadata.

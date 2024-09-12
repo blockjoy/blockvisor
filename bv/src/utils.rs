@@ -14,34 +14,13 @@ use std::{
 use sysinfo::{Pid, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use thiserror::Error;
 use tokio::{
-    fs::{self, File},
-    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    fs::{self},
+    io::AsyncWriteExt,
 };
 use tracing::debug;
 
 // image download should never take more than 15min
 const ARCHIVE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-
-pub async fn load_bin(bin_path: &Path) -> Result<(Vec<babel_api::utils::Binary>, u32)> {
-    let file = File::open(bin_path)
-        .await
-        .with_context(|| format!("failed to load binary {}", bin_path.display()))?;
-    let mut reader = BufReader::new(file);
-    let mut buf = [0; 16384];
-    let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
-    let mut digest = crc.digest();
-    let mut binary = Vec::<babel_api::utils::Binary>::default();
-    while let Ok(size) = reader.read(&mut buf[..]).await {
-        if size == 0 {
-            break;
-        }
-        digest.update(&buf[0..size]);
-        binary.push(babel_api::utils::Binary::Bin(buf[0..size].to_vec()));
-    }
-    let checksum = digest.finalize();
-    binary.push(babel_api::utils::Binary::Checksum(checksum));
-    Ok((binary, checksum))
-}
 
 #[derive(Error, Debug)]
 pub enum GetProcessIdError {

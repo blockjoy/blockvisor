@@ -1,12 +1,14 @@
 use babel_api::engine::PosixSignal;
-use eyre::{anyhow, Result};
+use eyre::{anyhow, Context, Result};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use sysinfo::{
     Disk, DiskExt, Pid, Process, ProcessExt, ProcessRefreshKind, Signal, System, SystemExt,
 };
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, BufReader};
 use tracing::log::debug;
 
 const PROCESS_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -204,4 +206,38 @@ pub fn available_disk_space_by_path(path: &Path) -> Result<u64> {
     find_disk_by_path(&sys, path)
         .map(|disk| disk.available_space())
         .ok_or_else(|| anyhow!("Cannot get available disk space"))
+}
+
+pub async fn load_bin(bin_path: &Path) -> Result<(Vec<babel_api::utils::Binary>, u32)> {
+    let file = File::open(bin_path)
+        .await
+        .with_context(|| format!("failed to load binary {}", bin_path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut buf = [0; 16384];
+    let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
+    let mut digest = crc.digest();
+    let mut binary = Vec::<babel_api::utils::Binary>::default();
+    while let Ok(size) = reader.read(&mut buf[..]).await {
+        if size == 0 {
+            break;
+        }
+        digest.update(&buf[0..size]);
+        binary.push(babel_api::utils::Binary::Bin(buf[0..size].to_vec()));
+    }
+    let checksum = digest.finalize();
+    binary.push(babel_api::utils::Binary::Checksum(checksum));
+    Ok((binary, checksum))
+}
+
+pub fn bytes_into_bin(destination: PathBuf, bytes: Vec<u8>) -> Vec<babel_api::utils::Binary> {
+    let crc = crc::Crc::<u32>::new(&crc::CRC_32_BZIP2);
+    let mut digest = crc.digest();
+    let mut binary = Vec::<babel_api::utils::Binary>::default();
+    binary.push(babel_api::utils::Binary::Destination(destination));
+    for chunk in bytes.chunks(16384) {
+        digest.update(chunk);
+        binary.push(babel_api::utils::Binary::Bin(chunk.to_vec()));
+    }
+    binary.push(babel_api::utils::Binary::Checksum(digest.finalize()));
+    binary
 }

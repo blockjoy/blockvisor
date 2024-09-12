@@ -170,6 +170,13 @@ fn config_check(param) {
     throw "first get_config should fail"
 }
 
+fn file_access_check(param) {
+    file_write("/blockjoy/secret.file", "some secret".to_blob());
+    let secret = file_read("/blockjoy/secret.file").as_string();
+    let content = run_sh("cat /blockjoy/secret.file").unwrap();
+    return if secret == "some secret" && secret == content {"ok"} else {"got unexpected file content: $secret"}
+}
+
 fn sh_inside(param) {
     let res = run_sh(param);
     if res.exit_code != 0 {

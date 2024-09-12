@@ -41,7 +41,6 @@ cidr-utils = "0.5.10"
 chitchat = { git = "https://github.com/quickwit-oss/chitchat.git", rev = "c939d19" }
 clap = { version = "4.4.10", features = ["derive", "cargo"] }
 cli-table = "0.4"
-crc = "3.0.0"
 chrono = { version = "0.4.24", features = ["serde"] }
 cron = "0.12.1"
 eyre = "0.6.8"

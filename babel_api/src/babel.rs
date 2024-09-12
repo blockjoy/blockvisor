@@ -67,6 +67,13 @@ pub trait Babel {
         params: String,
     );
 
+    /// Write binary content into file inside node.
+    #[client_streaming]
+    fn file_write(content: Binary);
+    /// Read binary file from inside node.
+    #[server_streaming]
+    fn file_read(path: PathBuf) -> Binary;
+
     /// Checks if blockchain data has been already downloaded.
     fn is_download_completed() -> bool;
 }

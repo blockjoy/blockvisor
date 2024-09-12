@@ -293,7 +293,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         });
         let babel_engine = engine.clone();
         rhai_engine.register_fn("put_secret", move |name: &str, value: Vec<u8>| {
-            into_rhai_result(babel_engine.put_secret(name, &value))
+            into_rhai_result(babel_engine.put_secret(name, value))
         });
         let babel_engine = engine.clone();
         rhai_engine.register_fn(
@@ -304,6 +304,17 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                 } else {
                     Err("not_found".into())
                 }
+            },
+        );
+        let babel_engine = engine.clone();
+        rhai_engine.register_fn("file_write", move |path: &str, content: Vec<u8>| {
+            into_rhai_result(babel_engine.file_write(Path::new(&path.to_string()), content))
+        });
+        let babel_engine = engine.clone();
+        rhai_engine.register_fn(
+            "file_read",
+            move |path: &str| -> std::result::Result<Vec<u8>, Box<rhai::EvalAltResult>> {
+                into_rhai_result(babel_engine.file_read(Path::new(&path.to_string())))
             },
         );
         let babel_engine = engine.clone();
@@ -904,7 +915,9 @@ mod tests {
             fn is_download_completed(&self) -> Result<bool>;
             fn has_blockchain_archive(&self) -> Result<bool>;
             fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
-            fn put_secret(&self, name: &str, value: &[u8]) -> Result<()>;
+            fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()>;
+            fn file_read(&self, path: &Path) -> Result<Vec<u8>>;
+            fn file_write(&self, path: &Path, content: Vec<u8>) -> Result<()>;
         }
     }
 
@@ -1057,6 +1070,8 @@ mod tests {
         out += "|" + node_env().node_id;
         save_data("some plugin data");
         out += "|" + load_data();
+        file_write("/file/path", "file content".to_blob());
+        out += "|" + file_read("/file/path");
         put_secret("secret_key", "some plugin secret".to_blob());
         try {
             get_secret("secret_key_0")
@@ -1312,10 +1327,21 @@ mod tests {
             .expect_load_data()
             .return_once(|| Ok("loaded data".to_string()));
         babel
+            .expect_file_write()
+            .with(
+                predicate::eq(Path::new("/file/path")),
+                predicate::eq("file content".as_bytes().to_vec()),
+            )
+            .return_once(|_, _| Ok(()));
+        babel
+            .expect_file_read()
+            .with(predicate::eq(Path::new("/file/path")))
+            .return_once(|_| Ok("file content".as_bytes().to_vec()));
+        babel
             .expect_put_secret()
             .with(
                 predicate::eq("secret_key"),
-                predicate::eq("some plugin secret".as_bytes()),
+                predicate::eq("some plugin secret".as_bytes().to_vec()),
             )
             .return_once(|_, _| Ok(()));
         babel
@@ -1329,7 +1355,7 @@ mod tests {
 
         let plugin = RhaiPlugin::new(script, babel)?;
         assert_eq!(
-            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data|psecret"#,
+            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data|file content|psecret"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
         );
         Ok(())

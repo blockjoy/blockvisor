@@ -41,6 +41,8 @@ mock! {
         fn is_download_completed(&self) -> Result<bool>;
         fn has_blockchain_archive(&self) -> Result<bool>;
         fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
-        fn put_secret(&self, name: &str, value: &[u8]) -> Result<()>;
+        fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()>;
+        fn file_read(&self, path: &Path) -> Result<Vec<u8>>;
+        fn file_write(&self, path: &Path, content: Vec<u8>) -> Result<()>;
     }
 }

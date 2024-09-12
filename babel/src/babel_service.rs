@@ -8,15 +8,17 @@ use babel_api::{
     metadata::BabelConfig,
 };
 use eyre::{anyhow, ContextCompat, Result};
+use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::RequestBuilder;
 use serde_json::json;
-use std::str::FromStr;
 use std::{ops::Deref, path::PathBuf, sync::Arc, time::Duration};
+use std::{pin::Pin, str::FromStr};
 use tokio::{
     fs,
     sync::{broadcast, oneshot, RwLock},
 };
+use tokio_stream::Stream;
 use tonic::{Request, Response, Status, Streaming};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -237,6 +239,37 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             Status::internal(format!("failed to render template file with: {err:#}"))
         })?;
         Ok(Response::new(()))
+    }
+
+    async fn file_write(
+        &self,
+        request: Request<Streaming<babel_api::utils::Binary>>,
+    ) -> Result<Response<()>, Status> {
+        let mut stream = request.into_inner();
+        let Some(Ok(babel_api::utils::Binary::Destination(path))) = stream.next().await else {
+            return Err(Status::internal("missing file destination"));
+        };
+        utils::save_bin_stream(&path, &mut stream)
+            .await
+            .map_err(|err| {
+                Status::internal(format!("file_write {} failed: {err:#}", path.display()))
+            })?;
+        Ok(Response::new(()))
+    }
+
+    type FileReadStream =
+        Pin<Box<dyn Stream<Item = Result<babel_api::utils::Binary, Status>> + Send>>;
+    async fn file_read(
+        &self,
+        request: Request<PathBuf>,
+    ) -> Result<Response<Self::FileReadStream>, Status> {
+        let path = request.into_inner();
+        let (content, _) = bv_utils::system::load_bin(&path).await.map_err(|err| {
+            Status::internal(format!("file_read {} failed: {err:#}", path.display()))
+        })?;
+        Ok(Response::new(Box::pin(tokio_stream::iter(
+            content.into_iter().map(Ok).collect::<Vec<_>>(),
+        ))))
     }
 
     async fn is_download_completed(&self, _request: Request<()>) -> Result<Response<bool>, Status> {
