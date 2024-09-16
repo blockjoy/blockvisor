@@ -23,7 +23,6 @@ use babel_api::{
 };
 use chrono::{DateTime, Utc};
 use eyre::{anyhow, bail, Context, Result};
-use futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -51,9 +50,16 @@ pub fn build_state_filename(bv_root: &Path) -> PathBuf {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub enum MaybeNode<P: Pal> {
+    Node(RwLock<Node<P>>),
+    BrokenNode(NodeState),
+}
+
+#[derive(Debug)]
 pub struct NodesManager<P: Pal + Debug> {
     api_config: SharedConfig,
-    nodes: Arc<RwLock<HashMap<Uuid, RwLock<Node<P>>>>>,
+    nodes: Arc<RwLock<HashMap<Uuid, MaybeNode<P>>>>,
     scheduler: Scheduler,
     cpu_registry: Mutex<CpuRegistry>,
     node_state_cache: RwLock<HashMap<Uuid, NodeStateCache>>,
@@ -225,8 +231,10 @@ where
     pub async fn detach(self) {
         let nodes_lock = self.nodes.read().await;
         for (id, node) in nodes_lock.iter() {
-            if let Err(err) = node.write().await.detach().await {
-                warn!("error while detaching node {id}: {err:#}")
+            if let MaybeNode::Node(node) = node {
+                if let Err(err) = node.write().await.detach().await {
+                    warn!("error while detaching node {id}: {err:#}")
+                }
             }
         }
         match self.scheduler.stop().await {
@@ -241,7 +249,7 @@ where
         }
     }
 
-    pub async fn nodes_list(&self) -> RwLockReadGuard<'_, HashMap<Uuid, RwLock<Node<P>>>> {
+    pub async fn nodes_list(&self) -> RwLockReadGuard<'_, HashMap<Uuid, MaybeNode<P>>> {
         self.nodes.read().await
     }
 
@@ -291,8 +299,11 @@ where
             .collect();
 
         for n in self.nodes.read().await.values() {
-            let node = n.read().await;
-            if node.state.network_interface.ip == ip {
+            let node_ip = match n {
+                MaybeNode::Node(node) => node.read().await.state.network_interface.ip,
+                MaybeNode::BrokenNode(state) => state.network_interface.ip,
+            };
+            if node_ip == ip {
                 command_failed!(Error::Internal(anyhow!(
                     "Node with ip address `{ip}` exists"
                 )));
@@ -362,7 +373,10 @@ where
         if node.is_err() {
             self.cpu_registry.lock().await.release(&mut assigned_cpus);
         }
-        self.nodes.write().await.insert(id, RwLock::new(node?));
+        self.nodes
+            .write()
+            .await
+            .insert(id, MaybeNode::Node(RwLock::new(node?)));
         node_ids.insert(config.name, id);
         self.node_state_cache
             .write()
@@ -375,16 +389,16 @@ where
 
     #[instrument(skip(self))]
     pub async fn upgrade(&self, id: Uuid, image: NodeImage) -> commands::Result<()> {
-        if image != self.image(id).await? {
-            let nodes_lock = self.nodes.read().await;
-            let data = nodes_lock
-                .get(&id)
-                .ok_or_else(|| Error::NodeNotFound(id))?
-                .read()
-                .await
-                .state
-                .clone();
-
+        let nodes_lock = self.nodes.read().await;
+        let MaybeNode::Node(node_lock) =
+            nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?
+        else {
+            command_failed!(Error::Internal(anyhow!(
+                "Cannot upgrade broken node `{id}`"
+            )));
+        };
+        let data = node_lock.read().await.state.clone();
+        if image != data.image {
             if image.protocol != data.image.protocol {
                 command_failed!(Error::Internal(anyhow!(
                     "Cannot upgrade protocol to `{}`",
@@ -409,12 +423,7 @@ where
                 .await?;
             }
 
-            let mut node = nodes_lock
-                .get(&id)
-                .ok_or_else(|| Error::NodeNotFound(id))?
-                .write()
-                .await;
-
+            let mut node = node_lock.write().await;
             let mut cpu_registry = self.cpu_registry.lock().await;
             cpu_registry.release(&mut node.state.assigned_cpus);
             node.state.assigned_cpus = cpu_registry.acquire(new_meta.requirements.vcpu_count)?;
@@ -434,11 +443,11 @@ where
     pub async fn delete(&self, id: Uuid) -> commands::Result<()> {
         let name = {
             let nodes_lock = self.nodes.read().await;
-            let mut node = nodes_lock
-                .get(&id)
-                .ok_or_else(|| Error::NodeNotFound(id))?
-                .write()
-                .await;
+            let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+            let MaybeNode::Node(node_lock) = maybe_node else {
+                command_failed!(Error::Internal(anyhow!("Cannot delete broken node `{id}`")));
+            };
+            let mut node = node_lock.write().await;
             node.delete().await?;
             node.state.name.clone()
         };
@@ -460,11 +469,11 @@ where
     #[instrument(skip(self))]
     pub async fn start(&self, id: Uuid, reload_plugin: bool) -> commands::Result<()> {
         let nodes_lock = self.nodes.read().await;
-        let mut node = nodes_lock
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            command_failed!(Error::Internal(anyhow!("Cannot start broken node `{id}`")));
+        };
+        let mut node = node_lock.write().await;
         if reload_plugin {
             node.reload_plugin()
                 .await
@@ -480,11 +489,11 @@ where
     #[instrument(skip(self))]
     pub async fn stop(&self, id: Uuid, force: bool) -> commands::Result<()> {
         let nodes_lock = self.nodes.read().await;
-        let mut node = nodes_lock
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            command_failed!(Error::Internal(anyhow!("Cannot stop broken node `{id}`")));
+        };
+        let mut node = node_lock.write().await;
         if NodeStatus::Stopped != node.expected_status() || force {
             node.stop(force).await?;
         }
@@ -494,11 +503,14 @@ where
     #[instrument(skip(self))]
     pub async fn restart(&self, id: Uuid, force: bool) -> commands::Result<()> {
         let nodes_lock = self.nodes.read().await;
-        let mut node = nodes_lock
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            command_failed!(Error::Internal(anyhow!(
+                "Cannot restart broken node `{id}`"
+            )));
+        };
+
+        let mut node = node_lock.write().await;
         node.restart(force).await?;
         Ok(())
     }
@@ -511,35 +523,38 @@ where
         org_id: String,
     ) -> commands::Result<()> {
         check_user_firewall_rules(&rules)?;
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            command_failed!(Error::Internal(anyhow!("Cannot update broken node `{id}`")));
+        };
+        let mut node = node_lock.write().await;
         node.update(rules, org_id).await
     }
 
     #[instrument(skip(self))]
     pub async fn status(&self, id: Uuid) -> Result<NodeStatus> {
-        let nodes = self.nodes.read().await;
-        let node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .read()
-            .await;
-        Ok(node.status().await)
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        Ok(if let MaybeNode::Node(node_lock) = maybe_node {
+            let node = node_lock.read().await;
+            node.status().await
+        } else {
+            NodeStatus::Failed
+        })
     }
 
     #[instrument(skip(self))]
     async fn expected_status(&self, id: Uuid) -> Result<NodeStatus> {
-        let nodes = self.nodes.read().await;
-        let node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .read()
-            .await;
-        Ok(node.expected_status())
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        Ok(match maybe_node {
+            MaybeNode::Node(node_lock) => {
+                let node = node_lock.read().await;
+                node.expected_status()
+            }
+            MaybeNode::BrokenNode(state) => state.expected_status,
+        })
     }
 
     /// Recovery helps nodes to achieve expected state,
@@ -552,7 +567,13 @@ where
     #[instrument(skip(self))]
     pub async fn recover(&self) {
         let nodes_lock = self.nodes.read().await;
-        for (id, node_lock) in nodes_lock.iter() {
+        for (id, node_lock) in nodes_lock.iter().filter_map(|(id, maybe_node)| {
+            if let MaybeNode::Node(node) = maybe_node {
+                Some((id, node))
+            } else {
+                None
+            }
+        }) {
             if let Ok(mut node) = node_lock.try_write() {
                 if node.status().await == NodeStatus::Failed
                     && node.expected_status() != NodeStatus::Failed
@@ -567,78 +588,78 @@ where
 
     #[instrument(skip(self))]
     pub async fn jobs(&self, id: Uuid) -> Result<JobsInfo> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            bail!("Cannot get jobs for broken node `{id}`");
+        };
+        let mut node = node_lock.write().await;
         node.babel_engine.get_jobs().await
     }
 
     #[instrument(skip(self))]
     pub async fn job_info(&self, id: Uuid, job_name: &str) -> Result<JobInfo> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            bail!("Cannot get job info for broken node `{id}`");
+        };
+        let mut node = node_lock.write().await;
         node.babel_engine.job_info(job_name).await
     }
 
     #[instrument(skip(self))]
     pub async fn start_job(&self, id: Uuid, job_name: &str) -> Result<()> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            bail!("Cannot start job on broken node `{id}`");
+        };
+        let mut node = node_lock.write().await;
         node.babel_engine.start_job(job_name).await
     }
 
     #[instrument(skip(self))]
     pub async fn stop_job(&self, id: Uuid, job_name: &str) -> Result<()> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            bail!("Cannot stop job on broken node `{id}`");
+        };
+        let mut node = node_lock.write().await;
         node.babel_engine.stop_job(job_name).await
     }
 
     #[instrument(skip(self))]
     pub async fn skip_job(&self, id: Uuid, job_name: &str) -> Result<()> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            bail!("Cannot skip job on broken node `{id}`");
+        };
+        let mut node = node_lock.write().await;
         node.babel_engine.skip_job(job_name).await
     }
 
     #[instrument(skip(self))]
     pub async fn cleanup_job(&self, id: Uuid, job_name: &str) -> Result<()> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            bail!("Cannot cleanup job on broken node `{id}`");
+        };
+        let mut node = node_lock.write().await;
         node.babel_engine.cleanup_job(job_name).await
     }
 
     #[instrument(skip(self))]
     pub async fn metrics(&self, id: Uuid) -> Result<node_metrics::Metric> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            bail!("Cannot get metrics for broken node `{id}`");
+        };
+        let mut node = node_lock.write().await;
 
         node_metrics::collect_metric(&mut node.babel_engine)
             .await
@@ -647,12 +668,12 @@ where
 
     #[instrument(skip(self))]
     pub async fn capabilities(&self, id: Uuid) -> Result<Vec<String>> {
-        let nodes = self.nodes.read().await;
-        let node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .write()
-            .await;
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            bail!("Cannot get broken node capabilities `{id}`");
+        };
+        let node = node_lock.read().await;
         Ok(node.babel_engine.capabilities().clone())
     }
 
@@ -664,13 +685,17 @@ where
         param: &str,
         reload_plugin: bool,
     ) -> eyre::Result<String, BabelError> {
-        let nodes = self.nodes.read().await;
-        let mut node = nodes
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock
             .get(&id)
             .ok_or_else(|| Error::NodeNotFound(id))
-            .map_err(|err| BabelError::Internal { err: err.into() })?
-            .write()
-            .await;
+            .map_err(|err| BabelError::Internal { err: err.into() })?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            return Err(BabelError::Internal {
+                err: anyhow!("Cannot call method '{method}' on broken node {id}"),
+            });
+        };
+        let mut node = node_lock.write().await;
 
         if reload_plugin {
             node.reload_plugin()
@@ -738,17 +763,6 @@ where
         Ok(())
     }
 
-    #[instrument(skip(self))]
-    async fn image(&self, id: Uuid) -> commands::Result<NodeImage> {
-        let nodes = self.nodes.read().await;
-        let node = nodes
-            .get(&id)
-            .ok_or_else(|| Error::NodeNotFound(id))?
-            .read()
-            .await;
-        Ok(node.state.image.clone())
-    }
-
     pub async fn node_state_cache(&self, id: Uuid) -> commands::Result<NodeStateCache> {
         let cache = self
             .node_state_cache
@@ -781,7 +795,7 @@ where
         tx: mpsc::Sender<scheduler::Action>,
         cpu_registry: &mut CpuRegistry,
     ) -> Result<(
-        HashMap<Uuid, RwLock<Node<P>>>,
+        HashMap<Uuid, MaybeNode<P>>,
         HashMap<String, Uuid>,
         HashMap<Uuid, NodeStateCache>,
     )> {
@@ -812,36 +826,45 @@ where
             let Some(path) = node_state_path(&entry.path()) else {
                 continue;
             };
-            match NodeState::load(&path)
-                .and_then(|state| async {
+            match NodeState::load(&path).await {
+                Ok(state) => {
                     cpu_registry.mark_acquired(&state.assigned_cpus);
-                    Node::attach(pal.clone(), api_config.clone(), state, tx.clone())
-                        .await
-                        .with_context(|| "attach node failed")
-                })
-                .await
-            {
-                Ok(node) => {
                     // insert node and its info into internal data structures
-                    let id = node.id();
-                    let name = node.state.name.clone();
+                    let id = state.id;
+                    let name = state.name.clone();
                     node_ids.insert(name.clone(), id);
                     node_state_cache.insert(
                         id,
                         NodeStateCache {
                             name,
-                            ip: node.state.network_interface.ip.to_string(),
-                            gateway: node.state.network_interface.gateway.to_string(),
-                            image: node.state.image.clone(),
-                            network: node.state.network.clone(),
-                            started_at: node.state.started_at,
-                            dev_mode: node.state.dev_mode,
-                            requirements: node.state.requirements.clone(),
-                            properties: node.state.properties.clone(),
-                            assigned_cpus: node.state.assigned_cpus.clone(),
+                            ip: state.network_interface.ip.to_string(),
+                            gateway: state.network_interface.gateway.to_string(),
+                            image: state.image.clone(),
+                            network: state.network.clone(),
+                            started_at: state.started_at,
+                            dev_mode: state.dev_mode,
+                            requirements: state.requirements.clone(),
+                            properties: state.properties.clone(),
+                            assigned_cpus: state.assigned_cpus.clone(),
                         },
                     );
-                    nodes.insert(id, RwLock::new(node));
+                    nodes.insert(
+                        id,
+                        match Node::attach(
+                            pal.clone(),
+                            api_config.clone(),
+                            state.clone(),
+                            tx.clone(),
+                        )
+                        .await
+                        {
+                            Ok(node) => MaybeNode::Node(RwLock::new(node)),
+                            Err(err) => {
+                                error!("Failed to attach node {id}: {err:#}");
+                                MaybeNode::BrokenNode(state)
+                            }
+                        },
+                    );
                 }
                 Err(e) => {
                     // blockvisord should not bail on problems with individual node files.
@@ -1518,6 +1541,7 @@ mod tests {
 
         let mut invalid_node_state = node_state.clone();
         invalid_node_state.id = Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047531").unwrap();
+        invalid_node_state.name = "invalid node".to_string();
         let nodes_dir = build_nodes_dir(&test_env.tmp_root);
         make_node_dir(&nodes_dir, node_state.id).await;
         node_state.save(&nodes_dir).await?;
@@ -1576,7 +1600,7 @@ mod tests {
             });
         let config = default_config(test_env.tmp_root.clone());
         let nodes = NodesManager::load(pal, config).await?;
-        assert_eq!(1, nodes.nodes_list().await.len());
+        assert_eq!(2, nodes.nodes_list().await.len());
         assert_eq!(
             "first node",
             nodes.node_state_cache(node_state.id).await?.name
@@ -1586,6 +1610,34 @@ mod tests {
             nodes.expected_status(node_state.id).await?
         );
         assert_eq!(node_state.id, nodes.node_id_for_name("first node").await?);
+        assert_eq!(
+            NodeStatus::Failed,
+            nodes.status(invalid_node_state.id).await?
+        );
+        assert_eq!(
+            "BV internal error: Cannot stop broken node `4931bafa-92d9-4521-9fc6-a77eee047531`",
+            nodes
+                .stop(invalid_node_state.id, true)
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            NodeStatus::Failed,
+            nodes.status(invalid_node_state.id).await.unwrap()
+        );
+        assert_eq!(
+            NodeStatus::Stopped,
+            nodes.expected_status(invalid_node_state.id).await.unwrap()
+        );
+        assert_eq!(
+            invalid_node_state.name,
+            nodes
+                .node_state_cache(invalid_node_state.id)
+                .await
+                .unwrap()
+                .name
+        );
 
         Ok(())
     }
@@ -1697,7 +1749,10 @@ mod tests {
         );
         {
             let mut nodes_list = nodes.nodes.write().await;
-            let mut node = nodes_list.get_mut(&node_id).unwrap().write().await;
+            let MaybeNode::Node(node) = nodes_list.get_mut(&node_id).unwrap() else {
+                panic!("unexpected broken node")
+            };
+            let mut node = node.write().await;
             node.state.initialized = true;
             assert!(node.babel_engine.has_capability("info"));
         }
@@ -1736,7 +1791,10 @@ mod tests {
         );
         {
             let mut nodes_list = nodes.nodes.write().await;
-            let node = nodes_list.get_mut(&node_id).unwrap().write().await;
+            let MaybeNode::Node(node) = nodes_list.get_mut(&node_id).unwrap() else {
+                panic!("unexpected broken node")
+            };
+            let node = node.write().await;
             assert!(!node.state.initialized);
             assert!(!node.babel_engine.has_capability("info"));
         }
@@ -1922,17 +1980,11 @@ mod tests {
 
     impl RecoverySut {
         async fn on_node(&mut self, call_on_node: impl FnOnce(&mut Node<MockTestPal>)) {
-            call_on_node(
-                &mut *self
-                    .nodes
-                    .nodes
-                    .write()
-                    .await
-                    .get_mut(&self.node_id)
-                    .unwrap()
-                    .write()
-                    .await,
-            );
+            let mut nodes_lock = self.nodes.nodes.write().await;
+            let MaybeNode::Node(node) = nodes_lock.get_mut(&self.node_id).unwrap() else {
+                panic!("unexpected broken node")
+            };
+            call_on_node(&mut *node.write().await);
         }
     }
 

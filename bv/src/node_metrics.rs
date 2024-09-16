@@ -2,7 +2,7 @@
 
 use crate::node::BabelEngine;
 use crate::node_state::NodeStatus;
-use crate::nodes_manager::NodesManager;
+use crate::nodes_manager::{MaybeNode, NodesManager};
 use crate::pal::{NodeConnection, Pal};
 use crate::services::api::{common, pb};
 use babel_api::{
@@ -85,19 +85,23 @@ where
     let nodes_lock = nodes_manager.nodes_list().await;
     let metrics_fut: Vec<_> = nodes_lock
         .values()
-        .map(|n| async {
-            match n.try_write() {
-                Err(_) => None,
-                Ok(mut node) => {
-                    if node.status().await == NodeStatus::Running && !node.state.dev_mode {
-                        collect_metric(&mut node.babel_engine)
-                            .await
-                            .map(|metric| (node.id(), metric))
-                    } else {
-                        // don't collect metrics for not running or dev nodes
-                        None
+        .map(|n| async move {
+            if let MaybeNode::Node(n) = n {
+                match n.try_write() {
+                    Err(_) => None,
+                    Ok(mut node) => {
+                        if node.status().await == NodeStatus::Running && !node.state.dev_mode {
+                            collect_metric(&mut node.babel_engine)
+                                .await
+                                .map(|metric| (node.id(), metric))
+                        } else {
+                            // don't collect metrics for not running or dev nodes
+                            None
+                        }
                     }
                 }
+            } else {
+                None
             }
         })
         .collect();

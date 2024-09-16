@@ -1,5 +1,5 @@
-use crate::node::Node;
 use crate::node_state::NodeStatus;
+use crate::nodes_manager::MaybeNode;
 use crate::pal::Pal;
 use async_trait::async_trait;
 use bv_utils::run_flag::RunFlag;
@@ -24,7 +24,7 @@ pub trait TaskHandler {
     async fn handle(&self, task: &Scheduled);
 }
 
-pub struct NodeTaskHandler<P: Pal>(pub Arc<RwLock<HashMap<Uuid, RwLock<Node<P>>>>>);
+pub struct NodeTaskHandler<P: Pal>(pub Arc<RwLock<HashMap<Uuid, MaybeNode<P>>>>);
 
 #[async_trait]
 impl<P> TaskHandler for NodeTaskHandler<P>
@@ -37,7 +37,7 @@ where
 {
     async fn handle(&self, task: &Scheduled) {
         let nodes_lock = self.0.read().await;
-        if let Some(node) = nodes_lock.get(&task.node_id) {
+        if let Some(MaybeNode::Node(node)) = nodes_lock.get(&task.node_id) {
             let mut node_lock = node.write().await;
             if node_lock.status().await == NodeStatus::Running {
                 match &task.task {

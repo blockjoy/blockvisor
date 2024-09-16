@@ -4,7 +4,7 @@ use crate::{
     hosts::{self, HostMetrics},
     internal_server, node_metrics,
     node_state::NodeStatus,
-    nodes_manager::NodesManager,
+    nodes_manager::{MaybeNode, NodesManager},
     pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
     services::{
@@ -256,13 +256,19 @@ where
                 // collect interesting information about nodes
                 let mut updates = vec![];
                 for (id, node) in nodes_manager.nodes_list().await.iter() {
-                    if let Ok(node) = node.try_read() {
-                        let status = node.status().await;
-                        let image = node.state.image.clone();
-                        updates.push((node.id(), status, image));
+                    if let MaybeNode::Node(node) = node {
+                        if let Ok(node) = node.try_read() {
+                            let status = node.status().await;
+                            let image = node.state.image.clone();
+                            updates.push((node.id(), status, image));
+                        } else {
+                            debug!(
+                            "Skipping node info collection for cluster metadata, node `{id}` busy"
+                        );
+                        }
                     } else {
                         debug!(
-                            "Skipping node info collection for cluster metadata, node `{id}` busy"
+                            "Skipping node info collection for cluster metadata, node `{id}` broken"
                         );
                     }
                 }
@@ -313,23 +319,28 @@ where
             let now = Instant::now();
             let mut updates = vec![];
             for (id, node) in nodes_manager.nodes_list().await.iter() {
-                if let Ok(mut node) = node.try_write() {
-                    if node.state.dev_mode {
-                        // don't send updates for nodes in dev mode
-                        continue;
-                    }
-                    let status = node.status().await;
-                    let maybe_address = if status == NodeStatus::Running
-                        && node.babel_engine.has_capability("address")
-                    {
-                        node.babel_engine.address().await.ok()
+                if let MaybeNode::Node(node) = node {
+                    if let Ok(mut node) = node.try_write() {
+                        if node.state.dev_mode {
+                            // don't send updates for nodes in dev mode
+                            continue;
+                        }
+                        let status = node.status().await;
+                        let maybe_address = if status == NodeStatus::Running
+                            && node.babel_engine.has_capability("address")
+                        {
+                            node.babel_engine.address().await.ok()
+                        } else {
+                            None
+                        };
+                        debug!("Collected node `{id}` info: s={status}, a={maybe_address:?}");
+                        updates.push((node.id(), status, maybe_address));
                     } else {
-                        None
-                    };
-                    debug!("Collected node `{id}` info: s={status}, a={maybe_address:?}");
-                    updates.push((node.id(), status, maybe_address));
+                        debug!("Skipping node info collection, node `{id}` busy");
+                    }
                 } else {
-                    debug!("Skipping node info collection, node `{id}` busy");
+                    debug!("Collected node `{id}` info: s=Broken, a=None");
+                    updates.push((*id, NodeStatus::Failed, None));
                 }
             }
 

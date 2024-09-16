@@ -1,13 +1,11 @@
-use crate::apptainer_platform::ApptainerPlatform;
-use crate::node_state::NodeProperties;
 use crate::{
+    apptainer_platform::ApptainerPlatform,
     cluster::ClusterData,
     config,
     config::SharedConfig,
     hosts,
-    node::Node,
-    node_state::{NodeImage, NodeStatus},
-    nodes_manager::{self, NodeConfig, NodesManager},
+    node_state::{NodeImage, NodeProperties, NodeStatus},
+    nodes_manager::{self, MaybeNode, NodeConfig, NodesManager},
     pal::Pal,
     services,
     services::api::{self, common, pb},
@@ -22,7 +20,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
-use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::{info, instrument};
 use uuid::Uuid;
@@ -490,16 +487,16 @@ where
 {
     async fn is_dev_node(&self, id: Uuid) -> eyre::Result<bool, Status> {
         Ok(self.dev_mode
-            || self
+            || match self
                 .nodes_manager
                 .nodes_list()
                 .await
                 .get(&id)
                 .ok_or_else(|| Status::not_found(format!("node '{id}' not found")))?
-                .read()
-                .await
-                .state
-                .dev_mode)
+            {
+                MaybeNode::Node(node) => node.read().await.state.dev_mode,
+                MaybeNode::BrokenNode(state) => state.dev_mode,
+            })
     }
 
     async fn connect_to_node_service(&self) -> Result<api::NodesServiceClient, Status> {
@@ -514,49 +511,69 @@ where
     async fn get_node_display_info(
         &self,
         id: Uuid,
-        node_lock: &RwLock<Node<P>>,
+        maybe_node: &MaybeNode<P>,
     ) -> eyre::Result<NodeDisplayInfo> {
-        Ok(if let Ok(node) = node_lock.try_read() {
-            let status = node.status().await;
-            NodeDisplayInfo {
-                id: node.state.id,
-                name: node.state.name.clone(),
-                image: node.state.image.clone(),
-                network: node.state.network.clone(),
-                status,
-                ip: node.state.network_interface.ip.to_string(),
-                gateway: node.state.network_interface.gateway.to_string(),
-                uptime: node
-                    .state
-                    .started_at
-                    .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                dev_mode: node.state.dev_mode,
-                requirements: Some(node.state.requirements.clone()),
-                properties: node.state.properties.clone(),
-                assigned_cpus: node.state.assigned_cpus.clone(),
+        Ok(match maybe_node {
+            MaybeNode::Node(node_lock) => {
+                if let Ok(node) = node_lock.try_read() {
+                    let status = node.status().await;
+                    NodeDisplayInfo {
+                        id: node.state.id,
+                        name: node.state.name.clone(),
+                        image: node.state.image.clone(),
+                        network: node.state.network.clone(),
+                        status,
+                        ip: node.state.network_interface.ip.to_string(),
+                        gateway: node.state.network_interface.gateway.to_string(),
+                        uptime: node
+                            .state
+                            .started_at
+                            .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
+                        dev_mode: node.state.dev_mode,
+                        requirements: Some(node.state.requirements.clone()),
+                        properties: node.state.properties.clone(),
+                        assigned_cpus: node.state.assigned_cpus.clone(),
+                    }
+                } else {
+                    let cache = self
+                        .nodes_manager
+                        .node_state_cache(id)
+                        .await
+                        .map_err(|e| Status::unknown(format!("{e:#}")))?;
+                    NodeDisplayInfo {
+                        id,
+                        name: cache.name,
+                        image: cache.image,
+                        network: cache.network,
+                        status: NodeStatus::Busy,
+                        ip: cache.ip,
+                        gateway: cache.gateway,
+                        uptime: cache
+                            .started_at
+                            .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
+                        dev_mode: cache.dev_mode,
+                        requirements: Some(cache.requirements),
+                        properties: cache.properties,
+                        assigned_cpus: cache.assigned_cpus,
+                    }
+                }
             }
-        } else {
-            let cache = self
-                .nodes_manager
-                .node_state_cache(id)
-                .await
-                .map_err(|e| Status::unknown(format!("{e:#}")))?;
-            NodeDisplayInfo {
+            MaybeNode::BrokenNode(state) => NodeDisplayInfo {
                 id,
-                name: cache.name,
-                image: cache.image,
-                network: cache.network,
-                status: NodeStatus::Busy,
-                ip: cache.ip,
-                gateway: cache.gateway,
-                uptime: cache
+                name: state.name.clone(),
+                image: state.image.clone(),
+                network: state.network.clone(),
+                status: NodeStatus::Failed,
+                ip: state.network_interface.ip.to_string(),
+                gateway: state.network_interface.gateway.to_string(),
+                uptime: state
                     .started_at
                     .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                dev_mode: cache.dev_mode,
-                requirements: Some(cache.requirements),
-                properties: cache.properties,
-                assigned_cpus: cache.assigned_cpus,
-            }
+                dev_mode: state.dev_mode,
+                requirements: Some(state.requirements.clone()),
+                properties: state.properties.clone(),
+                assigned_cpus: state.assigned_cpus.clone(),
+            },
         })
     }
 
@@ -691,7 +708,13 @@ where
                     used_ips.push(host_ip.clone());
                 }
                 for (_, node) in self.nodes_manager.nodes_list().await.iter() {
-                    used_ips.push(node.read().await.state.network_interface.ip.to_string());
+                    used_ips.push(
+                        match node {
+                            MaybeNode::Node(node) => node.read().await.state.network_interface.ip,
+                            MaybeNode::BrokenNode(state) => state.network_interface.ip,
+                        }
+                        .to_string(),
+                    );
                 }
                 let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {
                     anyhow!("failed to auto assign ip - provide it manually : {err:#}")
