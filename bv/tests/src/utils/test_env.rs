@@ -382,13 +382,13 @@ impl Pal for DummyPlatform {
         .await
     }
 
-    fn available_cpus(&self) -> usize {
+    async fn available_cpus(&self) -> usize {
         4
     }
 
-    fn available_resources(
+    async fn available_resources(
         &self,
-        _nodes_data_cache: &NodesDataCache,
+        _nodes_data_cache: NodesDataCache,
     ) -> Result<blockvisord::pal::AvailableResources> {
         Ok(AvailableResources {
             vcpu_count: 4,
@@ -397,7 +397,7 @@ impl Pal for DummyPlatform {
         })
     }
 
-    fn used_disk_space_correction(&self, _nodes_data_cache: &NodesDataCache) -> Result<u64> {
+    async fn used_disk_space_correction(&self, _nodes_data_cache: NodesDataCache) -> Result<u64> {
         Ok(0)
     }
 

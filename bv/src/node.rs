@@ -809,9 +809,9 @@ pub mod tests {
                 bv_context: &BvContext,
                 node_state: &NodeState,
             ) -> Result<MockTestVM>;
-            fn available_cpus(&self) -> usize;
-            fn available_resources(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
-            fn used_disk_space_correction(&self, nodes_data_cache: &nodes_manager::NodesDataCache) -> Result<u64>;
+            async fn available_cpus(&self) -> usize;
+            async fn available_resources(&self, nodes_data_cache: nodes_manager::NodesDataCache) -> Result<pal::AvailableResources>;
+            async fn used_disk_space_correction(&self, nodes_data_cache: nodes_manager::NodesDataCache) -> Result<u64>;
 
             type RecoveryBackoff = DummyBackoff;
             fn create_recovery_backoff(&self) -> DummyBackoff;

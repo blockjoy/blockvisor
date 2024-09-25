@@ -182,7 +182,7 @@ impl ApptainerMachine {
     pub async fn attach(self) -> Result<Self> {
         let mut vm = self.create().await?;
         vm.load_apptainer_pid().await?;
-        if vm.is_container_running() {
+        if vm.is_container_running().await {
             vm.stop_babel(false).await?;
             vm.start_babel().await?;
         }
@@ -223,12 +223,12 @@ impl ApptainerMachine {
         Ok(())
     }
 
-    fn is_container_running(&self) -> bool {
+    async fn is_container_running(&self) -> bool {
         self.apptainer_pid.map(is_process_running).unwrap_or(false)
     }
 
     async fn stop_container(&mut self) -> Result<()> {
-        if self.is_container_running() {
+        if self.is_container_running().await {
             if let Err(err) = run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &self.vm_name]).await
             {
                 if run_cmd(APPTAINER_BIN_NAME, ["instance", "list", &self.vm_name])
@@ -249,7 +249,7 @@ impl ApptainerMachine {
     }
 
     async fn start_container(&mut self) -> Result<()> {
-        if !self.is_container_running() {
+        if !self.is_container_running().await {
             let hostname = self.vm_name.replace('_', "-");
             let chroot_path = self.chroot_dir.to_string_lossy();
             let cgroups_path = self.cgroups_path.to_string_lossy();
@@ -403,7 +403,7 @@ async fn is_mounted(path: &Path) -> Result<bool> {
 #[async_trait]
 impl pal::VirtualMachine for ApptainerMachine {
     async fn state(&self) -> pal::VmState {
-        if self.is_container_running() {
+        if self.is_container_running().await {
             if self.is_babel_running() {
                 pal::VmState::RUNNING
             } else {
@@ -447,7 +447,7 @@ impl pal::VirtualMachine for ApptainerMachine {
     }
 
     async fn recover(&mut self) -> Result<()> {
-        if self.is_container_running() {
+        if self.is_container_running().await {
             match get_process_pid(BABEL_BIN_NAME, &self.chroot_dir.to_string_lossy()) {
                 Ok(_) => Ok(()),
                 Err(GetProcessIdError::NotFound) => self.start_babel().await,

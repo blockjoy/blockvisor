@@ -157,31 +157,42 @@ impl Pal for ApptainerPlatform {
         self.new_vm(bv_context, node_state).await?.attach().await
     }
 
-    fn available_cpus(&self) -> usize {
+    async fn available_cpus(&self) -> usize {
         linux_platform::available_cpus()
     }
 
-    fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources> {
-        self.base.available_resources(
-            nodes_data_cache,
-            self.used_disk_space_correction(nodes_data_cache)?,
-        )
+    async fn available_resources(
+        &self,
+        nodes_data_cache: NodesDataCache,
+    ) -> Result<AvailableResources> {
+        self.base
+            .available_resources(
+                nodes_data_cache.clone(),
+                self.used_disk_space_correction(nodes_data_cache).await?,
+            )
+            .await
     }
 
-    fn used_disk_space_correction(&self, nodes_data_cache: &NodesDataCache) -> Result<u64> {
-        let mut correction = 0;
-        for (id, data) in nodes_data_cache {
-            let data_img_path =
-                node_context::build_node_dir(self.bv_root(), *id).join(apptainer_machine::DATA_DIR);
-            let actual_data_size = fs_extra::dir::get_size(&data_img_path)
-                .with_context(|| format!("can't check size of '{}'", data_img_path.display()))?;
-            let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
-            debug!("id: {id}; declared: {declared_data_size}; actual: {actual_data_size}");
-            if declared_data_size > actual_data_size {
-                correction += declared_data_size - actual_data_size;
+    async fn used_disk_space_correction(&self, nodes_data_cache: NodesDataCache) -> Result<u64> {
+        let bv_root = self.bv_root().to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let mut correction = 0;
+            for (id, data) in nodes_data_cache {
+                let data_img_path =
+                    node_context::build_node_dir(&bv_root, id).join(apptainer_machine::DATA_DIR);
+                let actual_data_size =
+                    fs_extra::dir::get_size(&data_img_path).with_context(|| {
+                        format!("can't check size of '{}'", data_img_path.display())
+                    })?;
+                let declared_data_size = data.requirements.disk_size_gb * 1_000_000_000;
+                debug!("id: {id}; declared: {declared_data_size}; actual: {actual_data_size}");
+                if declared_data_size > actual_data_size {
+                    correction += declared_data_size - actual_data_size;
+                }
             }
-        }
-        Ok(correction)
+            Ok(correction)
+        })
+        .await?
     }
 
     type RecoveryBackoff = linux_platform::RecoveryBackoff;

@@ -64,12 +64,15 @@ pub trait Pal {
     ) -> Result<Self::VirtualMachine>;
 
     /// Get available cpus.
-    fn available_cpus(&self) -> usize;
+    async fn available_cpus(&self) -> usize;
     /// Get available resources, but take into account requirements declared by nodes.
-    fn available_resources(&self, nodes_data_cache: &NodesDataCache) -> Result<AvailableResources>;
+    async fn available_resources(
+        &self,
+        nodes_data_cache: NodesDataCache,
+    ) -> Result<AvailableResources>;
     /// Calculate used disk space value correction. Regarding sparse files used for data images, used
     /// disk space need manual correction that include declared data image size.
-    fn used_disk_space_correction(&self, nodes_data_cache: &NodesDataCache) -> Result<u64>;
+    async fn used_disk_space_correction(&self, nodes_data_cache: NodesDataCache) -> Result<u64>;
 
     /// Type representing recovery backoff counter.
     type RecoveryBackoff: RecoverBackoff + Debug;

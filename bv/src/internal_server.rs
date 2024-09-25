@@ -154,6 +154,7 @@ where
                 self.nodes_manager.nodes_data_cache().await,
                 self.nodes_manager.pal(),
             )
+            .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?,
         ))
     }

@@ -180,7 +180,7 @@ where
         let state_path = build_state_filename(bv_root);
         let pal = Arc::new(pal);
         let nodes = Arc::new(RwLock::new(HashMap::new()));
-        let available_cpus = pal.available_cpus();
+        let available_cpus = pal.available_cpus().await;
         let mut cpu_registry = CpuRegistry::new(available_cpus);
         Ok(if state_path.exists() {
             let state = State::load(&state_path).await?;
@@ -725,7 +725,8 @@ where
     ) -> commands::Result<()> {
         let mut available = self
             .pal
-            .available_resources(&self.nodes_data_cache().await)?;
+            .available_resources(self.nodes_data_cache().await)
+            .await?;
         debug!("Available resources {available:?}");
 
         if let Some(tol) = tolerance {
@@ -1133,7 +1134,7 @@ mod tests {
     };
 
     fn available_test_resources(
-        _nodes_data_cache: &NodesDataCache,
+        _nodes_data_cache: NodesDataCache,
     ) -> Result<pal::AvailableResources> {
         Ok(TEST_NODE_REQUIREMENTS)
     }

@@ -59,32 +59,35 @@ impl LinuxPlatform {
         })
     }
 
-    pub fn available_resources(
+    pub async fn available_resources(
         &self,
-        nodes_data_cache: &NodesDataCache,
+        nodes_data_cache: NodesDataCache,
         used_disk_space_correction: u64,
     ) -> Result<AvailableResources> {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        let (available_mem_size_mb, available_vcpu_count) = nodes_data_cache.iter().fold(
-            (sys.total_memory() / 1_000_000, sys.cpus().len()),
-            |(available_mem_size_mb, available_vcpu_count), (_, data)| {
-                (
-                    available_mem_size_mb - data.requirements.mem_size_mb,
-                    available_vcpu_count - data.requirements.vcpu_count,
-                )
-            },
-        );
-        let available_disk_space =
-            bv_utils::system::find_disk_by_path(&sys, &self.bv_root.join(BV_VAR_PATH))
+        let var_path = self.bv_root.join(BV_VAR_PATH);
+        tokio::task::spawn_blocking(move || {
+            let mut sys = System::new_all();
+            sys.refresh_all();
+            let (available_mem_size_mb, available_vcpu_count) = nodes_data_cache.iter().fold(
+                (sys.total_memory() / 1_000_000, sys.cpus().len()),
+                |(available_mem_size_mb, available_vcpu_count), (_, data)| {
+                    (
+                        available_mem_size_mb - data.requirements.mem_size_mb,
+                        available_vcpu_count - data.requirements.vcpu_count,
+                    )
+                },
+            );
+            let available_disk_space = bv_utils::system::find_disk_by_path(&sys, &var_path)
                 .map(|disk| disk.available_space())
                 .ok_or_else(|| anyhow!("Cannot get available disk space"))?
                 - used_disk_space_correction;
-        Ok(AvailableResources {
-            vcpu_count: available_vcpu_count,
-            mem_size_mb: available_mem_size_mb,
-            disk_size_gb: available_disk_space / 1_000_000_000,
+            Ok(AvailableResources {
+                vcpu_count: available_vcpu_count,
+                mem_size_mb: available_mem_size_mb,
+                disk_size_gb: available_disk_space / 1_000_000_000,
+            })
         })
+        .await?
     }
 }
 

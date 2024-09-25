@@ -91,46 +91,58 @@ impl HostMetrics {
         SYSTEM_HOST_UPTIME_GAUGE.set(self.uptime_secs as f64);
     }
 
-    pub fn collect(nodes_data_cache: NodesDataCache, pal: &impl Pal) -> Result<Self> {
+    pub async fn collect(nodes_data_cache: NodesDataCache, pal: &impl Pal) -> Result<Self> {
+        let used_ips = nodes_data_cache
+            .iter()
+            .map(|(_, data)| data.ip.clone())
+            .collect();
+        let disk_space_correction = pal
+            .used_disk_space_correction(nodes_data_cache)
+            .await
+            .with_context(|| "failed to get used_disk_space_correction")?;
+
         let bv_root = bv_root();
-        let mut sys = System::new_all();
-        // We need to refresh twice:
-        // https://docs.rs/sysinfo/latest/sysinfo/trait.CpuExt.html#tymethod.cpu_usage
-        sys.refresh_all();
-        sys.refresh_cpu_specifics(sysinfo::CpuRefreshKind::new().with_cpu_usage());
 
-        // sysinfo produced wrong results, so let's try how this crate works
-        let sys2 = System2::new();
-        let mem = sys2.memory()?;
+        tokio::task::spawn_blocking(move || {
+            let mut sys = System::new_all();
+            // We need to refresh twice:
+            // https://docs.rs/sysinfo/latest/sysinfo/trait.CpuExt.html#tymethod.cpu_usage
+            sys.refresh_all();
+            sys.refresh_cpu_specifics(sysinfo::CpuRefreshKind::new().with_cpu_usage());
 
-        let load = sys.load_average();
-        Ok(HostMetrics {
-            used_cpu_count: sys.global_cpu_info().cpu_usage() as u32,
-            used_memory_bytes: saturating_sub_bytes(mem.total, mem.free).as_u64(),
-            used_disk_space_bytes: bv_utils::system::find_disk_by_path(
-                &sys,
-                &bv_root.canonicalize()?.join(BV_VAR_PATH),
-            )
-            .map(|disk| disk.total_space() - disk.available_space())
-            .ok_or_else(|| anyhow!("Cannot get used disk space"))?
-                + pal
-                    .used_disk_space_correction(&nodes_data_cache)
-                    .with_context(|| "failed to get used_disk_space_correction")?,
-            used_ips: nodes_data_cache
-                .into_iter()
-                .map(|(_, data)| data.ip)
-                .collect(),
-            load_one: load.one,
-            load_five: load.five,
-            load_fifteen: load.fifteen,
-            network_received_bytes: sys.networks().iter().map(|(_, n)| n.total_received()).sum(),
-            network_sent_bytes: sys
-                .networks()
-                .iter()
-                .map(|(_, n)| n.total_transmitted())
-                .sum(),
-            uptime_secs: sys.uptime(),
+            // sysinfo produced wrong results, so let's try how this crate works
+            let sys2 = System2::new();
+            let mem = sys2.memory()?;
+
+            let load = sys.load_average();
+            Ok(HostMetrics {
+                used_cpu_count: sys.global_cpu_info().cpu_usage() as u32,
+                used_memory_bytes: saturating_sub_bytes(mem.total, mem.free).as_u64(),
+                used_disk_space_bytes: bv_utils::system::find_disk_by_path(
+                    &sys,
+                    &bv_root.canonicalize()?.join(BV_VAR_PATH),
+                )
+                .map(|disk| disk.total_space() - disk.available_space())
+                .ok_or_else(|| anyhow!("Cannot get used disk space"))?
+                    + disk_space_correction,
+                used_ips,
+                load_one: load.one,
+                load_five: load.five,
+                load_fifteen: load.fifteen,
+                network_received_bytes: sys
+                    .networks()
+                    .iter()
+                    .map(|(_, n)| n.total_received())
+                    .sum(),
+                network_sent_bytes: sys
+                    .networks()
+                    .iter()
+                    .map(|(_, n)| n.total_transmitted())
+                    .sum(),
+                uptime_secs: sys.uptime(),
+            })
         })
+        .await?
     }
 }
 
