@@ -95,3 +95,4 @@ serial_test = "2.0.0"
 tokio-stream = { version = "0.1.14", features = ["net"] }
 http = "1.0.0"
 hyper = "1.0.1"
+serde_yaml = "0.9.33"
