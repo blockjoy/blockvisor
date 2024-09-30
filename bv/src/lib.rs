@@ -22,6 +22,7 @@ pub mod node_state;
 pub mod nodes_manager;
 pub mod pal;
 pub mod pretty_table;
+mod protocol_definition;
 pub mod scheduler;
 pub mod self_updater;
 pub mod services;
