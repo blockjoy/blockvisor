@@ -19,14 +19,14 @@ pub const NODE_STATE_FILENAME: &str = "state.json";
 pub type NodeProperties = HashMap<String, String>;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
-pub enum NodeStatus {
+pub enum VmStatus {
     Running,
     Stopped,
     Busy,
     Failed,
 }
 
-impl fmt::Display for NodeStatus {
+impl fmt::Display for VmStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self:?}")
     }
@@ -44,7 +44,7 @@ pub struct NodeImage {
 pub struct NodeInfo {
     pub id: Uuid,
     pub name: String,
-    pub status: NodeStatus,
+    pub status: VmStatus,
 
     pub uptime: Option<i64>,
     pub requirements: Option<VmConfig>,
@@ -84,7 +84,7 @@ pub struct NodeState {
 
     // internal state
     pub assigned_cpus: Vec<usize>,
-    pub expected_status: NodeStatus,
+    pub expected_status: VmStatus,
     #[serde(default, with = "ts_seconds_option")]
     /// Time when node was started, None if node should not be running now
     pub started_at: Option<DateTime<Utc>>,

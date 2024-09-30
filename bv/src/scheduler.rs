@@ -1,4 +1,4 @@
-use crate::node_state::NodeStatus;
+use crate::node_state::VmStatus;
 use crate::nodes_manager::MaybeNode;
 use crate::pal::Pal;
 use async_trait::async_trait;
@@ -39,7 +39,7 @@ where
         let nodes_lock = self.0.read().await;
         if let Some(MaybeNode::Node(node)) = nodes_lock.get(&task.node_id) {
             let mut node_lock = node.write().await;
-            if node_lock.status().await == NodeStatus::Running {
+            if node_lock.status().await == VmStatus::Running {
                 match &task.task {
                     Task::PluginFnCall { name, param } => {
                         debug!("calling scheduled plugin function '{name}({param})'");

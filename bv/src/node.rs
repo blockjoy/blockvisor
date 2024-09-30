@@ -8,7 +8,7 @@ use crate::{
     firewall,
     node_context::NodeContext,
     node_env,
-    node_state::{NodeProperties, NodeState, NodeStatus},
+    node_state::{NodeProperties, NodeState, VmStatus},
     pal::{self, NodeConnection, NodeFirewallConfig, Pal, RecoverBackoff, VirtualMachine},
     scheduler,
 };
@@ -205,7 +205,7 @@ impl<P: Pal + Debug> Node<P> {
         )
         .await
         .with_context(|| "can't initialize BabelEngine")?;
-        if state.expected_status == NodeStatus::Running {
+        if state.expected_status == VmStatus::Running {
             if let Err(err) = babel_engine.start().await {
                 error!("failed to start babel engine for node {node_id}: {err:#}");
             }
@@ -232,29 +232,29 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     /// Returns the actual status of the node.
-    pub async fn status(&self) -> NodeStatus {
+    pub async fn status(&self) -> VmStatus {
         let machine_status = match self.machine.state().await {
-            pal::VmState::RUNNING => NodeStatus::Running,
-            pal::VmState::SHUTOFF => NodeStatus::Stopped,
-            pal::VmState::INVALID => NodeStatus::Failed,
+            pal::VmState::RUNNING => VmStatus::Running,
+            pal::VmState::SHUTOFF => VmStatus::Stopped,
+            pal::VmState::INVALID => VmStatus::Failed,
         };
         if machine_status == self.state.expected_status {
-            if machine_status == NodeStatus::Running // node is running, but
+            if machine_status == VmStatus::Running // node is running, but
                 && (self.babel_engine.node_connection.is_closed() // there is no babel connection
                     || self.babel_engine.node_connection.is_broken() // or is broken for some reason
                     || !self.state.initialized // or it failed to initialize
             ) {
-                NodeStatus::Failed
+                VmStatus::Failed
             } else {
                 machine_status
             }
         } else {
-            NodeStatus::Failed
+            VmStatus::Failed
         }
     }
 
     /// Returns the expected status of the node.
-    pub fn expected_status(&self) -> NodeStatus {
+    pub fn expected_status(&self) -> VmStatus {
         self.state.expected_status
     }
 
@@ -262,11 +262,11 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
         let status = self.status().await;
-        if status == NodeStatus::Failed && self.expected_status() == NodeStatus::Stopped {
+        if status == VmStatus::Failed && self.expected_status() == VmStatus::Stopped {
             bail!("can't start node which is not stopped properly");
         }
-        self.save_expected_status(NodeStatus::Running).await?;
-        if status == NodeStatus::Running {
+        self.save_expected_status(VmStatus::Running).await?;
+        if status == VmStatus::Running {
             return Ok(());
         }
 
@@ -288,7 +288,7 @@ impl<P: Pal + Debug> Node<P> {
         if !self.state.initialized {
             if let Err(err) = self.babel_engine.init().await {
                 // mark as permanently failed - non-recoverable
-                self.save_expected_status(NodeStatus::Failed).await?;
+                self.save_expected_status(VmStatus::Failed).await?;
                 return Err(err);
             }
             self.state.initialized = true;
@@ -303,8 +303,8 @@ impl<P: Pal + Debug> Node<P> {
     /// Stops the running node.
     #[instrument(skip(self))]
     pub async fn stop(&mut self, force: bool) -> Result<()> {
-        self.save_expected_status(NodeStatus::Stopped).await?;
-        if self.status().await == NodeStatus::Stopped {
+        self.save_expected_status(VmStatus::Stopped).await?;
+        if self.status().await == VmStatus::Stopped {
             return Ok(());
         }
         if let Err(err) = self.shutdown_babel(force).await {
@@ -356,7 +356,7 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(self))]
     pub async fn delete(&mut self) -> Result<()> {
         // set expected to `Stopped` just in case of delete errors
-        self.save_expected_status(NodeStatus::Stopped).await?;
+        self.save_expected_status(VmStatus::Stopped).await?;
         self.babel_engine.stop().await?;
         self.machine.delete().await?;
         self.pal.cleanup_firewall_config(self.state.id).await?;
@@ -396,7 +396,7 @@ impl<P: Pal + Debug> Node<P> {
                 .await
                 .map_err(into_internal);
             if res.is_err() {
-                self.state.expected_status = NodeStatus::Failed;
+                self.state.expected_status = VmStatus::Failed;
             }
             self.state.save(&self.context.nodes_dir).await?;
             res?
@@ -408,12 +408,12 @@ impl<P: Pal + Debug> Node<P> {
     #[instrument(skip(self))]
     pub async fn upgrade(&mut self, desired_state: NodeState) -> commands::Result<()> {
         let status = self.status().await;
-        if status == NodeStatus::Failed {
+        if status == VmStatus::Failed {
             return Err(commands::Error::Internal(anyhow!(
                 "can't upgrade node in Failed state"
             )));
         }
-        let need_to_restart = status == NodeStatus::Running;
+        let need_to_restart = status == VmStatus::Running;
         if need_to_restart {
             if self
                 .babel_engine
@@ -481,7 +481,7 @@ impl<P: Pal + Debug> Node<P> {
         }
         let id = self.id();
         match self.state.expected_status {
-            NodeStatus::Running => {
+            VmStatus::Running => {
                 let vm_state = self.machine.state().await;
                 if vm_state == pal::VmState::SHUTOFF || !self.state.initialized {
                     self.started_node_recovery().await?;
@@ -491,7 +491,7 @@ impl<P: Pal + Debug> Node<P> {
                     self.node_connection_recovery().await?;
                 }
             }
-            NodeStatus::Stopped => {
+            VmStatus::Stopped => {
                 info!("Recovery: stopping node with ID `{id}`");
                 if let Err(e) = self
                     .stop(
@@ -505,7 +505,7 @@ impl<P: Pal + Debug> Node<P> {
                     warn!("Recovery: stopping node with ID `{id}` failed: {e:#}");
                     if self.recovery_backoff.stop_failed() {
                         error!("Recovery: retries count exceeded, mark as failed: {e:#}");
-                        self.save_expected_status(NodeStatus::Failed).await?;
+                        self.save_expected_status(VmStatus::Failed).await?;
                     }
                 } else {
                     self.post_recovery();
@@ -514,10 +514,10 @@ impl<P: Pal + Debug> Node<P> {
                     }
                 }
             }
-            NodeStatus::Failed => {
+            VmStatus::Failed => {
                 warn!("Recovery: node with ID `{id}` cannot be recovered");
             }
-            NodeStatus::Busy => unreachable!(),
+            VmStatus::Busy => unreachable!(),
         }
         Ok(())
     }
@@ -532,7 +532,7 @@ impl<P: Pal + Debug> Node<P> {
         Ok(())
     }
 
-    async fn save_expected_status(&mut self, status: NodeStatus) -> Result<()> {
+    async fn save_expected_status(&mut self, status: VmStatus) -> Result<()> {
         self.state.expected_status = status;
         self.state.save(&self.context.nodes_dir).await
     }
@@ -544,7 +544,7 @@ impl<P: Pal + Debug> Node<P> {
             warn!("Recovery: starting node with ID `{id}` failed: {e:#}");
             if self.recovery_backoff.start_failed() {
                 error!("Recovery: retries count exceeded, mark as failed: {e:#}");
-                self.save_expected_status(NodeStatus::Failed).await?;
+                self.save_expected_status(VmStatus::Failed).await?;
             }
         } else {
             self.post_recovery();
@@ -590,7 +590,7 @@ impl<P: Pal + Debug> Node<P> {
             warn!("Recovery: restart node with ID `{id}` failed: {e:#}");
             if self.recovery_backoff.stop_failed() {
                 error!("Recovery: retries count exceeded, mark as failed: {e:#}");
-                self.save_expected_status(NodeStatus::Failed).await?;
+                self.save_expected_status(VmStatus::Failed).await?;
             }
         } else {
             self.post_recovery();
@@ -953,7 +953,7 @@ pub mod tests {
             id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
             name: "node name".to_string(),
             blockchain_id: "blockchain_id".to_string(),
-            expected_status: NodeStatus::Running,
+            expected_status: VmStatus::Running,
             started_at: None,
             initialized: true,
             image: NodeImage {
@@ -1249,7 +1249,7 @@ pub mod tests {
         );
 
         let node = Node::create(pal, config, node_state, test_env.tx.clone()).await?;
-        assert_eq!(NodeStatus::Running, node.expected_status());
+        assert_eq!(VmStatus::Running, node.expected_status());
         test_env.assert_node_state_saved(&node.state).await;
         Ok(())
     }
@@ -1438,7 +1438,7 @@ pub mod tests {
             test_env.tx.clone(),
         )
         .await?;
-        assert_eq!(NodeStatus::Failed, node.status().await);
+        assert_eq!(VmStatus::Failed, node.status().await);
 
         fs::create_dir_all(node_context::build_node_dir(pal.bv_root(), node_state.id)).await?;
         fs::write(&test_env.tmp_root.join("job_runner"), "dummy job_runner")
@@ -1446,7 +1446,7 @@ pub mod tests {
             .unwrap();
         let server = test_env.start_server(babel_mock).await;
         let node = Node::attach(pal, config, node_state, test_env.tx.clone()).await?;
-        assert_eq!(NodeStatus::Running, node.expected_status());
+        assert_eq!(VmStatus::Running, node.expected_status());
         server.assert().await;
         Ok(())
     }
@@ -1542,12 +1542,12 @@ pub mod tests {
             test_env.tx.clone(),
         )
         .await?;
-        assert_eq!(NodeStatus::Running, node.expected_status());
+        assert_eq!(VmStatus::Running, node.expected_status());
 
         // already started
         node.start().await?;
 
-        node.state.expected_status = NodeStatus::Stopped;
+        node.state.expected_status = VmStatus::Stopped;
         assert_eq!(
             "can't start node which is not stopped properly",
             node.start().await.unwrap_err().to_string()
@@ -1606,19 +1606,19 @@ pub mod tests {
         node.state.initialized = false;
         let start_err = format!("{:#}", node.start().await.unwrap_err());
         assert!(start_err.starts_with(r#"node_id=4931bafa-92d9-4521-9fc6-a77eee047530: status: Internal, message: "error on init""#));
-        assert_eq!(NodeStatus::Failed, node.state.expected_status);
+        assert_eq!(VmStatus::Failed, node.state.expected_status);
         assert!(!node.state.initialized);
         assert_eq!(None, node.state.started_at);
 
         // successfully started
         node.start().await?;
-        assert_eq!(NodeStatus::Running, node.state.expected_status);
+        assert_eq!(VmStatus::Running, node.state.expected_status);
         assert!(node.state.initialized);
         assert!(node.state.started_at.is_some());
         test_env.assert_node_state_saved(&node.state).await;
 
         // successfully started again, without init, but with pending update
-        node.state.expected_status = NodeStatus::Stopped;
+        node.state.expected_status = VmStatus::Stopped;
         node.start().await?;
         test_env.assert_node_state_saved(&node.state).await;
 
@@ -1689,14 +1689,14 @@ pub mod tests {
         });
 
         let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
-        assert_eq!(NodeStatus::Running, node.expected_status());
+        assert_eq!(VmStatus::Running, node.expected_status());
 
-        node.state.expected_status = NodeStatus::Stopped;
+        node.state.expected_status = VmStatus::Stopped;
         // already stopped
         node.stop(false).await?;
 
         let now = Utc::now();
-        node.state.expected_status = NodeStatus::Running;
+        node.state.expected_status = VmStatus::Running;
         node.state.started_at = Some(now);
         let mut babel_mock = MockTestBabelService::new();
         let mut seq = Sequence::new();
@@ -1731,12 +1731,12 @@ pub mod tests {
             .unwrap_err()
             .to_string()
             .starts_with("Failed to gracefully shutdown babel and background jobs"));
-        assert_eq!(NodeStatus::Stopped, node.state.expected_status);
+        assert_eq!(VmStatus::Stopped, node.state.expected_status);
         assert_eq!(Some(now), node.state.started_at);
 
         // force stop node in failed state
         node.stop(true).await?;
-        assert_eq!(NodeStatus::Stopped, node.state.expected_status);
+        assert_eq!(VmStatus::Stopped, node.state.expected_status);
         assert_eq!(None, node.state.started_at);
         test_env.assert_node_state_saved(&node.state).await;
 
@@ -1800,7 +1800,7 @@ pub mod tests {
             test_env.tx.clone(),
         )
         .await?;
-        assert_eq!(NodeStatus::Running, node.expected_status());
+        assert_eq!(VmStatus::Running, node.expected_status());
 
         assert_eq!(node.state.firewall, node_state.firewall);
         node.update(
@@ -1882,7 +1882,7 @@ pub mod tests {
             test_env.tx.clone(),
         )
         .await?;
-        assert_eq!(NodeStatus::Running, node.expected_status());
+        assert_eq!(VmStatus::Running, node.expected_status());
 
         let mut babel_mock = MockTestBabelService::new();
         // failed to gracefully shutdown babel
