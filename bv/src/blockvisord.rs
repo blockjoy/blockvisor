@@ -3,7 +3,7 @@ use crate::{
     config::{Config, SharedConfig},
     hosts::{self, HostMetrics},
     internal_server, node_metrics,
-    node_state::NodeStatus,
+    node_state::VmStatus,
     nodes_manager::{MaybeNode, NodesManager},
     pal::{CommandsStream, Pal, ServiceConnector},
     self_updater,
@@ -341,17 +341,17 @@ where
                             "Collected node `{id}` info: s=Broken, a={}",
                             state.image.config_id
                         );
-                        updates.push((*id, state.image.config_id.clone(), NodeStatus::Failed));
+                        updates.push((*id, state.image.config_id.clone(), VmStatus::Failed));
                     }
                 }
             }
 
             for (node_id, config_id, status) in updates {
                 let container_status = match status {
-                    NodeStatus::Running => common::ContainerStatus::Running,
-                    NodeStatus::Stopped => common::ContainerStatus::Stopped,
-                    NodeStatus::Failed => common::ContainerStatus::Failed,
-                    NodeStatus::Busy => common::ContainerStatus::Busy,
+                    VmStatus::Running => common::ContainerStatus::Running,
+                    VmStatus::Stopped => common::ContainerStatus::Stopped,
+                    VmStatus::Failed => common::ContainerStatus::Failed,
+                    VmStatus::Busy => common::ContainerStatus::Busy,
                 };
                 let mut report = pb::NodeServiceReportStatusRequest {
                     id: node_id.to_string(),

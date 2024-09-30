@@ -6,14 +6,14 @@ use cli_table::{
     ColorChoice, Style, Table, TableStruct, WithTitle,
 };
 
-use crate::node_state::NodeStatus;
+use crate::node_state::VmStatus;
 
-fn style_node_status(cell: CellStruct, value: &NodeStatus) -> CellStruct {
+fn style_node_status(cell: CellStruct, value: &VmStatus) -> CellStruct {
     match value {
-        NodeStatus::Busy => cell.foreground_color(Some(Yellow)),
-        NodeStatus::Running => cell.foreground_color(Some(Green)),
-        NodeStatus::Stopped => cell.foreground_color(Some(Yellow)),
-        NodeStatus::Failed => cell.foreground_color(Some(Red)),
+        VmStatus::Busy => cell.foreground_color(Some(Yellow)),
+        VmStatus::Running => cell.foreground_color(Some(Green)),
+        VmStatus::Stopped => cell.foreground_color(Some(Yellow)),
+        VmStatus::Failed => cell.foreground_color(Some(Red)),
     }
 }
 
@@ -28,7 +28,7 @@ pub struct PrettyTableRow {
     #[table(title = "NetworkType", color = "Blue")]
     pub network_type: String,
     #[table(title = "State", customize_fn = "style_node_status")]
-    pub status: NodeStatus,
+    pub status: VmStatus,
     #[table(title = "IP Address", color = "Yellow")]
     pub ip: String,
     #[table(title = "Uptime (s)")]

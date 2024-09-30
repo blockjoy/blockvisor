@@ -4,7 +4,7 @@ use crate::{
     config,
     config::SharedConfig,
     hosts,
-    node_state::{NodeImage, NodeProperties, NodeState, NodeStatus},
+    node_state::{NodeImage, NodeProperties, NodeState, VmStatus},
     nodes_manager::{self, MaybeNode, NodesManager},
     pal::Pal,
     services::{
@@ -26,7 +26,7 @@ use uuid::Uuid;
 // Data that we display in cli
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NodeDisplayInfo {
-    pub status: NodeStatus,
+    pub status: VmStatus,
     pub state: NodeState,
 }
 
@@ -47,7 +47,7 @@ trait Service {
     fn health() -> ServiceStatus;
     fn start_update() -> ServiceStatus;
     fn get_host_metrics() -> hosts::HostMetrics;
-    fn get_node_status(id: Uuid) -> NodeStatus;
+    fn get_node_status(id: Uuid) -> VmStatus;
     fn get_node(id: Uuid) -> NodeDisplayInfo;
     fn get_nodes() -> Vec<NodeDisplayInfo>;
     fn create_node(req: CreateNodeRequest) -> NodeDisplayInfo;
@@ -146,10 +146,7 @@ where
     }
 
     #[instrument(skip(self), ret(Debug))]
-    async fn get_node_status(
-        &self,
-        request: Request<Uuid>,
-    ) -> Result<Response<NodeStatus>, Status> {
+    async fn get_node_status(&self, request: Request<Uuid>) -> Result<Response<VmStatus>, Status> {
         status_check().await?;
         let id = request.into_inner();
         let status = self
@@ -484,13 +481,13 @@ where
                         .map_err(|e| Status::unknown(format!("{e:#}")))?;
                     NodeDisplayInfo {
                         state: cache,
-                        status: NodeStatus::Busy,
+                        status: VmStatus::Busy,
                     }
                 }
             }
             MaybeNode::BrokenNode(state) => NodeDisplayInfo {
                 state: state.clone(),
-                status: NodeStatus::Failed,
+                status: VmStatus::Failed,
             },
         })
     }
@@ -585,13 +582,13 @@ where
                 },
 
                 assigned_cpus: vec![],
-                expected_status: NodeStatus::Stopped,
+                expected_status: VmStatus::Stopped,
                 started_at: None,
                 initialized: false,
                 restarting: false,
                 apptainer_config: None,
             },
-            status: NodeStatus::Stopped,
+            status: VmStatus::Stopped,
         })
     }
 

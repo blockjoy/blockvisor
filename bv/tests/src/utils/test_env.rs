@@ -10,7 +10,7 @@ use blockvisord::{
     node_context,
     node_context::NODES_DIR,
     node_env,
-    node_state::{NodeState, NodeStatus},
+    node_state::{NodeState, VmStatus},
     nodes_manager::NodesDataCache,
     pal::{AvailableResources, NodeFirewallConfig, RecoverBackoff},
     pal::{CommandsStream, Pal, ServiceConnector},
@@ -150,7 +150,7 @@ impl TestEnv {
             .join(format!("{vm_id}/state.json"));
         let start = std::time::Instant::now();
         loop {
-            if NodeState::load(&node_path).await.unwrap().expected_status == NodeStatus::Failed {
+            if NodeState::load(&node_path).await.unwrap().expected_status == VmStatus::Failed {
                 break;
             } else if start.elapsed() < timeout {
                 sleep(Duration::from_secs(5)).await;

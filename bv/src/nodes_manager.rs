@@ -6,7 +6,7 @@ use crate::{
     node::Node,
     node_context::{build_nodes_dir, NODES_DIR},
     node_metrics,
-    node_state::{NodeImage, NodeProperties, NodeState, NodeStatus, VmConfig, NODE_STATE_FILENAME},
+    node_state::{NodeImage, NodeProperties, NodeState, VmConfig, VmStatus, NODE_STATE_FILENAME},
     pal::Pal,
     scheduler,
     scheduler::{Action, Scheduled, Scheduler},
@@ -414,7 +414,7 @@ where
                 .map_err(|err| BabelError::Internal { err })
                 .map_err(into_internal)?;
         }
-        if NodeStatus::Running != node.expected_status() {
+        if VmStatus::Running != node.expected_status() {
             node.start().await?;
         }
         Ok(())
@@ -428,7 +428,7 @@ where
             command_failed!(Error::Internal(anyhow!("Cannot stop broken node `{id}`")));
         };
         let mut node = node_lock.write().await;
-        if NodeStatus::Stopped != node.expected_status() || force {
+        if VmStatus::Stopped != node.expected_status() || force {
             node.stop(force).await?;
         }
         Ok(())
@@ -479,19 +479,19 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn status(&self, id: Uuid) -> Result<NodeStatus> {
+    pub async fn status(&self, id: Uuid) -> Result<VmStatus> {
         let nodes_lock = self.nodes.read().await;
         let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
         Ok(if let MaybeNode::Node(node_lock) = maybe_node {
             let node = node_lock.read().await;
             node.status().await
         } else {
-            NodeStatus::Failed
+            VmStatus::Failed
         })
     }
 
     #[instrument(skip(self))]
-    async fn expected_status(&self, id: Uuid) -> Result<NodeStatus> {
+    async fn expected_status(&self, id: Uuid) -> Result<VmStatus> {
         let nodes_lock = self.nodes.read().await;
         let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
         Ok(match maybe_node {
@@ -521,8 +521,8 @@ where
             }
         }) {
             if let Ok(mut node) = node_lock.try_write() {
-                if node.status().await == NodeStatus::Failed
-                    && node.expected_status() != NodeStatus::Failed
+                if node.status().await == VmStatus::Failed
+                    && node.expected_status() != VmStatus::Failed
                 {
                     if let Err(e) = node.recover().await {
                         error!("node `{id}` recovery failed with: {e:#}");
@@ -968,7 +968,7 @@ mod tests {
     pub fn build_node_state(name: &str, ip: &str, gateway: &str) -> NodeState {
         let mut state = default_node_state();
         state.id = Uuid::new_v4();
-        state.expected_status = NodeStatus::Stopped;
+        state.expected_status = VmStatus::Stopped;
         state.name = name.to_string();
         state.ip = IpAddr::from_str(ip).unwrap();
         state.gateway = IpAddr::from_str(gateway).unwrap();
@@ -1088,16 +1088,10 @@ mod tests {
             second_node_state.id,
             nodes.node_id_for_name(&second_node_state.name).await?
         );
+        assert_eq!(VmStatus::Stopped, nodes.status(first_node_state.id).await?);
+        assert_eq!(VmStatus::Stopped, nodes.status(second_node_state.id).await?);
         assert_eq!(
-            NodeStatus::Stopped,
-            nodes.status(first_node_state.id).await?
-        );
-        assert_eq!(
-            NodeStatus::Stopped,
-            nodes.status(second_node_state.id).await?
-        );
-        assert_eq!(
-            NodeStatus::Stopped,
+            VmStatus::Stopped,
             nodes.expected_status(first_node_state.id).await?
         );
         assert_eq!(
@@ -1206,14 +1200,11 @@ mod tests {
             nodes.node_state_cache(node_state.id).await?.name
         );
         assert_eq!(
-            NodeStatus::Running,
+            VmStatus::Running,
             nodes.expected_status(node_state.id).await?
         );
         assert_eq!(node_state.id, nodes.node_id_for_name("node name").await?);
-        assert_eq!(
-            NodeStatus::Failed,
-            nodes.status(invalid_node_state.id).await?
-        );
+        assert_eq!(VmStatus::Failed, nodes.status(invalid_node_state.id).await?);
         assert_eq!(
             "BV internal error: Cannot stop broken node `4931bafa-92d9-4521-9fc6-a77eee047531`",
             nodes
@@ -1223,11 +1214,11 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            NodeStatus::Failed,
+            VmStatus::Failed,
             nodes.status(invalid_node_state.id).await.unwrap()
         );
         assert_eq!(
-            NodeStatus::Running,
+            VmStatus::Running,
             nodes.expected_status(invalid_node_state.id).await.unwrap()
         );
         assert_eq!(
@@ -1382,7 +1373,7 @@ mod tests {
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
         let mut node_state = default_node_state();
-        node_state.expected_status = NodeStatus::Stopped;
+        node_state.expected_status = VmStatus::Stopped;
         let node_id = node_state.id;
 
         pal.expect_available_cpus().return_const(1usize);
@@ -1462,23 +1453,23 @@ mod tests {
         sut.nodes.recover().await;
 
         // no recovery for permanently failed node
-        sut.on_node(|node| node.state.expected_status = NodeStatus::Failed)
+        sut.on_node(|node| node.state.expected_status = VmStatus::Failed)
             .await;
         sut.nodes.recover().await;
 
         // recovery of node that is expected to be running, but it is not
-        sut.on_node(|node| node.state.expected_status = NodeStatus::Running)
+        sut.on_node(|node| node.state.expected_status = VmStatus::Running)
             .await;
         sut.nodes.recover().await;
 
         // recovery of node that is expected to be stopped, but it is not
-        sut.on_node(|node| node.state.expected_status = NodeStatus::Stopped)
+        sut.on_node(|node| node.state.expected_status = VmStatus::Stopped)
             .await;
         sut.nodes.recover().await;
 
         // node connection recovery
         sut.on_node(|node| {
-            node.state.expected_status = NodeStatus::Running;
+            node.state.expected_status = VmStatus::Running;
             node.state.initialized = true;
             node.post_recovery();
         })
@@ -1487,7 +1478,7 @@ mod tests {
 
         // no recovery needed - node is expected to be running
         sut.on_node(|node| {
-            node.state.expected_status = NodeStatus::Running;
+            node.state.expected_status = VmStatus::Running;
             node.state.initialized = true;
         })
         .await;
