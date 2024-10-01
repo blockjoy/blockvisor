@@ -100,12 +100,10 @@ pub struct NodeEnv {
     pub node_name: String,
     /// Node version.
     pub node_version: String,
-    /// Node blockchain name.
-    pub blockchain_name: String,
-    /// Node blockchain network.
-    pub blockchain_network: String,
-    /// Node type.
-    pub node_type: String,
+    /// Node protocol.
+    pub node_protocol: String,
+    /// Node variant.
+    pub node_variant: String,
     /// Node IP.
     pub node_ip: String,
     /// Node gateway IP.

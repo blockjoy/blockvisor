@@ -7,7 +7,7 @@ use eyre::{Context, Result};
 const PROTO_DIRS: &[&str] = &["./proto"];
 const EXCLUDE_DIRS: &[&str] = &[".direnv"];
 
-include!("src/cli.rs");
+include!("src/bv_cli.rs");
 
 fn main() -> Result<()> {
     let mut app = App::command();

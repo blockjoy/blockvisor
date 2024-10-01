@@ -1,4 +1,4 @@
-use crate::config::SharedConfig;
+use crate::bv_config::SharedConfig;
 use crate::linux_platform::bv_root;
 use crate::nodes_manager::NodesDataCache;
 use crate::pal::Pal;

@@ -1,5 +1,5 @@
 use crate::{
-    api_with_retry, config::SharedConfig, installer, services, services::api::pb, utils,
+    api_with_retry, bv_config::SharedConfig, installer, services, services::api::pb, utils,
     BV_VAR_PATH,
 };
 use bv_utils::{run_flag::RunFlag, timer::AsyncTimer};

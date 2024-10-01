@@ -4,8 +4,8 @@ use crate::src::utils::{
 };
 use assert_cmd::Command;
 use assert_fs::TempDir;
-use blockvisord::config::ApptainerConfig;
-use blockvisord::{config::Config, node_state::NodeState, services::api::pb};
+use blockvisord::bv_config::ApptainerConfig;
+use blockvisord::{bv_config::Config, node_state::NodeState, services::api::pb};
 use predicates::prelude::*;
 use serial_test::serial;
 use std::{fs, net::ToSocketAddrs, path::Path, str};
@@ -364,7 +364,7 @@ async fn node_version(id: &str) -> String {
     )))
     .await
     {
-        node_state.software_version
+        node_state.image.version
     } else {
         Default::default()
     }

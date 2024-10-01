@@ -45,11 +45,11 @@ pub enum Command {
         command: HostCommand,
     },
 
-    /// Get information about chains
-    #[clap(alias = "c")]
-    Chain {
+    /// Get information about protocols
+    #[clap(alias = "p")]
+    Protocol {
         #[clap(subcommand)]
-        command: ChainCommand,
+        command: ProtocolCommand,
     },
 
     /// Manage workspace
@@ -80,26 +80,20 @@ pub enum NodeCommand {
     /// Create node
     #[clap(alias = "c")]
     Create {
+        /// Protocol key.
+        protocol: String,
+        /// Protocol variant key
+        variant: String,
+        /// Version of image, or skip to use latest,
+        version: Option<String>,
+        /// Version of image build, or skip to use latest,
+        build: Option<u64>,
+
         /// The properties that are passed to the node. These are used for running certain babel
         /// commands. For example, the ether nodes require that at least one property whose name
         /// starts with `key` is passed here like so: `bv node create --props '{"key1": "asdf"}'`.
         #[clap(long)]
         props: Option<String>,
-
-        /// Blockchain network name
-        #[clap(long)]
-        network: String,
-
-        /// Node 'triple' identifier
-        triple: String,
-
-        /// Create node in dev mode - without involvement of the API.
-        /// Non-dev mode mean that BV CLI acts like the API frontend. Once node is created
-        /// in non-dev mode, all operations on the node will be performed via API.
-        /// If node is created in dev node, then BV CLI will omit the API, and it won't
-        /// be aware of the node existence or any operation on it.
-        #[clap(long, default_value = "false")]
-        dev_mode: bool,
     },
 
     /// Start node
@@ -268,11 +262,11 @@ pub enum HostCommand {
 }
 
 #[derive(Subcommand)]
-pub enum ChainCommand {
-    /// Show chains list
+pub enum ProtocolCommand {
+    /// Show protocol images list
     #[clap(alias = "ls")]
     List {
-        /// Blockchain protocol name (e.g. helium, eth)
+        /// Protocol name (e.g. helium, eth)
         protocol: String,
 
         /// Display the first N items
@@ -295,62 +289,6 @@ pub enum WorkspaceCommand {
     SetActiveNode {
         /// The id or name of the node
         id_or_name: String,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum ImageCommand {
-    /// Create new node image from scratch
-    Create {
-        /// New node image identifier in the following format: protocol/type/version
-        image_id: String,
-
-        /// Debian version
-        #[clap(long, default_value = "jammy")]
-        debian_version: String,
-
-        /// Size of image disk for image, in GB
-        #[clap(long, default_value = "20")]
-        rootfs_size: u64,
-    },
-
-    /// Create new node image from existing one
-    Clone {
-        /// Source image identifier
-        source_image_id: String,
-
-        /// New node image identifier
-        destination_image_id: String,
-    },
-
-    /// Capture image files from given node.
-    /// Node must be stopped first.
-    Capture {
-        /// The id or name of the source node. BV tries to get it from workspace if not provided.
-        node_id_or_name: Option<String>,
-    },
-
-    /// Upload image to S3 compatible storage.
-    /// Following environment variables are expected to be set:
-    /// AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
-    Upload {
-        /// Node image identifier
-        image_id: Option<String>,
-        /// S3 endpoint
-        #[clap(
-            long,
-            default_value = "https://19afdffb308beea3e9c1ef3a95085d3b.r2.cloudflarestorage.com"
-        )]
-        s3_endpoint: String,
-        /// S3 region
-        #[clap(long, default_value = "us-east-1")]
-        s3_region: String,
-        /// S3 bucket
-        #[clap(long, default_value = "cookbook-dev")]
-        s3_bucket: String,
-        /// S3 prefix
-        #[clap(long, default_value = "chains")]
-        s3_prefix: String,
     },
 }
 

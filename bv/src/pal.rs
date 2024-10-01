@@ -4,7 +4,7 @@
 /// It defines `Pal` trait which is top level abstraction that contains definitions of sub layers.
 ///
 use crate::{
-    bv_context::BvContext, config::SharedConfig, firewall, node_state::NodeState,
+    bv_config::SharedConfig, bv_context::BvContext, firewall, node_state::NodeState,
     nodes_manager::NodesDataCache, services,
 };
 use async_trait::async_trait;

@@ -1,9 +1,8 @@
 use crate::apptainer_machine::ApptainerMachine;
 use crate::{
-    apptainer_machine,
+    apptainer_machine, bv_config,
+    bv_config::{ApptainerConfig, SharedConfig},
     bv_context::BvContext,
-    config,
-    config::{ApptainerConfig, SharedConfig},
     linux_platform,
     node::NODE_REQUEST_TIMEOUT,
     node_context, node_env,
@@ -223,7 +222,7 @@ pub struct LinuxNetInterface {
 }
 
 fn default_bridge_ifa() -> String {
-    config::DEFAULT_BRIDGE_IFACE.to_string()
+    bv_config::DEFAULT_BRIDGE_IFACE.to_string()
 }
 
 #[derive(Debug)]

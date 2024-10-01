@@ -1,4 +1,4 @@
-use crate::{babel_engine::NodeInfo, config::SharedConfig, services};
+use crate::{babel_engine::NodeInfo, bv_config::SharedConfig, services};
 use async_trait::async_trait;
 use babel_api::engine::{Chunk, DownloadManifest, DownloadMetadata, UploadSlots};
 use eyre::Context;

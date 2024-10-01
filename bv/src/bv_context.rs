@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::bv_config::Config;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct BvContext {
@@ -13,7 +13,7 @@ impl BvContext {
         Self {
             id: config.id,
             name: config.name,
-            url: config.blockjoy_api_url,
+            url: config.api_config.blockjoy_api_url,
             iface: config.iface,
         }
     }

@@ -1,4 +1,4 @@
-use crate::{config::SharedConfig, pal, services, services::api::pb};
+use crate::{bv_config::SharedConfig, pal, services, services::api::pb};
 use async_trait::async_trait;
 use eyre::{anyhow, bail, Result};
 use metrics::{register_counter, Counter};

@@ -1,5 +1,5 @@
 use crate::{
-    config::{Config, CONFIG_PATH},
+    bv_config::{Config, CONFIG_PATH},
     internal_server, ServiceStatus,
 };
 use async_trait::async_trait;

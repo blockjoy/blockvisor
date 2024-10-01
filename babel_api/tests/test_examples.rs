@@ -186,9 +186,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         node_id: "node_id".to_string(),
         node_name: "node name".to_string(),
         node_version: "".to_string(),
-        blockchain_name: "".to_string(),
-        blockchain_network: "".to_string(),
-        node_type: "".to_string(),
+        node_protocol: "".to_string(),
         node_ip: "".to_string(),
         node_gateway: "".to_string(),
         dev_mode: false,
@@ -196,6 +194,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         bv_host_name: "".to_string(),
         bv_api_url: "".to_string(),
         org_id: "".to_string(),
+        node_variant: "".to_string(),
     });
     babel
         .expect_render_template()
