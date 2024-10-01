@@ -18,7 +18,7 @@ pub enum NodeType {
     Rpc,
 }
 
-pub struct BlockchainService<C> {
+pub struct ProtocolService<C> {
     connector: C,
 }
 
@@ -26,12 +26,12 @@ type BlockchainServiceClient =
     blockchain_service_client::BlockchainServiceClient<AuthenticatedService>;
 type ImageServiceClient = image_service_client::ImageServiceClient<AuthenticatedService>;
 
-impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
+impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     pub async fn new(connector: C) -> Result<Self> {
         Ok(Self { connector })
     }
 
-    async fn connect_blockchain_service(
+    async fn connect_protocol_service(
         &self,
     ) -> Result<
         ApiClient<
@@ -68,15 +68,13 @@ impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
     #[instrument(skip(self))]
     pub async fn get_image_id(
         &mut self,
-        blockchain_key: &str,
-        node_type: NodeType,
-        network: String,
-        software: String,
+        protocol_key: &str,
+        variant_key: &str,
         version: Option<String>,
         build_version: Option<u64>,
     ) -> Result<String> {
         info!("Getting image id...");
-        let blockchain = self.get_blockchain(blockchain_key).await?;
+        let blockchain = self.get_protocol(protocol_key).await?;
         if let Some(version) = &version {
             if blockchain
                 .versions
@@ -87,13 +85,12 @@ impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
             }
         }
         let mut client = self.connect_image_service().await?;
-        let node_type: common::NodeType = node_type.into();
         let req = pb::ImageServiceGetImageRequest {
             version_key: Some(common::VersionKey {
-                blockchain_key: blockchain_key.to_string(),
-                node_type: node_type.into(),
-                network,
-                software,
+                blockchain_key: protocol_key.to_string(),
+                node_type: Default::default(), //TODO MJR update protos
+                network: Default::default(),
+                software: Default::default(),
             }),
             org_id: None,
             software_version: version,
@@ -106,9 +103,9 @@ impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
     }
 
     #[instrument(skip(self))]
-    pub async fn list_blockchain_versions(&mut self, blockchain_key: &str) -> Result<Vec<String>> {
-        info!("Getting blockchain versions...");
-        let blockchain = self.get_blockchain(blockchain_key).await?;
+    pub async fn list_protocol_images(&mut self, protocol_key: &str) -> Result<Vec<String>> {
+        info!("Getting protocol versions...");
+        let blockchain = self.get_protocol(protocol_key).await?;
         blockchain
             .versions
             .into_iter()
@@ -125,8 +122,8 @@ impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
             .collect::<Result<Vec<_>>>()
     }
 
-    async fn get_blockchain(&mut self, name: &str) -> Result<pb::Blockchain> {
-        let mut client = self.connect_blockchain_service().await?;
+    async fn get_protocol(&mut self, name: &str) -> Result<pb::Blockchain> {
+        let mut client = self.connect_protocol_service().await?;
         let req = pb::BlockchainServiceListBlockchainsRequest {
             org_ids: vec![],
             offset: 0,
@@ -144,12 +141,37 @@ impl<C: ApiServiceConnector + Clone> BlockchainService<C> {
             api_with_retry!(client, client.list_blockchains(req.clone()))?.into_inner();
 
         if blockchains.blockchain_count > 1 {
-            bail!("multiple blockchains found with the same name");
+            bail!("multiple blockchains found with the same key");
         }
         blockchains
             .blockchains
             .pop()
             .ok_or(anyhow!("blockchain with name `{name}` not found"))
+    }
+
+    pub async fn list_protocols(&mut self) -> Result<Vec<pb::Blockchain>> {
+        let mut client = self.connect_protocol_service().await?;
+        let req = pb::BlockchainServiceListBlockchainsRequest {
+            org_ids: vec![],
+            offset: 0,
+            limit: 0,
+            search: Some(pb::BlockchainSearch {
+                operator: common::SearchOperator::Or.into(),
+                id: None,
+                name: None,
+                display_name: None,
+            }),
+            sort: vec![pb::BlockchainSort {
+                field: pb::BlockchainSortField::Name.into(),
+                order: common::SortOrder::Ascending.into(),
+            }],
+        };
+
+        Ok(
+            api_with_retry!(client, client.list_blockchains(req.clone()))?
+                .into_inner()
+                .blockchains,
+        )
     }
 }
 

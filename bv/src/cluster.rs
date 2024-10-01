@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::bv_config::Config;
 use bv_utils::system::get_ip_address;
 use chitchat::{
     spawn_chitchat, transport::UdpTransport, Chitchat, ChitchatConfig, ChitchatId,

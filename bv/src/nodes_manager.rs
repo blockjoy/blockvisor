@@ -1,7 +1,7 @@
 use crate::{
+    bv_config::SharedConfig,
     command_failed,
     commands::{self, into_internal, Error},
-    config::SharedConfig,
     firewall,
     node::Node,
     node_context::{build_nodes_dir, NODES_DIR},
@@ -304,16 +304,16 @@ where
         if desired_state.image.id != data.image.id {
             let node = node_lock.read().await.state.clone();
 
-            if desired_state.blockchain_id != node.blockchain_id {
+            if desired_state.image_key.protocol_key != node.image_key.protocol_key {
                 command_failed!(Error::Internal(anyhow!(
                     "Cannot upgrade protocol to `{}`",
-                    desired_state.blockchain_id
+                    desired_state.image_key.protocol_key
                 )));
             }
-            if desired_state.image_key.node_type != node.image_key.node_type {
+            if desired_state.image_key.variant_key != node.image_key.variant_key {
                 command_failed!(Error::Internal(anyhow!(
-                    "Cannot upgrade node type to `{:?}`",
-                    desired_state.image_key.node_type
+                    "Cannot upgrade protocol variant to `{}`",
+                    desired_state.image_key.variant_key
                 )));
             }
             if desired_state.image.archive_id != node.image.archive_id {
@@ -1244,8 +1244,8 @@ mod tests {
         let mut new_state = node_state.clone();
         new_state.initialized = false;
         new_state.image.id = "new-image-id".to_string();
-        new_state.software_version = "3.2.1".to_string();
         new_state.image.uri = "new.uri".to_string();
+        new_state.image.version = "3.2.1".to_string();
         new_state.vm_config.vcpu_count = 2;
         new_state.vm_config.mem_size_mb = 4096;
         new_state.vm_config.disk_size_gb = 3;
@@ -1344,7 +1344,7 @@ mod tests {
                 .to_string()
         );
         let mut new_proto_node_state = new_state.clone();
-        new_proto_node_state.blockchain_id = "different_chain".to_string();
+        new_proto_node_state.protocol_id = "different_chain".to_string();
         assert_eq!(
             "BV internal error: Cannot upgrade protocol to `different_chain`",
             nodes

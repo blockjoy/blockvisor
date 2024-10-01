@@ -1,5 +1,5 @@
 use crate::{
-    config::ApptainerConfig,
+    bv_config::ApptainerConfig,
     node_context, node_env,
     node_env::NODE_ENV_FILE_PATH,
     node_state::{NodeState, VmConfig},

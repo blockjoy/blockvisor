@@ -1,0 +1,65 @@
+version: 0.1.1
+key:
+  protocol_key: test_chain
+  variant_key: test_client-testnet
+org_id: null
+description: Test image description
+visibility: private
+properties:
+- key: arbitrary text property
+  description: this is some text property example
+  required: true
+  dynamic_value: true
+  default_value: default_value
+  ui_type: !text
+    new_archive: false
+    add_cpu: 1
+    add_memory_bytes: -1
+    add_disk_bytes: 10
+- key: switch property
+  description: this is some switch example
+  required: true
+  dynamic_value: true
+  default_value: off
+  ui_type: !switch
+    on_impact:
+      new_archive: true
+      add_cpu: 3
+      add_memory_bytes: 10000000
+      add_disk_bytes: 10000000000
+    off_impact: null
+- key: enum property
+  description: this is some enum example
+  required: true
+  dynamic_value: true
+  default_value: variant_b
+  ui_type: !enum
+  - key: variant_a
+    impact: null
+  - key: variant_b
+    impact: null
+  - key: variant_c
+    impact:
+      new_archive: true
+      add_cpu: -1
+      add_memory_bytes: 1000000
+      add_disk_bytes: 1000000000
+firewall_config:
+  default_in: deny
+  default_out: allow
+  rules:
+  - key: Testing rule
+    description: null
+    protocol: both
+    direction: in
+    action: allow
+    ips: []
+    ports:
+    - port: 78901
+      name: service port
+min_cpu: 1
+min_memory_bytes: 1000000000
+min_disk_bytes: 2000000000
+ramdisks:
+- mount: /mnt/ramdisk
+  size_bytes: 100000000

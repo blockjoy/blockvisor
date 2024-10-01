@@ -1,7 +1,8 @@
-use blockvisord::config::ApptainerConfig;
+use blockvisord::api_config::ApiConfig;
+use blockvisord::bv_config::ApptainerConfig;
 use blockvisord::{
-    config,
-    config::{Config, SharedConfig},
+    bv_config,
+    bv_config::{Config, SharedConfig},
     hosts::HostInfo,
     linux_platform::bv_root,
     self_updater,
@@ -223,31 +224,33 @@ async fn main() -> Result<()> {
 
         let host = client.create(create).await?.into_inner();
 
-        let mut api_config = Config {
+        let mut host_config = Config {
             id: host
                 .host
                 .ok_or_else(|| anyhow!("No `host` in response"))?
                 .id,
             name: host_info.name,
-            token: host.token,
-            refresh_token: host.refresh,
-            blockjoy_api_url: cmd_args.blockjoy_api_url.clone(),
+            api_config: ApiConfig {
+                token: host.token,
+                refresh_token: host.refresh,
+                blockjoy_api_url: cmd_args.blockjoy_api_url.clone(),
+            },
             blockjoy_mqtt_url: cmd_args.blockjoy_mqtt_url,
             update_check_interval_secs: Some(cmd_args.update_check_interval_secs),
             blockvisor_port: cmd_args
                 .blockvisor_port
-                .unwrap_or_else(config::default_blockvisor_port),
+                .unwrap_or_else(bv_config::default_blockvisor_port),
             iface: cmd_args.bridge_ifa,
             ..Default::default()
         };
         if cmd_args.use_host_network {
-            api_config.apptainer = ApptainerConfig {
+            host_config.apptainer = ApptainerConfig {
                 host_network: true,
                 ..Default::default()
             };
         }
-        api_config.save(&bv_root).await?;
-        Some(api_config)
+        host_config.save(&bv_root).await?;
+        Some(host_config)
     } else {
         None
     };

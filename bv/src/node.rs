@@ -1,10 +1,10 @@
 use crate::{
     babel_engine,
     babel_engine::NodeInfo,
+    bv_config::SharedConfig,
     bv_context::BvContext,
     command_failed, commands,
     commands::into_internal,
-    config::SharedConfig,
     firewall,
     node_context::NodeContext,
     node_env,
@@ -450,8 +450,7 @@ impl<P: Pal + Debug> Node<P> {
         self.state.vm_config = desired_state.vm_config;
         self.state.properties = desired_state.properties;
         self.state.firewall = desired_state.firewall;
-        self.state.software_version = desired_state.software_version;
-        self.state.blockchain_name = desired_state.blockchain_name;
+        self.state.protocol_name = desired_state.protocol_name;
         self.state.org_name = desired_state.org_name;
         self.state.org_id = desired_state.org_id;
         self.state.display_name = desired_state.display_name;
@@ -622,10 +621,10 @@ async fn check_job_runner(
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::node_state::{BlockchainImageKey, NodeImage, VmConfig};
-    use crate::services::blockchain::NodeType;
+    use crate::api_config::ApiConfig;
+    use crate::node_state::{NodeImage, ProtocolImageKey, VmConfig};
     use crate::{
-        config::Config,
+        bv_config::Config,
         node_context,
         node_context::build_nodes_dir,
         nodes_manager,
@@ -903,9 +902,11 @@ pub mod tests {
             Config {
                 id: "host_id".to_string(),
                 name: "host_name".to_string(),
-                token: "token".to_string(),
-                refresh_token: "refresh_token".to_string(),
-                blockjoy_api_url: "api.url".to_string(),
+                api_config: ApiConfig {
+                    token: "token".to_string(),
+                    refresh_token: "refresh_token".to_string(),
+                    blockjoy_api_url: "api.url".to_string(),
+                },
                 blockjoy_mqtt_url: Some("mqtt.url".to_string()),
                 blockvisor_port: 888,
                 iface: "bvbr7".to_string(),
@@ -952,12 +953,13 @@ pub mod tests {
         NodeState {
             id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
             name: "node name".to_string(),
-            blockchain_id: "blockchain_id".to_string(),
+            protocol_id: "blockchain_id".to_string(),
             expected_status: VmStatus::Running,
             started_at: None,
             initialized: true,
             image: NodeImage {
                 id: "image_id".to_string(),
+                version: "1.2.3".to_string(),
                 config_id: "config_id".to_string(),
                 archive_id: "archive_id".to_string(),
                 uri: "image.uri".to_string(),
@@ -1003,17 +1005,14 @@ pub mod tests {
             restarting: false,
             org_id: "org_id".to_string(),
             org_name: "org_name".to_string(),
-            blockchain_name: "testing blockchain".to_string(),
-            image_key: BlockchainImageKey {
-                blockchain_key: "testing_blockchain".to_string(),
-                node_type: NodeType::Rpc,
-                network: "test".to_string(),
-                software: "tst".to_string(),
+            protocol_name: "testing blockchain".to_string(),
+            image_key: ProtocolImageKey {
+                protocol_key: "testing_blockchain".to_string(),
+                variant_key: "tst".to_string(),
             },
             dns_name: "dns.name".to_string(),
             apptainer_config: None,
             display_name: "node display name".to_string(),
-            software_version: "1.2.3".to_string(),
         }
     }
 

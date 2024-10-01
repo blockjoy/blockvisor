@@ -1,6 +1,6 @@
 use crate::{
     api_with_retry,
-    config::SharedConfig,
+    bv_config::SharedConfig,
     services::{
         api::{common, pb, pb::crypt_service_client},
         ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService,

@@ -1,6 +1,5 @@
-use crate::config::ApptainerConfig;
+use crate::bv_config::ApptainerConfig;
 use crate::firewall;
-use crate::services::blockchain::NodeType;
 use babel_api::utils::BabelConfig;
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
@@ -35,6 +34,7 @@ impl fmt::Display for VmStatus {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct NodeImage {
     pub id: String,
+    pub version: String,
     pub config_id: String,
     pub archive_id: String,
     pub uri: String,
@@ -59,8 +59,8 @@ pub struct NodeState {
     // static properties
     pub id: Uuid,
     pub name: String,
-    pub blockchain_id: String,
-    pub image_key: BlockchainImageKey,
+    pub protocol_id: String,
+    pub image_key: ProtocolImageKey,
     pub dev_mode: bool,
     // potentially configurable
     pub ip: IpAddr,
@@ -74,11 +74,10 @@ pub struct NodeState {
     pub display_name: String,
     pub org_id: String,
     pub org_name: String,
-    pub blockchain_name: String,
+    pub protocol_name: String,
     pub dns_name: String,
 
     // upgradeable
-    pub software_version: String,
     pub vm_config: VmConfig,
     pub image: NodeImage,
 
@@ -94,15 +93,11 @@ pub struct NodeState {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct BlockchainImageKey {
-    /// The key identifier to a blockchain.
-    pub blockchain_key: String,
-    /// The node type of this version.
-    pub node_type: NodeType,
-    /// The network name for this version (e.g. mainnet or testnet).
-    pub network: String,
-    /// A unique identifier to the software (e.g. reth or geth).
-    pub software: String,
+pub struct ProtocolImageKey {
+    /// The key identifier to a protocol.
+    pub protocol_key: String,
+    /// A unique identifier to the implementation variant (e.g. reth or geth).
+    pub variant_key: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]

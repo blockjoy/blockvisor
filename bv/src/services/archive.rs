@@ -1,6 +1,6 @@
 use crate::{
     api_with_retry,
-    config::SharedConfig,
+    bv_config::SharedConfig,
     services::{
         self,
         api::{pb, pb::archive_service_client},

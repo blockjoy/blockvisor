@@ -1,6 +1,6 @@
 use blockvisord::linux_platform::bv_root;
 use blockvisord::{
-    config, config::SharedConfig, internal_server, nodes_manager::NodesManager, pal::Pal,
+    bv_config, bv_config::SharedConfig, internal_server, nodes_manager::NodesManager, pal::Pal,
     set_bv_status, ServiceStatus,
 };
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     );
     set_bv_status(ServiceStatus::Ok).await;
 
-    let config = config::Config::load(&bv_root()).await?;
+    let config = bv_config::Config::load(&bv_root()).await?;
     let pal = blockvisord::apptainer_platform::ApptainerPlatform::new(
         &config.iface,
         config.apptainer.clone(),
@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_server<P>(config: config::Config, pal: P) -> Result<()>
+async fn run_server<P>(config: bv_config::Config, pal: P) -> Result<()>
 where
     P: Pal + Debug + Send + Sync + 'static,
     P::NodeConnection: Send + Sync + 'static,
