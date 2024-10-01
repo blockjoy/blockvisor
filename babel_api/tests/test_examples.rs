@@ -247,6 +247,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["other_init_job_name".to_string()]),
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(32),
+                log_timestamp: Some(false),
             }),
         )
         .times(2)
@@ -289,6 +290,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["init_job".to_string()]),
                 run_as: None,
                 log_buffer_capacity_mb: None,
+                log_timestamp: None,
             }),
         )
         .once()
@@ -312,6 +314,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["init_job".to_string()]),
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(64),
+                log_timestamp: Some(false),
             }),
         )
         .once()
@@ -334,6 +337,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["download".to_string()]),
                 run_as: None,
                 log_buffer_capacity_mb: None,
+                log_timestamp: None,
             }),
         )
         .times(2)
@@ -362,6 +366,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["post_download_job".to_string()]),
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(256),
+                log_timestamp: Some(false),
             }),
         )
         .times(2)
@@ -390,6 +395,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["post_download_job".to_string()]),
                 run_as: None,
                 log_buffer_capacity_mb: None,
+                log_timestamp: None,
             }),
         )
         .times(2)
@@ -433,6 +439,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec![]),
                 run_as: None,
                 log_buffer_capacity_mb: None,
+                log_timestamp: None,
             }),
         )
         .once()
@@ -472,6 +479,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["pre_upload_job".to_string()]),
                 run_as: None,
                 log_buffer_capacity_mb: None,
+                log_timestamp: None,
             }),
         )
         .once()
@@ -496,6 +504,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["upload".to_string()]),
                 run_as: None,
                 log_buffer_capacity_mb: None,
+                log_timestamp: None,
             }),
         )
         .once()
@@ -524,6 +533,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["post_upload_job".to_string()]),
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(256),
+                log_timestamp: Some(false),
             }),
         )
         .once()
@@ -552,6 +562,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 needs: Some(vec!["post_upload_job".to_string()]),
                 run_as: None,
                 log_buffer_capacity_mb: None,
+                log_timestamp: None,
             }),
         )
         .once()

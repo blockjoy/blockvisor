@@ -161,9 +161,12 @@ const PLUGIN_CONFIG = #{
                 //needs: ["other_init_job_name"],
                 /// [optional] Run job as a different user.
                 //run_as: "some_user",
-                /// [optional] Capacity of log buffer (in lines).
+                /// [optional] Capacity of log buffer (in megabytes).
                 /// If not set default to 1024.
                 //log_buffer_capacity_mb: 32,
+                /// [optional] Prepend timestamp to each log, or not.
+                /// If not set default to true.
+                //log_timestamp: false,
             }
         ]
     },
@@ -204,9 +207,12 @@ const PLUGIN_CONFIG = #{
             /// is finished. They are also stopped while uploading blockchain archive.
             /// If not set default to true.
             //use_blockchain_data: true,
-            /// [optional] Capacity of log buffer (in lines).
+            /// [optional] Capacity of log buffer (in megabytes).
             /// If not set default to 128.
             //log_buffer_capacity_mb: 256,
+            /// [optional] Prepend timestamp to each log, or not.
+            /// If not set default to true.
+            //log_timestamp: false,
         },
         #{
             name: "blockchain_service_b",
@@ -248,9 +254,12 @@ const PLUGIN_CONFIG = #{
         //},
         /// [optional] Run job as a different user.
         //run_as: "some_user",
-        /// [optional] Capacity of log buffer (in lines).
+        /// [optional] Capacity of log buffer (in megabytes).
         /// If not set default to 128.
         //log_buffer_capacity_mb: 64,
+        /// [optional] Prepend timestamp to each log, or not.
+        /// If not set default to true.
+        //log_timestamp: false,
     //},
     /// [optional] Post-download sh jobs, to be started after download.
     //post_download: [

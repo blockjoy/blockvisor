@@ -153,7 +153,7 @@ async fn test_bv_cmd_jobs() -> Result<()> {
             .join("var/lib/babel/jobs/logs/init_job"),
     )
     .await?
-    .contains("init_job|dummy_init"));
+    .contains("dummy_init"));
     Ok(())
 }
 

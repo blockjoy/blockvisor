@@ -1050,6 +1050,7 @@ mod tests {
                     needs: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 },
             )?;
             self.engine.start_job(name)?;

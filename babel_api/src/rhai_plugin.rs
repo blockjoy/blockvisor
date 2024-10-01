@@ -468,6 +468,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
                             run_as: service.run_as,
                             use_blockchain_data: false,
                             log_buffer_capacity_mb: service.log_buffer_capacity_mb,
+                            log_timestamp: service.log_timestamp,
                         },
                         vec![],
                     ),
@@ -1119,6 +1120,7 @@ mod tests {
                     needs: Some(vec!["needed".to_string()]),
                     run_as: Some("some_user".to_string()),
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1142,6 +1144,7 @@ mod tests {
                     needs: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1559,6 +1562,7 @@ mod tests {
                     needs: Some(vec!["some".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 })),
             )
             .once()
@@ -1597,6 +1601,7 @@ mod tests {
                     needs: Some(vec!["some".to_string(), UPLOAD_JOB_NAME.to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 })),
             )
             .once()
@@ -1620,6 +1625,7 @@ mod tests {
                         run_as: Some("some_user".to_string()),
                         use_blockchain_data: true,
                         log_buffer_capacity_mb: None,
+                        log_timestamp: None,
                     },
                     vec!["post_upload_job".to_string()],
                 )),
@@ -1760,6 +1766,7 @@ mod tests {
                         run_as: None,
                         use_blockchain_data: false,
                         log_buffer_capacity_mb: None,
+                        log_timestamp: None,
                     },
                     vec![],
                 )),
@@ -1794,6 +1801,7 @@ mod tests {
                     needs: Some(vec![]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 })),
             )
             .once()
@@ -1821,6 +1829,7 @@ mod tests {
                         restart_config: None,
                         run_as: None,
                         log_buffer_capacity_mb: None,
+                        log_timestamp: None,
                     },
                     vec!["init_job".to_string()],
                 )),
@@ -1845,6 +1854,7 @@ mod tests {
                     needs: Some(vec!["some".to_string(), DOWNLOAD_JOB_NAME.to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 })),
             )
             .once()
@@ -1868,6 +1878,7 @@ mod tests {
                         run_as: None,
                         use_blockchain_data: true,
                         log_buffer_capacity_mb: None,
+                        log_timestamp: None,
                     },
                     vec!["post_download_job".to_string()],
                 )),
@@ -1893,6 +1904,7 @@ mod tests {
                         run_as: None,
                         use_blockchain_data: false,
                         log_buffer_capacity_mb: None,
+                        log_timestamp: None,
                     },
                     vec![],
                 )),

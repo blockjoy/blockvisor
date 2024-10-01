@@ -1068,6 +1068,7 @@ mod tests {
                     needs: Some(vec![]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .once()
@@ -1106,6 +1107,7 @@ mod tests {
                     needs: Some(vec!["init_job".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .once()
@@ -1134,6 +1136,7 @@ mod tests {
                     needs: Some(vec!["download".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .once()
@@ -1162,6 +1165,7 @@ mod tests {
                     needs: Some(vec!["download".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .once()
@@ -1211,6 +1215,7 @@ mod tests {
                     needs: Some(vec![]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .once()
@@ -1239,6 +1244,7 @@ mod tests {
                     needs: Some(vec!["upload".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .once()
@@ -1267,6 +1273,7 @@ mod tests {
                     needs: Some(vec!["upload".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 }),
             )
             .once()

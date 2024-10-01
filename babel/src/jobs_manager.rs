@@ -853,6 +853,7 @@ mod tests {
             needs: None,
             run_as: None,
             log_buffer_capacity_mb: None,
+            log_timestamp: None,
         }
     }
 
@@ -959,6 +960,7 @@ mod tests {
                     needs: Some(vec![]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 },
             )
             .await
@@ -1198,6 +1200,7 @@ mod tests {
                     needs: Some(vec!["invalid_dependency".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 },
             )
             .await?;
@@ -1219,6 +1222,7 @@ mod tests {
                     needs: Some(vec!["test_job".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 },
             )
             .await?;
@@ -1298,6 +1302,7 @@ mod tests {
                     needs: Some(vec!["failed_job".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 },
             )
             .await?;
@@ -1376,6 +1381,7 @@ mod tests {
                     needs: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
+                    log_timestamp: None,
                 },
             )
             .await?;

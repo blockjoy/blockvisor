@@ -32,6 +32,7 @@ impl LogBuffer {
     pub fn attach<T, U>(
         &self,
         entry_name: &str,
+        timestamp: bool,
         stdout: Option<T>,
         stderr: Option<U>,
     ) -> JoinHandle<()>
@@ -39,8 +40,8 @@ impl LogBuffer {
         T: AsyncRead + Send + Unpin + 'static,
         U: AsyncRead + Send + Unpin + 'static,
     {
-        let stdout_task = self.attach_stream(stdout, entry_name.to_string());
-        let stderr_task = self.attach_stream(stderr, entry_name.to_string());
+        let stdout_task = self.attach_stream(stdout, timestamp);
+        let stderr_task = self.attach_stream(stderr, timestamp);
         let entry_name = entry_name.to_string();
         tokio::spawn(async move {
             match (stdout_task, stderr_task) {
@@ -65,7 +66,7 @@ impl LogBuffer {
     fn attach_stream<T: AsyncRead + Send + Unpin + 'static>(
         &self,
         stream: Option<T>,
-        entry_name: String,
+        timestamp: bool,
     ) -> Option<JoinHandle<()>> {
         stream.map(|stream| {
             let tx = self.tx.clone();
@@ -80,12 +81,11 @@ impl LogBuffer {
                         }
                         Ok(0) => break,
                         Ok(_) => {
-                            let _ = tx.send(format!(
-                                "{}|{}|{}",
-                                chrono::Local::now(),
-                                entry_name,
+                            let _ = tx.send(if timestamp {
+                                format!("{}|{}", chrono::Local::now(), line)
+                            } else {
                                 line
-                            ));
+                            });
                         }
                     }
                 }
@@ -105,7 +105,7 @@ mod tests {
         let log_buffer = LogBuffer::default();
         let mut rx = log_buffer.subscribe();
         log_buffer
-            .attach::<tokio::io::Empty, tokio::io::Empty>("name1", None, None)
+            .attach::<tokio::io::Empty, tokio::io::Empty>("name1", false, None, None)
             .await
             .unwrap();
         rx.try_recv().unwrap_err();
@@ -129,22 +129,15 @@ mod tests {
         let stderr = StreamReader::new(stderr_stream);
         let mut rx = log_buffer.subscribe();
         log_buffer
-            .attach("name1", Some(stdout), Some(stderr))
+            .attach("name1", false, Some(stdout), Some(stderr))
             .await
             .unwrap();
         let mut lines = Vec::default();
         while let Ok(line) = rx.try_recv() {
-            lines.push(line.split_once('|').unwrap().1.to_string());
+            lines.push(line);
         }
         assert_eq!(
-            vec![
-                "name1|one\n",
-                "name1|two\n",
-                "name1|three\n",
-                "name1|err1\n",
-                "name1|err2\n",
-                "name1|err3\n"
-            ],
+            vec!["one\n", "two\n", "three\n", "err1\n", "err2\n", "err3\n"],
             lines
         );
     }
@@ -164,26 +157,18 @@ mod tests {
         let stdout = StreamReader::new(stdout_stream);
         let mut rx = log_buffer.subscribe();
         log_buffer
-            .attach::<_, tokio::io::Empty>("name1", Some(stdout), None)
+            .attach::<_, tokio::io::Empty>("name1", false, Some(stdout), None)
             .await
             .unwrap();
         let mut lines = Vec::default();
         loop {
             match rx.try_recv() {
-                Ok(line) => lines.push(line.split_once('|').unwrap().1.to_string()),
+                Ok(line) => lines.push(line),
                 Err(error::TryRecvError::Lagged(_)) => {}
                 Err(_) => break,
             }
         }
         // four items expected since capacity is rounded up to next power of 2
-        assert_eq!(
-            vec![
-                "name1|two\n",
-                "name1|three\n",
-                "name1|four\n",
-                "name1|five\n"
-            ],
-            lines
-        );
+        assert_eq!(vec!["two\n", "three\n", "four\n", "five\n"], lines);
     }
 }

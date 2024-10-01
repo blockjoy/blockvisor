@@ -23,9 +23,13 @@ fn init() {
         /// [optional] Run job as a different user.
         run_as: "some_user",
 
-        /// [optional] Capacity of log buffer (in lines).
+        /// [optional] Capacity of log buffer (in megabytes).
         /// If not set default to 128.
         log_buffer_capacity_mb: 256,
+
+         /// [optional] Prepend timestamp to each log, or not.
+         /// If not set default to true.
+         log_timestamp: false,
     };
     create_job("job_name_A", job_config_A);
 

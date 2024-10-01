@@ -90,21 +90,22 @@ async fn run_job(
                     .unwrap_or(DEFAULT_LOG_BUFFER_CAPACITY_MB),
             ));
             let _ = join!(
-                RunShJob::new(
-                    bv_utils::timer::SysTimer,
-                    body,
-                    job_config.restart,
-                    Duration::from_secs(
+                RunShJob {
+                    timer: bv_utils::timer::SysTimer,
+                    sh_body: body,
+                    restart_policy: job_config.restart,
+                    shutdown_timeout: Duration::from_secs(
                         job_config
                             .shutdown_timeout_secs
                             .unwrap_or(DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS)
                     ),
-                    job_config
+                    shutdown_signal: job_config
                         .shutdown_signal
                         .unwrap_or(DEFAULT_JOB_SHUTDOWN_SIGNAL),
                     log_buffer,
-                    job_config.run_as,
-                )?
+                    log_timestamp: job_config.log_timestamp.unwrap_or(true),
+                    run_as: job_config.run_as,
+                }
                 .run(run, &job_name, &jobs::JOBS_DIR),
                 log_handler
             );

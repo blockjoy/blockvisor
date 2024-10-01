@@ -18,36 +18,17 @@ use tokio::process::Command;
 use tracing::info;
 
 pub struct RunShJob<T> {
-    sh_body: String,
-    restart_policy: RestartPolicy,
-    shutdown_timeout: Duration,
-    shutdown_signal: PosixSignal,
-    timer: T,
-    log_buffer: LogBuffer,
-    run_as: Option<String>,
+    pub sh_body: String,
+    pub restart_policy: RestartPolicy,
+    pub shutdown_timeout: Duration,
+    pub shutdown_signal: PosixSignal,
+    pub timer: T,
+    pub log_buffer: LogBuffer,
+    pub log_timestamp: bool,
+    pub run_as: Option<String>,
 }
 
 impl<T: AsyncTimer + Send> RunShJob<T> {
-    pub fn new(
-        timer: T,
-        sh_body: String,
-        restart_policy: RestartPolicy,
-        shutdown_timeout: Duration,
-        shutdown_signal: PosixSignal,
-        log_buffer: LogBuffer,
-        run_as: Option<String>,
-    ) -> Result<Self> {
-        Ok(Self {
-            sh_body,
-            restart_policy,
-            shutdown_timeout,
-            shutdown_signal,
-            timer,
-            log_buffer,
-            run_as,
-        })
-    }
-
     pub async fn run(self, run: RunFlag, name: &str, jobs_dir: &Path) {
         // Check if there are no remnant child process after previous run.
         // If so, just kill it.
@@ -92,9 +73,12 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
             match cmd.spawn() {
                 Ok(mut child) => {
                     info!("Spawned job '{name}'");
-                    let log_handle =
-                        self.log_buffer
-                            .attach(name, child.stdout.take(), child.stderr.take());
+                    let log_handle = self.log_buffer.attach(
+                        name,
+                        self.log_timestamp,
+                        child.stdout.take(),
+                        child.stderr.take(),
+                    );
                     if let Some(exit_status) = run.select(child.wait()).await {
                         let message = format!("Job '{name}' finished with {exit_status:?}");
                         backoff
@@ -159,19 +143,20 @@ mod tests {
         let now = std::time::Instant::now();
         timer_mock.expect_now().returning(move || now);
         timer_mock.expect_sleep().returning(|_| ());
-        RunShJob::new(
-            timer_mock,
-            cmd_path.to_string_lossy().to_string(),
-            RestartPolicy::Always(RestartConfig {
+        RunShJob {
+            timer: timer_mock,
+            sh_body: cmd_path.to_string_lossy().to_string(),
+            restart_policy: RestartPolicy::Always(RestartConfig {
                 backoff_timeout_ms: 1000,
                 backoff_base_ms: 100,
                 max_retries: Some(3),
             }),
-            Duration::from_secs(3),
-            PosixSignal::SIGTERM,
+            shutdown_timeout: Duration::from_secs(3),
+            shutdown_signal: PosixSignal::SIGTERM,
             log_buffer,
-            None,
-        )?
+            log_timestamp: false,
+            run_as: None,
+        }
         .run(test_run, &job_name, &jobs_dir)
         .await;
 
@@ -187,10 +172,10 @@ mod tests {
                     .to_string()
             }
         );
-        assert!(log_rx.recv().await?.ends_with("|job_name|cmd log\n")); // first start
-        assert!(log_rx.recv().await?.ends_with("|job_name|cmd log\n")); // retry 1
-        assert!(log_rx.recv().await?.ends_with("|job_name|cmd log\n")); // retry 2
-        assert!(log_rx.recv().await?.ends_with("|job_name|cmd log\n")); // retry 3
+        assert_eq!(log_rx.recv().await?, "cmd log\n"); // first start
+        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 1
+        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 2
+        assert_eq!(log_rx.recv().await?, "cmd log\n"); // retry 3
         log_rx.try_recv().unwrap_err();
         Ok(())
     }
