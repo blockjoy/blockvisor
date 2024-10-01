@@ -1,9 +1,10 @@
 use crate::{
-    api_with_retry, command_failed, commands,
+    api_with_retry,
+    bv_config::SharedConfig,
+    command_failed, commands,
     commands::Error,
-    config::SharedConfig,
     firewall, get_bv_status,
-    node_state::{self, BlockchainImageKey, NodeState, VmStatus},
+    node_state::{self, NodeState, ProtocolImageKey, VmStatus},
     nodes_manager::NodesManager,
     pal::Pal,
     services::{ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService},
@@ -369,7 +370,7 @@ impl std::fmt::Display for common::NodeType {
     }
 }
 
-//TODO mJR remove?
+//TODO MJR update protos and remove
 impl FromStr for common::NodeType {
     type Err = eyre::Error;
 
@@ -474,16 +475,12 @@ impl From<common::VmConfig> for node_state::VmConfig {
     }
 }
 
-impl TryFrom<common::VersionKey> for BlockchainImageKey {
-    type Error = eyre::Error;
-    fn try_from(key: common::VersionKey) -> Result<Self, Self::Error> {
-        let node_type = key.node_type().try_into()?;
-        Ok(Self {
-            blockchain_key: key.blockchain_key,
-            node_type,
-            network: key.network,
-            software: key.software,
-        })
+impl From<common::VersionKey> for ProtocolImageKey {
+    fn from(key: common::VersionKey) -> Self {
+        Self {
+            protocol_key: key.blockchain_key,
+            variant_key: key.software,
+        }
     }
 }
 
@@ -496,6 +493,7 @@ impl TryFrom<pb::Node> for NodeState {
             .ok_or_else(|| anyhow!("Missing node config"))?;
         let image = node_state::NodeImage {
             id: node.image_id,
+            version: node.blockchain_software_version,
             config_id: node.config_id,
             archive_id: config.archive_id.clone(),
             uri: Default::default(),
@@ -539,13 +537,12 @@ impl TryFrom<pb::Node> for NodeState {
             initialized: false,
             dev_mode: false,
             restarting: false,
-            blockchain_id: node.blockchain_id,
+            protocol_id: node.blockchain_id,
             image_key: node
                 .blockchain_version_key
                 .ok_or_else(|| anyhow!("Missing blockchain_version_key"))?
-                .try_into()?,
-            blockchain_name: node.blockchain_name,
-            software_version: node.blockchain_software_version,
+                .into(),
+            protocol_name: node.blockchain_name,
             org_id: node.org_id,
             display_name: node.display_name,
             org_name: node.org_name,

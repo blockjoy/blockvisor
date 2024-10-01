@@ -10,7 +10,7 @@
 /// `BabelEngine` handle all that messages until parallel operation on Plugin is finished.
 use crate::{
     babel_engine_service::{self, BabelEngineServer},
-    config::SharedConfig,
+    bv_config::SharedConfig,
     node::NODE_REQUEST_TIMEOUT,
     node_state::{NodeImage, NodeProperties},
     pal::{BabelClient, NodeConnection},
@@ -887,7 +887,7 @@ fn escape_sh_char(c: char) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::Config, pal::BabelClient};
+    use crate::{bv_config::Config, pal::BabelClient};
     use assert_fs::TempDir;
     use async_trait::async_trait;
     use babel_api::{
@@ -1157,6 +1157,7 @@ mod tests {
                     node_id,
                     image: NodeImage {
                         id: "".to_string(),
+                        version: "".to_string(),
                         config_id: "".to_string(),
                         archive_id: "".to_string(),
                         uri: "".to_string(),
@@ -1170,9 +1171,7 @@ mod tests {
                     node_id: node_id.to_string(),
                     node_name: "".to_string(),
                     node_version: "".to_string(),
-                    blockchain_name: "".to_string(),
-                    blockchain_network: "".to_string(),
-                    node_type: "".to_string(),
+                    node_protocol: "".to_string(),
                     node_ip: "".to_string(),
                     node_gateway: "".to_string(),
                     dev_mode: false,
@@ -1180,6 +1179,7 @@ mod tests {
                     bv_host_name: "".to_string(),
                     bv_api_url: "".to_string(),
                     org_id: "org_id".to_string(),
+                    node_variant: "".to_string(),
                 },
                 connection,
                 SharedConfig::new(

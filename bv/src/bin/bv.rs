@@ -1,7 +1,7 @@
 use blockvisord::{
     bv,
-    cli::{App, Command},
-    config::{Config, SharedConfig, CONFIG_PATH},
+    bv_cli::{App, Command},
+    bv_config::{Config, SharedConfig, CONFIG_PATH},
     internal_server,
     linux_platform::bv_root,
 };
@@ -21,10 +21,10 @@ const BV_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 async fn main() -> Result<()> {
     let args = App::parse();
 
-    if !bv_root().join(CONFIG_PATH).exists() {
+    let bv_root = bv_root();
+    if !bv_root.join(CONFIG_PATH).exists() {
         bail!("Host is not registered, please run `bvup` first");
     }
-    let bv_root = bv_root();
     let config = SharedConfig::new(Config::load(&bv_root).await?, bv_root);
     let port = config.read().await.blockvisor_port;
     let bv_url = format!("http://localhost:{port}");
@@ -75,11 +75,11 @@ async fn main() -> Result<()> {
                 println!("Service stopped");
             }
         }
-        _ => {} // Command::Host { command } => bv::process_host_command(bv_url, config, command).await?,
-                // Command::Chain { command } => bv::process_chain_command(config, command).await?,
-                // Command::Node { command } => bv::process_node_command(bv_url, command).await?,
-                // Command::Workspace { command } => bv::process_workspace_command(bv_url, command).await?,
-                // Command::Cluster { command } => bv::process_cluster_command(bv_url, command).await?,
+        Command::Host { command } => bv::process_host_command(bv_url, config, command).await?,
+        Command::Protocol { command } => bv::process_protocol_command(config, command).await?,
+        Command::Node { command } => bv::process_node_command(bv_url, command).await?,
+        Command::Workspace { command } => bv::process_workspace_command(bv_url, command).await?,
+        Command::Cluster { command } => bv::process_cluster_command(bv_url, command).await?,
     }
 
     Ok(())

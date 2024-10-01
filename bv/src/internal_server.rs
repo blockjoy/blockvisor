@@ -1,8 +1,9 @@
+use crate::node_state::ProtocolImageKey;
 use crate::{
     apptainer_platform::ApptainerPlatform,
+    bv_config,
+    bv_config::SharedConfig,
     cluster::ClusterData,
-    config,
-    config::SharedConfig,
     hosts,
     node_state::{NodeImage, NodeProperties, NodeState, VmStatus},
     nodes_manager::{self, MaybeNode, NodesManager},
@@ -10,7 +11,6 @@ use crate::{
     services::{
         self,
         api::{self, common, pb},
-        blockchain::NodeType,
     },
     {get_bv_status, set_bv_status, ServiceStatus}, {node_metrics, BV_VAR_PATH},
 };
@@ -32,11 +32,8 @@ pub struct NodeDisplayInfo {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct CreateNodeRequest {
-    pub blockchain_name: String,
-    pub network: String,
-    pub node_type: Option<NodeType>,
-    pub software: String,
-    pub version: Option<String>,
+    pub protocol_image_key: ProtocolImageKey,
+    pub image_version: Option<String>,
     pub build_version: Option<u64>,
     pub properties: NodeProperties,
 }
@@ -97,11 +94,11 @@ where
         let pal = ApptainerPlatform::default()
             .await
             .map_err(|e| Status::internal(format!("{e:#}")))?;
-        let mut config = config::Config::load(pal.bv_root())
+        let mut config = bv_config::Config::load(pal.bv_root())
             .await
             .map_err(|e| Status::internal(format!("{e:#}")))?;
-        config.token = "***".to_string();
-        config.refresh_token = "***".to_string();
+        config.api_config.token = "***".to_string();
+        config.api_config.refresh_token = "***".to_string();
         let service_name = if self.dev_mode {
             format!("{}-dev", env!("CARGO_PKG_NAME"))
         } else {
@@ -501,14 +498,11 @@ where
             .map(|(key, value)| common::ImagePropertyValue { key, value })
             .collect::<Vec<_>>();
         let (host_id, org_id) = self.get_host_and_org_id().await?;
-        let node_type = req.node_type.unwrap_or(NodeType::Rpc);
         let image_id = self
             .get_image_id(
-                &req.blockchain_name,
-                node_type,
-                req.network,
-                req.software,
-                req.version,
+                &req.protocol_image_key.protocol_key,
+                &req.protocol_image_key.variant_key,
+                req.image_version,
                 req.build_version,
             )
             .await?;
@@ -552,7 +546,7 @@ where
                     format!("node_create received invalid node id from API: {}", node.id)
                 })?,
                 name: node.node_name,
-                blockchain_id: node.blockchain_id,
+                protocol_id: node.blockchain_id,
                 dev_mode: false,
                 ip: node.ip_address.parse()?,
                 gateway: node.ip_gateway.parse()?,
@@ -563,17 +557,17 @@ where
                 display_name: node.display_name,
                 org_id: node.org_id,
                 org_name: node.org_name,
-                blockchain_name: node.blockchain_name,
+                protocol_name: node.blockchain_name,
                 image_key: node
                     .blockchain_version_key
                     .ok_or_else(|| anyhow!("Missing blockchain_version_key"))?
-                    .try_into()?,
+                    .into(),
                 dns_name: node.dns_name,
 
-                software_version: node.blockchain_software_version,
                 vm_config: requirements,
                 image: NodeImage {
                     id: node.image_id,
+                    version: node.blockchain_software_version,
                     config_id: node.config_id,
                     archive_id: config
                         .map(|config| config.archive_id.clone())
@@ -620,24 +614,15 @@ where
     async fn get_image_id(
         &self,
         protocol: &str,
-        node_type: NodeType,
-        network: String,
-        software: String,
+        variant: &str,
         version: Option<String>,
         build_version: Option<u64>,
     ) -> eyre::Result<String> {
-        services::blockchain::BlockchainService::new(services::DefaultConnector {
+        services::protocol::ProtocolService::new(services::DefaultConnector {
             config: self.config.clone(),
         })
         .await?
-        .get_image_id(
-            &protocol.to_lowercase(),
-            node_type,
-            network,
-            software,
-            version,
-            build_version,
-        )
+        .get_image_id(protocol, variant, version, build_version)
         .await
     }
 }

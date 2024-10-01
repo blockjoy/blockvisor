@@ -1,12 +1,13 @@
 use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
 
+use blockvisord::api_config::ApiConfig;
 use blockvisord::{
     apptainer_machine,
     apptainer_platform::BareNodeConnection,
     blockvisord::BlockvisorD,
+    bv_config::{ApptainerConfig, Config, SharedConfig},
     bv_context::BvContext,
-    config::{ApptainerConfig, Config, SharedConfig},
     node_context,
     node_context::NODES_DIR,
     node_env,
@@ -80,9 +81,11 @@ impl TestEnv {
         let api_config = Config {
             id: "host_id".to_owned(),
             name: "host_name".to_string(),
-            token: "token".to_owned(),
-            refresh_token: "fresh boii".to_owned(),
-            blockjoy_api_url: "http://localhost:8070".to_owned(),
+            api_config: ApiConfig {
+                token: "token".to_owned(),
+                refresh_token: "fresh boii".to_owned(),
+                blockjoy_api_url: "http://localhost:8070".to_owned(),
+            },
             blockjoy_mqtt_url: Some("mqtt://localhost:1873".to_string()),
             blockvisor_port: 0, // 0 has special meaning - pick first free port
             iface: "bvbr0".to_string(),

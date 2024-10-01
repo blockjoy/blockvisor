@@ -1,6 +1,7 @@
 use crate::{
-    api_with_retry, cluster,
-    config::{Config, SharedConfig},
+    api_with_retry,
+    bv_config::{Config, SharedConfig},
+    cluster,
     hosts::{self, HostMetrics},
     internal_server, node_metrics,
     node_state::VmStatus,

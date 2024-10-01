@@ -1,14 +1,14 @@
-use crate::services::{request_refresh_token, AuthToken};
+use crate::api_config::ApiConfig;
+use crate::services::AuthToken;
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{path::Path, time::Duration};
+use std::path::Path;
 use sysinfo::{System, SystemExt};
-use tokio::{fs, time::timeout};
+use tokio::fs;
 use tracing::debug;
 
 pub const CONFIG_PATH: &str = "etc/blockvisor.json";
 pub const DEFAULT_BRIDGE_IFACE: &str = "bvbr0";
-const REFRESH_TOKEN_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn default_blockvisor_port() -> u16 {
     9001
@@ -47,35 +47,16 @@ impl SharedConfig {
     }
 
     pub async fn token(&self) -> Result<AuthToken, tonic::Status> {
-        let token = &self.read().await.token;
-        Ok(AuthToken(if AuthToken::expired(token)? {
+        let api_config = self.read().await.api_config.clone();
+        Ok(AuthToken(if api_config.token_expired()? {
             let token = {
                 let mut write_lock = self.config.write().await;
                 // A concurrent update may have written to the jwt field, check if the token has become
                 // unexpired while we have unique access.
-                if !AuthToken::expired(&write_lock.token)? {
-                    return Ok(AuthToken(write_lock.token.clone()));
+                if write_lock.api_config.token_expired()? {
+                    write_lock.api_config.refresh_token().await?;
                 }
-
-                let resp = timeout(
-                    REFRESH_TOKEN_TIMEOUT,
-                    request_refresh_token(
-                        &write_lock.blockjoy_api_url,
-                        &write_lock.token,
-                        &write_lock.refresh_token,
-                    ),
-                )
-                .await
-                .map_err(|_| {
-                    tonic::Status::deadline_exceeded(format!(
-                        "refresh token request has sucked for more than {}s",
-                        REFRESH_TOKEN_TIMEOUT.as_secs()
-                    ))
-                })??;
-
-                write_lock.token.clone_from(&resp.token);
-                write_lock.refresh_token = resp.refresh;
-                resp.token
+                write_lock.api_config.token.clone()
             };
             self.read()
                 .await
@@ -84,7 +65,7 @@ impl SharedConfig {
                 .map_err(|err| tonic::Status::internal(format!("failed to save token: {err:#}")))?;
             token
         } else {
-            token.clone()
+            api_config.token
         }))
     }
 }
@@ -115,12 +96,8 @@ pub struct Config {
     /// Host name
     #[serde(default = "default_hostname")]
     pub name: String,
-    /// Host auth token
-    pub token: String,
-    /// The refresh token.
-    pub refresh_token: String,
-    /// API endpoint url
-    pub blockjoy_api_url: String,
+    #[serde(flatten)]
+    pub api_config: ApiConfig,
     /// Url for mqtt broker to receive commands and updates from.
     pub blockjoy_mqtt_url: Option<String>,
     /// Self update check interval - how often blockvisor shall check for new version of itself
@@ -161,14 +138,7 @@ impl Config {
         fs::create_dir_all(parent).await?;
         debug!("Writing host config: {}", path.display());
         let config = serde_json::to_string(&self)?;
-        fs::write(path, &*config).await?;
-        Ok(())
-    }
-
-    pub async fn remove(bv_root: &Path) -> Result<()> {
-        let path = bv_root.join(CONFIG_PATH);
-        debug!("Removing host config: {}", path.display());
-        fs::remove_file(path).await?;
+        fs::write(path, config).await?;
         Ok(())
     }
 }

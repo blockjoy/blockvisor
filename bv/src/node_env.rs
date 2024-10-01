@@ -10,10 +10,9 @@ pub fn new(bv_context: &BvContext, node_state: &NodeState) -> NodeEnv {
     NodeEnv {
         node_id: node_state.id.to_string(),
         node_name: node_state.name.clone(),
-        node_type: serde_json::to_string(&node_state.image_key.node_type).unwrap_or_default(),
-        blockchain_name: node_state.blockchain_name.clone(),
-        blockchain_network: node_state.image_key.network.clone(),
-        node_version: node_state.software_version.clone(),
+        node_version: node_state.image.version.clone(),
+        node_protocol: node_state.image_key.protocol_key.clone(),
+        node_variant: node_state.image_key.variant_key.clone(),
         node_ip: node_state.ip.to_string(),
         node_gateway: node_state.gateway.to_string(),
         dev_mode: node_state.dev_mode,
@@ -26,32 +25,30 @@ pub fn new(bv_context: &BvContext, node_state: &NodeState) -> NodeEnv {
 
 pub async fn save(env: &NodeEnv, babel_root: &Path) -> eyre::Result<()> {
     let mut node_env = format!(
-        "BV_HOST_ID=\"{}\"\n\
-         BV_HOST_NAME=\"{}\"\n\
-         BV_API_URL=\"{}\"\n\
-         NODE_ID=\"{}\"\n\
+        "NODE_ID=\"{}\"\n\
          NODE_NAME=\"{}\"\n\
-         NODE_TYPE=\"{}\"\n\
-         ORG_ID=\"{}\"\n\
-         BLOCKCHAIN_NAME=\"{}\"\n\
-         BLOCKCHAIN_NETWORK=\"{}\"\n\
          NODE_VERSION=\"{}\"\n\
+         NODE_PROTOCOL=\"{}\"\n\
+         NODE_VARIANT=\"{}\"\n\
          NODE_IP=\"{}\"\n\
          NODE_GATEWAY=\"{}\"\n\
-         DEV_MODE=\"{}\"\n",
+         DEV_MODE=\"{}\"\n\
+         BV_HOST_ID=\"{}\"\n\
+         BV_HOST_NAME=\"{}\"\n\
+         BV_API_URL=\"{}\"\n\
+         ORG_ID=\"{}\"\n",
+        env.node_id,
+        env.node_name,
+        env.node_version,
+        env.node_protocol,
+        env.node_variant,
+        env.node_ip,
+        env.node_gateway,
+        env.dev_mode,
         env.bv_host_id,
         env.bv_host_name,
         env.bv_api_url,
-        env.node_id,
-        env.node_name,
-        env.node_type,
         env.org_id,
-        env.blockchain_name,
-        env.blockchain_network,
-        env.node_version,
-        env.node_ip,
-        env.node_gateway,
-        env.dev_mode
     );
     if let Ok(rust_log) = std::env::var("RUST_LOG") {
         node_env.push_str(&format!("RUST_LOG=\"{rust_log}\"\n"))

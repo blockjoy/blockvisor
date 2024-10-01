@@ -1,6 +1,4 @@
 use blockvisord::services::api::{common, pb};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 type Result<T> = std::result::Result<Response<T>, Status>;
@@ -115,51 +113,6 @@ impl pb::host_service_server::HostService for StubHostsServer {
         _request: Request<pb::HostServiceRegionsRequest>,
     ) -> Result<pb::HostServiceRegionsResponse> {
         unimplemented!()
-    }
-}
-
-pub struct StubCommandsServer {
-    pub commands: Arc<Mutex<Vec<Vec<pb::Command>>>>,
-    pub updates: Arc<Mutex<Vec<pb::CommandServiceUpdateRequest>>>,
-}
-
-#[tonic::async_trait]
-impl pb::command_service_server::CommandService for StubCommandsServer {
-    async fn list(
-        &self,
-        _request: Request<pb::CommandServiceListRequest>,
-    ) -> Result<pb::CommandServiceListResponse> {
-        Ok(Response::new(pb::CommandServiceListResponse {
-            commands: vec![],
-        }))
-    }
-
-    async fn update(
-        &self,
-        request: Request<pb::CommandServiceUpdateRequest>,
-    ) -> Result<pb::CommandServiceUpdateResponse> {
-        let req = request.into_inner();
-        self.updates.lock().await.push(req);
-        let resp = pb::CommandServiceUpdateResponse { command: None }; // tests lol
-        Ok(Response::new(resp))
-    }
-
-    async fn ack(
-        &self,
-        _request: Request<pb::CommandServiceAckRequest>,
-    ) -> Result<pb::CommandServiceAckResponse> {
-        Ok(Response::new(pb::CommandServiceAckResponse {}))
-    }
-
-    async fn pending(
-        &self,
-        _: Request<pb::CommandServicePendingRequest>,
-    ) -> Result<pb::CommandServicePendingResponse> {
-        let reply = pb::CommandServicePendingResponse {
-            commands: self.commands.lock().await.pop().unwrap_or_default(),
-        };
-
-        Ok(Response::new(reply))
     }
 }
 

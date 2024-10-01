@@ -1,5 +1,5 @@
 use blockvisord::linux_platform::bv_root;
-use blockvisord::{blockvisord::BlockvisorD, config};
+use blockvisord::{blockvisord::BlockvisorD, bv_config};
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::Result;
 use tracing::info;
@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
         env!("CARGO_BIN_NAME"),
         env!("CARGO_PKG_VERSION")
     );
-    let config = config::Config::load(&bv_root()).await?;
+    let config = bv_config::Config::load(&bv_root()).await?;
     let pal = blockvisord::apptainer_platform::ApptainerPlatform::new(
         &config.iface,
         config.apptainer.clone(),
