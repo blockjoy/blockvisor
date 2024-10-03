@@ -1,5 +1,5 @@
 /// This module implements job runner for for long running sh scripts. This includes long initialization tasks
-/// and blockchain entrypoints as well, dependent on restart policy. It spawn child process as defined in
+/// and protocol entrypoints as well, dependent on restart policy. It spawn child process as defined in
 /// given config and watch it. Stopped child (whatever reason) is respawned according to given config,
 /// with exponential backoff timeout and max retries (if configured).
 /// Backoff timeout and retry count are reset after child stays alive for at least `backoff_timeout_ms`.

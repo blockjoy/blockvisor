@@ -202,7 +202,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         request: Request<JrpcRequest>,
     ) -> Result<Response<HttpResponse>, Status> {
         Ok(Response::new(
-            self.handle_jrpc(request).await.map_err(to_blockchain_err)?,
+            self.handle_jrpc(request).await.map_err(to_protocol_err)?,
         ))
     }
 
@@ -211,13 +211,13 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         request: Request<RestRequest>,
     ) -> Result<Response<HttpResponse>, Status> {
         Ok(Response::new(
-            self.handle_rest(request).await.map_err(to_blockchain_err)?,
+            self.handle_rest(request).await.map_err(to_protocol_err)?,
         ))
     }
 
     async fn run_sh(&self, request: Request<String>) -> Result<Response<ShResponse>, Status> {
         Ok(Response::new(
-            self.handle_sh(request).await.map_err(to_blockchain_err)?,
+            self.handle_sh(request).await.map_err(to_protocol_err)?,
         ))
     }
 
@@ -277,7 +277,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
     }
 }
 
-fn to_blockchain_err(err: eyre::Error) -> Status {
+fn to_protocol_err(err: eyre::Error) -> Status {
     Status::internal(err.to_string())
 }
 

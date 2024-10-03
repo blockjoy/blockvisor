@@ -149,7 +149,7 @@ impl HostMetrics {
 impl pb::MetricsServiceHostRequest {
     pub fn new(host_id: String, metrics: HostMetrics) -> Self {
         let metrics = pb::HostMetrics {
-            used_cpu_percent: Some(metrics.used_cpu_count),
+            used_cpu_hundreths: Some(metrics.used_cpu_count),
             used_mem_bytes: Some(metrics.used_memory_bytes),
             used_disk_bytes: Some(metrics.used_disk_space_bytes),
             load_one: Some(metrics.load_one),
@@ -174,7 +174,7 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
     )
     .await?;
     let update = pb::HostServiceUpdateRequest {
-        id: config.read().await.id,
+        host_id: config.read().await.id,
         name: Some(info.name),
         bv_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         os: Some(info.os),

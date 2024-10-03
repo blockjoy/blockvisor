@@ -4,19 +4,19 @@ const NETS = #{
     },
 };
 
-const A_DIR = BLOCKCHAIN_DATA_PATH + "/A/";
-const B_DIR = BLOCKCHAIN_DATA_PATH + "/B/";
-const NET =  global::NETS[node_params().NETWORK];
+const A_DIR = PROTOCOL_DATA_PATH + "/A/";
+const B_DIR = PROTOCOL_DATA_PATH + "/B/";
+const NET =  global::NETS[node_env().node_variant];
 
-fn stop_blockchain() {
-    stop_job("blockchain_service_a");
-    stop_job("blockchain_service_b");
+fn stop_protocol() {
+    stop_job("protocol_service_a");
+    stop_job("protocol_service_b");
 }
 
-fn start_blockchain(needed) {
-    start_job("blockchain_service_a", #{
+fn start_protocol(needed) {
+    start_job("protocol_service_a", #{
         job_type: #{
-            run_sh: `/usr/bin/blockchain_service_a --chain=${global::NET.net_type} --datadir=${global::A_DIR} --snapshots=false`,
+            run_sh: `/usr/bin/protocol_service_a --chain=${global::NET.net_type} --datadir=${global::A_DIR} --snapshots=false`,
         },
         restart: #{
             always: #{
@@ -26,9 +26,9 @@ fn start_blockchain(needed) {
         },
         needs: needed,
     });
-    start_job("blockchain_service_b", #{
+    start_job("protocol_service_b", #{
         job_type: #{
-            run_sh: `/usr/bin/blockchain_service_b start --home=${global::B_DIR} --chain=${global::NET.net_type} --rest-server --seeds ${global::NET.seeds} "$@"`,
+            run_sh: `/usr/bin/protocol_service_b start --home=${global::B_DIR} --chain=${global::NET.net_type} --rest-server --seeds ${global::NET.seeds} "$@"`,
         },
         restart: #{
             always: #{
@@ -62,7 +62,7 @@ fn init() {
             },
         });
     } catch {
-        // if it fail (maybe not uploaded yet), try blockchain provided archives (if any), to speed up first sync
+        // if it fail (maybe not uploaded yet), try protocol provided archives (if any), to speed up first sync
         start_job("download", #{
             job_type: #{
                 run_sh: `/usr/bin/wget -q -O - ${global::SNAPSHOT_UTIL_URL}`,
@@ -76,12 +76,12 @@ fn init() {
             },
         });
     }
-    // start blockchain services once download is finished
-    start_blockchain(["download"]);
+    // start protocol services once download is finished
+    start_protocol(["download"]);
 }
 
 fn upload(param) {
-    stop_blockchain();
+    stop_protocol();
     start_job("upload", #{
         job_type: #{
             upload: #{
@@ -105,7 +105,7 @@ fn upload(param) {
             },
         },
     });
-    // start blockchain services again once upload is finished
-    start_blockchain(["upload"]);
+    // start protocol services again once upload is finished
+    start_protocol(["upload"]);
     "Upload started!"
 }

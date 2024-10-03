@@ -64,7 +64,7 @@ fn init() {
     let service_config = #{
         job_type: #{
             // Sh script body
-            run_sh: "echo \"Blockchain service parametrized with " + node_params().TESTING + "\"",
+            run_sh: "echo \"Protocol service parametrized with " + node_params().TESTING + "\"",
         },
 
         // Job restart policy.
@@ -95,7 +95,7 @@ fn init() {
     let upload_job_config = #{
         job_type: #{
             upload: #{
-                // [optional] List of exclude patterns. Files in `BLOCKCHAIN_DATA_PATH` directory that match any of pattern,
+                // [optional] List of exclude patterns. Files in `PROTOCOL_DATA_PATH` directory that match any of pattern,
                 // won't be taken into account.
                 exclude: ["file_to_be_excluded", "or_more/**"],
                 // [optional] Compression to be used on chunks.
@@ -106,7 +106,7 @@ fn init() {
                 max_connections: 4,
                 // [optional] Maximum number of parallel workers.
                 max_runners: 8,
-                // [optional] Number of chunks that blockchain data should be split into.
+                // [optional] Number of chunks that protocol data should be split into.
                 // Recommended chunk size is about 500MB. Estimated by BV based on data size, if not provided.
                 number_of_chunks: 700,
                 // [optional] Seconds after which presigned urls in generated `UploadManifest` may expire.

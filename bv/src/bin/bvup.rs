@@ -202,7 +202,6 @@ async fn main() -> Result<()> {
             os_version: host_info.os_version,
             ip_addr: ip.clone(),
             ip_gateway: gateway,
-            org_id: None,
             region: cmd_args.region,
             billing_amount: None,
             vmm_mountpoint: Some(format!("{}", bv_root.join(BV_VAR_PATH).to_string_lossy())),
@@ -228,7 +227,7 @@ async fn main() -> Result<()> {
             id: host
                 .host
                 .ok_or_else(|| anyhow!("No `host` in response"))?
-                .id,
+                .host_id,
             name: host_info.name,
             api_config: ApiConfig {
                 token: host.token,

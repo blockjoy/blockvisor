@@ -43,13 +43,13 @@ pub trait Babel {
     /// Get jobs list.
     fn get_jobs() -> JobsInfo;
 
-    /// Send a Jrpc request to the current blockchain.
+    /// Send a Jrpc request to the current node.
     fn run_jrpc(req: JrpcRequest) -> HttpResponse;
 
-    /// Send a Rest request to the current blockchain.
+    /// Send a Rest request to the current node.
     fn run_rest(req: RestRequest) -> HttpResponse;
 
-    /// Send a Sh request to the current blockchain.
+    /// Send a Sh request to the current node.
     fn run_sh(
         /// These are the arguments to the sh command that is executed for this `Method`.
         body: String,
@@ -74,7 +74,7 @@ pub trait Babel {
     #[server_streaming]
     fn file_read(path: PathBuf) -> Binary;
 
-    /// Checks if blockchain data has been already downloaded.
+    /// Checks if protocol data has been already downloaded.
     fn is_download_completed() -> bool;
 }
 

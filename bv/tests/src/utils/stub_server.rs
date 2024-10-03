@@ -46,7 +46,7 @@ impl pb::host_service_server::HostService for StubHostsServer {
     ) -> Result<pb::HostServiceCreateResponse> {
         let reply = pb::HostServiceCreateResponse {
             host: Some(pb::Host {
-                id: "497d13b1-ddbe-4ee7-bfc7-752c7b710afe".to_string(),
+                host_id: "497d13b1-ddbe-4ee7-bfc7-752c7b710afe".to_string(),
                 name: "hostname".to_string(),
                 bv_version: "1.0".to_string(),
                 cpu_count: 1,
