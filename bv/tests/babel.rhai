@@ -45,8 +45,6 @@ const PLUGIN_CONFIG = #{
     },
 };
 
-/// Returns blockchain application status.
-/// SHALL be implemented
 fn application_status() {
     "broadcasting"
 }
@@ -69,14 +67,6 @@ fn address() {
 
 fn consensus() {
     false
-}
-
-fn sync_status() {
-    "synced"
-}
-
-fn staking_status() {
-    "staking"
 }
 
 fn download(param) {

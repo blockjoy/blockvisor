@@ -37,7 +37,7 @@ In case of any issues, try to build apptainer [from sources](https://apptainer.o
 
 ### Network Setup
 
-BV uses Apptainer to run blockchain nodes, it requires bridge interface to be configured. 
+BV uses Apptainer to run protocol nodes, it requires bridge interface to be configured. 
 If bridge interface name is different thant default `bvbr0`, then it must be explicitly passed to `bvup`
 when provisioning(see `bvup --help` for more details).
 

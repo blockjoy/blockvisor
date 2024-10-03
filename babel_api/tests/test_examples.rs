@@ -3,7 +3,7 @@ use babel_api::plugin::NodeHealth;
 use babel_api::{
     self,
     engine::{HttpResponse, JobConfig, JobInfo, JobStatus, RestartConfig, ShResponse},
-    plugin::{ApplicationStatus, Plugin},
+    plugin::{Plugin, ProtocolStatus},
     rhai_plugin,
 };
 use bv_tests_utils::babel_engine_mock::MockBabelEngine;
@@ -79,10 +79,21 @@ fn dummy_babel_engine() -> MockBabelEngine {
         .returning(|input| Ok(input.to_string()));
     babel.expect_render_template().returning(|_, _, _| Ok(()));
     babel.expect_node_params().returning(|| {
-        HashMap::from_iter([
-            ("NETWORK".to_string(), "main".to_string()),
-            ("TESTING_PARAM".to_string(), "testing_value".to_string()),
-        ])
+        HashMap::from_iter([("TESTING_PARAM".to_string(), "testing_value".to_string())])
+    });
+    babel.expect_node_env().returning(|| NodeEnv {
+        node_id: "node_id".to_string(),
+        node_name: "node name".to_string(),
+        node_version: "".to_string(),
+        node_protocol: "".to_string(),
+        node_ip: "".to_string(),
+        node_gateway: "".to_string(),
+        dev_mode: false,
+        bv_host_id: "".to_string(),
+        bv_host_name: "".to_string(),
+        bv_api_url: "".to_string(),
+        org_id: "".to_string(),
+        node_variant: "main".to_string(),
     });
     babel.expect_save_data().returning(|_| Ok(()));
     babel
@@ -168,11 +179,11 @@ fn test_polygon_functions() {
     let plugin = rhai_plugin::RhaiPlugin::new(&script, dummy_babel).unwrap();
     assert_eq!("addr", plugin.address().unwrap());
     assert_eq!(
-        ApplicationStatus::Custom {
+        ProtocolStatus {
             state: "broadcasting".to_string(),
-            health: Some(NodeHealth::Healthy),
+            health: NodeHealth::Healthy,
         },
-        plugin.application_status().unwrap()
+        plugin.protocol_status().unwrap()
     );
     assert_eq!(161, plugin.height().unwrap());
     assert_eq!(0, plugin.block_age().unwrap());
@@ -194,7 +205,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         bv_host_name: "".to_string(),
         bv_api_url: "".to_string(),
         org_id: "".to_string(),
-        node_variant: "".to_string(),
+        node_variant: "main".to_string(),
     });
     babel
         .expect_render_template()
@@ -206,10 +217,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         .times(2)
         .returning(|_, _, _| Ok(()));
     babel.expect_node_params().returning(|| {
-        HashMap::from_iter([
-            ("NETWORK".to_string(), "main".to_string()),
-            ("TESTING_PARAM".to_string(), "testing_value".to_string()),
-        ])
+        HashMap::from_iter([("TESTING_PARAM".to_string(), "testing_value".to_string())])
     });
     babel
         .expect_run_sh()
@@ -243,7 +251,7 @@ fn test_plugin_config() -> eyre::Result<()> {
             predicate::eq("init_job"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::RunSh(
-                    "openssl rand -hex 32 > /blockjoy/blockchain_data/A/jwt.txt".to_string(),
+                    "openssl rand -hex 32 > /blockjoy/protocol_data/A/jwt.txt".to_string(),
                 ),
                 restart: babel_api::engine::RestartPolicy::Never,
                 shutdown_timeout_secs: Some(120),
@@ -267,11 +275,11 @@ fn test_plugin_config() -> eyre::Result<()> {
         .times(2)
         .returning(|| Ok(false));
     babel
-        .expect_has_blockchain_archive()
+        .expect_has_protocol_archive()
         .once()
         .returning(|| Ok(true));
     babel
-        .expect_has_blockchain_archive()
+        .expect_has_protocol_archive()
         .once()
         .returning(|| Ok(false));
 
@@ -358,10 +366,10 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel
         .expect_create_job()
         .with(
-            predicate::eq("blockchain_service_a"),
+            predicate::eq("protocol_service_a"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::RunSh(
-                    r#"/usr/bin/blockchain_service_a start --home=/blockjoy/blockchain_data/A --chain=main --rest-server --seeds main seed "$@""#.to_string(),
+                    r#"/usr/bin/protocol_service_a start --home=/blockjoy/protocol_data/A --chain=main --rest-server --seeds main seed "$@""#.to_string(),
                 ),
                 restart: babel_api::engine::RestartPolicy::Always(RestartConfig{
                     backoff_timeout_ms: 60000,
@@ -381,17 +389,17 @@ fn test_plugin_config() -> eyre::Result<()> {
         .returning(|_, _| Ok(()));
     babel
         .expect_start_job()
-        .with(predicate::eq("blockchain_service_a"))
+        .with(predicate::eq("protocol_service_a"))
         .times(2)
         .returning(|_| Ok(()));
 
     babel
         .expect_create_job()
         .with(
-            predicate::eq("blockchain_service_b"),
+            predicate::eq("protocol_service_b"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::RunSh(
-                    r#"/usr/bin/blockchain_service_b --chain=main --datadir=/blockjoy/blockchain_data/A --snapshots=false"#.to_string(),
+                    r#"/usr/bin/protocol_service_b --chain=main --datadir=/blockjoy/protocol_data/A --snapshots=false"#.to_string(),
                 ),
                 restart: babel_api::engine::RestartPolicy::Always(RestartConfig{
                     backoff_timeout_ms: 60000,
@@ -411,7 +419,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         .returning(|_, _| Ok(()));
     babel
         .expect_start_job()
-        .with(predicate::eq("blockchain_service_b"))
+        .with(predicate::eq("protocol_service_b"))
         .times(2)
         .returning(|_| Ok(()));
     babel
@@ -427,12 +435,12 @@ fn test_plugin_config() -> eyre::Result<()> {
 
     babel
         .expect_stop_job()
-        .with(predicate::eq("blockchain_service_a"))
+        .with(predicate::eq("protocol_service_a"))
         .once()
         .returning(|_| Ok(()));
     babel
         .expect_stop_job()
-        .with(predicate::eq("blockchain_service_b"))
+        .with(predicate::eq("protocol_service_b"))
         .once()
         .returning(|_| Ok(()));
 
@@ -529,10 +537,10 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel
         .expect_create_job()
         .with(
-            predicate::eq("blockchain_service_a"),
+            predicate::eq("protocol_service_a"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::RunSh(
-                    r#"/usr/bin/blockchain_service_a start --home=/blockjoy/blockchain_data/A --chain=main --rest-server --seeds main seed "$@""#.to_string(),
+                    r#"/usr/bin/protocol_service_a start --home=/blockjoy/protocol_data/A --chain=main --rest-server --seeds main seed "$@""#.to_string(),
                 ),
                 restart: babel_api::engine::RestartPolicy::Always(RestartConfig{
                     backoff_timeout_ms: 60000,
@@ -552,17 +560,17 @@ fn test_plugin_config() -> eyre::Result<()> {
         .returning(|_, _| Ok(()));
     babel
         .expect_start_job()
-        .with(predicate::eq("blockchain_service_a"))
+        .with(predicate::eq("protocol_service_a"))
         .once()
         .returning(|_| Ok(()));
 
     babel
         .expect_create_job()
         .with(
-            predicate::eq("blockchain_service_b"),
+            predicate::eq("protocol_service_b"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::RunSh(
-                    r#"/usr/bin/blockchain_service_b --chain=main --datadir=/blockjoy/blockchain_data/A --snapshots=false"#.to_string(),
+                    r#"/usr/bin/protocol_service_b --chain=main --datadir=/blockjoy/protocol_data/A --snapshots=false"#.to_string(),
                 ),
                 restart: babel_api::engine::RestartPolicy::Always(RestartConfig{
                     backoff_timeout_ms: 60000,
@@ -582,7 +590,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         .returning(|_, _| Ok(()));
     babel
         .expect_start_job()
-        .with(predicate::eq("blockchain_service_b"))
+        .with(predicate::eq("protocol_service_b"))
         .once()
         .returning(|_| Ok(()));
 
@@ -619,11 +627,11 @@ fn test_plugin_config() -> eyre::Result<()> {
     plugin.init().unwrap();
     plugin.upload().unwrap();
     assert_eq!(
-        ApplicationStatus::Custom {
+        ProtocolStatus {
             state: "broadcasting".to_string(),
-            health: Some(NodeHealth::Healthy),
+            health: NodeHealth::Healthy,
         },
-        plugin.application_status().unwrap()
+        plugin.protocol_status().unwrap()
     );
     Ok(())
 }

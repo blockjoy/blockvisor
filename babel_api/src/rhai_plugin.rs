@@ -1,8 +1,10 @@
+use crate::plugin::NodeHealth;
+use crate::plugin_config::{DOWNLOADING_STATE_NAME, STARTING_STATE_NAME, UPLOADING_STATE_NAME};
 use crate::{
     engine::{
         self, Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse,
     },
-    plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
+    plugin::{Plugin, ProtocolStatus},
     plugin_config::{
         self, Actions, BaseConfig, ConfigFile, Job, PluginConfig, Service, DOWNLOAD_JOB_NAME,
         UPLOAD_JOB_NAME,
@@ -70,8 +72,8 @@ fn build_scope() -> rhai::Scope<'static> {
     let mut scope = rhai::Scope::new();
     scope.push("DATA_DRIVE_MOUNT_POINT", engine::DATA_DRIVE_MOUNT_POINT);
     scope.push(
-        "BLOCKCHAIN_DATA_PATH",
-        engine::BLOCKCHAIN_DATA_PATH.to_string_lossy().to_string(),
+        "PROTOCOL_DATA_PATH",
+        engine::PROTOCOL_DATA_PATH.to_string_lossy().to_string(),
     );
     scope
 }
@@ -461,7 +463,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
                             shutdown_timeout_secs: service.shutdown_timeout_secs,
                             shutdown_signal: service.shutdown_signal,
                             run_as: service.run_as,
-                            use_blockchain_data: false,
+                            use_protocol_data: false,
                             log_buffer_capacity_mb: service.log_buffer_capacity_mb,
                             log_timestamp: service.log_timestamp,
                         },
@@ -509,7 +511,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         }
         let mut services_needs = self.run_actions(config.init, vec![])?;
         if !self.babel_engine.is_download_completed()? {
-            if self.babel_engine.has_blockchain_archive()? {
+            if self.babel_engine.has_protocol_archive()? {
                 self.create_and_start_job(
                     DOWNLOAD_JOB_NAME,
                     plugin_config::build_download_job_config(config.download, services_needs),
@@ -547,9 +549,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
             bail!("Missing {PLUGIN_CONFIG_CONST_NAME} constant")
         };
 
-        config
-            .services
-            .retain(|service| service.use_blockchain_data);
+        config.services.retain(|service| service.use_protocol_data);
         for service in &config.services {
             self.babel_engine.stop_job(&service.name)?;
         }
@@ -640,7 +640,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
         self.call_fn("consensus", ())
     }
 
-    fn application_status(&self) -> Result<ApplicationStatus> {
+    fn protocol_status(&self) -> Result<ProtocolStatus> {
         let jobs = self.bare.babel_engine.get_jobs()?;
         let check_job_status = |name: &str, check_status: fn(&JobStatus) -> bool| {
             jobs.get(name)
@@ -648,9 +648,15 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 .unwrap_or(false)
         };
         if check_job_status(UPLOAD_JOB_NAME, |status| *status == JobStatus::Running) {
-            Ok(ApplicationStatus::Uploading)
+            Ok(ProtocolStatus {
+                state: UPLOADING_STATE_NAME.to_owned(),
+                health: NodeHealth::Neutral,
+            })
         } else if check_job_status(DOWNLOAD_JOB_NAME, |status| *status == JobStatus::Running) {
-            Ok(ApplicationStatus::Downloading)
+            Ok(ProtocolStatus {
+                state: DOWNLOADING_STATE_NAME.to_owned(),
+                health: NodeHealth::Neutral,
+            })
         } else if self.bare.plugin_config.as_ref().is_some_and(|config| {
             config.services.iter().any(|service| {
                 check_job_status(&service.name, |status| {
@@ -658,24 +664,15 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 })
             })
         }) {
-            Ok(ApplicationStatus::Starting)
+            Ok(ProtocolStatus {
+                state: STARTING_STATE_NAME.to_owned(),
+                health: NodeHealth::Neutral,
+            })
         } else {
             Ok(from_dynamic(
                 &self.call_fn::<_, Dynamic>("application_status", ())?,
             )?)
         }
-    }
-
-    fn sync_status(&self) -> Result<SyncStatus> {
-        Ok(from_dynamic(
-            &self.call_fn::<_, Dynamic>("sync_status", ())?,
-        )?)
-    }
-
-    fn staking_status(&self) -> Result<StakingStatus> {
-        Ok(from_dynamic(
-            &self.call_fn::<_, Dynamic>("staking_status", ())?,
-        )?)
     }
 
     fn call_custom_method(&self, name: &str, param: &str) -> Result<String> {
@@ -910,7 +907,7 @@ mod tests {
             ) -> Result<()>;
             fn delete_task(&self, task_name: &str) -> Result<()>;
             fn is_download_completed(&self) -> Result<bool>;
-            fn has_blockchain_archive(&self) -> Result<bool>;
+            fn has_protocol_archive(&self) -> Result<bool>;
             fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
             fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()>;
             fn file_read(&self, path: &Path) -> Result<Vec<u8>>;
@@ -976,15 +973,7 @@ mod tests {
         }
 
         fn application_status() {
-            #{custom: #{state: "delinquent", health: "unhealthy"}}
-        }
-
-        fn sync_status() {
-            "synced"
-        }
-        
-        fn staking_status() {
-            "staking"
+            #{state: "delinquent", health: "unhealthy"}
         }
 "#;
         let mut babel = MockBabelEngine::new();
@@ -1008,14 +997,12 @@ mod tests {
         assert_eq!("node address", &plugin.address()?);
         assert!(plugin.consensus()?);
         assert_eq!(
-            ApplicationStatus::Custom {
+            ProtocolStatus {
                 state: "delinquent".to_string(),
-                health: Some(NodeHealth::Unhealthy),
+                health: NodeHealth::Unhealthy,
             },
-            plugin.application_status()?
+            plugin.protocol_status()?
         );
-        assert_eq!(SyncStatus::Synced, plugin.sync_status()?);
-        assert_eq!(StakingStatus::Staking, plugin.staking_status()?);
         Ok(())
     }
 
@@ -1385,18 +1372,18 @@ mod tests {
             const PLUGIN_CONFIG = #{
                 services: [
                     #{
-                        name: "blockchain_service_a",
+                        name: "protocol_service_a",
                         run_sh: `echo A`,
                     },
                     #{
-                        name: "blockchain_service_b",
+                        name: "protocol_service_b",
                         run_sh: `echo B`,
                     }
                 ],
             };
 
             fn application_status() {
-                #{custom: #{state: "delinquent"}}
+                #{state: "delinquent", health: "unhealthy"}
             }
             "#;
         let mut babel = MockBabelEngine::new();
@@ -1415,7 +1402,7 @@ mod tests {
         babel.expect_get_jobs().once().returning(|| {
             Ok(HashMap::from_iter([
                 (
-                    "blockchain_service_a".to_string(),
+                    "protocol_service_a".to_string(),
                     JobInfo {
                         status: JobStatus::Running,
                         progress: Default::default(),
@@ -1425,7 +1412,7 @@ mod tests {
                     },
                 ),
                 (
-                    "blockchain_service_b".to_string(),
+                    "protocol_service_b".to_string(),
                     JobInfo {
                         status: JobStatus::Pending {
                             waiting_for: vec![],
@@ -1456,15 +1443,33 @@ mod tests {
             .returning(|| Ok(HashMap::default()));
 
         let plugin = RhaiPlugin::new(script, babel)?;
-        assert_eq!(ApplicationStatus::Downloading, plugin.application_status()?);
-        assert_eq!(ApplicationStatus::Starting, plugin.application_status()?);
-        assert_eq!(ApplicationStatus::Uploading, plugin.application_status()?);
         assert_eq!(
-            ApplicationStatus::Custom {
-                state: "delinquent".to_string(),
-                health: None
+            ProtocolStatus {
+                state: DOWNLOADING_STATE_NAME.to_owned(),
+                health: NodeHealth::Neutral
             },
-            plugin.application_status()?
+            plugin.protocol_status()?
+        );
+        assert_eq!(
+            ProtocolStatus {
+                state: STARTING_STATE_NAME.to_owned(),
+                health: NodeHealth::Neutral
+            },
+            plugin.protocol_status()?
+        );
+        assert_eq!(
+            ProtocolStatus {
+                state: UPLOADING_STATE_NAME.to_owned(),
+                health: NodeHealth::Neutral
+            },
+            plugin.protocol_status()?
+        );
+        assert_eq!(
+            ProtocolStatus {
+                state: "delinquent".to_string(),
+                health: NodeHealth::Unhealthy
+            },
+            plugin.protocol_status()?
         );
         Ok(())
     }
@@ -1505,14 +1510,14 @@ mod tests {
             const PLUGIN_CONFIG = #{
                 services: [
                     #{
-                        name: "blockchain_service",
+                        name: "protocol_service",
                         run_sh: `echo A`,
                         run_as: "some_user",
                     },
                     #{
-                        name: "non_blockchain_service",
+                        name: "non_protocol_service",
                         run_sh: `echo B`,
-                        use_blockchain_data: false,
+                        use_protocol_data: false,
                     },
                 ],
                 pre_upload: #{
@@ -1549,7 +1554,7 @@ mod tests {
             });
         babel
             .expect_stop_job()
-            .with(predicate::eq("blockchain_service"))
+            .with(predicate::eq("protocol_service"))
             .return_once(|_| Ok(()));
         babel
             .expect_create_job()
@@ -1616,16 +1621,16 @@ mod tests {
         babel
             .expect_create_job()
             .with(
-                predicate::eq("blockchain_service"),
+                predicate::eq("protocol_service"),
                 predicate::eq(plugin_config::build_service_job_config(
                     Service {
-                        name: "blockchain_service".to_string(),
+                        name: "protocol_service".to_string(),
                         run_sh: "echo A".to_string(),
                         restart_config: None,
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                         run_as: Some("some_user".to_string()),
-                        use_blockchain_data: true,
+                        use_protocol_data: true,
                         log_buffer_capacity_mb: None,
                         log_timestamp: None,
                     },
@@ -1637,7 +1642,7 @@ mod tests {
             .returning(|_, _| Ok(()));
         babel
             .expect_start_job()
-            .with(predicate::eq("blockchain_service"))
+            .with(predicate::eq("protocol_service"))
             .once()
             .returning(|_| Ok(()));
 
@@ -1683,13 +1688,13 @@ mod tests {
                 ],
                 services: [
                     #{
-                        name: "blockchain_service",
+                        name: "protocol_service",
                         run_sh: `echo A`,
                     },
                     #{
-                        name: "non_blockchain_service",
+                        name: "non_protocol_service",
                         run_sh: `echo B`,
-                        use_blockchain_data: false,
+                        use_protocol_data: false,
                     },
                 ],
                 scheduled: [
@@ -1767,7 +1772,7 @@ mod tests {
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                         run_as: None,
-                        use_blockchain_data: false,
+                        use_protocol_data: false,
                         log_buffer_capacity_mb: None,
                         log_timestamp: None,
                     },
@@ -1820,7 +1825,7 @@ mod tests {
             .once()
             .returning(|| Ok(false));
         babel
-            .expect_has_blockchain_archive()
+            .expect_has_protocol_archive()
             .once()
             .returning(|| Ok(false));
         babel
@@ -1871,16 +1876,16 @@ mod tests {
         babel
             .expect_create_job()
             .with(
-                predicate::eq("blockchain_service"),
+                predicate::eq("protocol_service"),
                 predicate::eq(plugin_config::build_service_job_config(
                     Service {
-                        name: "blockchain_service".to_string(),
+                        name: "protocol_service".to_string(),
                         run_sh: "echo A".to_string(),
                         restart_config: None,
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                         run_as: None,
-                        use_blockchain_data: true,
+                        use_protocol_data: true,
                         log_buffer_capacity_mb: None,
                         log_timestamp: None,
                     },
@@ -1892,22 +1897,22 @@ mod tests {
             .returning(|_, _| Ok(()));
         babel
             .expect_start_job()
-            .with(predicate::eq("blockchain_service"))
+            .with(predicate::eq("protocol_service"))
             .once()
             .returning(|_| Ok(()));
         babel
             .expect_create_job()
             .with(
-                predicate::eq("non_blockchain_service"),
+                predicate::eq("non_protocol_service"),
                 predicate::eq(plugin_config::build_service_job_config(
                     Service {
-                        name: "non_blockchain_service".to_string(),
+                        name: "non_protocol_service".to_string(),
                         run_sh: "echo B".to_string(),
                         restart_config: None,
                         shutdown_timeout_secs: None,
                         shutdown_signal: None,
                         run_as: None,
-                        use_blockchain_data: false,
+                        use_protocol_data: false,
                         log_buffer_capacity_mb: None,
                         log_timestamp: None,
                     },
@@ -1919,7 +1924,7 @@ mod tests {
             .returning(|_, _| Ok(()));
         babel
             .expect_start_job()
-            .with(predicate::eq("non_blockchain_service"))
+            .with(predicate::eq("non_protocol_service"))
             .once()
             .returning(|_| Ok(()));
 

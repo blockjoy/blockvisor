@@ -13,7 +13,7 @@ pub const DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_JOB_SHUTDOWN_SIGNAL: PosixSignal = PosixSignal::SIGTERM;
 pub const DATA_DRIVE_MOUNT_POINT: &str = "/blockjoy/";
 lazy_static::lazy_static! {
-    pub static ref BLOCKCHAIN_DATA_PATH: &'static Path = Path::new("/blockjoy/blockchain_data");
+    pub static ref PROTOCOL_DATA_PATH: &'static Path = Path::new("/blockjoy/protocol_data");
 }
 
 /// Plugin engine must implement this interface, so it can be used by babel plugins.
@@ -29,13 +29,13 @@ pub trait Engine {
     /// Get background jobs info.
     fn get_jobs(&self) -> Result<JobsInfo>;
 
-    /// Execute Jrpc request to the current blockchain and return its http response. See `HttpResponse`.
+    /// Execute Jrpc request on the current node and return its http response. See `HttpResponse`.
     fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
 
-    /// Execute a Rest request to the current blockchain and return its http response. See `HttpResponse`.
+    /// Execute a Rest request on the current node and return its http response. See `HttpResponse`.
     fn run_rest(&self, req: RestRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
 
-    /// Run Sh script on the blockchain VM and return its response. See `ShResponse` for details.
+    /// Run Sh script on the current node and return its response. See `ShResponse` for details.
     fn run_sh(&self, body: &str, timeout: Option<Duration>) -> Result<ShResponse>;
 
     /// Allowing people to substitute arbitrary data into sh-commands is unsafe.
@@ -77,10 +77,10 @@ pub trait Engine {
     /// Delete previously scheduled task.
     fn delete_task(&self, task_name: &str) -> Result<()>;
 
-    /// Checks if blockchain data has been already downloaded.
+    /// Checks if protocol data has been already downloaded.
     fn is_download_completed(&self) -> Result<bool>;
-    /// Checks if blockchain archive is available.
-    fn has_blockchain_archive(&self) -> Result<bool>;
+    /// Checks if protocol archive is available.
+    fn has_protocol_archive(&self) -> Result<bool>;
     /// Get plugin secret from remote encrypted storage
     fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
     /// Put plugin secret to remote encrypted storage
@@ -276,7 +276,7 @@ pub enum JobType {
         max_connections: Option<usize>,
         /// Maximum number of parallel workers.
         max_runners: Option<usize>,
-        /// Number of chunks that blockchain data should be split into.
+        /// Number of chunks that protocol data should be split into.
         /// Recommended chunk size is about 500MB.
         number_of_chunks: Option<u32>,
         /// Seconds after which presigned urls in generated `UploadManifest` may expire.

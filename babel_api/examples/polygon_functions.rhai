@@ -12,9 +12,9 @@ fn application_status() {
         headers: [["Content-Type", "application/json"]],
       });
     if res.status_code != 200 {
-       #{custom: #{state: "delinquent", health: "healthy"}};
+       #{state: "delinquent", health: "healthy"}
     } else {
-       #{custom: #{state: "broadcasting", health: "healthy"}};
+       #{state: "broadcasting", health: "healthy"}
     }
 }
 

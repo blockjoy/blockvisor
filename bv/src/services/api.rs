@@ -14,9 +14,8 @@ use babel_api::utils::{BabelConfig, RamdiskConfiguration};
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
-    archive_service_client, blockchain_service_client, command_service_client,
-    discovery_service_client, host_service_client, metrics_service_client, node_command::Command,
-    node_service_client,
+    archive_service_client, command_service_client, discovery_service_client, host_service_client,
+    metrics_service_client, node_command::Command, node_service_client, protocol_service_client,
 };
 use std::{
     collections::HashMap,
@@ -59,8 +58,8 @@ lazy_static::lazy_static! {
     pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
 }
 
-pub type BlockchainServiceClient =
-    blockchain_service_client::BlockchainServiceClient<AuthenticatedService>;
+pub type ProtocolServiceClient =
+    protocol_service_client::ProtocolServiceClient<AuthenticatedService>;
 pub type ArchiveServiceClient = archive_service_client::ArchiveServiceClient<AuthenticatedService>;
 pub type DiscoveryServiceClient =
     discovery_service_client::DiscoveryServiceClient<AuthenticatedService>;
@@ -128,9 +127,9 @@ impl<'a> CommandsService<'a> {
             Ok(resp) => {
                 let commands = resp.into_inner().commands;
                 for command in &commands {
-                    let command_id = &command.id;
+                    let command_id = &command.command_id;
                     let req = pb::CommandServiceAckRequest {
-                        id: command_id.clone(),
+                        command_id: command_id.clone(),
                     };
                     if let Err(err) = api_with_retry!(client, client.ack(req.clone())) {
                         warn!("failed to send ACK for command {command_id}: {err:#}");
@@ -160,7 +159,7 @@ impl<'a> CommandsService<'a> {
         info!("Processing {} commands", commands.len());
         for command in commands {
             info!("Processing command: {command:?}");
-            let command_id = &command.id;
+            let command_id = &command.command_id;
 
             // check for bv health status
             let service_status = get_bv_status().await;
@@ -200,14 +199,14 @@ impl<'a> CommandsService<'a> {
     ) -> Result<()> {
         let req = match command_result {
             Ok(()) => pb::CommandServiceUpdateRequest {
-                id: command_id.to_string(),
+                command_id: command_id.to_string(),
                 exit_code: Some(pb::CommandExitCode::Ok.into()),
                 exit_message: None,
                 retry_hint_seconds: None,
             },
             Err(err) => {
                 let mut req = pb::CommandServiceUpdateRequest {
-                    id: command_id.to_string(),
+                    command_id: command_id.to_string(),
                     exit_code: Some(match &err {
                         Error::Internal(_) => pb::CommandExitCode::InternalError.into(),
                         Error::ServiceNotReady => pb::CommandExitCode::ServiceNotReady.into(),
@@ -362,24 +361,6 @@ fn process_host_command(host_command: pb::HostCommand) -> commands::Result<()> {
     Ok(())
 }
 
-impl std::fmt::Display for common::NodeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = self.as_str_name();
-        let s = s.strip_prefix("NODE_TYPE_").unwrap_or(s).to_lowercase();
-        write!(f, "{s}")
-    }
-}
-
-//TODO MJR update protos and remove
-impl FromStr for common::NodeType {
-    type Err = eyre::Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let str = format!("NODE_TYPE_{}", s.to_uppercase());
-        Self::from_str_name(&str).ok_or_else(|| anyhow!("Invalid NodeType {s}"))
-    }
-}
-
 impl TryFrom<common::FirewallConfig> for firewall::Config {
     type Error = eyre::Error;
     fn try_from(config: common::FirewallConfig) -> Result<Self, Self::Error> {
@@ -475,11 +456,11 @@ impl From<common::VmConfig> for node_state::VmConfig {
     }
 }
 
-impl From<common::VersionKey> for ProtocolImageKey {
-    fn from(key: common::VersionKey) -> Self {
+impl From<common::ProtocolVersionKey> for ProtocolImageKey {
+    fn from(key: common::ProtocolVersionKey) -> Self {
         Self {
-            protocol_key: key.blockchain_key,
-            variant_key: key.software,
+            protocol_key: key.protocol_key,
+            variant_key: key.variant_key,
         }
     }
 }
@@ -493,16 +474,16 @@ impl TryFrom<pb::Node> for NodeState {
             .ok_or_else(|| anyhow!("Missing node config"))?;
         let image = node_state::NodeImage {
             id: node.image_id,
-            version: node.blockchain_software_version,
+            version: node.semantic_version,
             config_id: node.config_id,
             archive_id: config.archive_id.clone(),
             uri: Default::default(),
         };
-        let blockchain = config
-            .blockchain
+        let image_config = config
+            .image
             .as_ref()
-            .ok_or_else(|| anyhow!("Missing blockchain"))?;
-        let properties = blockchain
+            .ok_or_else(|| anyhow!("Missing image"))?;
+        let properties = image_config
             .properties
             .clone()
             .into_iter()
@@ -518,7 +499,7 @@ impl TryFrom<pb::Node> for NodeState {
             .clone()
             .ok_or_else(|| anyhow!("Missing vm config"))?;
         Ok(Self {
-            id: Uuid::from_str(&node.id)?,
+            id: Uuid::from_str(&node.node_id)?,
             name: node.node_name,
             image,
             vm_config: vm.into(),
@@ -537,12 +518,12 @@ impl TryFrom<pb::Node> for NodeState {
             initialized: false,
             dev_mode: false,
             restarting: false,
-            protocol_id: node.blockchain_id,
+            protocol_id: node.protocol_id,
             image_key: node
-                .blockchain_version_key
-                .ok_or_else(|| anyhow!("Missing blockchain_version_key"))?
+                .version_key
+                .ok_or_else(|| anyhow!("Missing version_key"))?
                 .into(),
-            protocol_name: node.blockchain_name,
+            protocol_name: node.protocol_name,
             org_id: node.org_id,
             display_name: node.display_name,
             org_name: node.org_name,

@@ -24,7 +24,7 @@ use babel_api::{
     engine::{
         HttpResponse, JobConfig, JobInfo, JobType, JobsInfo, JrpcRequest, RestRequest, ShResponse,
     },
-    plugin::{ApplicationStatus, Plugin, StakingStatus, SyncStatus},
+    plugin::{Plugin, ProtocolStatus},
 };
 use bv_utils::system::bytes_into_bin;
 use bv_utils::{
@@ -173,14 +173,14 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     /// Returns the name of the node. This is usually some random generated name that you may use
-    /// to recognise the node, but the purpose may vary per blockchain.
+    /// to recognise the node, but the purpose may vary per protocol.
     /// ### Example
     /// `chilly-peach-kangaroo`
     pub async fn name(&mut self) -> Result<String> {
         self.on_plugin(|plugin| plugin.name()).await
     }
 
-    /// The address of the node. The meaning of this varies from blockchain to blockchain.
+    /// The address of the node. The meaning of this varies from protocol to protocol.
     /// ### Example
     /// `/p2p/11Uxv9YpMpXvLf8ZyvGWBdbgq3BXv8z1pra1LBqkRS5wmTEHNW3`
     pub async fn address(&mut self) -> Result<String> {
@@ -192,16 +192,8 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         self.on_plugin(|plugin| plugin.consensus()).await
     }
 
-    pub async fn application_status(&mut self) -> Result<ApplicationStatus> {
-        self.on_plugin(|plugin| plugin.application_status()).await
-    }
-
-    pub async fn sync_status(&mut self) -> Result<SyncStatus> {
-        self.on_plugin(|plugin| plugin.sync_status()).await
-    }
-
-    pub async fn staking_status(&mut self) -> Result<StakingStatus> {
-        self.on_plugin(|plugin| plugin.staking_status()).await
+    pub async fn protocol_status(&mut self) -> Result<ProtocolStatus> {
+        self.on_plugin(|plugin| plugin.protocol_status()).await
     }
 
     pub async fn upload(&mut self) -> Result<()> {
@@ -212,7 +204,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         self.on_plugin(move |plugin| plugin.init()).await
     }
 
-    /// This function calls babel by sending a blockchain command using the specified method name.
+    /// This function calls babel by sending a protocol command using the specified method name.
     #[instrument(skip(self), fields(id = % self.node_info.node_id, name = name.to_string()), err, ret(Debug))]
     pub async fn call_method(&mut self, name: &str, param: &str) -> Result<String> {
         Ok(match name {
@@ -225,9 +217,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             "name" => self.name().await?,
             "address" => self.address().await?,
             "consensus" => self.consensus().await?.to_string(),
-            "application_status" => serde_json::to_string(&self.application_status().await?)?,
-            "sync_status" => serde_json::to_string(&self.sync_status().await?)?,
-            "staking_status" => serde_json::to_string(&self.staking_status().await?)?,
+            "application_status" => serde_json::to_string(&self.protocol_status().await?)?,
             "upload" => serde_json::to_string(&self.upload().await?)?,
             _ => {
                 let method_name = name.to_owned();
@@ -238,8 +228,8 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         })
     }
 
-    /// Returns the methods that are supported by this blockchain. Calling any method on this
-    /// blockchain that is not listed here will result in an error being returned.
+    /// Returns the methods that are supported by this protocol. Calling any method on this
+    /// protocol that is not listed here will result in an error being returned.
     pub fn capabilities(&self) -> &Vec<String> {
         &self.capabilities
     }
@@ -249,7 +239,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         self.capabilities.iter().any(|v| v == method)
     }
 
-    /// Returns the list of jobs from blockchain jobs.
+    /// Returns the list of jobs from protocol jobs.
     pub async fn get_jobs(&mut self) -> Result<JobsInfo> {
         let babel_client = self.node_connection.babel_client().await?;
         Ok(with_retry!(babel_client.get_jobs(())).map(|v| v.into_inner())?)
@@ -443,9 +433,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            EngineRequest::HasBlockchainArchive { response_tx } => {
+            EngineRequest::HasProtocolArchive { response_tx } => {
                 let _ = response_tx.send(
-                    services::archive::has_blockchain_archive(
+                    services::archive::has_protocol_archive(
                         &self.api_config,
                         self.node_info.image.archive_id.clone(),
                     )
@@ -523,7 +513,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     ) -> std::result::Result<(), Error> {
         let babel_client = self.node_connection.babel_client().await?;
         if let JobType::Download { .. } = &job_config.job_type {
-            if !services::archive::has_blockchain_archive(
+            if !services::archive::has_protocol_archive(
                 &self.api_config,
                 self.node_info.image.archive_id.clone(),
             )
@@ -640,7 +630,7 @@ enum EngineRequest {
     IsDownloadCompleted {
         response_tx: ResponseTx<Result<bool>>,
     },
-    HasBlockchainArchive {
+    HasProtocolArchive {
         response_tx: ResponseTx<Result<bool>>,
     },
     GetSecret {
@@ -819,10 +809,10 @@ impl babel_api::engine::Engine for Engine {
         response_rx.blocking_recv()?
     }
 
-    fn has_blockchain_archive(&self) -> Result<bool> {
+    fn has_protocol_archive(&self) -> Result<bool> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx
-            .blocking_send(EngineRequest::HasBlockchainArchive { response_tx })?;
+            .blocking_send(EngineRequest::HasProtocolArchive { response_tx })?;
         response_rx.blocking_recv()?
     }
 
@@ -890,6 +880,7 @@ mod tests {
     use crate::{bv_config::Config, pal::BabelClient};
     use assert_fs::TempDir;
     use async_trait::async_trait;
+    use babel_api::plugin::NodeHealth;
     use babel_api::{
         engine::{Engine, JobInfo, JobStatus, JobType, RestartPolicy},
         utils::BabelConfig,
@@ -1020,20 +1011,12 @@ mod tests {
             self.engine.run_sh("consensus", None)?;
             Ok(true)
         }
-        fn application_status(&self) -> Result<ApplicationStatus> {
+        fn protocol_status(&self) -> Result<ProtocolStatus> {
             self.engine.run_sh("application_status", None)?;
-            Ok(ApplicationStatus::Custom {
+            Ok(ProtocolStatus {
                 state: "disabled".to_string(),
-                health: None,
+                health: NodeHealth::Neutral,
             })
-        }
-        fn sync_status(&self) -> Result<SyncStatus> {
-            self.engine.run_sh("sync_status", None)?;
-            Ok(SyncStatus::Syncing)
-        }
-        fn staking_status(&self) -> Result<StakingStatus> {
-            self.engine.run_sh("staking_status", None)?;
-            Ok(StakingStatus::Staked)
         }
         fn call_custom_method(&self, name: &str, param: &str) -> Result<String> {
             self.engine.create_job(
@@ -1359,14 +1342,6 @@ mod tests {
             .return_once(return_request);
         babel_mock
             .expect_run_sh()
-            .withf(|req| req.get_ref() == "sync_status")
-            .return_once(return_request);
-        babel_mock
-            .expect_run_sh()
-            .withf(|req| req.get_ref() == "staking_status")
-            .return_once(return_request);
-        babel_mock
-            .expect_run_sh()
             .withf(|req| req.get_ref() == "capabilities")
             .return_once(return_request);
         babel_mock
@@ -1420,16 +1395,11 @@ mod tests {
         assert_eq!("dummy address", test_env.engine.address().await?);
         assert!(test_env.engine.consensus().await?);
         assert_eq!(
-            ApplicationStatus::Custom {
+            ProtocolStatus {
                 state: "disabled".to_string(),
-                health: None
+                health: NodeHealth::Neutral,
             },
-            test_env.engine.application_status().await?
-        );
-        assert_eq!(SyncStatus::Syncing, test_env.engine.sync_status().await?);
-        assert_eq!(
-            StakingStatus::Staked,
-            test_env.engine.staking_status().await?
+            test_env.engine.protocol_status().await?
         );
         assert_eq!(
             vec!["some_method".to_string()],

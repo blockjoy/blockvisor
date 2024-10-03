@@ -348,19 +348,22 @@ where
             }
 
             for (node_id, config_id, status) in updates {
-                let container_status = match status {
-                    VmStatus::Running => common::ContainerStatus::Running,
-                    VmStatus::Stopped => common::ContainerStatus::Stopped,
-                    VmStatus::Failed => common::ContainerStatus::Failed,
-                    VmStatus::Busy => common::ContainerStatus::Busy,
+                let vm_status = match status {
+                    VmStatus::Running => Some(common::NodeState::Running),
+                    VmStatus::Stopped => Some(common::NodeState::Stopped),
+                    VmStatus::Failed => Some(common::NodeState::Failed),
+                    VmStatus::Busy => None,
                 };
-                let mut report = pb::NodeServiceReportStatusRequest {
-                    id: node_id.to_string(),
-                    p2p_address: None,
-                    container_status: None, // We use the setter to set this field for type-safety
+                let report = pb::NodeServiceReportStatusRequest {
+                    node_id: node_id.to_string(),
                     config_id,
+                    status: vm_status.map(|state| common::NodeStatus {
+                        state: state.into(),
+                        next: None,
+                        protocol: None,
+                    }),
+                    p2p_address: None,
                 };
-                report.set_container_status(container_status);
 
                 if updates_cache.get(&node_id) == Some(&report) {
                     debug!("Skipping node update: {report:?}");
