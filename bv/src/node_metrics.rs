@@ -8,7 +8,7 @@ use crate::services::api::{common, pb};
 use babel_api::plugin::NodeHealth;
 use babel_api::{
     engine::{JobStatus, JobsInfo},
-    plugin::{ApplicationStatus, StakingStatus, SyncStatus},
+    plugin::ProtocolStatus,
 };
 use eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -35,10 +35,8 @@ pub struct Metrics(HashMap<NodeId, Metric>);
 pub struct Metric {
     pub height: Option<u64>,
     pub block_age: Option<u64>,
-    pub staking_status: Option<StakingStatus>,
     pub consensus: Option<bool>,
-    pub application_status: Option<ApplicationStatus>,
-    pub sync_status: Option<SyncStatus>,
+    pub application_status: Option<ProtocolStatus>,
     pub jobs: JobsInfo,
 }
 
@@ -47,10 +45,8 @@ impl Metrics {
         self.0.values().any(|m| {
             m.height.is_some()
                 || m.block_age.is_some()
-                || m.staking_status.is_some()
                 || m.consensus.is_some()
                 || m.application_status.is_some()
-                || m.sync_status.is_some()
                 || !m.jobs.is_empty()
         })
     }
@@ -114,26 +110,44 @@ where
 pub async fn collect_metric<N: NodeConnection>(
     babel_engine: &mut BabelEngine<N>,
 ) -> Option<Metric> {
-    let application_status = timeout(babel_engine.application_status()).await.ok();
-    match application_status {
-        None | Some(ApplicationStatus::Downloading) | Some(ApplicationStatus::Uploading) => {
+    let application_status = timeout(babel_engine.protocol_status()).await.ok();
+    match &application_status {
+        None => {
             let jobs = timeout(babel_engine.get_jobs())
                 .await
                 .ok()
                 .unwrap_or_default();
 
             Some(Metric {
-                // these are expected in every chain
                 height: None,
                 block_age: None,
-                staking_status: None,
                 consensus: None,
                 application_status,
-                sync_status: None,
                 jobs,
             })
         }
-        Some(ApplicationStatus::Starting) => None,
+        Some(ProtocolStatus { state, .. })
+            if state == babel_api::plugin_config::DOWNLOADING_STATE_NAME
+                || state == babel_api::plugin_config::UPLOADING_STATE_NAME =>
+        {
+            let jobs = timeout(babel_engine.get_jobs())
+                .await
+                .ok()
+                .unwrap_or_default();
+
+            Some(Metric {
+                height: None,
+                block_age: None,
+                consensus: None,
+                application_status,
+                jobs,
+            })
+        }
+        Some(ProtocolStatus { state, .. })
+            if state == babel_api::plugin_config::STARTING_STATE_NAME =>
+        {
+            None
+        }
         _ => {
             let height = match babel_engine.has_capability("height") {
                 true => timeout(babel_engine.height()).await.ok(),
@@ -143,19 +157,10 @@ pub async fn collect_metric<N: NodeConnection>(
                 true => timeout(babel_engine.block_age()).await.ok(),
                 false => None,
             };
-            let staking_status = match babel_engine.has_capability("staking_status") {
-                true => timeout(babel_engine.staking_status()).await.ok(),
-                false => None,
-            };
             let consensus = match babel_engine.has_capability("consensus") {
                 true => timeout(babel_engine.consensus()).await.ok(),
                 false => None,
             };
-            let sync_status = match babel_engine.has_capability("sync_status") {
-                true => timeout(babel_engine.sync_status()).await.ok(),
-                false => None,
-            };
-
             let jobs = timeout(babel_engine.get_jobs())
                 .await
                 .ok()
@@ -165,9 +170,7 @@ pub async fn collect_metric<N: NodeConnection>(
                 // these could be optional
                 height,
                 block_age,
-                staking_status,
                 consensus,
-                sync_status,
                 // these are expected in every chain
                 application_status,
                 jobs,
@@ -194,7 +197,7 @@ where
 }
 
 /// Here is how we convert the metrics we aggregated to their representation that we use over gRPC.
-/// Note that even though this may fail, i.e. the application_status or sync_status may not be
+/// Note that even though this may fail, i.e. the application_status may not be
 /// something we can make sense of, we still provide an infallible `From` implementation (not
 /// `TryFrom`). This is because if the node goes to the sad place, it may start sending malformed
 /// responses (think instead of block_height: 3 it will send block_height: aaaaaaaaaaaa). Even when
@@ -239,23 +242,15 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
                         }
                     })
                     .collect();
-                let mut metrics = pb::NodeMetrics {
+                let metrics = pb::NodeMetrics {
                     height: v.height,
                     block_age: v.block_age,
                     consensus: v.consensus,
-                    staking_status: None,
                     node_status: v
                         .application_status
                         .map(|application_status| application_status.into()),
-                    sync_status: None,
                     jobs,
                 };
-                if let Some(v) = v.staking_status.map(Into::into) {
-                    metrics.set_staking_status(v);
-                }
-                if let Some(v) = v.sync_status.map(Into::into) {
-                    metrics.set_sync_status(v);
-                }
                 (k.to_string(), metrics)
             })
             .collect();
@@ -263,83 +258,16 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
     }
 }
 
-impl From<StakingStatus> for common::StakingStatus {
-    fn from(value: StakingStatus) -> Self {
-        match value {
-            StakingStatus::Follower => common::StakingStatus::Follower,
-            StakingStatus::Staked => common::StakingStatus::Staked,
-            StakingStatus::Staking => common::StakingStatus::Staking,
-            StakingStatus::Validating => common::StakingStatus::Validating,
-            StakingStatus::Consensus => common::StakingStatus::Consensus,
-            StakingStatus::Unstaked => common::StakingStatus::Unstaked,
-        }
-    }
-}
-
-impl From<ApplicationStatus> for common::NodeStatus {
-    fn from(value: ApplicationStatus) -> Self {
-        match value {
-            ApplicationStatus::Provisioning => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::Provisioning.into(),
-                )),
-            },
-            ApplicationStatus::Deleting => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::Deleting.into(),
-                )),
-            },
-            ApplicationStatus::Updating => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::Updating.into(),
-                )),
-            },
-            ApplicationStatus::DeletePending => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::DeletePending.into(),
-                )),
-            },
-            ApplicationStatus::Deleted => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::Deleted.into(),
-                )),
-            },
-            ApplicationStatus::ProvisioningPending => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::Creating.into(),
-                )),
-            },
-            ApplicationStatus::UpdatePending => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::UpdatePending.into(),
-                )),
-            },
-            ApplicationStatus::Starting => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::Starting.into(),
-                )),
-            },
-            ApplicationStatus::Downloading => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::Downloading.into(),
-                )),
-            },
-            ApplicationStatus::Uploading => common::NodeStatus {
-                status: Some(common::node_status::Status::State(
-                    common::NodeState::Uploading.into(),
-                )),
-            },
-            ApplicationStatus::Custom { state, health } => {
-                let tone: common::NodeHealth = health.unwrap_or(NodeHealth::Neutral).into();
-                common::NodeStatus {
-                    status: Some(common::node_status::Status::Custom(
-                        common::CustomNodeState {
-                            state,
-                            health: tone.into(),
-                        },
-                    )),
-                }
-            }
+impl From<ProtocolStatus> for common::NodeStatus {
+    fn from(value: ProtocolStatus) -> Self {
+        let health: common::NodeHealth = value.health.into();
+        Self {
+            state: common::NodeState::Running.into(),
+            next: None,
+            protocol: Some(common::ProtocolStatus {
+                state: value.state,
+                health: health.into(),
+            }),
         }
     }
 }
@@ -350,15 +278,6 @@ impl From<NodeHealth> for common::NodeHealth {
             NodeHealth::Unhealthy => common::NodeHealth::Unhealthy,
             NodeHealth::Neutral => common::NodeHealth::Neutral,
             NodeHealth::Healthy => common::NodeHealth::Healthy,
-        }
-    }
-}
-
-impl From<SyncStatus> for common::SyncStatus {
-    fn from(value: SyncStatus) -> Self {
-        match value {
-            SyncStatus::Syncing => common::SyncStatus::Syncing,
-            SyncStatus::Synced => common::SyncStatus::Synced,
         }
     }
 }

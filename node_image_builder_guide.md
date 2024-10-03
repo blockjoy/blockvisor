@@ -3,27 +3,27 @@
 ## Introduction
 
 This guide aims to provide the necessary steps a BRE engineer needs to take in order
-to add support for a new blockchain type to Blockvisor or update existing node images.
+to add support for a new protocol type to Blockvisor or update existing node images.
 Below instructions is not the only way to create/update node images, but recommended one.
 While this guide will describe the steps needed to create an image from scratch,
-it is recommended to use the bv image clone feature if the new blockchain requires similar configurations as an existing one
+it is recommended to use the bv image clone feature if the new protocol requires similar configurations as an existing one
 whose image is readily available.
 
-Across this guide, we will refer to the physical machines as HOSTS that will run our different blockchain Apptainer containers which we call NODES.
+Across this guide, we will refer to the physical machines as HOSTS that will run our different protocol Apptainer containers which we call NODES.
 
 ### Before you start
 It is recommended to familiarize with rest of documentation, to get a feel of the concepts, and where the important files are on the hosts and nodes:
 - The Blockvisor [README](README.md) provides a list of important paths to remember and suggestive diagrams for the platform.
 - The Blockvisor [Host Setup Guide](host_setup_guide.md) provides a how-to for host configuration.
 - The [RHAI plugin scripting guide](babel_api/rhai_plugin_guide.md) provides the structure and what functionality the Blockvisor API expects it to provide through Babel API.
-- The [Blockchain Data Upload](babel_api/rhai_plugin_guide.md#blockchain-data-archives) chapter provides guidelines to upload a blockchain's data to remote object storage.
+- The [Protocol Data Upload](babel_api/rhai_plugin_guide.md#protocol-data-archives) chapter provides guidelines to upload a protocol's data to remote object storage.
 
 ### What is Node Image?
-Since BV itself is blockchain agnostic, specific blockchain support is plugged-into BV by "Node Image".
+Since BV itself is protocol agnostic, specific protocol support is plugged-into BV by "Node Image".
 
 Each "Node Image" consists of:
-- blockchain `os.img`, that is used to run VM: it is a rootfs containing blockchain specific SW and BV agent (so called babelsup)
-- babel plugin that translates BV blockchain agnostic interface (aka Babel API) into blockchain specific calls.
+- protocol `os.img`, that is used to run VM: it is a rootfs containing protocol specific SW and BV agent (so called babelsup)
+- babel plugin that translates BV protocol agnostic interface (aka Babel API) into protocol specific calls.
 
 ## Prerequisites
 
@@ -107,7 +107,7 @@ __HINT 4__: When using standard (not `dev`) BV bundle, it is recommended to use 
 while adding support for a new node. All commands, run on a node created in dev mode, will bypass the API.
 Hence, node won't be visible for the API, as it would normally be.
 
-__HINT 5__: Once created node is started, `apptainer shell` can be used, to modify rootfs and install/update blockchain specific software.
+__HINT 5__: Once created node is started, `apptainer shell` can be used, to modify rootfs and install/update protocol specific software.
 <br>Adding below alias to your `~/.bashrc` will allow you to quickly attach  to it (don't forget to install `jq` first):
 ```
 alias node_shell='apptainer shell instance://$(cat .bv-workspace |jq .active_node.name| xargs)'
@@ -129,22 +129,22 @@ root@bvhost:~/workspaces/example# bv node ls
 
 ### Add Required Binaries and Snapshots
 
-First you need to provision the binaries and configurations needed for the blockchain you're adding support for.
+First you need to provision the binaries and configurations needed for the protocol you're adding support for.
 
-Below steps should be considered generic and suitable for any blockchain:
+Below steps should be considered generic and suitable for any protocol:
 - Identify the documentation for the project you're trying to add support for.
 - Discern what kind of node you want to add as different types of nodes will imply different approaches (Light/Full/Archive).
-- Use `apptainer shell` to attach to the node and go through the blockchain specific installation as you would normally do on any machine.
+- Use `apptainer shell` to attach to the node and go through the protocol specific installation as you would normally do on any machine.
 - Ensure all the binaries recommended in the documentation are compiled/installed properly on the node.
-- Look through the documentation and try to find any Blockchain provided snapshots;
+- Look through the documentation and try to find any protocol provided snapshots;
 especially when running archive nodes, it can take weeks to sync a node to the tip of the chain
-without first downloading snapshots of the blockchain data.
+without first downloading snapshots of the protocol data.
 - Attempt to start the binaries manually with all the required arguments according to the network,
 type of node and customer needs
   - we're purposefully avoiding any startup mechanisms like systemd,
   since the Babel will take care of running the binaries through the jobs we'll configure
-- Once the binaries and the blockchain data are in place, and you have a sense of what it means to run nodes
-on different networks of the same blockchain, you can move on to implement/customize Babel Plugin (rhai script).
+- Once the binaries and the protocol data are in place, and you have a sense of what it means to run nodes
+on different networks of the same protocol, you can move on to implement/customize Babel Plugin (rhai script).
 
 Also make sure that following tools, required by Babel, are available:
 - `fallocate`
@@ -154,9 +154,9 @@ Also make sure that following tools, required by Babel, are available:
 You can define additional services that will be automatically started on all nodes of given kind in
 `/var/lib/babel/base.rhai` file (on rootfs). See [Services Example](babel_api/examples/base.rhai) for more details.
 
-It is the place to define blockchain unrelated services like monitoring agent or proxy servers.
+It is the place to define protocol unrelated services like monitoring agent or proxy servers.
 
-### Implementing/Customizing Babel Plugin for New Blockchain
+### Implementing/Customizing Babel Plugin for New Protocol
 
 Once you've created the node, you should be able to find it's rhai script in `<workspace>/node/babel.rhai`.
 Whole node directory is automatically symlinked into workspace dir as `node`.
@@ -170,7 +170,7 @@ Use `bv node run <METHOD>` to run specific Rhai function from script.
 
 __NOTE 2__: Use `bv node check` for quick `babel.rhai` script smoke tests.
 <br>It executes set of build in functions and all other functions that starts with `test_` prefix.
-This can be used to implement blockchain specific a'la unit tests, that will validate other functions output and throw
+This can be used to implement protocol specific a'la unit tests, that will validate other functions output and throw
 exception when assertion fail.
 **Example:**
 ```
@@ -216,4 +216,4 @@ Uploading blockjoy.gz to cookbook-dev/chains/example/node/1.2.3/blockjoy.gz ...
 
 __NOTE 2__: Before you can use the newly updated image, its version needs to be added to the API (ask the dev team for assistance about it).
 
-__Congratulations, you have just added new blockchain support, to the great BlockJoy ecosystem!__
+__Congratulations, you have just added new protocol support, to the great BlockJoy ecosystem!__

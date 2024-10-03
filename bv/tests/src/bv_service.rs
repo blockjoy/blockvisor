@@ -182,14 +182,14 @@ async fn test_bv_service_e2e() {
     const OLD_IMAGE_VERSION: &str = "0.0.2";
     const OLD_IMAGE: &str = "testing/validator/0.0.2";
     // const NEW_IMAGE_VERSION: &str = "0.0.3";
-    println!("add blockchain");
-    let blockchain_query = r#"INSERT INTO blockchains (id, name, display_name, visibility, ticker) values ('ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'Testing', 'Testing', 'public', 'TEST');
-        INSERT INTO blockchain_node_types (id, blockchain_id, node_type, visibility) VALUES ('206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'validator', 'public');
-        INSERT INTO blockchain_versions (id, blockchain_id, blockchain_node_type_id, version) VALUES ('78d4c409-401d-491f-8c87-df7f35971bb7','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '0.0.2');
-        INSERT INTO blockchain_properties VALUES ('5972a35a-333c-421f-ab64-a77f4ae17533', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'keystore-file', NULL, 'file_upload', FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
-        INSERT INTO blockchain_properties VALUES ('a989ad08-b455-4a57-9fe0-696405947e48', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'TESTING_PARAM', NULL, 'text',        FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
+    println!("add protocol");
+    let protocol_query = r#"INSERT INTO protocols (id, name, display_name, visibility, ticker) values ('ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'Testing', 'Testing', 'public', 'TEST');
+        INSERT INTO protocol_node_types (id, protocol_id, node_type, visibility) VALUES ('206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'validator', 'public');
+        INSERT INTO protocol_versions (id, protocol_id, protocol_node_type_id, version) VALUES ('78d4c409-401d-491f-8c87-df7f35971bb7','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '0.0.2');
+        INSERT INTO protocol_properties VALUES ('5972a35a-333c-421f-ab64-a77f4ae17533', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'keystore-file', NULL, 'file_upload', FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
+        INSERT INTO protocol_properties VALUES ('a989ad08-b455-4a57-9fe0-696405947e48', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'TESTING_PARAM', NULL, 'text',        FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
         "#;
-    execute_sql_insert(db_url, blockchain_query);
+    execute_sql_insert(db_url, protocol_query);
 
     println!("stop blockvisor");
     test_env::bv_run(&["stop"], "blockvisor service stopped successfully", None);
@@ -281,14 +281,14 @@ async fn test_bv_service_e2e() {
     )
     .await;
 
-    // println!("give user 'blockjoy-admin' so ity can add new blockchain version");
+    // println!("give user 'blockjoy-admin' so ity can add new protocol version");
     // let org_query = r#"INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'blockjoy-admin');"#;
     // println!("add new image version {NEW_IMAGE_VERSION} - trigger auto upgrade");
     // execute_sql_insert(db_url, org_query);
     // client
     //     .add_version(with_auth(
-    //         pb::BlockchainServiceAddVersionRequest {
-    //             blockchain_id: blockchain.id.clone(),
+    //         pb::protocolServiceAddVersionRequest {
+    //             protocol_id: protocol.id.clone(),
     //             version: NEW_IMAGE_VERSION.to_string(),
     //             description: None,
     //             node_type: common::NodeType::Validator.into(),
@@ -383,16 +383,16 @@ fn check_upload_and_download(node_id: &str) {
     println!("cleanup previous download if any");
     sh_inside(
         node_id,
-        "rm -rf /blockjoy/.babel_jobs; rm -rf /blockjoy/blockchain_data/*",
+        "rm -rf /blockjoy/.babel_jobs; rm -rf /blockjoy/protocol_data/*",
     );
-    println!("create dummy blockchain data");
-    sh_inside(node_id,"mkdir -p /blockjoy/blockchain_data/sub /blockjoy/blockchain_data/some_subdir && touch /blockjoy/blockchain_data/.gitignore /blockjoy/blockchain_data/some_subdir/something_to_ignore.txt /blockjoy/blockchain_data/empty_file");
-    sh_inside(node_id,"head -c 43210 < /dev/urandom > /blockjoy/blockchain_data/file_a && head -c 654321 < /dev/urandom > /blockjoy/blockchain_data/file_b && head -c 432 < /dev/urandom > /blockjoy/blockchain_data/file_c && head -c 257 < /dev/urandom > /blockjoy/blockchain_data/sub/file_d && head -c 128 < /dev/urandom > /blockjoy/blockchain_data/sub/file_e && head -c 43210 < /dev/urandom > /blockjoy/blockchain_data/some_subdir/any.bak");
-    let sha_a = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_a");
-    let sha_b = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_b");
-    let sha_c = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_c");
-    let sha_d = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/sub/file_d");
-    let sha_e = sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/sub/file_e");
+    println!("create dummy protocol data");
+    sh_inside(node_id,"mkdir -p /blockjoy/protocol_data/sub /blockjoy/protocol_data/some_subdir && touch /blockjoy/protocol_data/.gitignore /blockjoy/protocol_data/some_subdir/something_to_ignore.txt /blockjoy/protocol_data/empty_file");
+    sh_inside(node_id,"head -c 43210 < /dev/urandom > /blockjoy/protocol_data/file_a && head -c 654321 < /dev/urandom > /blockjoy/protocol_data/file_b && head -c 432 < /dev/urandom > /blockjoy/protocol_data/file_c && head -c 257 < /dev/urandom > /blockjoy/protocol_data/sub/file_d && head -c 128 < /dev/urandom > /blockjoy/protocol_data/sub/file_e && head -c 43210 < /dev/urandom > /blockjoy/protocol_data/some_subdir/any.bak");
+    let sha_a = sh_inside(node_id, "sha1sum /blockjoy/protocol_data/file_a");
+    let sha_b = sh_inside(node_id, "sha1sum /blockjoy/protocol_data/file_b");
+    let sha_c = sh_inside(node_id, "sha1sum /blockjoy/protocol_data/file_c");
+    let sha_d = sh_inside(node_id, "sha1sum /blockjoy/protocol_data/sub/file_d");
+    let sha_e = sh_inside(node_id, "sha1sum /blockjoy/protocol_data/sub/file_e");
 
     println!("start upload job");
     test_env::bv_run(&["node", "run", "upload", node_id], "", None);
@@ -411,10 +411,10 @@ fn check_upload_and_download(node_id: &str) {
         }
     }
 
-    println!("cleanup blockchain data");
+    println!("cleanup protocol data");
     sh_inside(
         node_id,
-        "rm -rf /blockjoy/blockchain_data/* /blockjoy/blockchain_data/.gitignore",
+        "rm -rf /blockjoy/protocol_data/* /blockjoy/protocol_data/.gitignore",
     );
 
     println!("start download job");
@@ -448,35 +448,35 @@ fn check_upload_and_download(node_id: &str) {
     println!("verify downloaded data");
     assert_eq!(
         sha_a.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_a").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/protocol_data/file_a").trim()
     );
     assert_eq!(
         sha_b.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_b").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/protocol_data/file_b").trim()
     );
     assert_eq!(
         sha_c.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/file_c").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/protocol_data/file_c").trim()
     );
     assert_eq!(
         sha_d.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/sub/file_d").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/protocol_data/sub/file_d").trim()
     );
     assert_eq!(
         sha_e.trim(),
-        sh_inside(node_id, "sha1sum /blockjoy/blockchain_data/sub/file_e").trim()
+        sh_inside(node_id, "sha1sum /blockjoy/protocol_data/sub/file_e").trim()
     );
     sh_inside(
         node_id,
-        "if [ -f /blockjoy/blockchain_data/.gitignore ]; then exit 1; fi",
+        "if [ -f /blockjoy/protocol_data/.gitignore ]; then exit 1; fi",
     );
     sh_inside(
         node_id,
-        "if [ -f /blockjoy/blockchain_data/some_subdir/something_to_ignore.txt ]; then exit 1; fi",
+        "if [ -f /blockjoy/protocol_data/some_subdir/something_to_ignore.txt ]; then exit 1; fi",
     );
     sh_inside(
         node_id,
-        "if [ ! -f /blockjoy/blockchain_data/empty_file ]; then exit 1; fi",
+        "if [ ! -f /blockjoy/protocol_data/empty_file ]; then exit 1; fi",
     );
 }
 

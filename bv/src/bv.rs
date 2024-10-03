@@ -376,9 +376,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             println!("App Status:     {}", fmt_opt(metrics.application_status));
             println!("Block height:   {}", fmt_opt(metrics.height));
             println!("Block age:      {}", fmt_opt(metrics.block_age));
-            println!("Staking Status: {}", fmt_opt(metrics.staking_status));
             println!("In consensus:   {}", fmt_opt(metrics.consensus));
-            println!("Sync Status:    {}", fmt_opt(metrics.sync_status));
             if !metrics.jobs.is_empty() {
                 println!("Jobs:");
                 for (name, mut info) in metrics.jobs {

@@ -1,14 +1,8 @@
 /// You can define some constants to use in the code
 const NETS = #{
-    /// Key is the name of blockchain network
     test: #{
-        /// Url for given blockchain network.
         url: "https://testnet-api.helium.wtf/v1/",
-        /// Blockchain network type.
-        /// Allowed values: "dev", "test", "main"
         net_type: "test",
-        /// [optional] Custom network metadata can also be added.
-        /// example: beacon_nodes_csv: "http://beacon01.goerli.eth.blockjoy.com,http://beacon02.goerli.eth.blockjoy.com?789",
         seeds: "test seed"
     },
     main: #{
@@ -19,9 +13,9 @@ const NETS = #{
 };
 
 const API_HOST = "http://localhost:4467/";
-const A_DIR = BLOCKCHAIN_DATA_PATH + "/A";
-const B_DIR = BLOCKCHAIN_DATA_PATH + "/B";
-const NET =  global::NETS[node_params().NETWORK];
+const A_DIR = PROTOCOL_DATA_PATH + "/A";
+const B_DIR = PROTOCOL_DATA_PATH + "/B";
+const NET =  global::NETS[node_env().node_variant];
 
 const BABEL_VERSION = "0.9.0";
 const PLUGIN_CONFIG = #{
@@ -80,9 +74,9 @@ const PLUGIN_CONFIG = #{
     services: [
         #{
             /// Unique service job name.
-            name: "blockchain_service_a",
+            name: "protocol_service_a",
             /// Sh script body. It shall be blocking (foreground) process.
-            run_sh: `/usr/bin/blockchain_service_a start --home=${global::A_DIR} --chain=${global::NET.net_type} --rest-server --seeds ${global::NET.seeds} "$@"`,
+            run_sh: `/usr/bin/protocol_service_a start --home=${global::A_DIR} --chain=${global::NET.net_type} --rest-server --seeds ${global::NET.seeds} "$@"`,
             /// [optional] Job restart config.
             /// If not set default to:
             /// #{
@@ -108,11 +102,11 @@ const PLUGIN_CONFIG = #{
             shutdown_signal: "SIGINT",
             /// [optional] Run job as a different user.
             run_as: "some_user",
-            /// [optional] Flag indicating if service uses blockchain data.
-            /// Services that uses blockchain data won't be started until all init steps and download
-            /// is finished. They are also stopped while uploading blockchain archive.
+            /// [optional] Flag indicating if service uses protocol data.
+            /// Services that uses protocol data won't be started until all init steps and download
+            /// is finished. They are also stopped while uploading protocol archive.
             /// If not set default to true.
-            use_blockchain_data: true,
+            use_protocol_data: true,
             /// [optional] Capacity of log buffer (in megabytes).
             /// If not set default to 128.
             log_buffer_capacity_mb: 256,
@@ -121,8 +115,8 @@ const PLUGIN_CONFIG = #{
             log_timestamp: false,
         },
         #{
-            name: "blockchain_service_b",
-            run_sh: `/usr/bin/blockchain_service_b --chain=${global::NET.net_type} --datadir=${global::A_DIR} --snapshots=false`,
+            name: "protocol_service_b",
+            run_sh: `/usr/bin/protocol_service_b --chain=${global::NET.net_type} --datadir=${global::A_DIR} --snapshots=false`,
         }
     ],
     /// [optional] Download configuration.
@@ -191,7 +185,7 @@ const PLUGIN_CONFIG = #{
     /// [optional] Upload configuration.
     /// Built-in upload can be manually triggered with `bv node run upload`.
     upload: #{
-        /// [optional] List of exclude patterns. Files in `BLOCKCHAIN_DATA_PATH` directory that match any of pattern,
+        /// [optional] List of exclude patterns. Files in `PROTOCOL_DATA_PATH` directory that match any of pattern,
         /// won't be taken into account.
         exclude: [
             "**/something_to_ignore*",
@@ -209,7 +203,7 @@ const PLUGIN_CONFIG = #{
         /// [optional] Maximum number of parallel workers.
         /// If not set default to 8.
         max_runners: 12,
-        /// [optional] Number of chunks that blockchain data should be split into.
+        /// [optional] Number of chunks that protocol data should be split into.
         /// Recommended chunk size is about 500MB. Estimated by BV based on data size, if not provided.
         /// If not set calculated automatically by BV.
         number_of_chunks: 700,
@@ -257,7 +251,7 @@ const PLUGIN_CONFIG = #{
     disable_default_services: true,
 };
 
-/// Returns blockchain application status.
+/// Returns protocol application status.
 /// SHALL be implemented
 fn application_status() {
     /// "uploading", "downloading", "starting" statuses are automatically handled by BV if BABEL_CONFIG const is defined
@@ -268,8 +262,8 @@ fn application_status() {
         }).expect(200);
 
     if result.healthy != "false" || result.result.checks.bootstrapped.error == "subnets not bootstrapped" {
-        #{custom: #{state: "broadcasting", health: "healthy"}};
+        #{state: "broadcasting", health: "healthy"}
     } else {
-        #{custom: #{state: "delinquent", health: "healthy"}};
+        #{state: "delinquent", health: "healthy"}
     }
 }

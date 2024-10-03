@@ -3,7 +3,7 @@ use crate::{
     services::{
         api::{
             common,
-            pb::{self, blockchain_service_client, image_service_client},
+            pb::{self, image_service_client, protocol_service_client},
         },
         ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService,
     },
@@ -22,8 +22,7 @@ pub struct ProtocolService<C> {
     connector: C,
 }
 
-type BlockchainServiceClient =
-    blockchain_service_client::BlockchainServiceClient<AuthenticatedService>;
+type ProtocolServiceClient = protocol_service_client::ProtocolServiceClient<AuthenticatedService>;
 type ImageServiceClient = image_service_client::ImageServiceClient<AuthenticatedService>;
 
 impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
@@ -35,17 +34,17 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
         &self,
     ) -> Result<
         ApiClient<
-            BlockchainServiceClient,
+            ProtocolServiceClient,
             impl ApiServiceConnector,
-            impl Fn(Channel, ApiInterceptor) -> BlockchainServiceClient + Clone,
+            impl Fn(Channel, ApiInterceptor) -> ProtocolServiceClient + Clone,
         >,
     > {
         ApiClient::build(
             self.connector.clone(),
-            blockchain_service_client::BlockchainServiceClient::with_interceptor,
+            protocol_service_client::ProtocolServiceClient::with_interceptor,
         )
         .await
-        .with_context(|| "cannot connect to blockchain service")
+        .with_context(|| "cannot connect to protocol service")
     }
 
     async fn connect_image_service(
@@ -74,39 +73,37 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
         build_version: Option<u64>,
     ) -> Result<String> {
         info!("Getting image id...");
-        let blockchain = self.get_protocol(protocol_key).await?;
+        let protocol = self.get_protocol(protocol_key).await?;
         if let Some(version) = &version {
-            if blockchain
+            if protocol
                 .versions
                 .iter()
-                .any(|value| value.software_version == *version)
+                .any(|value| value.semantic_version == *version)
             {
-                bail!("blockchain version `{version}` not found");
+                bail!("protocol version `{version}` not found");
             }
         }
         let mut client = self.connect_image_service().await?;
         let req = pb::ImageServiceGetImageRequest {
-            version_key: Some(common::VersionKey {
-                blockchain_key: protocol_key.to_string(),
-                node_type: Default::default(), //TODO MJR update protos
-                network: Default::default(),
-                software: Default::default(),
+            version_key: Some(common::ProtocolVersionKey {
+                protocol_key: protocol_key.to_string(),
+                variant_key: variant_key.to_string(),
             }),
             org_id: None,
-            software_version: version,
+            protocol_version: version,
             build_version,
         };
 
         let resp = api_with_retry!(client, client.get_image(req.clone()))?.into_inner();
 
-        Ok(resp.image.ok_or(anyhow!("image not found"))?.id)
+        Ok(resp.image.ok_or(anyhow!("image not found"))?.image_id)
     }
 
     #[instrument(skip(self))]
     pub async fn list_protocol_images(&mut self, protocol_key: &str) -> Result<Vec<String>> {
         info!("Getting protocol versions...");
-        let blockchain = self.get_protocol(protocol_key).await?;
-        blockchain
+        let protocol = self.get_protocol(protocol_key).await?;
+        protocol
             .versions
             .into_iter()
             .map(|version| {
@@ -114,81 +111,59 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
                     "{}/{}",
                     version
                         .version_key
-                        .ok_or_else(|| anyhow!("Missing blockchain_version_key"))?
-                        .node_type(),
-                    version.software_version
+                        .ok_or_else(|| anyhow!("Missing version_key"))?
+                        .variant_key,
+                    version.semantic_version
                 ))
             })
             .collect::<Result<Vec<_>>>()
     }
 
-    async fn get_protocol(&mut self, name: &str) -> Result<pb::Blockchain> {
+    async fn get_protocol(&mut self, name: &str) -> Result<pb::Protocol> {
         let mut client = self.connect_protocol_service().await?;
-        let req = pb::BlockchainServiceListBlockchainsRequest {
+        let req = pb::ProtocolServiceListProtocolsRequest {
             org_ids: vec![],
             offset: 0,
             limit: 2,
-            search: Some(pb::BlockchainSearch {
+            search: Some(pb::ProtocolSearch {
                 operator: common::SearchOperator::Or.into(),
-                id: None,
+                protocol_id: None,
                 name: Some(name.to_string()),
-                display_name: None,
             }),
             sort: vec![],
         };
 
-        let mut blockchains =
-            api_with_retry!(client, client.list_blockchains(req.clone()))?.into_inner();
+        let mut protocols =
+            api_with_retry!(client, client.list_protocols(req.clone()))?.into_inner();
 
-        if blockchains.blockchain_count > 1 {
-            bail!("multiple blockchains found with the same key");
+        if protocols.matches.len() > 1 {
+            bail!("multiple protocols found with the same key");
         }
-        blockchains
-            .blockchains
+        protocols
+            .matches
             .pop()
-            .ok_or(anyhow!("blockchain with name `{name}` not found"))
+            .ok_or(anyhow!("protocol with name `{name}` not found"))
     }
 
-    pub async fn list_protocols(&mut self) -> Result<Vec<pb::Blockchain>> {
+    pub async fn list_protocols(&mut self) -> Result<Vec<pb::Protocol>> {
         let mut client = self.connect_protocol_service().await?;
-        let req = pb::BlockchainServiceListBlockchainsRequest {
+        let req = pb::ProtocolServiceListProtocolsRequest {
             org_ids: vec![],
             offset: 0,
             limit: 0,
-            search: Some(pb::BlockchainSearch {
+            search: Some(pb::ProtocolSearch {
                 operator: common::SearchOperator::Or.into(),
-                id: None,
+                protocol_id: None,
                 name: None,
-                display_name: None,
             }),
-            sort: vec![pb::BlockchainSort {
-                field: pb::BlockchainSortField::Name.into(),
+            sort: vec![pb::ProtocolSort {
+                field: pb::ProtocolSortField::Name.into(),
                 order: common::SortOrder::Ascending.into(),
             }],
         };
 
-        Ok(
-            api_with_retry!(client, client.list_blockchains(req.clone()))?
-                .into_inner()
-                .blockchains,
-        )
-    }
-}
-
-impl From<NodeType> for common::NodeType {
-    fn from(value: NodeType) -> Self {
-        match value {
-            NodeType::Rpc => common::NodeType::Rpc,
-        }
-    }
-}
-
-impl TryFrom<common::NodeType> for NodeType {
-    type Error = eyre::Error;
-    fn try_from(value: common::NodeType) -> Result<Self, Self::Error> {
-        Ok(match value {
-            common::NodeType::Unspecified => bail!("Invalid Protocol"),
-            common::NodeType::Rpc => NodeType::Rpc,
-        })
+        Ok(api_with_retry!(client, client.list_protocols(req.clone()))?
+            .into_inner()
+            .matches)
     }
 }

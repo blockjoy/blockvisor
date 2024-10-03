@@ -2,9 +2,9 @@
 
 ## Introduction
 
-This is user guide on how to create a "bridge" between blockchain specific SW and Blockvisor (aka BV),
+This is user guide on how to create a "bridge" between protocol specific SW and Blockvisor (aka BV),
 by implementing Babel Plugin.
-Babel Plugin translates BV blockchain agnostic interface (aka Babel API) into blockchain specific calls.
+Babel Plugin translates BV protocol agnostic interface (aka Babel API) into protocol specific calls.
 
 Currently, Babel Plugin can be implemented using Rhai scripting language.
 See [The Rhai Book](https://rhai.rs/book) for more details on Rhai language itself.
@@ -15,14 +15,14 @@ See [The Rhai Book](https://rhai.rs/book) for more details on Rhai language itse
 as described in [PLUGIN_CONFIG](#plugin_config) chapter, to use default implementation for `init()` and `upload()` functions.
 2. Dynamic node configuration is accessible via `node_params()` function. This can and should be used in order
 to change the behavior of the script according to the node configuration.
-3. While blockchain data are typically huge, BV provides built-in facility for efficient uploading and downloading
-blockchain archives.
-<br>See [Blockchain Data Archives](#blockchain-data-archives) chapter for more details.
+3. While protocol data are typically huge, BV provides built-in facility for efficient uploading and downloading
+protocol archives.
+<br>See [Protocol Data Archives](#protocol-data-archives) chapter for more details.
 
 ## Plugin Interface
 
-To add some specific blockchain support Babel Plugin must tell BV how to use blockchain specific tools inside the image,
-to properly setup and maintain blockchain node. This chapter describe interface that needs to be implemented by script
+To add some specific protocol support Babel Plugin must tell BV how to use protocol specific tools inside the image,
+to properly setup and maintain protocol node. This chapter describe interface that needs to be implemented by script
 for this purpose.
 
 ### PLUGIN_CONFIG
@@ -43,16 +43,16 @@ See [example](examples/plugin_config.rhai) with comments for more details.
 Functions listed below are required by BV to work properly.
 
 - `init` - Main entrypoint where everything starts. Function called only once, when node is started first time.
-  <br>It is the place where blockchain services running in background should be described as so called `jobs`.
-  Also, any other one-off operations can be done here (e.g. initializing stuff, or downloading blockchain data archives).
+  <br>It is the place where protocol services running in background should be described as so called `jobs`.
+  Also, any other one-off operations can be done here (e.g. initializing stuff, or downloading protocol data archives).
   <br>See [Engine Interface](#engine-interface) and [Background Jobs](#background-jobs) chapter for more details on how to start jobs.
   <br> BV provide default implementation if [PLUGIN_CONFIG](#plugin_config) constant is defined.
   Default implementation run all init commands and start init jobs according to config,
   then try to start build-in download job, if fail then fallback to alternative download (if provided),
   finally starts configured services.
 
-  See [minimalistic example](examples/init_minimal.rhai) or go to [Blockchain Data Archives](#blockchain-data-archives) chapter for example including download step)
-- `application_status()` - Returns blockchain application status.
+  See [minimalistic example](examples/init_minimal.rhai) or go to [Protocol Data Archives](#protocol-data-archives) chapter for example including download step)
+- `application_status()` - Returns protocol application status.
   <br>**Allowed return values**: _provisioning_, _broadcasting_, _cancelled_, _delegating_, _delinquent_, _disabled_, _earning_, _electing_, _elected_, _exported_, _ingesting_, _mining_, _minting_, _processing_, _relaying_, _delete_pending_, _deleting_, _deleted_, _provisioning_pending_, _update_pending_, _updating_, _initializing_, _downloading_, _uploading_
   <br>**Following values indicate that BV should not gather metrics for given node**: _initializing_, _downloading_, _uploading_
 
@@ -63,17 +63,13 @@ It is recommended to implement all of them, if feasible.
 
 - `height()` - Returns the height of the blockchain (in blocks).
 - `block_age()` - Returns the block age of the blockchain (in seconds).
-- `address()` - The address of the node. The meaning of this varies from blockchain to blockchain.
+- `address()` - The address of the node. The meaning of this varies from protocol to protocol.
   <br>**Example**: _/p2p/11Uxv9YpMpXvLf8ZyvGWBdbgq3BXv8z1pra1LBqkRS5wmTEHNW3_
 - `name()` - Returns the name of the node. This is usually some random generated name that you may use
-to recognise the node, but the purpose may vary per blockchain.
+to recognise the node, but the purpose may vary per protocol.
   <br>**Example**: _chilly-peach-kangaroo_
 - `consensus()` - Returns `bool` whether this node is in consensus or not.
-- `sync_status()` - Returns blockchain synchronization status.
-  <br>**Allowed return values**: _syncing_, _synced_
-- `staking_status()` - Returns blockchain staking status.
-  <br>**Allowed return values**: _follower_, _staked_, _staking_, _validating_, _consensus_, _unstaked_
-- `upload()` - Upload blockchain data snapshot to cloud storage, so it can be quickly reused by newly created nodes.
+- `upload()` - Upload protocol data snapshot to cloud storage, so it can be quickly reused by newly created nodes.
   <br> BV provide default implementation if [PLUGIN_CONFIG](#plugin_config) constant is defined.
   Default implementation stop all services, start upload job according to config, and then start services again.
 
@@ -109,7 +105,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
 - `stop_job(job_name)` - Stop background job with given unique name if running.
 - `job_status(job_name)` - Get background job status by unique name.
   <br>**Possible return values**: _pending_, _running_, _stopped_, _finished{exit_code, message}_
-- `run_jrpc(request)` - Execute Jrpc request to the current blockchain and return [HttpResponse](#httpresponse) (with default 15s timeout). Request must have following structure:
+- `run_jrpc(request)` - Execute Jrpc request to the current node and return [HttpResponse](#httpresponse) (with default 15s timeout). Request must have following structure:
 ```rust
 {
   // This is the host for the JSON rpc request.
@@ -123,7 +119,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
 }
 ```
 - `run_jrpc(request, timeout)` - Same as above, but with custom request timeout (in seconds).
-- `run_rest(request)` - Execute a Rest request to the current blockchain and return [HttpResponse](#httpresponse) (with default 15s timeout). Request must have following structure:
+- `run_rest(request)` - Execute a Rest request to the current node and return [HttpResponse](#httpresponse) (with default 15s timeout). Request must have following structure:
 ```rust
 {
   // This is the url of the rest endpoint.
@@ -133,7 +129,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
 }
 ```
 - `run_rest(request, timeout)` - Same as above, but with custom request timeout (in seconds).
-- `run_sh(body)` - Run Sh script on the blockchain VM and return [ShResponse](#shresponse) (with default 15s timeout).
+- `run_sh(body)` - Run Sh script on the node and return [ShResponse](#shresponse) (with default 15s timeout).
 - `run_sh(body, timeout)` - Same as above, but with custom execution timeout (in seconds).
 - `parse_hex(hex)` - Convert `0x` hex string into decimal number.
 - `parse_json(json)` - Parse json string into a Rhai object.
@@ -162,8 +158,8 @@ To make implementation of Babel Plugin interface possible, BV provides following
 - `file_write(path, content)` - Write binary `content` (BLOB) into node filesystem. Use `to_blob` if you want to store simple string.
 - `file_read(path)` - Read binary content (BLOB) from node filesystem. Use `as_string` if you expect simple string.
 - `DATA_DRIVE_MOUNT_POINT` - Globally available constant, containing absolute path to directory where data drive is mounted.
-- `BLOCKCHAIN_DATA_PATH` - Globally available constant, containing absolute path to directory where blockchain data are stored.
-  This is the path, where blockchain data archives are downloaded to, and where are uploaded from.
+- `PROTOCOL_DATA_PATH` - Globally available constant, containing absolute path to directory where protocol data are stored.
+  This is the path, where protocol data archives are downloaded to, and where are uploaded from.
 
 ### HttpResponse
 
@@ -191,31 +187,31 @@ Above structure provide following helper function:
 
 ### NodeEnv
 ```rust
-struct NodeEnv{
+pub struct NodeEnv {
     /// Node id.
-    node_id: String,
+    pub node_id: String,
     /// Node name.
-    node_name: String,
+    pub node_name: String,
     /// Node version.
-    node_version: String,
-    /// Node protocol name.
-    blockchain_type: String,
-    /// Node type.
-    node_type: String,
+    pub node_version: String,
+    /// Node protocol.
+    pub node_protocol: String,
+    /// Node variant.
+    pub node_variant: String,
     /// Node IP.
-    ip: String,
+    pub node_ip: String,
     /// Node gateway IP.
-    gateway: String,
+    pub node_gateway: String,
     /// Indicate if node run in dev mode.
-    dev_mode: bool,
+    pub dev_mode: bool,
     /// Host id.
-    bv_id: String,
+    pub bv_host_id: String,
     /// Host name.
-    bv_name: String,
+    pub bv_host_name: String,
     /// API url used by host.
-    bv_api_url: String,
+    pub bv_api_url: String,
     /// Organisation id to which node belongs to.
-    org_id: String,
+    pub org_id: String,
 }
 ```
 
@@ -223,9 +219,9 @@ struct NodeEnv{
 
 Background job is a way to asynchronously run long-running tasks. Currently, three types of tasks are supported:
 1. `run_sh` - arbitrary long-running shell script.
-2. `download` - download data (e.g. previously archived blockchain data, to speedup init process).
-3. `upload` - upload data (e.g. archive blockchain data).
-In particular, it can be used to define blockchain service(s) i.e. background process(es) that are automatically started
+2. `download` - download data (e.g. previously archived protocol data, to speedup init process).
+3. `upload` - upload data (e.g. archive protocol data).
+In particular, it can be used to define protocol service(s) i.e. background process(es) that are automatically started
 with the node.
 
 Each background job has its __unique__ name and configuration structure described by following [example](examples/jobs.rhai).
@@ -254,14 +250,14 @@ Output:
 <time>  INFO babel_api::rhai_plugin: node_id: <node_id>|some important step logged with INFO level 
 ```
 
-## Blockchain Data Archives
+## Protocol Data Archives
 
 ### Uploading Data Archives
 
-To upload blockchain data archive on remote object storage, following steps are needed:
-1. Stop all blockchain synchronization. Blockchain data should not be modified while uploading.
+To upload protocol data archive on remote object storage, following steps are needed:
+1. Stop all protocol synchronization. Protocol data should not be modified while uploading.
 2. Start upload job.
-3. Once upload is finished blockchain synchronization can be turned on again.
+3. Once upload is finished protocol synchronization can be turned on again.
 
 Above steps can be implemented in any custom rhai function (typically named `upload`, but name can be arbitrary).
 <br>See [example](examples/custom_download_upload.rhai) for details. See also example in [Background Jobs](#background-jobs) chapter for all possible
@@ -273,12 +269,12 @@ Define [PLUGIN_CONFIG](#plugin_config) constant to use default implementation fo
 
 ### Downloading Data Archives
 
-Once blockchain data archive is available on remote object storage, it can be used to speedup new nodes setup.
+Once protocol data archive is available on remote object storage, it can be used to speedup new nodes setup.
 
 To use default implementation define [PLUGIN_CONFIG](#plugin_config) constant. Otherwise
 see [example](examples/custom_download_upload.rhai) of custom `init()` function.
 
-Typically, download job is started in `init()` before other blockchain services are started. This is achieved by job
+Typically, download job is started in `init()` before other protocol services are started. This is achieved by job
 `needs` configuration. See also example in [Background Jobs](#background-jobs) chapter for all possible
 download job config options. 
 
@@ -334,8 +330,8 @@ Hence, it is a good candidate for output mapping.
 
 **Example:**
 ```
-fn sync_status() {
-    let stdout = run_sh("get_sync_status").unwrap();
+fn status() {
+    let stdout = run_sh("get_status").unwrap();
     let status = switch stdout {
         "0" => "synced",
         _ => "syncing",
@@ -413,7 +409,7 @@ fn custom_function(arg) {
 
 ### Rendering Configuration File
 
-Some blockchains may require configuration files to be filled up with some user data. For that `render_template` can be used.
+Some protocols may require configuration files to be filled up with some user data. For that `render_template` can be used.
 
 At first, configuration template file must be included into the image.
 
@@ -435,7 +431,7 @@ fn init(keys) {
         param2: 2,
         aParam: ["a", "bb", "ccc"],
     };
-    render_template("/etc/blockchain.config.template", "/etc/blockchain.config", params);
+    render_template("/etc/protocol.config.template", "/etc/protocol.config", params);
 }
 ```
 

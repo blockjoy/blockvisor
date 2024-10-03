@@ -1,5 +1,5 @@
 use crate::{download_job, upload_job};
-use babel_api::engine::{Chunk, JobConfig, JobProgress, JobStatus, JobType, BLOCKCHAIN_DATA_PATH};
+use babel_api::engine::{Chunk, JobConfig, JobProgress, JobStatus, JobType, PROTOCOL_DATA_PATH};
 use bv_utils::run_flag::RunFlag;
 use chrono::{DateTime, Local};
 use eyre::{Context, Result};
@@ -132,7 +132,7 @@ impl JobsData {
     pub fn cleanup_job(config: &JobConfig) -> Result<()> {
         match &config.job_type {
             JobType::Download { .. } => {
-                download_job::cleanup_job(&ARCHIVE_JOBS_META_DIR, &BLOCKCHAIN_DATA_PATH)?
+                download_job::cleanup_job(&ARCHIVE_JOBS_META_DIR, &PROTOCOL_DATA_PATH)?
             }
             JobType::Upload { .. } => upload_job::cleanup_job(&ARCHIVE_JOBS_META_DIR)?,
             _ => {}

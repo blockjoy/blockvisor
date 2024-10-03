@@ -6,7 +6,10 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub const DOWNLOAD_JOB_NAME: &str = "download";
+pub const DOWNLOADING_STATE_NAME: &str = "downloading";
 pub const UPLOAD_JOB_NAME: &str = "upload";
+pub const UPLOADING_STATE_NAME: &str = "uploading";
+pub const STARTING_STATE_NAME: &str = "starting";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginConfig {
@@ -14,7 +17,7 @@ pub struct PluginConfig {
     pub config_files: Option<Vec<ConfigFile>>,
     /// Node init actions.
     pub init: Option<Actions>,
-    /// List of blockchain services.
+    /// List of protocol services.
     pub services: Vec<Service>,
     /// Download configuration.
     pub download: Option<Download>,
@@ -153,7 +156,7 @@ pub struct Task {
 pub struct Actions {
     /// List of sh commands to be executed first.
     pub commands: Vec<String>,
-    /// List of long-running tasks (aka jobs) that must be finished before blockchain services start.
+    /// List of long-running tasks (aka jobs) that must be finished before protocol services start.
     pub jobs: Vec<Job>,
 }
 
@@ -211,18 +214,18 @@ pub struct Service {
     pub shutdown_signal: Option<PosixSignal>,
     /// Run job as a different user.
     pub run_as: Option<String>,
-    /// Flag indicating if service uses blockchain data.
-    /// Services that uses blockchain data won't be started until all init steps and download
-    /// is finished. They are also stopped while uploading blockchain archive.
+    /// Flag indicating if service uses protocol data.
+    /// Services that uses protocol data won't be started until all init steps and download
+    /// is finished. They are also stopped while uploading protocol archive.
     /// Default to true if not set.
-    #[serde(default = "default_use_blockchain_data")]
-    pub use_blockchain_data: bool,
+    #[serde(default = "default_use_protocol_data")]
+    pub use_protocol_data: bool,
     /// Capacity of log buffer (in megabytes).
     pub log_buffer_capacity_mb: Option<usize>,
     /// Prepend timestamp to each log, or not.
     pub log_timestamp: Option<bool>,
 }
-fn default_use_blockchain_data() -> bool {
+fn default_use_protocol_data() -> bool {
     true
 }
 
@@ -263,7 +266,7 @@ pub struct Upload {
     pub max_connections: Option<usize>,
     /// Maximum number of parallel workers.
     pub max_runners: Option<usize>,
-    /// Number of chunks that blockchain data should be split into.
+    /// Number of chunks that protocol data should be split into.
     /// Recommended chunk size is about 500MB.
     pub number_of_chunks: Option<u32>,
     /// Seconds after which presigned urls in generated `UploadManifest` may expire.
@@ -375,7 +378,7 @@ pub fn build_service_job_config(
         })),
         shutdown_timeout_secs: service.shutdown_timeout_secs,
         shutdown_signal: service.shutdown_signal,
-        needs: if service.use_blockchain_data {
+        needs: if service.use_protocol_data {
             Some(needs)
         } else {
             None

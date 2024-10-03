@@ -98,7 +98,7 @@ pub struct AvailableResources {
     pub vcpu_count: usize,
     /// RAM allocated to VM in MB.
     pub mem_size_mb: u64,
-    /// Size of data drive for storing blockchain data (not to be confused with OS drive).
+    /// Size of data drive for storing protocol data (not to be confused with OS drive).
     pub disk_size_gb: u64,
 }
 

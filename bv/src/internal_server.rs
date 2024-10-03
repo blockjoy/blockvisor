@@ -213,7 +213,9 @@ where
         } else {
             self.connect_to_node_service()
                 .await?
-                .start(pb::NodeServiceStartRequest { id: id.to_string() })
+                .start(pb::NodeServiceStartRequest {
+                    node_id: id.to_string(),
+                })
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
         }
@@ -232,7 +234,9 @@ where
         } else {
             self.connect_to_node_service()
                 .await?
-                .stop(pb::NodeServiceStopRequest { id: id.to_string() })
+                .stop(pb::NodeServiceStopRequest {
+                    node_id: id.to_string(),
+                })
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
         }
@@ -251,7 +255,9 @@ where
         } else {
             self.connect_to_node_service()
                 .await?
-                .delete(pb::NodeServiceDeleteRequest { id: id.to_string() })
+                .delete(pb::NodeServiceDeleteRequest {
+                    node_id: id.to_string(),
+                })
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
         }
@@ -371,7 +377,7 @@ where
         Ok(Response::new(capabilities))
     }
 
-    /// Calls an arbitrary method on a the blockchain node running inside the VM.
+    /// Calls an arbitrary method on the node running inside the VM.
     #[instrument(skip(self), ret(Debug))]
     async fn run(
         &self,
@@ -385,7 +391,7 @@ where
             .await
             .map_err(|e| match e {
                 nodes_manager::BabelError::MethodNotFound => {
-                    Status::not_found("blockchain method not found")
+                    Status::not_found("protocol method not found")
                 }
                 nodes_manager::BabelError::Internal { err } => Status::internal(format!("{err:#}")),
                 nodes_manager::BabelError::Plugin { err } => Status::unknown(format!("{err:#}")),
@@ -542,11 +548,14 @@ where
 
         Ok(NodeDisplayInfo {
             state: NodeState {
-                id: Uuid::parse_str(&node.id).with_context(|| {
-                    format!("node_create received invalid node id from API: {}", node.id)
+                id: Uuid::parse_str(&node.node_id).with_context(|| {
+                    format!(
+                        "node_create received invalid node id from API: {}",
+                        node.node_id
+                    )
                 })?,
                 name: node.node_name,
-                protocol_id: node.blockchain_id,
+                protocol_id: node.protocol_id,
                 dev_mode: false,
                 ip: node.ip_address.parse()?,
                 gateway: node.ip_gateway.parse()?,
@@ -557,17 +566,17 @@ where
                 display_name: node.display_name,
                 org_id: node.org_id,
                 org_name: node.org_name,
-                protocol_name: node.blockchain_name,
+                protocol_name: node.protocol_name,
                 image_key: node
-                    .blockchain_version_key
-                    .ok_or_else(|| anyhow!("Missing blockchain_version_key"))?
+                    .version_key
+                    .ok_or_else(|| anyhow!("Missing version_key"))?
                     .into(),
                 dns_name: node.dns_name,
 
                 vm_config: requirements,
                 image: NodeImage {
                     id: node.image_id,
-                    version: node.blockchain_software_version,
+                    version: node.semantic_version,
                     config_id: node.config_id,
                     archive_id: config
                         .map(|config| config.archive_id.clone())
@@ -599,7 +608,7 @@ where
             host_id.clone(),
             host_client
                 .get(pb::HostServiceGetRequest {
-                    id: host_id.clone(),
+                    host_id: host_id.clone(),
                 })
                 .await
                 .with_context(|| "can't fetch host organization id")?

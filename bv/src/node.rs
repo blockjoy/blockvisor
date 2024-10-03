@@ -953,7 +953,7 @@ pub mod tests {
         NodeState {
             id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
             name: "node name".to_string(),
-            protocol_id: "blockchain_id".to_string(),
+            protocol_id: "protocol_id".to_string(),
             expected_status: VmStatus::Running,
             started_at: None,
             initialized: true,
@@ -1005,9 +1005,9 @@ pub mod tests {
             restarting: false,
             org_id: "org_id".to_string(),
             org_name: "org_name".to_string(),
-            protocol_name: "testing blockchain".to_string(),
+            protocol_name: "testing protocol".to_string(),
             image_key: ProtocolImageKey {
-                protocol_key: "testing_blockchain".to_string(),
+                protocol_key: "testing_protocol".to_string(),
                 variant_key: "tst".to_string(),
             },
             dns_name: "dns.name".to_string(),

@@ -1344,11 +1344,21 @@ mod tests {
                 .to_string()
         );
         let mut new_proto_node_state = new_state.clone();
-        new_proto_node_state.protocol_id = "different_chain".to_string();
+        new_proto_node_state.image_key.protocol_key = "different_protocol".to_string();
         assert_eq!(
-            "BV internal error: Cannot upgrade protocol to `different_chain`",
+            "BV internal error: Cannot upgrade protocol to `different_protocol`",
             nodes
                 .upgrade(new_proto_node_state)
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        let mut new_variant_node_state = new_state.clone();
+        new_variant_node_state.image_key.variant_key = "different_variant".to_string();
+        assert_eq!(
+            "BV internal error: Cannot upgrade protocol variant to `different_variant`",
+            nodes
+                .upgrade(new_variant_node_state)
                 .await
                 .unwrap_err()
                 .to_string()

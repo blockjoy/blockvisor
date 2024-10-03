@@ -1,6 +1,6 @@
 # BlockVisor
 
-The service that runs on the host systems and is responsible for provisioning and managing one or more blockchains on a single server.
+The service that runs on the host systems and is responsible for provisioning and managing one or more protocols on a single server.
 
 ## How to release a new version
 1. Make sure you have installed:
@@ -19,13 +19,13 @@ Published version of above guide with `bvup` tool can be found [here](https://gi
 
 ## Babel Plugins
 
-BV is blockchain agnostic system that uses plugin system to add support for specific blockchains.
+BV is protocol agnostic system that uses plugin system to add support for specific protocols.
 
-So-called Babel Plugin, that translates BV blockchain agnostic interface (aka Babel API) into blockchain specific calls,
+So-called Babel Plugin, that translates BV protocol agnostic interface (aka Babel API) into protocol specific calls,
 always comes together with node image.
 
 See [Node Image Builder Guide](node_image_builder_guide.md) for more details on how to
-add new blockchain support to Blockvisor.
+add new protocol support to Blockvisor.
 
 ## API proto files
 
@@ -61,7 +61,7 @@ used during debugging issues, not printed by default
 - `/var/lib/blockvisor/nodes/<uuid>/babel.rhai` node specific Babel plugin
 - `/var/lib/blockvisor/nodes/<uuid>/plugin.data` Babel plugin data persistence (see load_data/save_data functions in [RHAI plugin scripting guide](babel_api/rhai_plugin_guide.md))
 - `/var/lib/blockvisor/nodes/<uuid>/rootfs/` node rootfs (from `os.img`)
-- `/var/lib/blockvisor/nodes/<uuid>/data/` blockchain data dir, bind to node `/blockjoy/`, persist node upgrade
+- `/var/lib/blockvisor/nodes/<uuid>/data/` protocol data dir, bind to node `/blockjoy/`, persist node upgrade
 - `/var/lib/blockvisor/images/<protocol>/<node_type>/<node_version>/` downloaded images cache
 
 ### Node
@@ -78,7 +78,7 @@ used during debugging issues, not printed by default
 - `/var/lib/babel/post_setup.sh`
 - `/var/lib/babel/base.rhai` base config definition
 - `/blockjoy/.babel_jobs/` archive jobs (e.g. download) metadata dir, in particular `download.completed` file
-- `/blockjoy/blockchain_data/` directory where blockchain data are downloaded (uploaded from)
+- `/blockjoy/protocol_data/` directory where protocol data are downloaded (uploaded from)
 
 ### Bundle
 - `bundle/installer`
@@ -137,7 +137,7 @@ sequenceDiagram
     bv->>apptainer: start babel inside running container (listening on UDS)
 ```
 
-### Execute Method on Blockchain
+### Execute Method on Node
 
 ```mermaid
 sequenceDiagram
@@ -145,7 +145,7 @@ sequenceDiagram
     participant bv as BlockvisorD
     participant babel as Babel
 
-    cli->>bv: Blockchain Method
+    cli->>bv: Node Method
     bv ->> bv: call method on Babel plugin  
     bv ->> babel: run_*, start_job, ...
     Note right of bv: forward run_*, start_job and other calls<br> to bebel, so it can be run on the node
@@ -249,7 +249,7 @@ sequenceDiagram
     alt JobRunner checksum doesn't match
         bv ->> babel: send new JobRunner binary
         babel ->> babel: replace JobRunner binary
-        Note right of babel: JobRunner perform blockchain action/entrypoint<br> so it is not restarted automatically
+        Note right of babel: JobRunner perform protocol action/entrypoint<br> so it is not restarted automatically
     end
 
     deactivate babel

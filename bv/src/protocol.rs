@@ -153,7 +153,7 @@ pub mod tests {
                 name: "test".to_string(),
                 org_id: Some("4931bafa-92d9-4521-9fc6-a77eee047530".to_string()),
                 ticker: None,
-                description: Some("Testing blockchain definition".to_string()),
+                description: Some("Testing protocol definition".to_string()),
                 visibility: Visibility::Private,
             },
             Protocol {
@@ -161,7 +161,7 @@ pub mod tests {
                 name: "Ethereum".to_string(),
                 org_id: None,
                 ticker: None,
-                description: Some("Ethereum blockchain definition".to_string()),
+                description: Some("Ethereum protocol definition".to_string()),
                 visibility: Visibility::Public,
             },
         ];

@@ -152,7 +152,7 @@ impl Engine for LinterEngine {
         Ok(false)
     }
 
-    fn has_blockchain_archive(&self) -> eyre::Result<bool> {
+    fn has_protocol_archive(&self) -> eyre::Result<bool> {
         Ok(true)
     }
 

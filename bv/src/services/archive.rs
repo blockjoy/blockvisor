@@ -20,7 +20,7 @@ use url::Url;
 
 type ArchiveServiceClient = archive_service_client::ArchiveServiceClient<AuthenticatedService>;
 
-async fn connect_blockchain_archive_service(
+async fn connect_protocol_archive_service(
     config: &SharedConfig,
 ) -> Result<
     ApiClient<
@@ -35,7 +35,7 @@ async fn connect_blockchain_archive_service(
             .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
     })
     .await
-    .with_context(|| "cannot connect to blockchain archive service")
+    .with_context(|| "cannot connect to protocol archive service")
 }
 
 pub async fn put_download_manifest(
@@ -45,7 +45,7 @@ pub async fn put_download_manifest(
     data_version: u64,
 ) -> Result<()> {
     info!("Putting download manifest...");
-    let mut client = connect_blockchain_archive_service(config).await?;
+    let mut client = connect_protocol_archive_service(config).await?;
     // DownloadManifest may be pretty big, so better set longer timeout that depends on number of chunks
     let custom_timeout =
         bv_utils::rpc::estimate_put_download_manifest_request_timeout(manifest.chunks.len());
@@ -95,7 +95,7 @@ pub async fn get_download_metadata(
     config: &SharedConfig,
     archive_id: String,
 ) -> Result<DownloadMetadata> {
-    let mut client = connect_blockchain_archive_service(config).await?;
+    let mut client = connect_protocol_archive_service(config).await?;
     api_with_retry!(
         client,
         client.get_download_metadata(with_timeout(
@@ -120,7 +120,7 @@ pub async fn get_download_chunks(
     data_version: u64,
     chunk_indexes: Vec<u32>,
 ) -> Result<Vec<Chunk>> {
-    let mut client = connect_blockchain_archive_service(config).await?;
+    let mut client = connect_protocol_archive_service(config).await?;
     api_with_retry!(
         client,
         client.get_download_chunks(with_timeout(
@@ -143,8 +143,8 @@ pub async fn get_download_chunks(
     .collect::<Result<Vec<_>>>()
 }
 
-pub async fn has_blockchain_archive(config: &SharedConfig, archive_id: String) -> Result<bool> {
-    let mut client = connect_blockchain_archive_service(config).await?;
+pub async fn has_protocol_archive(config: &SharedConfig, archive_id: String) -> Result<bool> {
+    let mut client = connect_protocol_archive_service(config).await?;
     if let Err(err) = api_with_retry!(
         client,
         client.get_download_metadata(with_timeout(
@@ -161,7 +161,7 @@ pub async fn has_blockchain_archive(config: &SharedConfig, archive_id: String) -
         if err.code() == tonic::Code::NotFound {
             Ok(false)
         } else {
-            bail!("cannot check blockchain archive: {err:#}");
+            bail!("cannot check protocol archive: {err:#}");
         }
     } else {
         Ok(true)
@@ -175,7 +175,7 @@ pub async fn get_upload_slots(
     slots: Vec<u32>,
     url_expires: u32,
 ) -> Result<UploadSlots> {
-    let mut client = connect_blockchain_archive_service(config).await?;
+    let mut client = connect_protocol_archive_service(config).await?;
     api_with_retry!(
         client,
         client.get_upload_slots(with_timeout(

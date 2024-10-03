@@ -130,7 +130,7 @@ async fn run_job(
                     job_config.restart,
                     Downloader::new(
                         connector,
-                        babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf(),
+                        babel_api::engine::PROTOCOL_DATA_PATH.to_path_buf(),
                         build_transfer_config(
                             &job_name,
                             None,
@@ -157,7 +157,7 @@ async fn run_job(
                 job_config.restart,
                 Uploader::new(
                     connector,
-                    babel_api::engine::BLOCKCHAIN_DATA_PATH.to_path_buf(),
+                    babel_api::engine::PROTOCOL_DATA_PATH.to_path_buf(),
                     exclude.unwrap_or_default(),
                     number_of_chunks,
                     url_expires_secs,
