@@ -571,6 +571,10 @@ mod tests {
                 &self,
                 request: tonic::Request<internal_server::CreateNodeRequest>,
             ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
+            async fn create_dev_node(
+                &self,
+                request: tonic::Request<internal_server::CreateDevNodeRequest>,
+            ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
             async fn delete_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn start_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn stop_node(&self, request: tonic::Request<(Uuid, bool)>) -> Result<tonic::Response<()>, tonic::Status>;

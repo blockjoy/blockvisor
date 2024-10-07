@@ -271,11 +271,10 @@ where
     match node_command.command {
         Some(cmd) => match cmd {
             Command::Create(args) => {
-                let mut node_state: NodeState = args
+                let node_state: NodeState = args
                     .node
                     .ok_or_else(|| anyhow!("Missing node details"))?
                     .try_into()?;
-                node_state.image.uri = args.image_uri;
                 nodes_manager.create(node_state).await?;
                 API_CREATE_COUNTER.increment(1);
                 API_CREATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
@@ -301,11 +300,10 @@ where
                 API_RESTART_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Upgrade(args) => {
-                let mut node_config: NodeState = args
+                let node_config: NodeState = args
                     .node
                     .ok_or_else(|| anyhow!("Missing node details"))?
                     .try_into()?;
-                node_config.image.uri = args.image_uri;
                 nodes_manager.upgrade(node_config).await?;
                 API_UPGRADE_COUNTER.increment(1);
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
@@ -468,38 +466,32 @@ impl From<common::ProtocolVersionKey> for ProtocolImageKey {
 impl TryFrom<pb::Node> for NodeState {
     type Error = eyre::Error;
     fn try_from(node: pb::Node) -> Result<Self, Self::Error> {
-        let config = node
-            .config
-            .as_ref()
-            .ok_or_else(|| anyhow!("Missing node config"))?;
+        let config = node.config.ok_or_else(|| anyhow!("Missing node config"))?;
+        let image_config = config.image.ok_or_else(|| anyhow!("Missing image"))?;
         let image = node_state::NodeImage {
             id: node.image_id,
             version: node.semantic_version,
             config_id: node.config_id,
-            archive_id: config.archive_id.clone(),
-            uri: Default::default(),
+            archive_id: image_config.archive_id,
+            uri: image_config.image_uri,
         };
-        let image_config = config
-            .image
-            .as_ref()
-            .ok_or_else(|| anyhow!("Missing image"))?;
         let properties = image_config
             .properties
-            .clone()
             .into_iter()
             .map(|p| (p.key, p.value))
             .collect();
         let firewall = config
             .firewall
-            .clone()
             .map(|config| config.try_into())
             .unwrap_or(Ok(Default::default()))?;
-        let vm = config
-            .vm
-            .clone()
-            .ok_or_else(|| anyhow!("Missing vm config"))?;
+        let vm = config.vm.ok_or_else(|| anyhow!("Missing vm config"))?;
         Ok(Self {
-            id: Uuid::from_str(&node.node_id)?,
+            id: Uuid::from_str(&node.node_id).with_context(|| {
+                format!(
+                    "node_create received invalid node id from API: {}",
+                    node.node_id
+                )
+            })?,
             name: node.node_name,
             image,
             vm_config: vm.into(),
@@ -513,11 +505,6 @@ impl TryFrom<pb::Node> for NodeState {
                 .with_context(|| format!("invalid gateway `{}`", node.ip_gateway))?,
             firewall,
             properties,
-            expected_status: VmStatus::Stopped,
-            started_at: None,
-            initialized: false,
-            dev_mode: false,
-            restarting: false,
             protocol_id: node.protocol_id,
             image_key: node
                 .version_key
@@ -529,6 +516,11 @@ impl TryFrom<pb::Node> for NodeState {
             org_name: node.org_name,
             dns_name: node.dns_name,
             assigned_cpus: vec![],
+            expected_status: VmStatus::Stopped,
+            started_at: None,
+            initialized: false,
+            dev_mode: false,
+            restarting: false,
             apptainer_config: None,
         })
     }

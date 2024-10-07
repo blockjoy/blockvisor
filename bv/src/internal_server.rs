@@ -1,13 +1,13 @@
-use crate::node_state::ProtocolImageKey;
 use crate::{
     apptainer_platform::ApptainerPlatform,
     bv_config,
     bv_config::SharedConfig,
     cluster::ClusterData,
     hosts,
-    node_state::{NodeImage, NodeProperties, NodeState, VmStatus},
+    node_state::{NodeProperties, NodeState, ProtocolImageKey, VmStatus},
     nodes_manager::{self, MaybeNode, NodesManager},
     pal::Pal,
+    protocol,
     services::{
         self,
         api::{self, common, pb},
@@ -15,7 +15,7 @@ use crate::{
     {get_bv_status, set_bv_status, ServiceStatus}, {node_metrics, BV_VAR_PATH},
 };
 use babel_api::engine::JobsInfo;
-use eyre::{anyhow, Context};
+use eyre::{anyhow, bail, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{fmt::Debug, sync::Arc};
@@ -38,6 +38,11 @@ pub struct CreateNodeRequest {
     pub properties: NodeProperties,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct CreateDevNodeRequest {
+    pub new_node_state: NodeState,
+}
+
 #[tonic_rpc::tonic_rpc(bincode)]
 trait Service {
     fn info() -> String;
@@ -48,6 +53,7 @@ trait Service {
     fn get_node(id: Uuid) -> NodeDisplayInfo;
     fn get_nodes() -> Vec<NodeDisplayInfo>;
     fn create_node(req: CreateNodeRequest) -> NodeDisplayInfo;
+    fn create_dev_node(req: CreateDevNodeRequest) -> NodeDisplayInfo;
     fn start_node(id: Uuid);
     fn stop_node(id: Uuid, force: bool);
     fn delete_node(id: Uuid);
@@ -196,6 +202,19 @@ where
         status_check().await?;
         Ok(Response::new(
             self.create_node(request.into_inner())
+                .await
+                .map_err(|err| Status::unknown(format!("{err:#}")))?,
+        ))
+    }
+
+    #[instrument(skip(self), ret(Debug))]
+    async fn create_dev_node(
+        &self,
+        request: Request<CreateDevNodeRequest>,
+    ) -> Result<Response<NodeDisplayInfo>, Status> {
+        status_check().await?;
+        Ok(Response::new(
+            self.create_dev_node(request.into_inner().new_node_state)
                 .await
                 .map_err(|err| Status::unknown(format!("{err:#}")))?,
         ))
@@ -496,6 +515,9 @@ where
     }
 
     async fn create_node(&self, req: CreateNodeRequest) -> eyre::Result<NodeDisplayInfo> {
+        if self.dev_mode {
+            bail!("blockvisord-dev support only dev nodes")
+        }
         // map properties into api format
         let properties = req
             .properties
@@ -537,60 +559,19 @@ where
             _ => Err(anyhow!("unexpected multiple node creation response")),
         }?;
 
-        let config = node.config.as_ref();
-
-        let requirements = config
-            .and_then(|config| config.vm.as_ref().map(|vm| vm.clone().into()))
-            .unwrap_or_default();
-        let firewall = config
-            .and_then(|config| config.firewall.clone().map(|config| config.try_into()))
-            .unwrap_or(Ok(Default::default()))?;
-
         Ok(NodeDisplayInfo {
-            state: NodeState {
-                id: Uuid::parse_str(&node.node_id).with_context(|| {
-                    format!(
-                        "node_create received invalid node id from API: {}",
-                        node.node_id
-                    )
-                })?,
-                name: node.node_name,
-                protocol_id: node.protocol_id,
-                dev_mode: false,
-                ip: node.ip_address.parse()?,
-                gateway: node.ip_gateway.parse()?,
+            state: node.try_into()?,
+            status: VmStatus::Stopped,
+        })
+    }
 
-                properties: req.properties,
-                firewall,
-
-                display_name: node.display_name,
-                org_id: node.org_id,
-                org_name: node.org_name,
-                protocol_name: node.protocol_name,
-                image_key: node
-                    .version_key
-                    .ok_or_else(|| anyhow!("Missing version_key"))?
-                    .into(),
-                dns_name: node.dns_name,
-
-                vm_config: requirements,
-                image: NodeImage {
-                    id: node.image_id,
-                    version: node.semantic_version,
-                    config_id: node.config_id,
-                    archive_id: config
-                        .map(|config| config.archive_id.clone())
-                        .unwrap_or_default(),
-                    uri: Default::default(),
-                },
-
-                assigned_cpus: vec![],
-                expected_status: VmStatus::Stopped,
-                started_at: None,
-                initialized: false,
-                restarting: false,
-                apptainer_config: None,
-            },
+    async fn create_dev_node(
+        &self,
+        mut new_node_state: NodeState,
+    ) -> eyre::Result<NodeDisplayInfo> {
+        new_node_state.dev_mode = true;
+        Ok(NodeDisplayInfo {
+            state: self.nodes_manager.create(new_node_state).await?,
             status: VmStatus::Stopped,
         })
     }
@@ -627,11 +608,22 @@ where
         version: Option<String>,
         build_version: Option<u64>,
     ) -> eyre::Result<String> {
-        services::protocol::ProtocolService::new(services::DefaultConnector {
-            config: self.config.clone(),
-        })
-        .await?
-        .get_image_id(protocol, variant, version, build_version)
-        .await
+        Ok(
+            services::protocol::ProtocolService::new(services::DefaultConnector {
+                config: self.config.clone(),
+            })
+            .await?
+            .get_image(
+                protocol::ImageKey {
+                    protocol_key: protocol.to_string(),
+                    variant_key: variant.to_string(),
+                },
+                version,
+                build_version,
+            )
+            .await?
+            .ok_or(anyhow!("image not found"))?
+            .image_id,
+        )
     }
 }
