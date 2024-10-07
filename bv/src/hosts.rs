@@ -66,7 +66,7 @@ impl HostInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HostMetrics {
-    pub used_cpu_count: u64,
+    pub used_cpu: f32,
     pub used_memory_bytes: u64,
     pub used_disk_space_bytes: u64,
     pub used_ips: Vec<String>,
@@ -80,7 +80,7 @@ pub struct HostMetrics {
 
 impl HostMetrics {
     pub fn set_all_gauges(&self) {
-        SYSTEM_HOST_USED_CPU_GAUGE.set(self.used_cpu_count as f64);
+        SYSTEM_HOST_USED_CPU_GAUGE.set(self.used_cpu as f64);
         SYSTEM_HOST_USED_MEMORY_GAUGE.set(self.used_memory_bytes as f64);
         SYSTEM_HOST_USED_DISK_GAUGE.set(self.used_disk_space_bytes as f64);
         SYSTEM_HOST_LOAD_ONE_GAUGE.set(self.load_one);
@@ -116,7 +116,7 @@ impl HostMetrics {
 
             let load = sys.load_average();
             Ok(HostMetrics {
-                used_cpu_count: sys.global_cpu_info().cpu_usage() as u64,
+                used_cpu: sys.global_cpu_info().cpu_usage(),
                 used_memory_bytes: saturating_sub_bytes(mem.total, mem.free).as_u64(),
                 used_disk_space_bytes: bv_utils::system::find_disk_by_path(
                     &sys,
@@ -149,16 +149,16 @@ impl HostMetrics {
 impl pb::MetricsServiceHostRequest {
     pub fn new(host_id: String, metrics: HostMetrics) -> Self {
         let metrics = pb::HostMetrics {
-            used_cpu_hundreths: Some(metrics.used_cpu_count),
+            used_cpu_percent: Some(metrics.used_cpu as f64),
             used_mem_bytes: Some(metrics.used_memory_bytes),
             used_disk_bytes: Some(metrics.used_disk_space_bytes),
-            load_one: Some(metrics.load_one),
-            load_five: Some(metrics.load_five),
-            load_fifteen: Some(metrics.load_fifteen),
-            network_received: Some(metrics.network_received_bytes),
-            network_sent: Some(metrics.network_sent_bytes),
-            uptime: Some(metrics.uptime_secs),
+            load_one_percent: Some(metrics.load_one),
+            load_five_percent: Some(metrics.load_five),
+            load_fifteen_percent: Some(metrics.load_fifteen),
+            network_received_bytes: Some(metrics.network_received_bytes),
+            network_sent_bytes: Some(metrics.network_sent_bytes),
             used_ips: metrics.used_ips,
+            uptime_seconds: Some(metrics.uptime_secs),
         };
         Self {
             metrics: HashMap::from([(host_id, metrics)]),

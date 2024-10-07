@@ -45,9 +45,37 @@ pub enum Command {
 pub enum ImageCommand {
     /// Create new image from scratch.
     Create {
-        /// New node image identifier in the following format: protocol/type/version
-        image_id: String,
+        /// Associated protocol_key.
+        protocol: String,
+        /// Image variant_key.
+        variant: String,
     },
+
+    /// Print associated container image URI.
+    ContainerUri {
+        #[clap(default_value = "babel.yaml")]
+        path: PathBuf,
+    },
+
+    /// Play with dev node created form the image.
+    Play {
+        /// Node IP Address
+        #[clap(long)]
+        ip: Option<String>,
+
+        /// Gateway IP Address
+        #[clap(long)]
+        gateway: Option<String>,
+
+        /// The properties that are passed to the node in form of JSON string.
+        #[clap(long)]
+        props: Option<String>,
+
+        #[clap(default_value = "babel.yaml")]
+        path: PathBuf,
+    },
+
+    Check,
 
     /// Push image to the API.
     Push {
