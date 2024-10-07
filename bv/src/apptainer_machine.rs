@@ -38,6 +38,7 @@ const BABEL_BIN_PATH: &str = "/usr/bin/babel";
 const APPTAINER_BIN_NAME: &str = "apptainer";
 const BASE_CONFIG_PATH: &str = "var/lib/babel/base.rhai";
 pub const PLUGIN_PATH: &str = "var/lib/babel/plugin.rhai";
+pub const PLUGIN_MAIN_FILENAME: &str = "main.rhai";
 const BABEL_VAR_PATH: &str = "var/lib/babel";
 
 pub fn build_rootfs_dir(node_dir: &Path) -> PathBuf {

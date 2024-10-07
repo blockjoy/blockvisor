@@ -89,9 +89,7 @@ pub enum NodeCommand {
         /// Version of image build, or skip to use latest,
         build: Option<u64>,
 
-        /// The properties that are passed to the node. These are used for running certain babel
-        /// commands. For example, the ether nodes require that at least one property whose name
-        /// starts with `key` is passed here like so: `bv node create --props '{"key1": "asdf"}'`.
+        /// The properties that are passed to the node in form of JSON string.
         #[clap(long)]
         props: Option<String>,
     },
@@ -171,7 +169,7 @@ pub enum NodeCommand {
     },
 
     /// Check current state of the node (including metrics).
-    Check {
+    Info {
         /// The id or name of the node to be checked. BV tries to get it from workspace if not provided.
         id_or_name: Option<String>,
     },

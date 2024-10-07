@@ -57,7 +57,7 @@ pub async fn process_host_command(
         HostCommand::Metrics => {
             let mut client = NodeClient::new(bv_url).await?;
             let metrics = client.get_host_metrics(()).await?.into_inner();
-            println!("Used cpu:       {:>10} %", metrics.used_cpu_count);
+            println!("Used cpu:       {:>10} %", metrics.used_cpu);
             println!(
                 "Used mem:       {:>10.3} GB",
                 to_gb(metrics.used_memory_bytes)
@@ -352,7 +352,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 }
             }
         }
-        NodeCommand::Check { id_or_name } => {
+        NodeCommand::Info { id_or_name } => {
             let id = client
                 .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
                 .await?;
@@ -406,46 +406,6 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 node_info.state.vm_config.disk_size_gb
             );
             println!("Assigned CPUs:  {:?}", node_info.state.assigned_cpus);
-            // run plugin linter and test_* methods if in dev_mode
-            if node_info.state.dev_mode {
-                // TODO MJR move to bib
-                // let node_context = NodeContext::build(&bv_root(), id);
-                // let (script, _) = node_context
-                //     .load_script(&node_context.node_dir.join(ROOTFS_DIR))
-                //     .await?;
-                // println!(
-                //     "Plugin linter: {:?}",
-                //     rhai_plugin_linter::check(&script, node_info.properties)
-                // );
-                // let caps = client.list_capabilities(id).await?.into_inner();
-                // let tests = caps
-                //     .iter()
-                //     .filter(|cap| cap.starts_with("test_"))
-                //     .map(|cap| cap.as_str())
-                //     .collect::<Vec<_>>();
-                // if !tests.is_empty() {
-                //     let mut errors = vec![];
-                //     println!("Running node internal tests:");
-                //     for test in tests {
-                //         let result =
-                //             match client.run((id, test.to_string(), String::default())).await {
-                //                 Ok(_) => "ok",
-                //                 Err(e) => {
-                //                     errors.push(e);
-                //                     "failed"
-                //                 }
-                //             };
-                //         println!("{:.<30}{:.>16}", test, result);
-                //     }
-                //     if !errors.is_empty() {
-                //         eprintln!("\n{} tests failed:", errors.len());
-                //         for e in errors.iter() {
-                //             eprintln!("{e:#}");
-                //         }
-                //         bail!("Node internal tests failed");
-                //     }
-                // }
-            }
         }
         NodeCommand::Shell { id_or_name } => {
             let (name, id) = match id_or_name {
@@ -495,12 +455,20 @@ pub async fn process_protocol_command(
         ProtocolCommand::List { protocol, number } => {
             let mut protocol_service =
                 ProtocolService::new(services::DefaultConnector { config }).await?;
-            let mut versions = protocol_service.list_protocol_images(&protocol).await?;
-
-            versions.truncate(number);
-
-            for version in versions {
-                println!("{version}");
+            let protocols = protocol_service.get_protocol_by_name(&protocol).await?;
+            for protocol in protocols {
+                for version in protocol
+                    .versions
+                    .into_iter()
+                    .take(number)
+                    .filter_map(|version| {
+                        version.version_key.map(|version_key| {
+                            format!("{}/{}", version_key.variant_key, version.semantic_version)
+                        })
+                    })
+                {
+                    println!("{version}");
+                }
             }
         }
     }
