@@ -1,3 +1,5 @@
+import "base" as base;
+
 /// You can define some constants to use in the code
 const NETS = #{
     test: #{
@@ -18,6 +20,7 @@ const B_DIR = PROTOCOL_DATA_PATH + "/B";
 const NET =  global::NETS[node_env().node_variant];
 
 const BABEL_VERSION = "0.9.0";
+const BASE_CONFIG = base::BASE_CONFIG;
 const PLUGIN_CONFIG = #{
     /// [optional] List of configuration files to be rendered from template with provided params.
     /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.

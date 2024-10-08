@@ -882,7 +882,7 @@ mod tests {
 
     struct TestEnv {
         tmp_root: PathBuf,
-        default_script: String,
+        default_plugin_path: PathBuf,
         _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
 
@@ -893,9 +893,7 @@ mod tests {
 
             Ok(Self {
                 tmp_root,
-                default_script: fs::read_to_string(testing_babel_path_absolute())
-                    .await
-                    .unwrap(),
+                default_plugin_path: testing_babel_path_absolute(),
                 _async_panic_checker: Default::default(),
             })
         }
@@ -986,10 +984,10 @@ mod tests {
             build_node_state("first node name", "192.168.0.7", "192.168.0.1");
         first_node_state.assigned_cpus = vec![2];
         let mut vm_mock = MockTestVM::new();
-        let script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         vm_mock
-            .expect_plugin()
-            .returning(move || Ok(script.clone()));
+            .expect_plugin_path()
+            .returning(move || Ok(plugin_path.clone()));
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         vm_mock
             .expect_delete()
@@ -1002,10 +1000,10 @@ mod tests {
             build_node_state("second node name", "192.168.0.8", "192.168.0.1");
         second_node_state.assigned_cpus = vec![1];
         let mut vm_mock = MockTestVM::new();
-        let script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         vm_mock
-            .expect_plugin()
-            .returning(move || Ok(script.clone()));
+            .expect_plugin_path()
+            .returning(move || Ok(plugin_path.clone()));
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         add_create_node_expectations(&mut pal, 2, second_node_state.clone(), vm_mock);
 
@@ -1168,7 +1166,7 @@ mod tests {
         pal.expect_create_node_connection()
             .with(predicate::eq(node_state.id))
             .returning(dummy_connection_mock);
-        let testing_babel_script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_attach_vm()
             .with(
                 predicate::eq(default_bv_context()),
@@ -1176,8 +1174,9 @@ mod tests {
             )
             .returning(move |_, _| {
                 let mut vm = MockTestVM::new();
-                let script = testing_babel_script.clone();
-                vm.expect_plugin().returning(move || Ok(script.clone()));
+                let plugin_path = plugin_path.clone();
+                vm.expect_plugin_path()
+                    .returning(move || Ok(plugin_path.clone()));
                 vm.expect_state().return_const(VmState::SHUTOFF);
                 Ok(vm)
             });
@@ -1251,17 +1250,21 @@ mod tests {
         new_state.vm_config.disk_size_gb = 3;
         new_state.assigned_cpus = vec![4, 3];
         let mut vm_mock = MockTestVM::new();
-        let script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         vm_mock
-            .expect_plugin()
+            .expect_plugin_path()
             .once()
-            .returning(move || Ok(script.clone()));
-        let script = test_env.default_script.clone();
-        vm_mock.expect_plugin().once().returning(move || {
-            let mut truncated = script.clone();
-            truncated.truncate(truncated.len() - 30); // truncate info function
-            Ok(truncated)
-        });
+            .returning(move || Ok(plugin_path.clone()));
+        let updated_plugin_path = test_env.tmp_root.join("updated.rhai");
+        let mut truncated = fs::read_to_string(test_env.default_plugin_path)
+            .await
+            .unwrap();
+        truncated.truncate(truncated.len() - 30); // truncate info function
+        fs::write(&updated_plugin_path, truncated).await.unwrap();
+        vm_mock
+            .expect_plugin_path()
+            .once()
+            .returning(move || Ok(updated_plugin_path.clone()));
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         vm_mock.expect_upgrade().return_once(|_| Ok(()));
         add_create_node_expectations(&mut pal, 1, node_state.clone(), vm_mock);
@@ -1392,15 +1395,15 @@ mod tests {
             .once()
             .returning(available_test_resources);
         add_firewall_expectation(&mut pal, node_state.clone());
-        let script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_create_vm().return_once(move |_, _| {
             let mut mock = MockTestVM::new();
-            let script = script.clone();
+            let plugin_path = plugin_path.clone();
             let mut seq = Sequence::new();
-            mock.expect_plugin()
+            mock.expect_plugin_path()
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(move || Ok(script.clone()));
+                .returning(move || Ok(plugin_path.clone()));
             mock.expect_state()
                 .times(6)
                 .in_sequence(&mut seq)

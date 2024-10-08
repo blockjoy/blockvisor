@@ -1,4 +1,4 @@
-const BASE_CONFIG = #{
+export const BASE_CONFIG = #{
     /// [optional] List of configuration files to be rendered from template with provided params.
     /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
     config_files: [
@@ -6,7 +6,7 @@ const BASE_CONFIG = #{
             /// It assumes that file pointed by `template` argument exists.
             template: "/var/lib/babel/templates/config.template",
             /// File pointed by `destination` path will be overwritten if exists.
-            destination: "/etc/service.config",
+            destination: "/etc/base_service.config",
             /// Map object serializable to JSON.
             params: #{
                 node_name: node_env().node_name
@@ -57,4 +57,4 @@ const BASE_CONFIG = #{
              run_sh: `proxy`,
          }
     ],
-}
+};

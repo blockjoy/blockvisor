@@ -9,13 +9,13 @@ use crate::{
 };
 use eyre::bail;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::Level;
 
-pub fn check(script: &str, node_properties: HashMap<String, String>) -> eyre::Result<()> {
+pub fn check(plugin_path: PathBuf, node_properties: HashMap<String, String>) -> eyre::Result<()> {
     let mut warnings = vec![];
-    let rhai_plugin = RhaiPlugin::new(script, LinterEngine { node_properties })?;
+    let rhai_plugin = RhaiPlugin::from_file(plugin_path, LinterEngine { node_properties })?;
     if rhai_plugin.bare.plugin_config.is_none() {
         warnings.push(format!(
             "Deprecated API used: missing {PLUGIN_CONFIG_CONST_NAME}"

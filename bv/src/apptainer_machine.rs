@@ -29,6 +29,8 @@ use uuid::Uuid;
 
 pub const DATA_DIR: &str = "data";
 pub const ROOTFS_DIR: &str = "rootfs";
+pub const PLUGIN_PATH: &str = "var/lib/babel/plugin";
+pub const PLUGIN_MAIN_FILENAME: &str = "main.rhai";
 const CGROUPS_CONF_FILE: &str = "cgroups.toml";
 const APPTAINER_PID_FILE: &str = "apptainer.pid";
 const JOURNAL_DIR: &str = "/run/systemd/journal";
@@ -36,9 +38,6 @@ const BABEL_BIN_NAME: &str = "babel";
 const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
 const BABEL_BIN_PATH: &str = "/usr/bin/babel";
 const APPTAINER_BIN_NAME: &str = "apptainer";
-const BASE_CONFIG_PATH: &str = "var/lib/babel/base.rhai";
-pub const PLUGIN_PATH: &str = "var/lib/babel/plugin.rhai";
-pub const PLUGIN_MAIN_FILENAME: &str = "main.rhai";
 const BABEL_VAR_PATH: &str = "var/lib/babel";
 
 pub fn build_rootfs_dir(node_dir: &Path) -> PathBuf {
@@ -431,12 +430,7 @@ impl pal::VirtualMachine for ApptainerMachine {
         }
     }
 
-    async fn plugin(&self) -> Result<String> {
-        let mut script = fs::read_to_string(self.chroot_dir.join(PLUGIN_PATH)).await?;
-        let base_config_path = self.chroot_dir.join(BASE_CONFIG_PATH);
-        if base_config_path.exists() {
-            script.push_str(&fs::read_to_string(base_config_path).await?);
-        }
-        Ok(script)
+    async fn plugin_path(&self) -> Result<PathBuf> {
+        Ok(self.chroot_dir.join(PLUGIN_PATH).join(PLUGIN_MAIN_FILENAME))
     }
 }
