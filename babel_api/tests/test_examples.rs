@@ -121,8 +121,11 @@ fn test_rhai_syntax() {
 #[test]
 fn test_custom_download_upload() {
     let dummy_babel = dummy_babel_engine();
-    let script = fs::read_to_string("examples/custom_download_upload.rhai").unwrap();
-    let plugin = rhai_plugin::RhaiPlugin::new(&script, dummy_babel).unwrap();
+    let plugin = rhai_plugin::RhaiPlugin::from_file(
+        PathBuf::from("examples/custom_download_upload.rhai"),
+        dummy_babel,
+    )
+    .unwrap();
     plugin.init().unwrap();
     plugin.upload().unwrap();
 }
@@ -130,16 +133,20 @@ fn test_custom_download_upload() {
 #[test]
 fn test_init_minimal() {
     let dummy_babel = dummy_babel_engine();
-    let script = fs::read_to_string("examples/init_minimal.rhai").unwrap();
-    let plugin = rhai_plugin::RhaiPlugin::new(&script, dummy_babel).unwrap();
+    let plugin = rhai_plugin::RhaiPlugin::from_file(
+        PathBuf::from("examples/init_minimal.rhai"),
+        dummy_babel,
+    )
+    .unwrap();
     plugin.init().unwrap();
 }
 
 #[test]
 fn test_jobs() {
     let dummy_babel = dummy_babel_engine();
-    let script = fs::read_to_string("examples/jobs.rhai").unwrap();
-    let plugin = rhai_plugin::RhaiPlugin::new(&script, dummy_babel).unwrap();
+    let plugin =
+        rhai_plugin::RhaiPlugin::from_file(PathBuf::from("examples/jobs.rhai"), dummy_babel)
+            .unwrap();
     plugin.init().unwrap();
 }
 
@@ -175,8 +182,11 @@ fn test_polygon_functions() {
         })
     });
 
-    let script = fs::read_to_string("examples/polygon_functions.rhai").unwrap();
-    let plugin = rhai_plugin::RhaiPlugin::new(&script, dummy_babel).unwrap();
+    let plugin = rhai_plugin::RhaiPlugin::from_file(
+        PathBuf::from("examples/polygon_functions.rhai"),
+        dummy_babel,
+    )
+    .unwrap();
     assert_eq!("addr", plugin.address().unwrap());
     assert_eq!(
         ProtocolStatus {
@@ -207,6 +217,15 @@ fn test_plugin_config() -> eyre::Result<()> {
         org_id: "".to_string(),
         node_variant: "main".to_string(),
     });
+    babel
+        .expect_render_template()
+        .with(
+            predicate::eq(PathBuf::from("/var/lib/babel/templates/config.template")),
+            predicate::eq(PathBuf::from("/etc/base_service.config")),
+            predicate::eq(r#"{"node_name":"node name"}"#),
+        )
+        .times(2)
+        .returning(|_, _, _| Ok(()));
     babel
         .expect_render_template()
         .with(
@@ -620,8 +639,8 @@ fn test_plugin_config() -> eyre::Result<()> {
             })
         });
 
-    let script = fs::read_to_string("examples/plugin_config.rhai")?;
-    let plugin = rhai_plugin::RhaiPlugin::new(&script, babel)?;
+    let plugin =
+        rhai_plugin::RhaiPlugin::from_file(PathBuf::from("examples/plugin_config.rhai"), babel)?;
 
     plugin.init().unwrap();
     plugin.init().unwrap();

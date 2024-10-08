@@ -38,6 +38,14 @@ for this purpose.
 
 See [example](examples/plugin_config.rhai) with comments for more details.
 
+### BASE_CONFIG
+
+`BASE_CONFIG` constant is a convenient way to define configuration files and services that are shared between multiple plugins.
+Config files defined in `BASE_CONFIG` are rendered before anything else in `init()` function. Services defined in `BASE_CONFIG`
+are started right after config files are rendered, and are not stopped with other protocol services e.g. during data upload.
+
+See [example](examples/base.rhai) with comments for more details.
+
 ### Functions that SHALL be implemented by Plugin
 
 Functions listed below are required by BV to work properly.

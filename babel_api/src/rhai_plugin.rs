@@ -11,6 +11,7 @@ use crate::{
     },
 };
 use eyre::{anyhow, bail, Context, Error, Report, Result};
+use rhai::module_resolvers::FileModuleResolver;
 use rhai::{
     self,
     serde::{from_dynamic, to_dynamic},
@@ -18,11 +19,12 @@ use rhai::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::{path::Path, sync::Arc, time::Duration};
 use tracing::Level;
 
+pub const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
 const INIT_FN_NAME: &str = "init";
-pub(crate) const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
 const BASE_CONFIG_CONST_NAME: &str = "BASE_CONFIG";
 const BABEL_VERSION_CONST_NAME: &str = "BABEL_VERSION";
 
@@ -103,16 +105,35 @@ fn check_babel_version(ast: &AST) -> Result<()> {
 }
 
 impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
-    pub fn new(script: &str, babel_engine: E) -> Result<Self> {
+    pub fn from_str(script: &str, babel_engine: E) -> Result<Self> {
         let babel_engine = Arc::new(babel_engine);
         let rhai_engine = Self::new_rhai_engine(babel_engine.clone());
+
         // compile script to AST
         let ast = rhai_engine
             .compile(script)
             .with_context(|| "Rhai syntax error")?;
+        Self::new(ast, babel_engine, rhai_engine)
+    }
 
+    pub fn from_file(plugin_path: PathBuf, babel_engine: E) -> Result<Self> {
+        let babel_engine = Arc::new(babel_engine);
+        let mut rhai_engine = Self::new_rhai_engine(babel_engine.clone());
+
+        rhai_engine.set_module_resolver(FileModuleResolver::new_with_path(
+            plugin_path
+                .parent()
+                .ok_or(anyhow!("invalid plugin parent dir"))?,
+        ));
+        // compile script to AST
+        let ast = rhai_engine
+            .compile_file(plugin_path)
+            .with_context(|| "Rhai syntax error")?;
+        Self::new(ast, babel_engine, rhai_engine)
+    }
+
+    fn new(ast: AST, babel_engine: Arc<E>, rhai_engine: rhai::Engine) -> Result<Self> {
         check_babel_version(&ast)?;
-
         let mut scope = build_scope();
         rhai_engine.run_ast_with_scope(&mut scope, &ast)?;
         let base_config = if let Some(dynamic) = scope.get(BASE_CONFIG_CONST_NAME) {
@@ -928,7 +949,7 @@ mod tests {
             // no params
         }
 "#;
-        let plugin = RhaiPlugin::new(script, MockBabelEngine::new())?;
+        let plugin = RhaiPlugin::from_str(script, MockBabelEngine::new())?;
         let mut expected_capabilities = vec![
             "function_A".to_string(),
             "function_b".to_string(),
@@ -988,7 +1009,7 @@ mod tests {
         babel
             .expect_get_jobs()
             .return_once(|| Ok(HashMap::default()));
-        let plugin = RhaiPlugin::new(script, babel)?.clone(); // call clone() to make sure it works as well
+        let plugin = RhaiPlugin::from_str(script, babel)?.clone(); // call clone() to make sure it works as well
         plugin.init()?;
         plugin.upload()?;
         assert_eq!(77, plugin.height()?);
@@ -1343,7 +1364,7 @@ mod tests {
             .with(predicate::eq("secret_key"))
             .return_once(|_| Ok(Some("psecret".as_bytes().to_vec())));
 
-        let plugin = RhaiPlugin::new(script, babel)?;
+        let plugin = RhaiPlugin::from_str(script, babel)?;
         assert_eq!(
             r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data|file content|psecret"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
@@ -1359,7 +1380,7 @@ mod tests {
                 "Required minimum babel version is `777.777.777`, running is `{}`",
                 env!("CARGO_PKG_VERSION")
             ),
-            RhaiPlugin::new(script, MockBabelEngine::new())
+            RhaiPlugin::from_str(script, MockBabelEngine::new())
                 .unwrap_err()
                 .to_string()
         );
@@ -1442,7 +1463,7 @@ mod tests {
             .once()
             .returning(|| Ok(HashMap::default()));
 
-        let plugin = RhaiPlugin::new(script, babel)?;
+        let plugin = RhaiPlugin::from_str(script, babel)?;
         assert_eq!(
             ProtocolStatus {
                 state: DOWNLOADING_STATE_NAME.to_owned(),
@@ -1487,7 +1508,7 @@ mod tests {
                     stderr: "".to_string(),
                 })
             });
-        let plugin = RhaiPlugin::new("", babel)?;
+        let plugin = RhaiPlugin::from_str("", babel)?;
         assert_eq!(
             vec!["some_job".to_string()],
             plugin
@@ -1646,7 +1667,7 @@ mod tests {
             .once()
             .returning(|_| Ok(()));
 
-        let plugin = RhaiPlugin::new(script, babel)?;
+        let plugin = RhaiPlugin::from_str(script, babel)?;
         assert!(plugin.capabilities().iter().any(|v| v == "upload"));
         plugin.upload().unwrap();
         Ok(())
@@ -1938,7 +1959,7 @@ mod tests {
             )
             .once()
             .returning(|_, _, _, _| Ok(()));
-        let plugin = RhaiPlugin::new(script, babel)?;
+        let plugin = RhaiPlugin::from_str(script, babel)?;
         assert!(plugin.capabilities().iter().any(|v| v == "init"));
         plugin.init().unwrap();
         Ok(())
@@ -1947,20 +1968,20 @@ mod tests {
     #[test]
     fn test_errors_handling() -> Result<()> {
         let script = r#"
-    fn custom_method_with_exception(param) {
-        throw "some Rhai exception";
-        ""
-    }
-    
-    fn custom_failing_method(param) {
-        load_data()
-    }
-"#;
+            fn custom_method_with_exception(param) {
+                throw "some Rhai exception";
+                ""
+            }
+
+            fn custom_failing_method(param) {
+                load_data()
+            }
+        "#;
         let mut babel = MockBabelEngine::new();
         babel
             .expect_load_data()
             .return_once(|| bail!("some Rust error"));
-        let plugin = RhaiPlugin::new(script, babel)?;
+        let plugin = RhaiPlugin::from_str(script, babel)?;
         assert_eq!(
             "Rhai function 'custom_method_with_exception' returned error",
             plugin
