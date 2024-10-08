@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use eyre::Result;
+use std::path::PathBuf;
 use std::{fmt::Debug, net::IpAddr, path::Path};
 use tonic::{codegen::InterceptedService, transport::Channel};
 use uuid::Uuid;
@@ -167,8 +168,8 @@ pub trait VirtualMachine {
     async fn upgrade(&mut self, node_state: &NodeState) -> Result<()>;
     /// Try recover VM that is in INVALID state.
     async fn recover(&mut self) -> Result<()>;
-    /// Get plugin script content.
-    async fn plugin(&self) -> Result<String>;
+    /// Get plugin path.
+    async fn plugin_path(&self) -> Result<PathBuf>;
 }
 
 pub trait RecoverBackoff {

@@ -74,9 +74,9 @@ impl<P: Pal> MaybeNode<P> {
         );
         let bv_context = BvContext::from_config(api_config.config.read().await.clone());
         let vm = check!(pal.create_vm(&bv_context, &self.state).await, self);
-        let script = vm.plugin().await;
+        let script = vm.plugin_path().await;
         self.machine = Some(vm);
-        let script = check!(script, self);
+        let plugin_path = check!(script, self);
         let iface = bv_context.iface.clone();
         check!(
             pal.apply_firewall_config(NodeFirewallConfig {
@@ -100,7 +100,7 @@ impl<P: Pal> MaybeNode<P> {
                 node_env::new(&bv_context, &self.state),
                 pal.create_node_connection(node_id),
                 api_config,
-                |engine| RhaiPlugin::new(&script, engine),
+                |engine| RhaiPlugin::from_file(plugin_path, engine),
                 self.context.plugin_data.clone(),
                 self.scheduler_tx.clone()
             )
@@ -173,8 +173,8 @@ impl<P: Pal + Debug> Node<P> {
             .attach_vm(&bv_context, &state)
             .await
             .with_context(|| "attach vm failed")?;
-        let script = machine
-            .plugin()
+        let plugin_path = machine
+            .plugin_path()
             .await
             .with_context(|| "load rhai script failed")?;
         if machine.state().await == pal::VmState::RUNNING {
@@ -199,7 +199,7 @@ impl<P: Pal + Debug> Node<P> {
             node_env::new(&bv_context, &state),
             node_conn,
             api_config,
-            |engine| RhaiPlugin::new(&script, engine),
+            |engine| RhaiPlugin::from_file(plugin_path, engine),
             context.plugin_data.clone(),
             scheduler_tx,
         )
@@ -429,9 +429,9 @@ impl<P: Pal + Debug> Node<P> {
             self.stop(false).await?;
         }
         self.machine.upgrade(&desired_state).await?;
-        let script = self.machine.plugin().await?;
+        let plugin_path = self.machine.plugin_path().await?;
         self.babel_engine
-            .update_plugin(|engine| RhaiPlugin::new(&script, engine))
+            .update_plugin(|engine| RhaiPlugin::from_file(plugin_path, engine))
             .await?;
         self.pal
             .apply_firewall_config(NodeFirewallConfig {
@@ -468,9 +468,9 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Read script content and update plugin with metadata
     pub async fn reload_plugin(&mut self) -> Result<()> {
-        let script = self.machine.plugin().await?;
+        let plugin_path = self.machine.plugin_path().await?;
         self.babel_engine
-            .update_plugin(|engine| RhaiPlugin::new(&script, engine))
+            .update_plugin(|engine| RhaiPlugin::from_file(plugin_path, engine))
             .await
     }
 
@@ -657,8 +657,8 @@ pub mod tests {
     use tokio_stream::Stream;
     use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
-    pub fn testing_babel_path_absolute() -> String {
-        format!("{}/tests/babel.rhai", env!("CARGO_MANIFEST_DIR"))
+    pub fn testing_babel_path_absolute() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/babel.rhai")
     }
 
     #[derive(Debug, Default, Clone)]
@@ -763,7 +763,7 @@ pub mod tests {
             async fn start(&mut self) -> Result<()>;
             async fn upgrade(&mut self, node_state: &NodeState) -> Result<()>;
             async fn recover(&mut self) -> Result<()>;
-            async fn plugin(&self) -> Result<String>;
+            async fn plugin_path(&self) -> Result<PathBuf>;
         }
     }
 
@@ -1032,7 +1032,7 @@ pub mod tests {
     struct TestEnv {
         tmp_root: PathBuf,
         nodes_dir: PathBuf,
-        default_script: String,
+        default_plugin_path: PathBuf,
         tx: mpsc::Sender<scheduler::Action>,
         _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
@@ -1047,9 +1047,7 @@ pub mod tests {
             Ok(Self {
                 tmp_root,
                 nodes_dir,
-                default_script: fs::read_to_string(testing_babel_path_absolute())
-                    .await
-                    .unwrap(),
+                default_plugin_path: testing_babel_path_absolute(),
                 tx,
                 _async_panic_checker: Default::default(),
             })
@@ -1121,12 +1119,16 @@ pub mod tests {
             .in_sequence(&mut seq)
             .returning(move |_, _| {
                 let mut vm = MockTestVM::new();
-                vm.expect_plugin()
+                vm.expect_plugin_path()
                     .returning(|| bail!("Babel plugin not found"));
                 vm.expect_delete().returning(|| Ok(()));
                 Ok(vm)
             });
 
+        let malformed_rhai_path = test_env.tmp_root.join("malformed.rhai");
+        fs::write(&malformed_rhai_path, "malformed rhai script")
+            .await
+            .unwrap();
         pal.expect_create_vm()
             .with(
                 predicate::eq(bv_context.clone()),
@@ -1134,10 +1136,11 @@ pub mod tests {
             )
             .once()
             .in_sequence(&mut seq)
-            .returning(|_, _| {
+            .returning(move |_, _| {
                 let mut vm = MockTestVM::new();
-                vm.expect_plugin()
-                    .returning(|| Ok("malformed rhai script".to_string()));
+                let malformed_rhai_path = malformed_rhai_path.clone();
+                vm.expect_plugin_path()
+                    .returning(move || Ok(malformed_rhai_path.clone()));
                 vm.expect_delete().returning(|| Ok(()));
                 Ok(vm)
             });
@@ -1152,6 +1155,8 @@ pub mod tests {
             .in_sequence(&mut seq)
             .returning(dummy_connection_mock);
 
+        let empty_rhai_path = test_env.tmp_root.join("empty.rhai");
+        fs::write(&empty_rhai_path, "").await.unwrap();
         pal.expect_create_vm()
             .with(
                 predicate::eq(bv_context.clone()),
@@ -1159,9 +1164,11 @@ pub mod tests {
             )
             .once()
             .in_sequence(&mut seq)
-            .returning(|_, _| {
+            .returning(move |_, _| {
                 let mut vm = MockTestVM::new();
-                vm.expect_plugin().returning(|| Ok(Default::default()));
+                let empty_rhai_path = empty_rhai_path.clone();
+                vm.expect_plugin_path()
+                    .returning(move || Ok(empty_rhai_path.clone()));
                 vm.expect_delete().returning(|| Ok(()));
                 Ok(vm)
             });
@@ -1171,16 +1178,16 @@ pub mod tests {
             .in_sequence(&mut seq)
             .returning(|_| bail!("FW apply error"));
 
-        let testing_babel_script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_create_vm()
             .with(predicate::eq(bv_context), predicate::eq(node_state.clone()))
             .once()
             .in_sequence(&mut seq)
             .returning(move |_, _| {
                 let mut vm = MockTestVM::new();
-                let testing_babel_script = testing_babel_script.clone();
-                vm.expect_plugin()
-                    .returning(move || Ok(testing_babel_script.clone()));
+                let plugin_path = plugin_path.clone();
+                vm.expect_plugin_path()
+                    .returning(move || Ok(plugin_path.clone()));
                 Ok(vm)
             });
         pal.expect_apply_firewall_config()
@@ -1291,7 +1298,8 @@ pub mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _| {
                 let mut vm = MockTestVM::new();
-                vm.expect_plugin().returning(|| bail!("load plugin error"));
+                vm.expect_plugin_path()
+                    .returning(|| bail!("load plugin error"));
                 Ok(vm)
             });
 
@@ -1300,6 +1308,10 @@ pub mod tests {
             .once()
             .in_sequence(&mut seq)
             .returning(dummy_connection_mock);
+        let malformed_rhai_path = test_env.tmp_root.join("malformed.rhai");
+        fs::write(&malformed_rhai_path, "malformed rhai script")
+            .await
+            .unwrap();
         pal.expect_attach_vm()
             .with(
                 predicate::eq(bv_context.clone()),
@@ -1307,11 +1319,12 @@ pub mod tests {
             )
             .once()
             .in_sequence(&mut seq)
-            .returning(|_, _| {
+            .returning(move |_, _| {
                 let mut vm = MockTestVM::new();
                 vm.expect_state().returning(|| pal::VmState::SHUTOFF);
-                vm.expect_plugin()
-                    .returning(|| Ok("malformed rhai script".to_string()));
+                let malformed_rhai_path = malformed_rhai_path.clone();
+                vm.expect_plugin_path()
+                    .returning(move || Ok(malformed_rhai_path.clone()));
                 Ok(vm)
             });
 
@@ -1328,7 +1341,7 @@ pub mod tests {
                     .return_const(Default::default());
                 mock
             });
-        let script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_attach_vm()
             .with(
                 predicate::eq(bv_context.clone()),
@@ -1339,8 +1352,9 @@ pub mod tests {
             .returning(move |_, _| {
                 let mut vm = MockTestVM::new();
                 vm.expect_state().returning(|| pal::VmState::RUNNING);
-                let script = script.clone();
-                vm.expect_plugin().returning(move || Ok(script.clone()));
+                let plugin_path = plugin_path.clone();
+                vm.expect_plugin_path()
+                    .returning(move || Ok(plugin_path.clone()));
                 Ok(vm)
             });
 
@@ -1359,7 +1373,7 @@ pub mod tests {
                     .return_const(Default::default());
                 mock
             });
-        let script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_attach_vm()
             .with(
                 predicate::eq(bv_context.clone()),
@@ -1370,8 +1384,9 @@ pub mod tests {
             .returning(move |_, _| {
                 let mut vm = MockTestVM::new();
                 vm.expect_state().returning(|| pal::VmState::RUNNING);
-                let script = script.clone();
-                vm.expect_plugin().returning(move || Ok(script.clone()));
+                let plugin_path = plugin_path.clone();
+                vm.expect_plugin_path()
+                    .returning(move || Ok(plugin_path.clone()));
                 Ok(vm)
             });
         let mut babel_mock = MockTestBabelService::new();
@@ -1417,7 +1432,7 @@ pub mod tests {
         );
 
         assert_eq!(
-            "Expecting ';' to terminate this statement (line 1, position 11)",
+            "Syntax error: Expecting ';' to terminate this statement (line 1, position 11)",
             Node::attach(
                 pal.clone(),
                 config.clone(),
@@ -1472,15 +1487,15 @@ pub mod tests {
             mock
         });
         add_firewall_expectation(&mut pal, node_state.clone());
-        let babel_script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_create_vm().return_once(move |_, _| {
             let mut mock = MockTestVM::new();
-            let babel_script = babel_script.clone();
+            let plugin_path = plugin_path.clone();
             let mut seq = Sequence::new();
-            mock.expect_plugin()
+            mock.expect_plugin_path()
                 .once()
                 .in_sequence(&mut seq)
-                .returning(move || Ok(babel_script.clone()));
+                .returning(move || Ok(plugin_path.clone()));
             // already started
             mock.expect_state()
                 .once()
@@ -1648,15 +1663,15 @@ pub mod tests {
             mock
         });
         add_firewall_expectation(&mut pal, node_state.clone());
-        let babel_script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_create_vm().return_once(move |_, _| {
             let mut mock = MockTestVM::new();
-            let babel_script = babel_script.clone();
+            let plugin_path = plugin_path.clone();
             let mut seq = Sequence::new();
-            mock.expect_plugin()
+            mock.expect_plugin_path()
                 .once()
                 .in_sequence(&mut seq)
-                .returning(move || Ok(babel_script.clone()));
+                .returning(move || Ok(plugin_path.clone()));
             // already stopped
             mock.expect_state()
                 .once()
@@ -1764,13 +1779,13 @@ pub mod tests {
             mock
         });
         add_firewall_expectation(&mut pal, node_state.clone());
-        let babel_script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_create_vm().return_once(move |_, _| {
             let mut mock = MockTestVM::new();
-            let babel_script = babel_script.clone();
-            mock.expect_plugin()
+            let plugin_path = plugin_path.clone();
+            mock.expect_plugin_path()
                 .once()
-                .returning(move || Ok(babel_script.clone()));
+                .returning(move || Ok(plugin_path.clone()));
             Ok(mock)
         });
 
@@ -1863,13 +1878,13 @@ pub mod tests {
             mock
         });
         add_firewall_expectation(&mut pal, node_state.clone());
-        let babel_script = test_env.default_script.clone();
+        let plugin_path = test_env.default_plugin_path.clone();
         pal.expect_create_vm().return_once(move |_, _| {
             let mut mock = MockTestVM::new();
-            let babel_script = babel_script.clone();
-            mock.expect_plugin()
+            let plugin_path = plugin_path.clone();
+            mock.expect_plugin_path()
                 .once()
-                .returning(move || Ok(babel_script.clone()));
+                .returning(move || Ok(plugin_path.clone()));
             mock.expect_state().once().returning(|| VmState::RUNNING);
             Ok(mock)
         });
