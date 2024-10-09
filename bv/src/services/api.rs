@@ -313,7 +313,7 @@ where
                 new_firewall,
                 new_org_id,
                 new_org_name,
-                new_properties,
+                new_changes,
                 ..
             }) => {
                 let firewall_config = if let Some(firewall_config) = new_firewall {
@@ -329,9 +329,7 @@ where
                         new_org_id,
                         new_org_name,
                         HashMap::from_iter(
-                            new_properties
-                                .into_iter()
-                                .map(|prop| (prop.key, prop.value)),
+                            new_changes.into_iter().map(|prop| (prop.key, prop.value)),
                         ),
                     )
                     .await?;
@@ -476,7 +474,7 @@ impl TryFrom<pb::Node> for NodeState {
             uri: image_config.image_uri,
         };
         let properties = image_config
-            .properties
+            .changes
             .into_iter()
             .map(|p| (p.key, p.value))
             .collect();

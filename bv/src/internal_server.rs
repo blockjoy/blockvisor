@@ -543,7 +543,7 @@ where
                 placement: Some(common::NodePlacement {
                     placement: Some(common::node_placement::Placement::HostId(host_id)),
                 }),
-                set_properties: properties,
+                changes: properties,
                 image_id,
                 add_rules: vec![],
                 tags: None,
