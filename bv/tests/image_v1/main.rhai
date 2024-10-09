@@ -46,7 +46,7 @@ const PLUGIN_CONFIG = #{
 };
 
 fn application_status() {
-    "broadcasting"
+    #{state: "broadcasting", health: "healthy"}
 }
 
 fn height() {

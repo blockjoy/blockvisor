@@ -5,6 +5,7 @@ build:
 build-release:
 	cargo build -p blockvisord --target x86_64-unknown-linux-musl --release
 	strip target/x86_64-unknown-linux-musl/release/bv
+	strip target/x86_64-unknown-linux-musl/release/bib
 	strip target/x86_64-unknown-linux-musl/release/bvup
 	strip target/x86_64-unknown-linux-musl/release/blockvisord
 	strip target/x86_64-unknown-linux-musl/release/blockvisord-dev
@@ -31,20 +32,20 @@ bundle: bundle-base
 
 bundle-dev: bundle-base
 	cp target/x86_64-unknown-linux-musl/release/blockvisord-dev /tmp/bundle/blockvisor/bin/blockvisord
+	cp target/x86_64-unknown-linux-musl/release/bib /tmp/bundle/blockvisor/bin
 	rm -rf /tmp/bundle-dev.tar.gz
 	tar -C /tmp -czvf /tmp/bundle-dev.tar.gz bundle
 
-install: bundle
+ci-setup: bundle-base
+	cp target/x86_64-unknown-linux-musl/release/bib /tmp/bundle/blockvisor/bin
+	systemctl stop blockvisor.service || true
 	rm -rf /opt/blockvisor
 	/tmp/bundle/installer
-	cp -f bv/tests/babel.rhai /var/lib/blockvisor/images/testing/validator/0.0.1/; \
-
-reinstall:
-	systemctl stop blockvisor.service || true
-	make install
+	docker build -t test bv/tests/image_v1
+	bib config test-token
 	systemctl start blockvisor.service
 
-ci-clean:
+ci-cleanup:
 	bv node rm --all --yes || true
 	bv stop || true
 	apptainer instance stop -a || true
