@@ -1,22 +1,25 @@
-use crate::apptainer_machine::PLUGIN_PATH;
 use crate::{
-    apptainer_machine::PLUGIN_MAIN_FILENAME,
+    apptainer_machine::{PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
     bib_cli::{ImageCommand, ProtocolCommand},
     bv_config, firewall,
     internal_server::{self, NodeDisplayInfo},
     node_state::{NodeImage, NodeState, ProtocolImageKey, VmConfig, VmStatus},
     protocol,
     services::{self, ApiServiceConnector},
-    utils,
+    utils, workspace,
 };
-use babel_api::engine::NodeEnv;
-use babel_api::rhai_plugin_linter;
-use babel_api::utils::{BabelConfig, RamdiskConfiguration};
+use babel_api::{
+    engine::NodeEnv,
+    rhai_plugin_linter,
+    utils::{BabelConfig, RamdiskConfiguration},
+};
 use bv_utils::cmd::run_cmd;
 use eyre::anyhow;
 use petname::Petnames;
-use std::ffi::OsStr;
-use std::{net::IpAddr, path::Path, str::FromStr, time::Duration};
+use std::{
+    ffi::OsStr,
+    {net::IpAddr, path::Path, str::FromStr, time::Duration},
+};
 use tokio::fs;
 use tonic::transport::Endpoint;
 use tracing::info;
@@ -92,7 +95,7 @@ pub async fn process_image_command(
             let (ip, gateway) =
                 discover_ip_and_gateway(&bv_config.iface, ip, gateway, &nodes).await?;
 
-            bv_client
+            let node = bv_client
                 .create_dev_node(internal_server::CreateDevNodeRequest {
                     new_node_state: NodeState {
                         id: Uuid::new_v4(),
@@ -142,7 +145,17 @@ pub async fn process_image_command(
                         apptainer_config: None,
                     },
                 })
-                .await?;
+                .await?
+                .into_inner();
+            println!(
+                "Created new dev_node with ID `{}` and name `{}`\n{:#?}",
+                node.state.id, node.state.name, node.state
+            );
+            let _ = workspace::set_active_node(
+                &std::env::current_dir()?,
+                node.state.id,
+                &node.state.name,
+            );
         }
         ImageCommand::Check { props, path } => {
             let local_image: protocol::Image =

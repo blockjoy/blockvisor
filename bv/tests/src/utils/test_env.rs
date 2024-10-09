@@ -165,18 +165,21 @@ impl TestEnv {
 
     pub fn create_node(&self, image: &str, ip: &str) -> (String, String) {
         let mut cmd = Command::cargo_bin("bib").unwrap();
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join(image)
+            .join("babel.yaml");
         let cmd = cmd
             .args([
                 "image",
                 "play",
-                "--path",
-                image,
                 "--props",
                 r#"{"network": "test", "TESTING_PARAM":"anything"}"#,
                 "--gateway",
                 "216.18.214.193",
                 "--ip",
                 ip,
+                &path.to_string_lossy(),
             ])
             .env("BV_ROOT", &self.bv_root);
         let output = cmd.output().unwrap();
@@ -185,7 +188,9 @@ impl TestEnv {
         println!("create stdout: {stdout}");
         println!("create stderr: {stderr}");
         let vm_id = stdout
-            .trim_start_matches(&format!("Created new node from `{image}` image with ID "))
+            .trim_start_matches(&format!(
+                "Created new dev_node from `{image}` image with ID "
+            ))
             .split('`')
             .nth(1)
             .unwrap()

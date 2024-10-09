@@ -658,7 +658,7 @@ pub mod tests {
     use tonic::{transport::Channel, Request, Response, Status, Streaming};
 
     pub fn testing_babel_path_absolute() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/babel.rhai")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/image_v1/main.rhai")
     }
 
     #[derive(Debug, Default, Clone)]
