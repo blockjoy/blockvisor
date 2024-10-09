@@ -75,7 +75,15 @@ pub enum ImageCommand {
         path: PathBuf,
     },
 
-    Check,
+    /// Run sanity checks on given image and embedded plugin.
+    Check {
+        /// The properties that are passed to the node in form of JSON string.
+        #[clap(long)]
+        props: Option<String>,
+
+        #[clap(default_value = "babel.yaml")]
+        path: PathBuf,
+    },
 
     /// Push image to the API.
     Push {

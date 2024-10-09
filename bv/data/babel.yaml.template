@@ -1,73 +1,146 @@
-version: 0.0.1 # Semantic version of the image. Must be increased according to the change type (major.minor.patch)
-container_uri: blockjoy/{{ protocol_key }}/{{ variant_key }}/0.0.1 # Associated container image uri. May be arbitrary, but recommended convention is <org>/<protocol_key>/<variant_key>/<version>
+# Semantic version of the image. Must be increased according to the change type (major.minor.patch)
+version: 0.0.1
+
+# Associated container image uri. May be arbitrary, but recommended convention is docker://<org>/<protocol_key>/<variant_key>/<version>
+# To test with local image use docker-daemon://<image_tag>:latest
+container_uri: docker://blockjoy/{{ protocol_key }}/{{ variant_key }}/0.0.1
+
 key:
-  protocol_key: {{ protocol_key }} # Name of protocol that is expected to be already populated in the API.
-  variant_key: {{ variant_key }} # The same protocol can have different implementations. This field let identify what implementation(s) has been used.
-                                 # Variant name may additional contain protocol network name e.g. "eth-mainnet".
-                                 # This value will be available in a Rhai runtime via `node_env().variant_key`.
-sku_code: SKU_code # The SKU code for this version (e.g. ETH-MN).
-org_id: null # Uuid of organization to which protocol belongs to, or null if public.
-description: Example image description # Brief image description.
-visibility: private # Image visibility, allowed values: `public`, `dev`, `private`.
+
+  # Name of protocol that is expected to be already populated in the API.
+  protocol_key: {{ protocol_key }}
+
+  # The same protocol can have different implementations. This field let identify what implementation(s) has been used.
+  # Variant name may additional contain protocol network name e.g. "eth-mainnet".
+  # This value will be available in a Rhai runtime via `node_env().variant_key`.
+  variant_key: {{ variant_key }}
+
+# The SKU code for this version (e.g. ETH-MN).
+sku_code: SKU_code
+
+# Uuid of organization to which protocol belongs to, or null if public.
+org_id: null
+
+# Brief image description.
+description: Example image description
+
+# Image visibility, allowed values: `public`, `dev`, `private`.
+visibility: private
+
 properties:
-- key: arbitrary text property # Unique property key. Property value will be available in a Rhai runtime via `node_params().<key>` (e.g. `node_params().arbitrary_property`).
-  description: this is some text property example # Brief property description.
-  dynamic_value: true # If it can be updated after node is created, or it can be set only once on node creation.
-  default_value: default_value # Default property value, if not provided by user.
-  ui_type: !text # The way it should be presented to the user.
-    new_archive: false # If it requires different protocol data set (affect archive_id).
-    add_cpu: 1 # How existence of property affect required CPU
-    add_memory_bytes: -1 # How existence of property affect required memory
-    add_disk_bytes: 10 # How existence of property affect required disk space
-- key: switch property
-  description: this is some switch example
-  dynamic_value: true
-  default_value: off_value
-  ui_type: !switch
-    on:
-      value: on_value
-      impact:
-        new_archive: true
-        add_cpu: 3
-        add_memory_bytes: 10000000
-        add_disk_bytes: 10000000000
-    off:
-      value: off_value
-      impact: null
-- key: enum property
-  description: this is some enum example
-  required: true
-  dynamic_value: true
-  default_value: variant_a
-  ui_type: !enum
-  - value: variant_a
-    impact: null
-  - value: variant_b
-    impact: null
-  - value: variant_c
-    impact:
-      new_archive: true
-      add_cpu: -1
-      add_memory_bytes: 1000000
-      add_disk_bytes: 1000000000
+
+  # Unique property key. Property value will be available in a Rhai runtime via `node_params().<key>` (e.g. `node_params().arbitrary_property`).
+  - key: arbitrary text property
+
+    # Brief property description.
+    description: this is some text property example
+
+    # If it can be updated after node is created, or it can be set only once on node creation.
+    dynamic_value: true
+
+    # Default property value, if not provided by user.
+    default_value: default_value
+
+    # The way it should be presented to the user.
+    ui_type: !text
+
+      # If it requires different protocol data set (affect archive_id).
+      new_archive: false
+
+      # How existence of property affect required CPU.
+      add_cpu: 1
+
+      # How existence of property affect required memory.
+      add_memory_bytes: -1
+
+      # How existence of property affect required disk space.
+      add_disk_bytes: 10
+
+  - key: switch property
+    description: this is some switch example
+    dynamic_value: true
+    default_value: off_value
+    ui_type: !switch
+      on:
+        value: on_value
+        impact:
+          new_archive: true
+          add_cpu: 3
+          add_memory_bytes: 10000000
+          add_disk_bytes: 10000000000
+      off:
+        value: off_value
+        impact: null
+
+  - key: enum property
+    description: this is some enum example
+    required: true
+    dynamic_value: true
+    default_value: variant_a
+    ui_type: !enum
+      - value: variant_a
+        impact: null
+      - value: variant_b
+        impact: null
+      - value: variant_c
+        impact:
+          new_archive: true
+          add_cpu: -1
+          add_memory_bytes: 1000000
+          add_disk_bytes: 1000000000
+
 firewall_config:
-  default_in: deny # Fallback action for inbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
-  default_out: allow # Fallback action for outbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
+
+  # Fallback action for inbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
+  default_in: deny
+
+  # Fallback action for outbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
+  default_out: allow
+
   rules:
-  - key: example_rule # Unique rule key.
-    description: null # Brief rule description.
-    protocol: both # Allowed values: `tcp`, `udp`, `both`.
-    direction: in # Traffic direction for which rule applies. Allowed values: `in`, `out`.
-    action: allow # Action applied on packet that match rule. Allowed values: `deny`, `allow`, `reject`.
-    ips:
-    - ip: 1.2.3.4/30 # IP(s) compliant with CIDR notation.
-      name: authorize client ip # Brief ip description.
-    ports:
-    - port: 12901 # Port number.
-      name: service port # Brief port description.
-min_cpu: 1 # Minimum CPU required to run image.
-min_memory_bytes: 1000000000 # Minimum RAM memory required to run image.
-min_disk_bytes: 2000000000 # Minimum disk space required to run image.
+
+    # Unique rule key.
+    - key: example_rule
+      # Brief rule description.
+      description: null
+
+      # Allowed values: `tcp`, `udp`, `both`.
+      protocol: both
+
+      # Traffic direction for which rule applies. Allowed values: `in`, `out`.
+      direction: in
+
+      # Action applied on packet that match rule. Allowed values: `deny`, `allow`, `reject`.
+      action: allow
+
+      ips:
+
+        # IP(s) compliant with CIDR notation.
+        - ip: 1.2.3.4/30
+
+          # Brief ip description.
+          name: authorize client ip
+
+      ports:
+
+        # Port number.
+        - port: 12901
+
+          # Port number.
+          name: service port
+
+# Minimum CPU required to run image.
+min_cpu: 1
+
+# Minimum RAM memory required to run image.
+min_memory_bytes: 1000000000
+
+# Minimum disk space required to run image.
+min_disk_bytes: 2000000000
+
 ramdisks:
-- mount: /mnt/ramdisk # Path to mount RAM disk to.
-  size_bytes: 100000000 # RAM disk size.
+
+  # Path to mount RAM disk to.
+  - mount: /mnt/ramdisk
+    # RAM disk size.
+    size_bytes: 100000000
