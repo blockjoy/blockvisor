@@ -27,6 +27,68 @@ description: Example image description
 # Image visibility, allowed values: `public`, `dev`, `private`.
 visibility: private
 
+# Minimum CPU required to run image.
+min_cpu: 1
+
+# Minimum RAM memory required to run image.
+min_memory_bytes: 1000000000
+
+# Minimum disk space required to run image.
+min_disk_bytes: 2000000000
+
+# Ram disks to be created inside the node.
+ramdisks:
+
+  # Path to mount RAM disk to.
+  - mount: /mnt/ramdisk
+    # RAM disk size.
+    size_bytes: 100000000
+
+# Default firewall configuration.
+firewall_config:
+
+  # Fallback action for inbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
+  default_in: deny
+
+  # Fallback action for outbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
+  default_out: allow
+
+  # List of firewall rules.
+  rules:
+
+    # Unique rule key.
+    - key: example_rule
+      # Brief rule description.
+      description: null
+
+      # Allowed values: `tcp`, `udp`, `both`.
+      protocol: both
+
+      # Traffic direction for which rule applies. Allowed values: `in`, `out`.
+      direction: in
+
+      # Action applied on packet that match rule. Allowed values: `deny`, `allow`, `reject`.
+      action: allow
+
+      # List of IPs for which rule apply.
+      ips:
+
+        # IP(s) compliant with CIDR notation.
+        - ip: 1.2.3.4/30
+
+          # Brief ip description.
+          name: authorize client ip
+
+      # List of ports for which rule apply.
+      ports:
+
+        # Port number.
+        - port: 12901
+
+          # Port number.
+          name: service port
+
+# List of image properties, allowed values and the way they affect required resources.
 properties:
 
   # Unique property key. Property value will be available in a Rhai runtime via `node_params().<key>` (e.g. `node_params().arbitrary_property`).
@@ -74,7 +136,6 @@ properties:
 
   - key: enum property
     description: this is some enum example
-    required: true
     dynamic_value: true
     default_value: variant_a
     ui_type: !enum
@@ -88,59 +149,3 @@ properties:
           add_cpu: -1
           add_memory_bytes: 1000000
           add_disk_bytes: 1000000000
-
-firewall_config:
-
-  # Fallback action for inbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
-  default_in: deny
-
-  # Fallback action for outbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
-  default_out: allow
-
-  rules:
-
-    # Unique rule key.
-    - key: example_rule
-      # Brief rule description.
-      description: null
-
-      # Allowed values: `tcp`, `udp`, `both`.
-      protocol: both
-
-      # Traffic direction for which rule applies. Allowed values: `in`, `out`.
-      direction: in
-
-      # Action applied on packet that match rule. Allowed values: `deny`, `allow`, `reject`.
-      action: allow
-
-      ips:
-
-        # IP(s) compliant with CIDR notation.
-        - ip: 1.2.3.4/30
-
-          # Brief ip description.
-          name: authorize client ip
-
-      ports:
-
-        # Port number.
-        - port: 12901
-
-          # Port number.
-          name: service port
-
-# Minimum CPU required to run image.
-min_cpu: 1
-
-# Minimum RAM memory required to run image.
-min_memory_bytes: 1000000000
-
-# Minimum disk space required to run image.
-min_disk_bytes: 2000000000
-
-ramdisks:
-
-  # Path to mount RAM disk to.
-  - mount: /mnt/ramdisk
-    # RAM disk size.
-    size_bytes: 100000000
