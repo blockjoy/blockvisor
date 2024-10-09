@@ -1,4 +1,5 @@
 use crate::apptainer_machine::ApptainerMachine;
+use crate::pal::VirtualMachine;
 use crate::{
     apptainer_machine, bv_config,
     bv_config::{ApptainerConfig, SharedConfig},
@@ -145,9 +146,13 @@ impl Pal for ApptainerPlatform {
         bv_context: &BvContext,
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine> {
-        let vm = self.new_vm(bv_context, node_state).await?;
-        vm.create().await?;
-        Ok(vm)
+        let mut vm = self.new_vm(bv_context, node_state).await?;
+        if let Err(err) = vm.create().await {
+            vm.delete().await?;
+            Err(err)
+        } else {
+            Ok(vm)
+        }
     }
 
     async fn attach_vm(
