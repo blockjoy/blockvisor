@@ -79,7 +79,6 @@ pub async fn new(
     let chroot_dir = build_rootfs_dir(&node_dir);
     let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
     let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
-    fs::create_dir_all(&chroot_dir).await?;
     let data_dir = node_dir.join(DATA_DIR);
     fs::create_dir_all(&data_dir).await?;
     Ok(ApptainerMachine {
@@ -111,6 +110,7 @@ impl ApptainerMachine {
                 "apptainer",
                 [
                     OsStr::new("build"),
+                    OsStr::new("--force"),
                     OsStr::new("--sandbox"),
                     &self.chroot_dir.clone().into_os_string(),
                     OsStr::new(&self.image_uri),
@@ -342,18 +342,30 @@ impl ApptainerMachine {
 }
 
 async fn is_built(path: &Path) -> Result<bool> {
-    let labels_out: serde_json::Value = run_cmd("apptainer", ["-d", "--json"])
+    if path.exists() {
+        let labels_out: serde_json::Value = run_cmd(
+            "apptainer",
+            [
+                OsStr::new("inspect"),
+                OsStr::new("-d"),
+                OsStr::new("--json"),
+                path.as_os_str(),
+            ],
+        )
         .await
         .with_context(|| {
             format!(
-                "can't check if {} vm is already built, `apptainer -d`",
+                "can't check if {} vm is already built, `apptainer inspect -d`",
                 path.display()
             )
         })
         .and_then(|out| {
-            serde_json::from_str(&out).with_context(|| "invalid `apptainer -d` output")
+            serde_json::from_str(&out).with_context(|| "invalid `apptainer inspect -d` output")
         })?;
-    Ok(labels_out["data"]["attributes"]["deffile"].is_string())
+        Ok(labels_out["data"]["attributes"]["deffile"].is_string())
+    } else {
+        Ok(false)
+    }
 }
 
 #[async_trait]
