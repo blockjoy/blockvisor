@@ -1,3 +1,4 @@
+use crate::apptainer_machine::PLUGIN_PATH;
 use crate::{
     apptainer_machine::PLUGIN_MAIN_FILENAME,
     bib_cli::{ImageCommand, ProtocolCommand},
@@ -8,9 +9,13 @@ use crate::{
     services::{self, ApiServiceConnector},
     utils,
 };
+use babel_api::engine::NodeEnv;
+use babel_api::rhai_plugin_linter;
 use babel_api::utils::{BabelConfig, RamdiskConfiguration};
+use bv_utils::cmd::run_cmd;
 use eyre::anyhow;
 use petname::Petnames;
+use std::ffi::OsStr;
 use std::{net::IpAddr, path::Path, str::FromStr, time::Duration};
 use tokio::fs;
 use tonic::transport::Endpoint;
@@ -58,7 +63,7 @@ pub async fn process_image_command(
         }
         ImageCommand::ContainerUri { path } => {
             let local_image: protocol::Image =
-                serde_json::from_str(&fs::read_to_string(path).await?)?;
+                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             println!("{}", local_image.container_uri);
         }
         ImageCommand::Play {
@@ -76,10 +81,10 @@ pub async fn process_image_command(
             )
             .await?;
             let local_image: protocol::Image =
-                serde_json::from_str(&fs::read_to_string(path).await?)?;
+                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
 
             let properties = if let Some(props) = props {
-                serde_json::from_str(&props)?
+                serde_yaml::from_str(&props)?
             } else {
                 Default::default()
             };
@@ -139,21 +144,60 @@ pub async fn process_image_command(
                 })
                 .await?;
         }
-        ImageCommand::Check => {
-            // TODO MJR
-            // let node_context = NodeContext::build(&bv_root(), id);
-            // let (script, _) = node_context
-            //     .load_script(&node_context.node_dir.join(ROOTFS_DIR))
-            //     .await?;
-            // println!(
-            //     "Plugin linter: {:?}",
-            //     rhai_plugin_linter::check(&script, node_info.properties)
-            // );
+        ImageCommand::Check { props, path } => {
+            let local_image: protocol::Image =
+                serde_yaml::from_str(&fs::read_to_string(&path).await?)?;
+            let properties = if let Some(props) = props {
+                serde_yaml::from_str(&props)?
+            } else {
+                Default::default()
+            };
+            let tmp_dir = tempdir::TempDir::new("bib_check")?;
+            let rootfs_path = tmp_dir.path();
+            run_cmd(
+                "apptainer",
+                [
+                    OsStr::new("build"),
+                    OsStr::new("--sandbox"),
+                    OsStr::new("--force"),
+                    rootfs_path.as_os_str(),
+                    OsStr::new(&local_image.container_uri),
+                ],
+            )
+            .await
+            .map_err(|err| {
+                anyhow!(
+                    "failed to build sandbox for '{}' in `{}`: {err:#}",
+                    path.display(),
+                    rootfs_path.display(),
+                )
+            })?;
+            println!(
+                "Plugin linter: {:?}",
+                rhai_plugin_linter::check(
+                    rootfs_path.join(PLUGIN_PATH).join(PLUGIN_MAIN_FILENAME),
+                    NodeEnv {
+                        node_id: "node-id".to_string(),
+                        node_name: "node_name".to_string(),
+                        node_version: local_image.version,
+                        node_protocol: local_image.key.protocol_key,
+                        node_variant: local_image.key.variant_key,
+                        node_ip: "1.2.3.4".to_string(),
+                        node_gateway: "4.3.2.1".to_string(),
+                        dev_mode: true,
+                        bv_host_id: "host-id".to_string(),
+                        bv_host_name: "nostname".to_string(),
+                        bv_api_url: "none.com".to_string(),
+                        org_id: "org-id".to_string(),
+                    },
+                    properties,
+                )
+            );
         }
         ImageCommand::Push { path } => {
             let mut client = services::protocol::ProtocolService::new(connector).await?;
             let local_image: protocol::Image =
-                serde_json::from_str(&fs::read_to_string(path).await?)?;
+                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             let protocol_version_id =
                 match client.get_protocol_version(local_image.key.clone()).await? {
                     Some(remote) if remote.semantic_version == local_image.version => {
@@ -212,7 +256,7 @@ pub async fn process_protocol_command(
         }
         ProtocolCommand::Push { path } => {
             let local_protocols: Vec<protocol::Protocol> =
-                serde_json::from_str(&fs::read_to_string(path).await?)?;
+                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             for local in local_protocols {
                 if let Some(remote) = protocols.iter().find(|protocol| protocol.key == local.key) {
                     client
@@ -346,6 +390,9 @@ pub mod tests {
         )
         .unwrap();
 
-        serde_yaml::from_str::<protocol::Image>(&fs::read_to_string(babel_path).unwrap()).unwrap();
+        let image =
+            serde_yaml::from_str::<protocol::Image>(&fs::read_to_string(babel_path).unwrap())
+                .unwrap();
+        println!("{image:?}");
     }
 }

@@ -13,9 +13,19 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::Level;
 
-pub fn check(plugin_path: PathBuf, node_properties: HashMap<String, String>) -> eyre::Result<()> {
+pub fn check(
+    plugin_path: PathBuf,
+    node_env: NodeEnv,
+    node_properties: HashMap<String, String>,
+) -> eyre::Result<()> {
     let mut warnings = vec![];
-    let rhai_plugin = RhaiPlugin::from_file(plugin_path, LinterEngine { node_properties })?;
+    let rhai_plugin = RhaiPlugin::from_file(
+        plugin_path,
+        LinterEngine {
+            node_properties,
+            node_env,
+        },
+    )?;
     if rhai_plugin.bare.plugin_config.is_none() {
         warnings.push(format!(
             "Deprecated API used: missing {PLUGIN_CONFIG_CONST_NAME}"
@@ -31,6 +41,7 @@ pub fn check(plugin_path: PathBuf, node_properties: HashMap<String, String>) -> 
 
 struct LinterEngine {
     node_properties: HashMap<String, String>,
+    node_env: NodeEnv,
 }
 
 impl Engine for LinterEngine {
@@ -121,7 +132,7 @@ impl Engine for LinterEngine {
     }
 
     fn node_env(&self) -> NodeEnv {
-        Default::default()
+        self.node_env.clone()
     }
 
     fn save_data(&self, _value: &str) -> eyre::Result<()> {
