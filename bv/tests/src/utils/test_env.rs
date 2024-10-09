@@ -164,11 +164,12 @@ impl TestEnv {
     }
 
     pub fn create_node(&self, image: &str, ip: &str) -> (String, String) {
-        let mut cmd = Command::cargo_bin("bv").unwrap();
+        let mut cmd = Command::cargo_bin("bib").unwrap();
         let cmd = cmd
             .args([
-                "node",
-                "create",
+                "image",
+                "play",
+                "--path",
                 image,
                 "--props",
                 r#"{"network": "test", "TESTING_PARAM":"anything"}"#,
@@ -176,9 +177,6 @@ impl TestEnv {
                 "216.18.214.193",
                 "--ip",
                 ip,
-                "--network",
-                "test",
-                "--dev-mode",
             ])
             .env("BV_ROOT", &self.bv_root);
         let output = cmd.output().unwrap();
