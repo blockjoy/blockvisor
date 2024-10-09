@@ -22,66 +22,10 @@
 			  "id": "CREATE_NETWORK_NAME_ID",
 			  "type": "promptString",
 			  "description": "network name"
-			},
-			{
-			  "id": "CLONE_SOURCE_IMAGE_ID",
-			  "type": "promptString",
-			  "description": "source image id"
-			},
-			{
-			  "id": "CLONE_DESTINATION_IMAGE_ID",
-			  "type": "promptString",
-			  "description": "destination image id"
-			},
-			{
-			  "id": "CREATE_IMAGE_ID",
-			  "type": "promptString",
-			  "description": "created image id"
-			},
-			{
-			  "id": "CREATE_ROOTFS_SIZE",
-			  "type": "promptString",
-			  "description": "RootFS size in GB"
-			},
-			{
-			  "id": "AWS_ACCESS_KEY_ID",
-			  "type": "promptString",
-			  "description": "AWS access key",
-			  "password": true
-			},
-			{
-			  "id": "AWS_SECRET_ACCESS_KEY_ID",
-			  "type": "promptString",
-			  "description": "AWS secret access key",
-			  "password": true
-			},
-			{
-			  "id": "AWS_ENDPOINT_ID",
-			  "type": "promptString",
-			  "description": "AWS endpoint url",
-			  "default": "https://19afdffb308beea3e9c1ef3a95085d3b.r2.cloudflarestorage.com"
-			},
-			{
-			  "id": "AWS_REGION_ID",
-			  "type": "promptString",
-			  "description": "AWS region",
-			  "default": "us-east-1"
 			}
 		],
 		"version": "0.2.0",
 		"configurations": [
-			{
-				"command": "bv image clone ${input:CLONE_SOURCE_IMAGE_ID} ${input:CLONE_DESTINATION_IMAGE_ID}",
-				"name": "image clone",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "bv image create ${input:CREATE_IMAGE_ID} --rootfs-size ${input:CREATE_ROOTFS_SIZE}",
-				"name": "image create",
-				"request": "launch",
-				"type": "f5anything"
-			},
 			{
 				"command": "bv node create --network ${input:CREATE_NETWORK_NAME_ID} --props ${input:CREATE_PROPS_ID}",
 				"name": "node create",
@@ -95,14 +39,14 @@
 				"type": "f5anything"
 			},
 			{
-				"command": "apptainer shell instance://$(cat .bv-workspace |jq .active_node.name| xargs)",
+				"command": "bv node shell",
 				"name": "node shell",
 				"request": "launch",
 				"type": "f5anything"
 			},
 			{
-				"command": "bv node check",
-				"name": "node check",
+				"command": "bv node info",
+				"name": "node info",
 				"request": "launch",
 				"type": "f5anything"
 			},
@@ -124,18 +68,6 @@
 				"request": "launch",
 				"type": "f5anything"
 			},
-			{
-				"command": "bv image capture",
-				"name": "image capture",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "export AWS_ACCESS_KEY_ID=${input:AWS_ACCESS_KEY_ID} && export AWS_SECRET_ACCESS_KEY=${input:AWS_SECRET_ACCESS_KEY_ID} && bv image upload",
-				"name": "image upload",
-				"request": "launch",
-				"type": "f5anything"
-			}
 			{
 				"command": "bv node restart",
 				"name": "node restart",
@@ -163,12 +95,6 @@
 			{
 				"command": "bv node capabilities",
 				"name": "node capabilities",
-				"request": "launch",
-				"type": "f5anything"
-			},
-			{
-				"command": "bv node metrics",
-				"name": "node metrics",
 				"request": "launch",
 				"type": "f5anything"
 			},
