@@ -60,9 +60,16 @@ Functions listed below are required by BV to work properly.
   finally starts configured services.
 
   See [minimalistic example](examples/init_minimal.rhai) or go to [Protocol Data Archives](#protocol-data-archives) chapter for example including download step)
-- `application_status()` - Returns protocol application status.
-  <br>**Allowed return values**: _provisioning_, _broadcasting_, _cancelled_, _delegating_, _delinquent_, _disabled_, _earning_, _electing_, _elected_, _exported_, _ingesting_, _mining_, _minting_, _processing_, _relaying_, _delete_pending_, _deleting_, _deleted_, _provisioning_pending_, _update_pending_, _updating_, _initializing_, _downloading_, _uploading_
-  <br>**Following values indicate that BV should not gather metrics for given node**: _initializing_, _downloading_, _uploading_
+- `app_status()` - Returns protocol application status in form of following structure.
+```rust
+{
+  // Arbitrary application state name.
+  state: String,
+  // Node health behind the state. One of healthy, neutral, unhealthy.
+  health: NodeHealth,
+}
+```
+e.g. `#{state: "broadcasting", health: "healthy"}`
 
 ### Functions that SHOULD be implemented by Plugin
 
