@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
     let bv_root = bv_root();
 
     match args.command {
-        Command::Connect(bib_cli::ConnectArgs {
+        Command::Config(bib_cli::ConfigArgs {
             token,
             blockjoy_api_url,
         }) => {

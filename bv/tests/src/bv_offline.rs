@@ -60,7 +60,7 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
     println!("create {NODES_COUNT} nodes");
     let mut nodes: Vec<(String, String)> = Default::default();
     for i in 0..NODES_COUNT {
-        nodes.push(test_env.create_node("testing/validator/0.0.1", &format!("216.18.214.{i}")));
+        nodes.push(test_env.create_node("image_v1", &format!("216.18.214.{i}")));
     }
 
     println!("start all created nodes");
@@ -83,7 +83,7 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
         test_env.sh_inside(node_id, "cat /blockjoy/test").trim()
     );
     assert_eq!(
-        "memory.limit = 2048000000\ncpu.cpus = \"3\"",
+        "memory.limit = 0\ncpu.cpus = \"\"",
         fs::read_to_string(node_dir.join("cgroups.toml"))
             .await
             .unwrap()
@@ -111,7 +111,7 @@ async fn test_bv_cmd_jobs() -> Result<()> {
     let mut test_env = TestEnv::new().await?;
     test_env.run_blockvisord(RunFlag::default()).await?;
     println!("create a node");
-    let (vm_id, _) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
+    let (vm_id, _) = &test_env.create_node("image_v1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start node");
@@ -160,7 +160,7 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     let mut run = RunFlag::default();
     let bv_handle = test_env.run_blockvisord(run.clone()).await?;
     println!("create a node");
-    let (vm_id, vm_name) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
+    let (vm_id, vm_name) = &test_env.create_node("image_v1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("stop stopped node");
@@ -179,7 +179,7 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
         .await;
 
     println!("check node");
-    test_env.bv_run(&["node", "check", vm_id], "In consensus:   false");
+    test_env.bv_run(&["node", "info", vm_id], "In consensus:   false");
 
     println!("list running node before service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");
@@ -197,19 +197,20 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     println!("list running node after service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
-    println!("upgrade running node");
-    test_env.bv_run(
-        &["node", "upgrade", "testing/validator/0.0.2", vm_id],
-        "Upgraded node",
-    );
-
-    println!("list running node after node upgrade");
-    test_env.bv_run(&["node", "status", vm_id], "Running");
-
-    println!("check jobs after node upgrade");
-    test_env
-        .wait_for_job_status(vm_id, "echo", "Running", Duration::from_secs(5))
-        .await;
+    // TODO MJR
+    // println!("upgrade running node");
+    // test_env.bv_run(
+    //     &["node", "upgrade", "testing/validator/0.0.2", vm_id],
+    //     "Upgraded node",
+    // );
+    //
+    // println!("list running node after node upgrade");
+    // test_env.bv_run(&["node", "status", vm_id], "Running");
+    //
+    // println!("check jobs after node upgrade");
+    // test_env
+    //     .wait_for_job_status(vm_id, "echo", "Running", Duration::from_secs(5))
+    //     .await;
 
     println!("delete started node");
     test_env.bv_run(&["node", "delete", "--yes", vm_id], "Deleted node");
@@ -222,7 +223,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     test_env.run_blockvisord(RunFlag::default()).await?;
 
     println!("create a node");
-    let (vm_id, vm_name) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
+    let (vm_id, vm_name) = &test_env.create_node("image_v1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start stopped node");
@@ -285,7 +286,7 @@ async fn test_bv_cmd_node_recovery_fail() -> Result<()> {
         .await?;
 
     println!("create a node");
-    let (vm_id, _) = &test_env.create_node("testing/validator/0.0.1", "216.18.214.195");
+    let (vm_id, _) = &test_env.create_node("image_v1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start stopped node");

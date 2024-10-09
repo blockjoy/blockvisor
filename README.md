@@ -58,7 +58,6 @@ used during debugging issues, not printed by default
 - `/var/lib/blockvisor/nodes/state.json` nodes_manager state persistence
 - `/var/lib/blockvisor/nodes/<uuid>/` node specific data
 - `/var/lib/blockvisor/nodes/<uuid>/state.json` node state persistence
-- `/var/lib/blockvisor/nodes/<uuid>/babel.rhai` node specific Babel plugin
 - `/var/lib/blockvisor/nodes/<uuid>/plugin.data` Babel plugin data persistence (see load_data/save_data functions in [RHAI plugin scripting guide](babel_api/rhai_plugin_guide.md))
 - `/var/lib/blockvisor/nodes/<uuid>/rootfs/` node rootfs (from `os.img`)
 - `/var/lib/blockvisor/nodes/<uuid>/data/` protocol data dir, bind to node `/blockjoy/`, persist node upgrade
@@ -68,7 +67,6 @@ used during debugging issues, not printed by default
 - `/usr/bin/babel`
 - `/usr/bin/babel_job_runner`
 - `/etc/babel.conf`
-- `/etc/bvignore`
 - `/var/lib/babel/jobs/config/<job_name>.cfg`
 - `/var/lib/babel/jobs/status/<job_name>.status`
 - `/var/lib/babel/jobs/status/<job_name>.progress`
@@ -76,7 +74,7 @@ used during debugging issues, not printed by default
 - `/var/lib/babel/jobs_monitor.socket`
 - `/var/lib/babel/node_env`
 - `/var/lib/babel/post_setup.sh`
-- `/var/lib/babel/base.rhai` base config definition
+- `/var/lib/babel/plugin/*.rhai` node specific Babel plugin files
 - `/blockjoy/.babel_jobs/` archive jobs (e.g. download) metadata dir, in particular `download.completed` file
 - `/blockjoy/protocol_data/` directory where protocol data are downloaded (uploaded from)
 

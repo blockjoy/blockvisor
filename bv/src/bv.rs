@@ -373,7 +373,10 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 )
             );
             let metrics = client.get_node_metrics(id).await?.into_inner();
-            println!("App Status:     {}", fmt_opt(metrics.application_status));
+            println!(
+                "Protocol Status:     {}",
+                fmt_opt(metrics.application_status)
+            );
             println!("Block height:   {}", fmt_opt(metrics.height));
             println!("Block age:      {}", fmt_opt(metrics.block_age));
             println!("In consensus:   {}", fmt_opt(metrics.consensus));

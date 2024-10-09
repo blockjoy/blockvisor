@@ -12,7 +12,7 @@ pub struct App {
 }
 
 #[derive(Args)]
-pub struct ConnectArgs {
+pub struct ConfigArgs {
     /// Client authentication token.
     pub token: String,
 
@@ -24,7 +24,7 @@ pub struct ConnectArgs {
 #[derive(Subcommand)]
 pub enum Command {
     /// Connect bib to the API.
-    Connect(ConnectArgs),
+    Config(ConfigArgs),
 
     /// Manage images and send them to the API.
     #[clap(alias = "img")]
