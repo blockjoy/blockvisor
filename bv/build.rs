@@ -1,16 +1,21 @@
-use std::path::Path;
-use std::{env, fs};
-
 use clap::CommandFactory;
 use eyre::{Context, Result};
+use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 const PROTO_DIRS: &[&str] = &["./proto"];
 const EXCLUDE_DIRS: &[&str] = &[".direnv"];
 
-include!("src/bv_cli.rs");
+mod bv {
+    include!("src/bv_cli.rs");
+}
 
+mod bib {
+    include!("src/bib_cli.rs");
+}
 fn main() -> Result<()> {
-    let mut app = App::command();
+    let mut bv = bv::App::command();
+    let mut bib = bib::App::command();
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let mut iter = out_dir.ancestors().into_iter().step_by(3);
@@ -18,8 +23,10 @@ fn main() -> Result<()> {
     let complete_out = iter.next().unwrap().to_path_buf().join("sh_complete");
     fs::create_dir_all(&complete_out).unwrap();
     for shell in [clap_complete::Shell::Bash, clap_complete::Shell::Zsh] {
-        clap_complete::generate_to(shell, &mut app, "bv", &complete_out)
-            .unwrap_or_else(|_| panic!("failed to generate {shell} complete"));
+        clap_complete::generate_to(shell, &mut bv, "bv", &complete_out)
+            .unwrap_or_else(|_| panic!("failed to generate {shell} complete for bv"));
+        clap_complete::generate_to(shell, &mut bib, "bib", &complete_out)
+            .unwrap_or_else(|_| panic!("failed to generate {shell} complete for bib"));
     }
 
     tonic_build::configure()
