@@ -309,7 +309,7 @@ where
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Update(pb::NodeUpdate {
-                new_name,
+                new_display_name,
                 new_firewall,
                 new_org_id,
                 new_org_name,
@@ -324,7 +324,7 @@ where
                 nodes_manager
                     .update(
                         node_id,
-                        new_name,
+                        new_display_name,
                         firewall_config,
                         new_org_id,
                         new_org_name,
@@ -435,9 +435,9 @@ impl TryFrom<common::FirewallRule> for firewall::Rule {
 impl From<common::VmConfig> for node_state::VmConfig {
     fn from(value: common::VmConfig) -> Self {
         Self {
-            vcpu_count: value.cpu_count as usize,
-            mem_size_mb: value.mem_size_bytes / 1_000_000,
-            disk_size_gb: value.disk_size_bytes / 1_000_000_000,
+            vcpu_count: value.cpu_cores as usize,
+            mem_size_mb: value.memory_bytes / 1_000_000,
+            disk_size_gb: value.disk_bytes / 1_000_000_000,
             babel_config: BabelConfig {
                 ramdisks: value
                     .ramdisks

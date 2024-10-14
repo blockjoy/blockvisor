@@ -596,7 +596,7 @@ where
                 .into_inner()
                 .host
                 .ok_or(anyhow!("host {host_id} not found in API"))?
-                .org_id,
+                .created_org_id,
         ))
     }
 
