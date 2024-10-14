@@ -8,7 +8,7 @@ use blockvisord::{
     self_updater,
     services::api::{common, pb},
     services::{DEFAULT_API_CONNECT_TIMEOUT, DEFAULT_API_REQUEST_TIMEOUT},
-    utils, BV_VAR_PATH,
+    utils,
 };
 use bv_utils::{
     cmd::{ask_confirm, run_cmd},
@@ -193,18 +193,17 @@ async fn main() -> Result<()> {
 
         let create = pb::HostServiceCreateRequest {
             provision_token: cmd_args.provision_token.unwrap(),
+            private_org_id: None,
             name: host_info.name.clone(),
             bv_version: crate_version!().to_string(),
-            cpu_count,
-            mem_size_bytes: host_info.memory_bytes,
-            disk_size_bytes: host_info.disk_space_bytes,
+            cpu_cores: cpu_count,
+            memory_bytes: host_info.memory_bytes,
+            disk_bytes: host_info.disk_space_bytes,
             os: host_info.os,
             os_version: host_info.os_version,
-            ip_addr: ip.clone(),
+            ip_address: ip.clone(),
             ip_gateway: gateway,
             region: cmd_args.region,
-            billing_amount: None,
-            vmm_mountpoint: Some(format!("{}", bv_root.join(BV_VAR_PATH).to_string_lossy())),
             managed_by: Some(pb::ManagedBy::Automatic.into()),
             ips,
             tags: Some(common::Tags {
