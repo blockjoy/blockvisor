@@ -4,7 +4,7 @@ use crate::{
     bv_config, firewall,
     internal_server::{self, NodeDisplayInfo},
     node_state::{NodeImage, NodeState, ProtocolImageKey, VmConfig, VmStatus},
-    protocol,
+    protocol::{self, Variant},
     services::{self, ApiServiceConnector},
     utils, workspace,
 };
@@ -14,7 +14,7 @@ use babel_api::{
     utils::{BabelConfig, RamdiskConfiguration},
 };
 use bv_utils::cmd::run_cmd;
-use eyre::anyhow;
+use eyre::{anyhow, bail};
 use petname::Petnames;
 use std::{
     ffi::OsStr,
@@ -74,6 +74,7 @@ pub async fn process_image_command(
             gateway,
             props,
             path,
+            variant,
         } => {
             let bv_config = load_bv_config(bv_root).await?;
             let bv_url = format!("http://localhost:{}", bv_config.blockvisor_port);
@@ -85,6 +86,8 @@ pub async fn process_image_command(
             .await?;
             let local_image: protocol::Image =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
+
+            let variant = pick_variant(local_image.variants, variant)?;
 
             let properties = if let Some(props) = props {
                 serde_yaml::from_str(&props)?
@@ -102,8 +105,8 @@ pub async fn process_image_command(
                         name: Petnames::default().generate_one(3, "-"),
                         protocol_id: "dev-node-protocol-id".to_string(),
                         image_key: ProtocolImageKey {
-                            protocol_key: local_image.key.protocol_key,
-                            variant_key: local_image.key.variant_key,
+                            protocol_key: local_image.protocol_key,
+                            variant_key: variant.key,
                         },
                         dev_mode: true,
                         ip,
@@ -120,7 +123,7 @@ pub async fn process_image_command(
                             mem_size_mb: 0,
                             disk_size_gb: 0,
                             babel_config: BabelConfig {
-                                ramdisks: local_image
+                                ramdisks: variant
                                     .ramdisks
                                     .into_iter()
                                     .map(|ramdisk| RamdiskConfiguration {
@@ -157,9 +160,14 @@ pub async fn process_image_command(
                 &node.state.name,
             );
         }
-        ImageCommand::Check { props, path } => {
+        ImageCommand::Check {
+            props,
+            path,
+            variant,
+        } => {
             let local_image: protocol::Image =
                 serde_yaml::from_str(&fs::read_to_string(&path).await?)?;
+            let variant = pick_variant(local_image.variants, variant)?;
             let properties = if let Some(props) = props {
                 serde_yaml::from_str(&props)?
             } else {
@@ -193,8 +201,8 @@ pub async fn process_image_command(
                         node_id: "node-id".to_string(),
                         node_name: "node_name".to_string(),
                         node_version: local_image.version,
-                        node_protocol: local_image.key.protocol_key,
-                        node_variant: local_image.key.variant_key,
+                        node_protocol: local_image.protocol_key,
+                        node_variant: variant.key,
                         node_ip: "1.2.3.4".to_string(),
                         node_gateway: "4.3.2.1".to_string(),
                         dev_mode: true,
@@ -211,39 +219,41 @@ pub async fn process_image_command(
             let mut client = services::protocol::ProtocolService::new(connector).await?;
             let local_image: protocol::Image =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
-            let protocol_version_id =
-                match client.get_protocol_version(local_image.key.clone()).await? {
-                    Some(remote) if remote.semantic_version == local_image.version => {
-                        client
-                            .update_protocol_version(
-                                remote.protocol_version_id.clone(),
-                                local_image.clone(),
-                            )
-                            .await?;
-                        remote.protocol_version_id
-                    }
-                    _ => {
-                        client
-                            .add_protocol_version(local_image.clone())
-                            .await?
-                            .protocol_version_id
-                    }
+            for variant in &local_image.variants {
+                let image_key = ProtocolImageKey {
+                    protocol_key: local_image.protocol_key.clone(),
+                    variant_key: variant.key.clone(),
                 };
-            if let Some(remote) = client
-                .get_image(
-                    local_image.key.clone(),
-                    Some(local_image.version.clone()),
-                    None,
-                )
-                .await?
-            {
-                client
-                    .update_image(remote.image_id, local_image.clone())
-                    .await?;
-            } else {
-                client
-                    .add_image(protocol_version_id, local_image.clone())
-                    .await?;
+                let protocol_version_id =
+                    match client.get_protocol_version(image_key.clone()).await? {
+                        Some(remote) if remote.semantic_version == local_image.version => {
+                            client
+                                .update_protocol_version(
+                                    remote.protocol_version_id.clone(),
+                                    local_image.clone(),
+                                )
+                                .await?;
+                            remote.protocol_version_id
+                        }
+                        _ => {
+                            client
+                                .add_protocol_version(local_image.clone(), variant.clone())
+                                .await?
+                                .protocol_version_id
+                        }
+                    };
+                if let Some(remote) = client
+                    .get_image(image_key, Some(local_image.version.clone()), None)
+                    .await?
+                {
+                    client
+                        .update_image(remote.image_id, local_image.clone())
+                        .await?;
+                } else {
+                    client
+                        .add_image(protocol_version_id, local_image.clone(), variant.clone())
+                        .await?;
+                }
             }
         }
     }
@@ -326,6 +336,25 @@ async fn discover_ip_and_gateway(
         Some(ip) => ip,
     };
     Ok((IpAddr::from_str(&ip)?, IpAddr::from_str(&gateway)?))
+}
+
+fn pick_variant(variants: Vec<Variant>, variant_key: Option<String>) -> eyre::Result<Variant> {
+    if let Some(variant_key) = variant_key {
+        variants
+            .into_iter()
+            .find(|variant| variant.key == variant_key)
+            .ok_or(anyhow!("variant '{variant_key}' not found"))
+    } else {
+        let mut iter = variants.into_iter();
+        if let Some(first) = iter.next() {
+            if iter.next().is_some() {
+                bail!("multiple variants found, please choose one");
+            }
+            Ok(first)
+        } else {
+            bail!("no image variant defined");
+        }
+    }
 }
 
 impl From<protocol::Action> for firewall::Action {
