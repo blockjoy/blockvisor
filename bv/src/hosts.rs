@@ -66,7 +66,7 @@ impl HostInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HostMetrics {
-    pub used_cpu: f32,
+    pub used_cpu: u64,
     pub used_memory_bytes: u64,
     pub used_disk_space_bytes: u64,
     pub used_ips: Vec<String>,
@@ -116,7 +116,7 @@ impl HostMetrics {
 
             let load = sys.load_average();
             Ok(HostMetrics {
-                used_cpu: sys.global_cpu_info().cpu_usage(),
+                used_cpu: sys.global_cpu_info().cpu_usage() as u64,
                 used_memory_bytes: saturating_sub_bytes(mem.total, mem.free).as_u64(),
                 used_disk_space_bytes: bv_utils::system::find_disk_by_path(
                     &sys,
@@ -149,8 +149,8 @@ impl HostMetrics {
 impl pb::MetricsServiceHostRequest {
     pub fn new(host_id: String, metrics: HostMetrics) -> Self {
         let metrics = pb::HostMetrics {
-            used_cpu_percent: Some(metrics.used_cpu as f64),
-            used_mem_bytes: Some(metrics.used_memory_bytes),
+            used_cpu_hundreths: Some(metrics.used_cpu),
+            used_memory_bytes: Some(metrics.used_memory_bytes),
             used_disk_bytes: Some(metrics.used_disk_space_bytes),
             load_one_percent: Some(metrics.load_one),
             load_five_percent: Some(metrics.load_five),
@@ -180,8 +180,7 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
         os: Some(info.os),
         os_version: Some(info.os_version),
         region: None,
-        billing_amount: None,
-        total_disk_space: Some(info.disk_space_bytes),
+        disk_bytes: Some(info.disk_space_bytes),
         managed_by: None,
         update_tags: None,
     };

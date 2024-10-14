@@ -250,7 +250,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             description: image.description,
             properties: add_properties(image.properties),
             firewall: Some(image.firewall_config.into()),
-            min_cpu: image.min_cpu,
+            min_cpu_cores: image.min_cpu,
             min_memory_bytes: image.min_memory_bytes,
             min_disk_bytes: image.min_disk_bytes,
             image_uri: image.container_uri,
@@ -392,7 +392,7 @@ fn add_properties(image_properties: Vec<protocol::ImageProperty>) -> Vec<pb::Add
                     default_value: property.default_value,
                     dynamic_value: property.dynamic_value,
                     ui_type: common::UiType::Text.into(),
-                    add_cpu: impact.as_ref().and_then(|impact| impact.add_cpu),
+                    add_cpu_cores: impact.as_ref().and_then(|impact| impact.add_cpu),
                     add_memory_bytes: impact.as_ref().and_then(|impact| impact.add_memory_bytes),
                     add_disk_bytes: impact.as_ref().and_then(|impact| impact.add_disk_bytes),
                 })
@@ -410,7 +410,7 @@ fn add_properties(image_properties: Vec<protocol::ImageProperty>) -> Vec<pb::Add
                     default_value: on.value,
                     dynamic_value: property.dynamic_value,
                     ui_type: common::UiType::Switch.into(),
-                    add_cpu: on.impact.as_ref().and_then(|impact| impact.add_cpu),
+                    add_cpu_cores: on.impact.as_ref().and_then(|impact| impact.add_cpu),
                     add_memory_bytes: on
                         .impact
                         .as_ref()
@@ -429,7 +429,7 @@ fn add_properties(image_properties: Vec<protocol::ImageProperty>) -> Vec<pb::Add
                     default_value: off.value,
                     dynamic_value: property.dynamic_value,
                     ui_type: common::UiType::Switch.into(),
-                    add_cpu: off.impact.as_ref().and_then(|impact| impact.add_cpu),
+                    add_cpu_cores: off.impact.as_ref().and_then(|impact| impact.add_cpu),
                     add_memory_bytes: off
                         .impact
                         .as_ref()
@@ -451,7 +451,7 @@ fn add_properties(image_properties: Vec<protocol::ImageProperty>) -> Vec<pb::Add
                         default_value: variant.value,
                         dynamic_value: property.dynamic_value,
                         ui_type: common::UiType::Enum.into(),
-                        add_cpu: variant.impact.as_ref().and_then(|impact| impact.add_cpu),
+                        add_cpu_cores: variant.impact.as_ref().and_then(|impact| impact.add_cpu),
                         add_memory_bytes: variant
                             .impact
                             .as_ref()

@@ -12,7 +12,7 @@ impl pb::host_service_server::HostService for StubHostsServer {
         &self,
         _: Request<pb::HostServiceUpdateRequest>,
     ) -> Result<pb::HostServiceUpdateResponse> {
-        let reply = pb::HostServiceUpdateResponse {};
+        let reply = pb::HostServiceUpdateResponse { host: None };
 
         Ok(Response::new(reply))
     }
@@ -49,20 +49,18 @@ impl pb::host_service_server::HostService for StubHostsServer {
                 host_id: "497d13b1-ddbe-4ee7-bfc7-752c7b710afe".to_string(),
                 name: "hostname".to_string(),
                 bv_version: "1.0".to_string(),
-                cpu_count: 1,
-                mem_size_bytes: 1,
-                disk_size_bytes: 1,
+                cpu_cores: 1,
+                memory_bytes: 1,
+                disk_bytes: 1,
                 os: "os".to_string(),
                 os_version: "20.0".to_string(),
-                ip: "1.1.1.1".to_string(),
+                ip_address: "1.1.1.1".to_string(),
                 created_at: None,
                 ip_gateway: "1.1.1.2".to_string(),
-                org_id: "org".to_string(),
-                org_name: "ORG".to_string(),
+                created_org_id: "org".to_string(),
+                created_org_name: "ORG".to_string(),
                 node_count: 1,
                 region: Some("europe-bosnia-number-1".to_string()),
-                billing_amount: None,
-                vmm_mountpoint: Some("/var/lib/blockvisor".to_string()),
                 ip_addresses: vec![
                     pb::HostIpAddress {
                         ip: "1.1.1.3".to_string(),
@@ -79,6 +77,7 @@ impl pb::host_service_server::HostService for StubHostsServer {
                         name: "testing".to_string(),
                     }],
                 }),
+                private_org_id: None,
             }),
             token: "awesome-token".to_string(),
             refresh: "even-more-awesomer-token".to_string(),
