@@ -7,7 +7,6 @@ use crate::{
     node_state::{NodeProperties, NodeState, ProtocolImageKey, VmStatus},
     nodes_manager::{self, MaybeNode, NodesManager},
     pal::Pal,
-    protocol,
     services::{
         self,
         api::{self, common, pb},
@@ -614,7 +613,7 @@ where
             })
             .await?
             .get_image(
-                protocol::ImageKey {
+                ProtocolImageKey {
                     protocol_key: protocol.to_string(),
                     variant_key: variant.to_string(),
                 },

@@ -3,46 +3,45 @@ version: 0.0.1
 
 # Associated container image uri. May be arbitrary, but recommended convention is docker://<org>/<protocol_key>/<variant_key>/<version>
 # To test with local image use docker-daemon://<image_tag>:latest
-container_uri: docker://blockjoy/{{ protocol_key }}/{{ variant_key }}/0.0.1
-
-key:
-
-  # Name of protocol that is expected to be already populated in the API.
-  protocol_key: {{ protocol_key }}
-
-  # The same protocol can have different implementations. This field let identify what implementation(s) has been used.
-  # Variant name may additional contain protocol network name e.g. "eth-mainnet".
-  # This value will be available in a Rhai runtime via `node_env().variant_key`.
-  variant_key: {{ variant_key }}
+container_uri: docker://blockjoy/{{protocol_key}}/{{variant_key}}/0.0.1
 
 # The SKU code for this version (e.g. ETH-MN).
 sku_code: SKU_code
 
-# Uuid of organization to which protocol belongs to, or null if public.
+# [optional] Uuid of organization to which protocol belongs to, or null if public.
 org_id: null
 
-# Brief image description.
+# [optional] Brief image description.
 description: Example image description
 
 # Image visibility, allowed values: `public`, `dev`, `private`.
 visibility: private
 
-# Minimum CPU required to run image.
-min_cpu: 1
+# Name of protocol that is expected to be already populated in the API.
+protocol_key: {{protocol_key}}
 
-# Minimum RAM memory required to run image.
-min_memory_bytes: 1000000000
+variants:
+  # The same protocol can have different implementations. This field let identify what implementation(s) has been used.
+  # Variant name may additional contain protocol network name e.g. "eth-mainnet".
+  # This value will be available in a Rhai runtime via `node_env().variant_key`.
+  - key: {{variant_key}}
 
-# Minimum disk space required to run image.
-min_disk_bytes: 2000000000
+    # Minimum CPU required to run image.
+    min_cpu: 1
 
-# Ram disks to be created inside the node.
-ramdisks:
+    # Minimum RAM memory required to run image.
+    min_memory_bytes: 1000000000
 
-  # Path to mount RAM disk to.
-  - mount: /mnt/ramdisk
-    # RAM disk size.
-    size_bytes: 100000000
+    # Minimum disk space required to run image.
+    min_disk_bytes: 2000000000
+
+    # [optional] Ram disks to be created inside the node.
+    ramdisks:
+
+      # Path to mount RAM disk to.
+      - mount: /mnt/ramdisk
+        # RAM disk size.
+        size_bytes: 100000000
 
 # Default firewall configuration.
 firewall_config:
@@ -58,7 +57,7 @@ firewall_config:
 
     # Unique rule key.
     - key: example_rule
-      # Brief rule description.
+      # [optional] Brief rule description.
       description: null
 
       # Allowed values: `tcp`, `udp`, `both`.
@@ -76,7 +75,7 @@ firewall_config:
         # IP(s) compliant with CIDR notation.
         - ip: 1.2.3.4/30
 
-          # Brief ip description.
+          # [optional] Brief ip description.
           name: authorize client ip
 
       # List of ports for which rule apply.
@@ -85,7 +84,7 @@ firewall_config:
         # Port number.
         - port: 12901
 
-          # Port number.
+          # [optional] Port number.
           name: service port
 
 # List of image properties, allowed values and the way they affect required resources.
@@ -94,7 +93,7 @@ properties:
   # Unique property key. Property value will be available in a Rhai runtime via `node_params().<key>` (e.g. `node_params().arbitrary_property`).
   - key: arbitrary text property
 
-    # Brief property description.
+    # [optional] Brief property description.
     description: this is some text property example
 
     # If it can be updated after node is created, or it can be set only once on node creation.
@@ -109,13 +108,13 @@ properties:
       # If it requires different protocol data set (affect archive_id).
       new_archive: false
 
-      # How existence of property affect required CPU.
+      # [optional] How existence of property affect required CPU.
       add_cpu: 1
 
-      # How existence of property affect required memory.
+      # [optional] How existence of property affect required memory.
       add_memory_bytes: -1
 
-      # How existence of property affect required disk space.
+      # [optional] How existence of property affect required disk space.
       add_disk_bytes: 10
 
   - key: switch property

@@ -16,9 +16,13 @@ pub struct Protocol {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ImageKey {
-    pub protocol_key: String,
-    pub variant_key: String,
+pub struct Variant {
+    pub key: String,
+    pub min_cpu: u64,
+    pub min_memory_bytes: u64,
+    pub min_disk_bytes: u64,
+    #[serde(default)]
+    pub ramdisks: Vec<RamdiskConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -26,17 +30,14 @@ pub struct Image {
     /// Set by image provider, shall follow semver.
     pub version: String,
     pub container_uri: String,
-    pub key: ImageKey,
     pub sku_code: String,
     pub org_id: Option<String>,
     pub description: Option<String>,
     pub visibility: Visibility,
+    pub protocol_key: String,
+    pub variants: Vec<Variant>,
     pub properties: Vec<ImageProperty>,
     pub firewall_config: FirewallConfig,
-    pub min_cpu: u64,
-    pub min_memory_bytes: u64,
-    pub min_disk_bytes: u64,
-    pub ramdisks: Vec<RamdiskConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

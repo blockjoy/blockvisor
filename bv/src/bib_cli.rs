@@ -71,6 +71,9 @@ pub enum ImageCommand {
         #[clap(long)]
         props: Option<String>,
 
+        /// Image variant key.
+        variant: Option<String>,
+
         #[clap(default_value = "babel.yaml")]
         path: PathBuf,
     },
@@ -80,6 +83,9 @@ pub enum ImageCommand {
         /// The properties that are passed to the node in form of JSON string.
         #[clap(long)]
         props: Option<String>,
+
+        /// Image variant key.
+        variant: Option<String>,
 
         #[clap(default_value = "babel.yaml")]
         path: PathBuf,

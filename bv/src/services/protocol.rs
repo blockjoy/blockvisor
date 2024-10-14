@@ -1,6 +1,7 @@
-use crate::protocol::UiType;
 use crate::{
-    api_with_retry, protocol,
+    api_with_retry,
+    node_state::ProtocolImageKey,
+    protocol::{self, UiType},
     services::{
         api::{
             common,
@@ -68,7 +69,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     #[instrument(skip(self))]
     pub async fn get_image(
         &mut self,
-        image_key: protocol::ImageKey,
+        image_key: ProtocolImageKey,
         version: Option<String>,
         build_version: Option<u64>,
     ) -> Result<Option<pb::Image>> {
@@ -88,7 +89,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     #[instrument(skip(self))]
     pub async fn get_protocol_version(
         &mut self,
-        image_key: protocol::ImageKey,
+        image_key: ProtocolImageKey,
     ) -> Result<Option<pb::ProtocolVersion>> {
         let mut client = self.connect_protocol_service().await?;
         let req = pb::ProtocolServiceGetLatestRequest {
@@ -202,11 +203,15 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     pub async fn add_protocol_version(
         &mut self,
         image: protocol::Image,
+        variant: protocol::Variant,
     ) -> Result<pb::ProtocolVersion> {
         let mut client = self.connect_protocol_service().await?;
         let req = pb::ProtocolServiceAddVersionRequest {
             org_id: image.org_id,
-            version_key: Some(image.key.into()),
+            version_key: Some(common::ProtocolVersionKey {
+                protocol_key: image.protocol_key,
+                variant_key: variant.key,
+            }),
             semantic_version: image.version,
             sku_code: image.sku_code,
             description: image.description,
@@ -242,6 +247,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
         &mut self,
         protocol_version_id: String,
         image: protocol::Image,
+        variant: protocol::Variant,
     ) -> Result<()> {
         let mut client = self.connect_image_service().await?;
         let req = pb::ImageServiceAddImageRequest {
@@ -250,11 +256,11 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             description: image.description,
             properties: add_properties(image.properties),
             firewall: Some(image.firewall_config.into()),
-            min_cpu_cores: image.min_cpu,
-            min_memory_bytes: image.min_memory_bytes,
-            min_disk_bytes: image.min_disk_bytes,
+            min_cpu_cores: variant.min_cpu,
+            min_memory_bytes: variant.min_memory_bytes,
+            min_disk_bytes: variant.min_disk_bytes,
             image_uri: image.container_uri,
-            ramdisks: image
+            ramdisks: variant
                 .ramdisks
                 .into_iter()
                 .map(|ramdisk| ramdisk.into())
@@ -285,8 +291,8 @@ impl From<protocol::Visibility> for common::Visibility {
     }
 }
 
-impl From<protocol::ImageKey> for common::ProtocolVersionKey {
-    fn from(value: protocol::ImageKey) -> Self {
+impl From<ProtocolImageKey> for common::ProtocolVersionKey {
+    fn from(value: ProtocolImageKey) -> Self {
         Self {
             protocol_key: value.protocol_key,
             variant_key: value.variant_key,
