@@ -228,10 +228,7 @@ pub async fn process_image_command(
                     match client.get_protocol_version(image_key.clone()).await? {
                         Some(remote) if remote.semantic_version == local_image.version => {
                             client
-                                .update_protocol_version(
-                                    remote.protocol_version_id.clone(),
-                                    local_image.clone(),
-                                )
+                                .update_protocol_version(remote.clone(), local_image.clone())
                                 .await?;
                             remote.protocol_version_id
                         }
@@ -242,18 +239,9 @@ pub async fn process_image_command(
                                 .protocol_version_id
                         }
                     };
-                if let Some(remote) = client
-                    .get_image(image_key, Some(local_image.version.clone()), None)
-                    .await?
-                {
-                    client
-                        .update_image(remote.image_id, local_image.clone())
-                        .await?;
-                } else {
-                    client
-                        .add_image(protocol_version_id, local_image.clone(), variant.clone())
-                        .await?;
-                }
+                client
+                    .push_image(protocol_version_id, local_image.clone(), variant.clone())
+                    .await?;
             }
         }
     }
