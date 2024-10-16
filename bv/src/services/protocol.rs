@@ -20,6 +20,12 @@ pub enum NodeType {
     Rpc,
 }
 
+pub enum PushResult<T> {
+    Added(T),
+    Updated(T),
+    NoChanges,
+}
+
 pub struct ProtocolService<C> {
     connector: C,
 }
@@ -242,7 +248,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
         protocol_version_id: String,
         image: protocol::Image,
         variant: protocol::Variant,
-    ) -> Result<()> {
+    ) -> Result<PushResult<pb::Image>> {
         let mut client = self.connect_image_service().await?;
         let mut firewall: common::FirewallConfig = image.firewall_config.into();
         firewall.rules.sort_by(|a, b| a.key.cmp(&b.key));
@@ -309,14 +315,20 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
                 && req.ramdisks == remote.ramdisks
             {
                 let visibility: common::Visibility = image.visibility.into();
-                if visibility != remote_visibility {
+                return Ok(if visibility != remote_visibility {
                     let req = pb::ImageServiceUpdateImageRequest {
                         image_id: remote.image_id,
                         visibility: Some(visibility.into()),
                     };
-                    api_with_retry!(client, client.update_image(req.clone()))?;
-                }
-                return Ok(());
+                    PushResult::Updated(
+                        api_with_retry!(client, client.update_image(req.clone()))?
+                            .into_inner()
+                            .image
+                            .ok_or(anyhow!("missing image in response"))?,
+                    )
+                } else {
+                    PushResult::NoChanges
+                });
             }
         }
         // Otherwise, add new image build.
@@ -326,11 +338,11 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             .ok_or(anyhow!("missing image in response"))?;
         let visibility: common::Visibility = image.visibility.into();
         let req = pb::ImageServiceUpdateImageRequest {
-            image_id: resp.image_id,
+            image_id: resp.image_id.clone(),
             visibility: Some(visibility.into()),
         };
         api_with_retry!(client, client.update_image(req.clone()))?;
-        Ok(())
+        Ok(PushResult::Added(resp))
     }
 }
 

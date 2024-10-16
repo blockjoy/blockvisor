@@ -1,13 +1,11 @@
 use crate::src::utils::test_env::link_apptainer_config;
-use crate::src::utils::{
-    execute_sql, execute_sql_insert, rbac, stub_server::StubHostsServer, test_env,
-};
+use crate::src::utils::{execute_sql_insert, rbac, stub_server::StubHostsServer, test_env};
 use assert_cmd::Command;
 use assert_fs::TempDir;
-use blockvisord::bv_config::ApptainerConfig;
 use blockvisord::{bv_config::Config, node_state::NodeState, services::api::pb};
 use predicates::prelude::*;
 use serial_test::serial;
+use std::path::PathBuf;
 use std::{fs, net::ToSocketAddrs, path::Path, str};
 use tokio::time::{sleep, Duration};
 use tonic::{transport::Server, Request};
@@ -179,18 +177,6 @@ async fn test_bv_service_e2e() {
     let provision_token = response.token;
     println!("host provision token: {provision_token}");
 
-    const OLD_IMAGE_VERSION: &str = "0.0.2";
-    const OLD_IMAGE: &str = "testing/validator/0.0.2";
-    // const NEW_IMAGE_VERSION: &str = "0.0.3";
-    println!("add protocol");
-    let protocol_query = r#"INSERT INTO protocols (id, name, display_name, visibility, ticker) values ('ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'Testing', 'Testing', 'public', 'TEST');
-        INSERT INTO protocol_node_types (id, protocol_id, node_type, visibility) VALUES ('206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'validator', 'public');
-        INSERT INTO protocol_versions (id, protocol_id, protocol_node_type_id, version) VALUES ('78d4c409-401d-491f-8c87-df7f35971bb7','ab5d8cfc-77b1-4265-9fee-ba71ba9de092', '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '0.0.2');
-        INSERT INTO protocol_properties VALUES ('5972a35a-333c-421f-ab64-a77f4ae17533', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'keystore-file', NULL, 'file_upload', FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
-        INSERT INTO protocol_properties VALUES ('a989ad08-b455-4a57-9fe0-696405947e48', 'ab5d8cfc-77b1-4265-9fee-ba71ba9de092', 'TESTING_PARAM', NULL, 'text',        FALSE, FALSE, '206fae73-0ea5-4b3c-9b76-f8ea2b9b5f45', '78d4c409-401d-491f-8c87-df7f35971bb7', 'Wow nice property');
-        "#;
-    execute_sql_insert(db_url, protocol_query);
-
     println!("stop blockvisor");
     test_env::bv_run(&["stop"], "blockvisor service stopped successfully", None);
 
@@ -214,16 +200,8 @@ async fn test_bv_service_e2e() {
     println!("read host id");
     let config_path = "/etc/blockvisor.json";
     let config = fs::read_to_string(config_path).unwrap();
-    let mut config: Config = serde_json::from_str(&config).unwrap();
+    let config: Config = serde_json::from_str(&config).unwrap();
     let host_id = config.id.clone();
-    config.apptainer = ApptainerConfig {
-        host_network: true,
-        extra_args: Some(vec!["--dns".to_owned(), "1.1.1.1,8.8.8.8".to_owned()]),
-        ..Default::default()
-    };
-    let config = serde_json::to_string(&config).unwrap();
-    tokio::fs::write(config_path, config).await.unwrap();
-
     println!("got host id: {host_id}");
 
     println!("start blockvisor");
@@ -232,121 +210,133 @@ async fn test_bv_service_e2e() {
     println!("test host info update");
     test_env::bv_run(&["host", "update"], "Host info update sent", None);
 
-    println!("test chain list query");
-    test_env::bv_run(
-        &["chain", "list", "testing", "validator"],
-        OLD_IMAGE_VERSION,
+    let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
+    println!("push testing protocol");
+    test_env::bib_run(
+        &[
+            "protocol",
+            "push",
+            &test_dir.join("protocols.yaml").to_string_lossy(),
+        ],
+        "Protocol 'testing' added",
         None,
     );
 
+    println!("check test image");
+    test_env::bib_run(
+        &[
+            "image",
+            "check",
+            "--props",
+            r#"{"TEST_PARAM":"testing value"}"#,
+            &test_dir
+                .join("image_v1")
+                .join("babel.yaml")
+                .to_string_lossy(),
+        ],
+        "Plugin linter: Ok(())",
+        None,
+    );
+
+    println!("push test image v1");
+    test_env::bib_run(
+        &[
+            "image",
+            "push",
+            &test_dir
+                .join("image_v1")
+                .join("babel.yaml")
+                .to_string_lossy(),
+        ],
+        "Image 'testing/test/0.0.1/1' added",
+        None,
+    );
+
+    println!("test chain list query");
+    test_env::bv_run(&["protocol", "list", "testing"], "test/0.0.1", None);
+
     let stdout = bv_run(&[
         "node",
         "create",
-        OLD_IMAGE,
+        "testing",
+        "test",
         "--props",
         r#"{"TESTING_PARAM":"I guess just some test value"}"#,
-        "--network",
-        "test",
     ]);
     println!("created first node: {stdout}");
-    let not_updated_node_id = parse_out_node_id(OLD_IMAGE, stdout);
-    let self_update_query = r#"UPDATE nodes SET self_update = false;"#;
-    execute_sql(db_url, self_update_query, "UPDATE 1");
+    let first_node_id = parse_out_node_id(stdout);
 
     let stdout = bv_run(&[
         "node",
         "create",
-        OLD_IMAGE,
+        "testing",
+        "test",
         "--props",
         r#"{"TESTING_PARAM":"I guess just some test value"}"#,
-        "--network",
-        "test",
     ]);
     println!("created second node: {stdout}");
-    let auto_updated_node_id = parse_out_node_id(OLD_IMAGE, stdout);
+    let second_node_id = parse_out_node_id(stdout);
 
     println!("list created node, should be auto-started");
-    test_env::wait_for_node_status(
-        &not_updated_node_id,
-        "Running",
-        Duration::from_secs(300),
+    test_env::wait_for_node_status(&first_node_id, "Running", Duration::from_secs(300), None).await;
+    test_env::wait_for_node_status(&second_node_id, "Running", Duration::from_secs(300), None)
+        .await;
+
+    println!("push test image v2");
+    test_env::bib_run(
+        &[
+            "image",
+            "push",
+            &test_dir
+                .join("image_v2")
+                .join("babel.yaml")
+                .to_string_lossy(),
+        ],
+        "Image 'testing/test/0.0.2/1' added",
         None,
-    )
-    .await;
-    test_env::wait_for_node_status(
-        &auto_updated_node_id,
-        "Running",
-        Duration::from_secs(300),
-        None,
-    )
-    .await;
+    );
 
-    // println!("give user 'blockjoy-admin' so ity can add new protocol version");
-    // let org_query = r#"INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'blockjoy-admin');"#;
-    // println!("add new image version {NEW_IMAGE_VERSION} - trigger auto upgrade");
-    // execute_sql_insert(db_url, org_query);
-    // client
-    //     .add_version(with_auth(
-    //         pb::protocolServiceAddVersionRequest {
-    //             protocol_id: protocol.id.clone(),
-    //             version: NEW_IMAGE_VERSION.to_string(),
-    //             description: None,
-    //             node_type: common::NodeType::Validator.into(),
-    //             properties: vec![],
-    //         },
-    //         &auth_token,
-    //     ))
-    //     .await
-    //     .unwrap();
+    println!("trigger second node upgrade");
+    bv_run(&["node", "upgrade", &second_node_id]);
 
-    // Note(luuk): nodes no longer auto upgrade by default when a new version
-    // is created. One day we will add a endpoint to do this and we can
-    // reintroduce this test.
-    // println!("list node, should be auto-upgraded");
-    // let start = std::time::Instant::now();
-    // while node_version(&auto_updated_node_id).await != NEW_IMAGE_VERSION {
-    //     if start.elapsed() < Duration::from_secs(300) {
-    //         sleep(Duration::from_secs(1)).await;
-    //     } else {
-    //         panic!("timeout expired")
-    //     }
-    // }
-
-    // TODO uncomment when API part is ready
-    // test_env::bv_run(
-    //     &["node", "run", "config_check", &auto_updated_node_id],
-    //     "ok",
-    //     None,
-    // );
+    println!("list node, should be auto-upgraded");
+    let start = std::time::Instant::now();
+    while node_version(&second_node_id).await != "0.0.2" {
+        if start.elapsed() < Duration::from_secs(300) {
+            sleep(Duration::from_secs(1)).await;
+        } else {
+            panic!("timeout expired")
+        }
+    }
 
     test_env::bv_run(
-        &["node", "run", "file_access_check", &auto_updated_node_id],
+        &["node", "run", "config_check", &second_node_id],
         "ok",
         None,
     );
 
-    check_upload_and_download(&auto_updated_node_id);
+    test_env::bv_run(
+        &["node", "run", "file_access_check", &first_node_id],
+        "ok",
+        None,
+    );
 
-    assert_eq!(OLD_IMAGE_VERSION, node_version(&not_updated_node_id).await);
+    check_upload_and_download(&first_node_id);
 
-    let stdout = bv_run(&["node", "stop", &auto_updated_node_id]);
+    assert_eq!("0.0.1", node_version(&first_node_id).await);
+
+    let stdout = bv_run(&["node", "stop", &first_node_id]);
     println!("executed stop node command: {stdout:?}");
 
     println!("get node status");
-    test_env::wait_for_node_status(
-        &auto_updated_node_id,
-        "Stopped",
-        Duration::from_secs(60),
-        None,
-    )
-    .await;
+    test_env::wait_for_node_status(&first_node_id, "Stopped", Duration::from_secs(60), None).await;
 
-    bv_run(&["node", "delete", "--yes", &auto_updated_node_id]);
+    bv_run(&["node", "delete", "--yes", &first_node_id]);
 
     println!("check if node is deleted");
     let is_deleted = || {
         let stdout = bv_run(&["node", "list"]);
-        !stdout.contains(&auto_updated_node_id)
+        !stdout.contains(&first_node_id)
     };
     let start = std::time::Instant::now();
     while !is_deleted() {
@@ -370,9 +360,9 @@ async fn node_version(id: &str) -> String {
     }
 }
 
-fn parse_out_node_id(image: &str, std_out: String) -> String {
+fn parse_out_node_id(std_out: String) -> String {
     std_out
-        .trim_start_matches(&format!("Created new node from `{image}` image with ID "))
+        .trim_start_matches("Created new node with ID `")
         .split('`')
         .nth(1)
         .unwrap()

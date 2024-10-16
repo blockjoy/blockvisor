@@ -167,6 +167,22 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 .await?;
             client.stop_nodes(&ids, force).await?;
         }
+        NodeCommand::Restart { id_or_names, force } => {
+            let ids = client
+                .get_node_ids(node_ids_with_fallback(id_or_names, true)?)
+                .await?;
+            client.stop_nodes(&ids, force).await?;
+            client.start_nodes(&ids).await?;
+        }
+        NodeCommand::Upgrade { id_or_names } => {
+            let ids = client
+                .get_node_ids(node_ids_with_fallback(id_or_names, false)?)
+                .await?;
+            for id in ids {
+                client.upgrade_node(id).await?;
+                println!("Node `{id}` upgrade triggered");
+            }
+        }
         NodeCommand::Delete {
             id_or_names,
             all,
@@ -203,13 +219,6 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 let _ = workspace::unset_active_node(&std::env::current_dir()?, id);
                 println!("Deleted node `{id_or_name}`");
             }
-        }
-        NodeCommand::Restart { id_or_names, force } => {
-            let ids = client
-                .get_node_ids(node_ids_with_fallback(id_or_names, true)?)
-                .await?;
-            client.stop_nodes(&ids, force).await?;
-            client.start_nodes(&ids).await?;
         }
         NodeCommand::Job {
             command,

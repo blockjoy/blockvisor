@@ -320,7 +320,8 @@ impl ApptainerMachine {
             &self.babel_path,
             self.chroot_dir.join(BABEL_BIN_PATH.trim_start_matches('/')),
         )
-        .await?;
+        .await
+        .with_context(|| format!("babel binary not found: {}", self.babel_path.display()))?;
         let mut cmd = Command::new(APPTAINER_BIN_NAME);
         cmd.args(["exec", "--ipc", "--cleanenv", "--userns", "--pid"]);
         cmd.args([

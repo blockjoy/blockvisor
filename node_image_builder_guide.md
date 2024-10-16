@@ -148,7 +148,6 @@ on different networks of the same protocol, you can move on to implement/customi
 
 Also make sure that following tools, required by Babel, are available:
 - `fallocate`
-- `fuser`
 
 ### Define Default Services as needed
 You can define additional services that will be automatically started on all nodes of given kind in

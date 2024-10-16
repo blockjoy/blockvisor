@@ -55,6 +55,7 @@ trait Service {
     fn create_dev_node(req: CreateDevNodeRequest) -> NodeDisplayInfo;
     fn start_node(id: Uuid);
     fn stop_node(id: Uuid, force: bool);
+    fn upgrade_node(id: Uuid);
     fn delete_node(id: Uuid);
     fn get_node_jobs(id: Uuid) -> JobsInfo;
     fn get_node_job_info(id: Uuid, job_name: String) -> babel_api::engine::JobInfo;
@@ -254,6 +255,52 @@ where
                 .await?
                 .stop(pb::NodeServiceStopRequest {
                     node_id: id.to_string(),
+                })
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        }
+        Ok(Response::new(()))
+    }
+
+    #[instrument(skip(self), ret(Debug))]
+    async fn upgrade_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
+        status_check().await?;
+        let id = request.into_inner();
+        if self.is_dev_node(id).await? {
+            return Err(Status::unimplemented("dev node upgrade is not supported"));
+        } else {
+            let node = self
+                .nodes_manager
+                .node_state_cache(id)
+                .await
+                .map_err(|e| Status::unknown(format!("{e:#}")))?;
+            let image = services::connect_to_api_service(
+                &self.config,
+                pb::image_service_client::ImageServiceClient::with_interceptor,
+            )
+            .await
+            .map_err(|e| Status::unknown(format!("Error connecting to api: {e:#}")))?
+            .get_image(pb::ImageServiceGetImageRequest {
+                version_key: Some(node.image_key.clone().into()),
+                org_id: None,
+                semantic_version: None,
+                build_version: None,
+            })
+            .await
+            .map_err(|e| Status::unknown(format!("{e:#}")))?
+            .into_inner()
+            .image
+            .ok_or(Status::not_found(format!(
+                "image for {}/{} not found",
+                node.image_key.protocol_key, node.image_key.variant_key
+            )))?;
+
+            self.connect_to_node_service()
+                .await?
+                .upgrade_image(pb::NodeServiceUpgradeImageRequest {
+                    node_ids: vec![id.to_string()],
+                    image_id: image.image_id,
+                    org_id: None,
                 })
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;

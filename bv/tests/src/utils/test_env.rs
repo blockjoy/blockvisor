@@ -232,7 +232,19 @@ impl Drop for TestEnv {
 }
 
 pub fn bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
-    let mut cmd = Command::cargo_bin("bv").unwrap();
+    bv_tool_run("bv", commands, stdout_pattern, bv_root)
+}
+
+pub fn try_bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) -> AssertResult {
+    try_bv_tool_run("bv", commands, stdout_pattern, bv_root)
+}
+
+pub fn bib_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
+    bv_tool_run("bib", commands, stdout_pattern, bv_root)
+}
+
+fn bv_tool_run(tool_name: &str, commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
+    let mut cmd = Command::cargo_bin(tool_name).unwrap();
     cmd.args(commands).env("NO_COLOR", "1");
     if let Some(bv_root) = bv_root {
         cmd.env("BV_ROOT", bv_root);
@@ -242,8 +254,13 @@ pub fn bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
         .stdout(predicate::str::contains(stdout_pattern));
 }
 
-pub fn try_bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) -> AssertResult {
-    let mut cmd = Command::cargo_bin("bv").unwrap();
+fn try_bv_tool_run(
+    tool_name: &str,
+    commands: &[&str],
+    stdout_pattern: &str,
+    bv_root: Option<&Path>,
+) -> AssertResult {
+    let mut cmd = Command::cargo_bin(tool_name).unwrap();
     cmd.args(commands).env("NO_COLOR", "1");
     if let Some(bv_root) = bv_root {
         cmd.env("BV_ROOT", bv_root);
