@@ -471,6 +471,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
                             log_timestamp: service.log_timestamp,
                         },
                         vec![],
+                        vec![],
                     ),
                 )?;
             }
@@ -478,12 +479,17 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         Ok(())
     }
 
-    fn start_services(&self, services: Vec<Service>, needs: Vec<String>) -> Result<()> {
+    fn start_services(
+        &self,
+        services: Vec<Service>,
+        needs: Vec<String>,
+        wait_for: Vec<String>,
+    ) -> Result<()> {
         for service in services {
             let name = service.name.clone();
             self.create_and_start_job(
                 &name,
-                plugin_config::build_service_job_config(service, needs.clone()),
+                plugin_config::build_service_job_config(service, needs.clone(), wait_for.clone()),
             )?;
         }
         Ok(())
@@ -527,7 +533,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
                     self.run_jobs(config.post_download, vec![DOWNLOAD_JOB_NAME.to_string()])?;
             }
         }
-        self.start_services(config.services, services_needs)?;
+        self.start_services(config.services, services_needs, Default::default())?;
         if let Some(tasks) = config.scheduled {
             for task in tasks {
                 self.babel_engine.add_task(
@@ -559,7 +565,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         )?;
         let post_upload_jobs =
             self.run_jobs(config.post_upload, vec![UPLOAD_JOB_NAME.to_string()])?;
-        self.start_services(config.services, post_upload_jobs)?;
+        self.start_services(config.services, Default::default(), post_upload_jobs)?;
         Ok(())
     }
 }
@@ -1118,6 +1124,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["needed".to_string()]),
+                    wait_for: None,
                     run_as: Some("some_user".to_string()),
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
@@ -1142,6 +1149,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: None,
+                    wait_for: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
@@ -1627,6 +1635,7 @@ mod tests {
                         log_buffer_capacity_mb: None,
                         log_timestamp: None,
                     },
+                    vec![],
                     vec!["post_upload_job".to_string()],
                 )),
             )
@@ -1769,6 +1778,7 @@ mod tests {
                         log_timestamp: None,
                     },
                     vec![],
+                    vec![],
                 )),
             )
             .once()
@@ -1881,6 +1891,7 @@ mod tests {
                         log_timestamp: None,
                     },
                     vec!["post_download_job".to_string()],
+                    vec![],
                 )),
             )
             .once()
@@ -1906,6 +1917,7 @@ mod tests {
                         log_buffer_capacity_mb: None,
                         log_timestamp: None,
                     },
+                    vec![],
                     vec![],
                 )),
             )

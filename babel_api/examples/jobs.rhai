@@ -84,7 +84,10 @@ fn init() {
         },
 
         // [optional] List of job names that this job needs to be finished before start, may be empty.
-        needs: ["job_name_A", "job_name_B"],
+        needs: ["job_name_A"],
+        /// [optional] List of job names that this job needs to wait for, but job will be started
+        /// whatever waited jobs result is.
+        wait_for: ["job_name_B"],
     };
     start_job("job_name_A");
     start_job("unique_service_name", service_config);

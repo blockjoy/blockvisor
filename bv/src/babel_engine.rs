@@ -1048,6 +1048,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: None,
+                    wait_for: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,

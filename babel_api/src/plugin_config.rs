@@ -292,6 +292,7 @@ pub fn build_job_config(job: Job) -> JobConfig {
         shutdown_timeout_secs: job.shutdown_timeout_secs,
         shutdown_signal: job.shutdown_signal,
         needs: job.needs,
+        wait_for: None,
         run_as: job.run_as,
         log_buffer_capacity_mb: job.log_buffer_capacity_mb,
         log_timestamp: job.log_timestamp,
@@ -317,6 +318,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: Some(init_jobs),
+            wait_for: None,
             run_as: None,
             log_buffer_capacity_mb: None,
             log_timestamp: None,
@@ -332,6 +334,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: Some(init_jobs),
+            wait_for: None,
             run_as: None,
             log_buffer_capacity_mb: None,
             log_timestamp: None,
@@ -353,13 +356,18 @@ pub fn build_alternative_download_job_config(
         shutdown_timeout_secs: None,
         shutdown_signal: None,
         needs: Some(init_jobs),
+        wait_for: None,
         run_as: alternative_download.run_as,
         log_buffer_capacity_mb: alternative_download.log_buffer_capacity_mb,
         log_timestamp: alternative_download.log_timestamp,
     }
 }
 
-pub fn build_service_job_config(service: Service, needs: Vec<String>) -> JobConfig {
+pub fn build_service_job_config(
+    service: Service,
+    needs: Vec<String>,
+    wait_for: Vec<String>,
+) -> JobConfig {
     JobConfig {
         job_type: JobType::RunSh(service.run_sh),
         restart: engine::RestartPolicy::Always(service.restart_config.unwrap_or(RestartConfig {
@@ -371,6 +379,11 @@ pub fn build_service_job_config(service: Service, needs: Vec<String>) -> JobConf
         shutdown_signal: service.shutdown_signal,
         needs: if service.use_blockchain_data {
             Some(needs)
+        } else {
+            None
+        },
+        wait_for: if service.use_blockchain_data {
+            Some(wait_for)
         } else {
             None
         },
@@ -409,6 +422,7 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: Some(pre_upload_jobs),
+            wait_for: None,
             run_as: None,
             log_buffer_capacity_mb: None,
             log_timestamp: None,
@@ -429,6 +443,7 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: Some(pre_upload_jobs),
+            wait_for: None,
             run_as: None,
             log_buffer_capacity_mb: None,
             log_timestamp: None,

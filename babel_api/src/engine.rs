@@ -330,6 +330,9 @@ pub struct JobConfig {
     pub shutdown_signal: Option<PosixSignal>,
     /// List of job names that this job needs to be finished before start.
     pub needs: Option<Vec<String>>,
+    /// List of job names that this job needs to wait for, but job will be started
+    /// whatever waited jobs result is.
+    pub wait_for: Option<Vec<String>>,
     /// Run job as a different user.
     pub run_as: Option<String>,
     /// Capacity of log buffer (in megabytes).

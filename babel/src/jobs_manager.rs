@@ -579,48 +579,46 @@ impl<C: BabelEngineConnector> Manager<C> {
         for (name, job) in jobs_context.jobs.iter_mut() {
             if let Job {
                 state: JobState::Inactive(status),
-                config: JobConfig { needs, .. },
+                config: JobConfig {
+                    needs, wait_for, ..
+                },
                 ..
             } = job
             {
                 if *status == JobStatus::Pending {
-                    if let Some(needs) = needs {
-                        match deps_finished(name, &deps, needs) {
-                            Ok(true) => {
+                    match deps_finished(name, &deps, needs, wait_for) {
+                        Ok(true) => {
+                            if needs.is_some() || wait_for.is_some() {
                                 info!("all '{name}' job dependencies finished");
-                                self.start_job(
-                                    name,
-                                    job,
-                                    &jobs_context.jobs_data,
-                                    &jobs_context.connector,
-                                )
-                                .await;
                             }
-                            Ok(false) => {}
-                            Err(err) => {
-                                *status = JobStatus::Finished {
-                                    exit_code: None,
-                                    message: err.to_string(),
-                                };
-                                let save_result = jobs_context.jobs_data.save_status(status, name);
-                                let message = err.to_string();
+                            self.start_job(
+                                name,
+                                job,
+                                &jobs_context.jobs_data,
+                                &jobs_context.connector,
+                            )
+                            .await;
+                        }
+                        Ok(false) => {}
+                        Err(err) => {
+                            *status = JobStatus::Finished {
+                                exit_code: None,
+                                message: err.to_string(),
+                            };
+                            let save_result = jobs_context.jobs_data.save_status(status, name);
+                            let message = err.to_string();
+                            job.push_log(&message);
+                            warn!(message);
+                            if let Err(err) = save_result {
+                                // if we can't save status for some reason, just log
+                                let message =
+                                    format!("failed to save failed job '{name}' status: {err:#}");
                                 job.push_log(&message);
-                                warn!(message);
-                                if let Err(err) = save_result {
-                                    // if we can't save status for some reason, just log
-                                    let message = format!(
-                                        "failed to save failed job '{name}' status: {err:#}"
-                                    );
-                                    job.push_log(&message);
-                                    error!(message);
-                                    let mut client = jobs_context.connector.connect();
-                                    let _ = with_retry!(client.bv_error(message.clone()));
-                                }
+                                error!(message);
+                                let mut client = jobs_context.connector.connect();
+                                let _ = with_retry!(client.bv_error(message.clone()));
                             }
                         }
-                    } else {
-                        self.start_job(name, job, &jobs_context.jobs_data, &jobs_context.connector)
-                            .await
                     }
                 }
             }
@@ -653,15 +651,18 @@ impl<C: BabelEngineConnector> Manager<C> {
             }
             Ok(status) => status,
         };
-        if let JobStatus::Finished { .. } = status {
-            info!("job '{name}' finished with {status:?}");
-            job.state = JobState::Inactive(status)
-        } else {
-            job.register_restart();
-            job.push_log("babel_job_runner process ended unexpectedly");
-            warn!("job '{name}' process ended, but job was not finished - try restart");
-            self.start_job(name, job, jobs_data, connector).await;
-        };
+        match status {
+            JobStatus::Finished { .. } | JobStatus::Stopped => {
+                info!("job '{name}' finished with {status:?}");
+                job.state = JobState::Inactive(status)
+            }
+            _ => {
+                job.register_restart();
+                job.push_log("babel_job_runner process ended unexpectedly");
+                warn!("job '{name}' process ended, but job was not finished - try restart");
+                self.start_job(name, job, jobs_data, connector).await;
+            }
+        }
     }
 
     async fn start_job(&self, name: &str, job: &mut Job, jobs_data: &JobsData, connector: &C) {
@@ -722,24 +723,39 @@ impl<C: BabelEngineConnector> Manager<C> {
 fn deps_finished(
     name: &str,
     deps: &HashMap<String, Job>,
-    needs: &[String],
+    needs: &Option<Vec<String>>,
+    wait_for: &Option<Vec<String>>,
 ) -> Result<bool, Report> {
-    for needed_name in needs {
-        match &deps
-            .get(needed_name)
-            .with_context(|| format!("job '{name}' needs '{needed_name}', but it is not defined"))?
-            .state
-        {
-            JobState::Inactive(JobStatus::Finished {
-                exit_code: Some(0), ..
-            }) => {}
-            JobState::Inactive(JobStatus::Finished { exit_code, message }) => bail!(
-                "job '{name}' needs '{needed_name}', but it failed with {exit_code:?} - {message}"
-            ),
-            JobState::Inactive(JobStatus::Stopped) => {
-                bail!("job '{name}' needs '{needed_name}', but it was stopped")
+    if let Some(needs) = needs {
+        for needed_name in needs {
+            match &deps
+                .get(needed_name)
+                .with_context(|| format!("job '{name}' needs '{needed_name}', but it is not defined"))?
+                .state
+            {
+                JobState::Inactive(JobStatus::Finished {
+                                       exit_code: Some(0), ..
+                                   }) => {}
+                JobState::Inactive(JobStatus::Finished { exit_code, message }) => bail!(
+                    "job '{name}' needs '{needed_name}', but it failed with {exit_code:?} - {message}"
+                ),
+                JobState::Inactive(JobStatus::Stopped) => {
+                    bail!("job '{name}' needs '{needed_name}', but it was stopped")
+                }
+                _ => return Ok(false),
             }
-            _ => return Ok(false),
+        }
+    }
+    if let Some(wait_for) = wait_for {
+        for wait_for_name in wait_for {
+            let job = deps.get(wait_for_name).with_context(|| {
+                format!("job '{name}' waits for '{wait_for_name}', but it is not defined")
+            })?;
+            match &job.state {
+                JobState::Inactive(JobStatus::Finished { .. })
+                | JobState::Inactive(JobStatus::Stopped) => {}
+                _ => return Ok(false),
+            }
         }
     }
     Ok(true)
@@ -762,7 +778,6 @@ mod tests {
 
     struct TestEnv {
         tmp_dir: PathBuf,
-        ctrl_file: PathBuf,
         jobs_dir: PathBuf,
         jobs_config_dir: PathBuf,
         jobs_status_dir: PathBuf,
@@ -777,7 +792,6 @@ mod tests {
         async fn setup() -> Result<Self> {
             let tmp_dir = TempDir::new()?.to_path_buf();
             fs::create_dir_all(&tmp_dir)?;
-            let ctrl_file = tmp_dir.join("job_runner_started");
             let jobs_dir = tmp_dir.join("jobs");
             let jobs_config_dir = jobs_dir.join(CONFIG_SUBDIR);
             let jobs_status_dir = jobs_dir.join(STATUS_SUBDIR);
@@ -802,8 +816,7 @@ mod tests {
             )
             .await?;
             Ok(Self {
-                tmp_dir,
-                ctrl_file,
+                tmp_dir: tmp_dir.clone(),
                 jobs_dir,
                 jobs_config_dir,
                 jobs_status_dir,
@@ -820,13 +833,13 @@ mod tests {
         }
 
         fn create_infinite_job_runner(&self) {
-            utils::tests::create_dummy_bin(&self.test_job_runner_path, &self.ctrl_file, true);
+            utils::tests::create_dummy_bin(&self.test_job_runner_path, &self.tmp_dir, true);
         }
 
-        async fn wait_for_job_runner(&self) -> Result<()> {
+        async fn wait_for_job_runner(&self, name: &str) -> Result<()> {
             // asynchronously wait for dummy job_runner to start
-            tokio::time::timeout(Duration::from_secs(1), async {
-                while !self.ctrl_file.exists() {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while !self.tmp_dir.join(name).exists() {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             })
@@ -851,6 +864,7 @@ mod tests {
             shutdown_timeout_secs: None,
             shutdown_signal: None,
             needs: None,
+            wait_for: None,
             run_as: None,
             log_buffer_capacity_mb: None,
             log_timestamp: None,
@@ -958,6 +972,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec![]),
+                    wait_for: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
@@ -1042,7 +1057,7 @@ mod tests {
         let mut job = Command::new(&test_env.test_job_runner_path)
             .args(["active_job"])
             .spawn()?;
-        test_env.wait_for_job_runner().await?;
+        test_env.wait_for_job_runner("active_job").await?;
         let invalid_config_path = test_env.jobs_config_dir.join("invalid.cfg");
         {
             // create invalid config file to make sure it won't crash load and is removed after
@@ -1117,9 +1132,9 @@ mod tests {
             test_env.client.info("test_job").await?.status
         );
 
-        let _ = test_env.wait_for_job_runner().await.unwrap_err();
+        let _ = test_env.wait_for_job_runner("test_job").await.unwrap_err();
         test_env.client.startup().await?;
-        test_env.wait_for_job_runner().await?;
+        test_env.wait_for_job_runner("test_job").await?;
 
         assert_eq!(
             JobStatus::Running,
@@ -1198,6 +1213,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["invalid_dependency".to_string()]),
+                    wait_for: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
@@ -1207,9 +1223,14 @@ mod tests {
         test_env.client.start("test_invalid_job").await?;
         test_env
             .client
-            .create("test_job", dummy_job_config())
+            .create("test_job_a", dummy_job_config())
             .await?;
-        test_env.client.start("test_job").await?;
+        test_env
+            .client
+            .create("test_job_b", dummy_job_config())
+            .await?;
+        test_env.client.start("test_job_a").await?;
+        test_env.client.start("test_job_b").await?;
         test_env
             .client
             .create(
@@ -1219,7 +1240,8 @@ mod tests {
                     restart: RestartPolicy::Never,
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
-                    needs: Some(vec!["test_job".to_string()]),
+                    needs: Some(vec!["test_job_a".to_string()]),
+                    wait_for: Some(vec!["test_job_b".to_string()]),
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
@@ -1229,7 +1251,8 @@ mod tests {
         test_env.client.start("test_pending_job").await?;
 
         let monitor_handle = test_env.spawn_monitor();
-        test_env.wait_for_job_runner().await?;
+        test_env.wait_for_job_runner("test_job_a").await?;
+        test_env.wait_for_job_runner("test_job_b").await?;
 
         assert_eq!(
             JobStatus::Finished {
@@ -1241,7 +1264,11 @@ mod tests {
         );
         assert_eq!(
             JobStatus::Running,
-            test_env.client.info("test_job").await?.status
+            test_env.client.info("test_job_a").await?.status
+        );
+        assert_eq!(
+            JobStatus::Running,
+            test_env.client.info("test_job_b").await?.status
         );
         assert_eq!(
             JobStatus::Pending,
@@ -1253,20 +1280,25 @@ mod tests {
                 exit_code: Some(0),
                 message: "".to_string(),
             },
-            "test_job",
+            "test_job_a",
             &test_env.jobs_status_dir,
         )?;
-        fs::remove_file(&test_env.ctrl_file)?;
-        test_env.kill_job("test_job");
-
-        test_env.wait_for_job_runner().await?;
-
+        jobs::save_status(&JobStatus::Stopped, "test_job_b", &test_env.jobs_status_dir)?;
+        test_env.kill_job("test_job_a");
+        test_env.wait_for_job_runner("test_job_a.finished").await?;
+        test_env.kill_job("test_job_b");
+        test_env.wait_for_job_runner("test_job_b.finished").await?;
+        test_env.wait_for_job_runner("test_pending_job").await?;
         assert_eq!(
             JobStatus::Finished {
                 exit_code: Some(0),
                 message: "".to_string(),
             },
-            test_env.client.info("test_job").await?.status
+            test_env.client.info("test_job_a").await?.status
+        );
+        assert_eq!(
+            JobStatus::Stopped,
+            test_env.client.info("test_job_b").await?.status
         );
         assert_eq!(
             JobStatus::Running,
@@ -1300,6 +1332,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: Some(vec!["failed_job".to_string()]),
+                    wait_for: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
@@ -1322,7 +1355,7 @@ mod tests {
         );
 
         let monitor_handle = test_env.spawn_monitor();
-        test_env.wait_for_job_runner().await?;
+        test_env.wait_for_job_runner("test_job").await?;
 
         assert_eq!(
             JobStatus::Finished {
@@ -1356,14 +1389,13 @@ mod tests {
             .create("test_job", dummy_job_config())
             .await?;
         test_env.client.start("test_job").await?;
-        test_env.wait_for_job_runner().await.unwrap();
+        test_env.wait_for_job_runner("test_job").await.unwrap();
 
         assert_eq!(
             JobStatus::Running,
             test_env.client.info("test_job").await?.status
         );
 
-        fs::remove_file(&test_env.ctrl_file)?;
         test_env.kill_job("test_job");
         test_env
             .client
@@ -1379,6 +1411,7 @@ mod tests {
                     shutdown_timeout_secs: None,
                     shutdown_signal: None,
                     needs: None,
+                    wait_for: None,
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
@@ -1386,7 +1419,10 @@ mod tests {
             )
             .await?;
         test_env.client.start("test_restarting_job").await?;
-        test_env.wait_for_job_runner().await.unwrap();
+        test_env
+            .wait_for_job_runner("test_restarting_job")
+            .await
+            .unwrap();
 
         let info = test_env.client.info("test_job").await?;
         assert_eq!(
@@ -1412,9 +1448,11 @@ mod tests {
             test_env.client.info("test_restarting_job").await?
         );
 
-        fs::remove_file(&test_env.ctrl_file)?;
         test_env.kill_job("test_restarting_job");
-        test_env.wait_for_job_runner().await.unwrap();
+        test_env
+            .wait_for_job_runner("test_restarting_job")
+            .await
+            .unwrap();
 
         let mut info = test_env.client.info("test_restarting_job").await?;
         assert_eq!(JobStatus::Running, info.status);

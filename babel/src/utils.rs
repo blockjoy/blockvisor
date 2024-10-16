@@ -275,7 +275,7 @@ pub mod tests {
     }
 
     #[allow(clippy::write_literal)]
-    pub fn create_dummy_bin(path: &Path, ctrl_file: &Path, wait_for_sigterm: bool) {
+    pub fn create_dummy_bin(path: &Path, ctrl_dir: &Path, wait_for_sigterm: bool) {
         let _ = fs::remove_file(path);
         let mut babel = fs::OpenOptions::new()
             .create(true)
@@ -285,13 +285,25 @@ pub mod tests {
             .open(path)
             .unwrap();
         writeln!(babel, "#!/bin/bash").unwrap();
-        writeln!(babel, "touch {}", ctrl_file.to_string_lossy()).unwrap();
+        writeln!(babel, "touch {}/$1", ctrl_dir.to_string_lossy()).unwrap();
         if wait_for_sigterm {
             writeln!(
                 babel,
                 "{}",
                 r#"
-                trap "exit" SIGINT SIGTERM SIGKILL
+                function cleanup()
+                {
+                "#
+            )
+            .unwrap();
+            writeln!(babel, "touch {}/$1.finished", ctrl_dir.to_string_lossy()).unwrap();
+            writeln!(
+                babel,
+                "{}",
+                r#"
+                    exit
+                }
+                trap "cleanup $1" SIGINT SIGTERM SIGKILL
                 while true
                 do
                     sleep 0.1
@@ -306,18 +318,18 @@ pub mod tests {
     async fn test_kill_all_processes() -> Result<()> {
         let tmp_root = TempDir::new()?.to_path_buf();
         fs::create_dir_all(&tmp_root)?;
-        let ctrl_file = tmp_root.join("cmd_started");
         let cmd_path = tmp_root.join("test_cmd");
-        create_dummy_bin(&cmd_path, &ctrl_file, true);
+        create_dummy_bin(&cmd_path, &tmp_root, true);
 
         let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(format!("{} a b c", cmd_path.display()));
+        cmd.arg("-c")
+            .arg(format!("{} cmd_started a b c", cmd_path.display()));
         let child = cmd.spawn()?;
         let pid = child.id().unwrap();
-        wait_for_process(&ctrl_file).await;
+        wait_for_process(&tmp_root.join("cmd_started")).await;
         bv_utils::system::kill_all_processes(
             &cmd_path.to_string_lossy(),
-            &["a", "b", "c"],
+            &["cmd_started", "a", "b", "c"],
             Duration::from_secs(3),
             PosixSignal::SIGTERM,
         );
