@@ -72,6 +72,7 @@ pub enum ImageCommand {
         props: Option<String>,
 
         /// Image variant key.
+        #[clap(long)]
         variant: Option<String>,
 
         #[clap(default_value = "babel.yaml")]
@@ -85,6 +86,7 @@ pub enum ImageCommand {
         props: Option<String>,
 
         /// Image variant key.
+        #[clap(long)]
         variant: Option<String>,
 
         #[clap(default_value = "babel.yaml")]

@@ -69,15 +69,15 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum NodeCommand {
-    /// Show nodes list
+    /// Show nodes list.
     #[clap(alias = "ls")]
     List {
-        /// Display only running nodes
+        /// Display only running nodes.
         #[clap(long, short)]
         running: bool,
     },
 
-    /// Create node
+    /// Create node.
     #[clap(alias = "c")]
     Create {
         /// Protocol key.
@@ -94,14 +94,14 @@ pub enum NodeCommand {
         props: Option<String>,
     },
 
-    /// Start node
+    /// Start node.
     Start {
-        /// Node id or name
+        /// Node id or name.
         #[clap(required(false))]
         id_or_names: Vec<String>,
     },
 
-    /// Stop node
+    /// Stop node.
     Stop {
         /// One or more node id or names.
         #[clap(required(false))]
@@ -112,7 +112,7 @@ pub enum NodeCommand {
         force: bool,
     },
 
-    /// Restart node
+    /// Restart node.
     Restart {
         /// One or more node id or names.
         #[clap(required(false))]
@@ -123,7 +123,14 @@ pub enum NodeCommand {
         force: bool,
     },
 
-    /// Delete node and clean up resources
+    /// Trigger node upgrade.
+    Upgrade {
+        /// Node id or name.
+        #[clap(required(false))]
+        id_or_names: Vec<String>,
+    },
+
+    /// Delete node and clean up resources.
     #[clap(alias = "d", alias = "rm")]
     Delete {
         /// One or more node id or names.
@@ -139,14 +146,14 @@ pub enum NodeCommand {
         yes: bool,
     },
 
-    /// Get node status
+    /// Get node status.
     Status {
         /// One or more node id or names.
         #[clap(required(false))]
         id_or_names: Vec<String>,
     },
 
-    /// Return supported methods that could be executed on running node via `bv node run`
+    /// Return supported methods that could be executed on running node via `bv node run`.
     #[clap(alias = "caps")]
     Capabilities {
         /// Node id or name. BV tries to get it from workspace if not provided.
@@ -174,7 +181,7 @@ pub enum NodeCommand {
         id_or_name: Option<String>,
     },
 
-    /// Manage jobs on given node
+    /// Manage jobs on given node.
     #[clap(alias = "j")]
     Job {
         #[clap(subcommand)]
@@ -184,7 +191,7 @@ pub enum NodeCommand {
         id_or_name: Option<String>,
     },
 
-    /// Shell-into node
+    /// Shell-into the node.
     Shell {
         /// The id or name of the node. BV tries to get it from workspace if not provided.
         id_or_name: Option<String>,

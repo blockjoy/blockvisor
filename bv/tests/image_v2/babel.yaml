@@ -1,5 +1,5 @@
-version: 0.0.1
-container_uri: docker-daemon://test_v1:latest
+version: 0.0.2
+container_uri: docker-daemon://test_v2:latest
 
 sku_code: SKU_code
 org_id: null

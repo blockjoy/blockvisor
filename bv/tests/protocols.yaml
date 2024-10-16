@@ -1,0 +1,6 @@
+- key: testing
+  name: Testing protocol
+  org_id: 4931bafa-92d9-4521-9fc6-a77eee047530
+  ticker: null
+  description: Testing protocol definition
+  visibility: private
