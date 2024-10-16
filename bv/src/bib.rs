@@ -5,7 +5,7 @@ use crate::{
     internal_server::{self, NodeDisplayInfo},
     node_state::{NodeImage, NodeState, ProtocolImageKey, VmConfig, VmStatus},
     protocol::{self, Variant},
-    services::{self, ApiServiceConnector},
+    services::{self, protocol::PushResult, ApiServiceConnector},
     utils, workspace,
 };
 use babel_api::{
@@ -230,18 +230,44 @@ pub async fn process_image_command(
                             client
                                 .update_protocol_version(remote.clone(), local_image.clone())
                                 .await?;
+                            println!(
+                                "Protocol version '{}/{}/{}' updated",
+                                local_image.protocol_key, variant.key, local_image.version
+                            );
                             remote.protocol_version_id
                         }
                         _ => {
-                            client
+                            let protocol_version_id = client
                                 .add_protocol_version(local_image.clone(), variant.clone())
                                 .await?
-                                .protocol_version_id
+                                .protocol_version_id;
+                            println!(
+                                "Protocol version '{}/{}/{}' added",
+                                local_image.protocol_key, variant.key, local_image.version
+                            );
+                            protocol_version_id
                         }
                     };
-                client
+                match client
                     .push_image(protocol_version_id, local_image.clone(), variant.clone())
-                    .await?;
+                    .await?
+                {
+                    PushResult::Added(image) => println!(
+                        "Image '{}/{}/{}/{}' added",
+                        local_image.protocol_key,
+                        variant.key,
+                        local_image.version,
+                        image.build_version,
+                    ),
+                    PushResult::Updated(image) => println!(
+                        "Image '{}/{}/{}/{}' updated",
+                        local_image.protocol_key,
+                        variant.key,
+                        local_image.version,
+                        image.build_version,
+                    ),
+                    PushResult::NoChanges => println!("No image changes to push"),
+                }
             }
         }
     }
@@ -269,12 +295,15 @@ pub async fn process_protocol_command(
             let local_protocols: Vec<protocol::Protocol> =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             for local in local_protocols {
+                let protocol_key = local.key.clone();
                 if let Some(remote) = protocols.iter().find(|protocol| protocol.key == local.key) {
                     client
                         .update_protocol(remote.protocol_id.clone(), local)
                         .await?;
+                    println!("Protocol '{protocol_key}' updated");
                 } else {
                     client.add_protocol(local).await?;
+                    println!("Protocol '{protocol_key}' added");
                 }
             }
         }

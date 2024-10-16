@@ -41,7 +41,8 @@ ci-setup: bundle-base
 	systemctl stop blockvisor.service || true
 	rm -rf /opt/blockvisor
 	/tmp/bundle/installer
-	docker build -t test bv/tests/image_v1
+	docker build -t test_v1 bv/tests/image_v1
+	docker build -t test_v2 bv/tests/image_v2
 	bib config test-token
 	systemctl start blockvisor.service
 
