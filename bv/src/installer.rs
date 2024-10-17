@@ -521,6 +521,7 @@ mod tests {
     use crate::hosts;
     use crate::internal_server;
     use crate::node_metrics;
+    use crate::node_state;
     use crate::node_state::VmStatus;
     use assert_fs::TempDir;
     use babel_api::engine::JobsInfo;
@@ -577,12 +578,16 @@ mod tests {
             ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
             async fn create_dev_node(
                 &self,
-                request: tonic::Request<internal_server::CreateDevNodeRequest>,
+                request: tonic::Request<node_state::NodeState>,
             ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
             async fn delete_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn start_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn stop_node(&self, request: tonic::Request<(Uuid, bool)>) -> Result<tonic::Response<()>, tonic::Status>;
             async fn upgrade_node(&self, request: tonic::Request<Uuid>) -> Result<tonic::Response<()>, tonic::Status>;
+            async fn upgrade_dev_node(
+                &self,
+                request: tonic::Request<node_state::NodeState>,
+            ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
             async fn get_node_jobs(
                 &self,
                 request: tonic::Request<Uuid>,
