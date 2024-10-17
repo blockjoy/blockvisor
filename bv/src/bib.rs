@@ -6,7 +6,8 @@ use crate::{
     node_state::{NodeImage, NodeState, ProtocolImageKey, VmConfig, VmStatus},
     protocol::{self, Variant},
     services::{self, protocol::PushResult, ApiServiceConnector},
-    utils, workspace,
+    utils::{self, node_id_with_fallback},
+    workspace,
 };
 use babel_api::{
     engine::NodeEnv,
@@ -99,54 +100,38 @@ pub async fn process_image_command(
                 discover_ip_and_gateway(&bv_config.iface, ip, gateway, &nodes).await?;
 
             let node = bv_client
-                .create_dev_node(internal_server::CreateDevNodeRequest {
-                    new_node_state: NodeState {
-                        id: Uuid::new_v4(),
-                        name: Petnames::default().generate_one(3, "-"),
-                        protocol_id: "dev-node-protocol-id".to_string(),
-                        image_key: ProtocolImageKey {
-                            protocol_key: local_image.protocol_key,
-                            variant_key: variant.key,
-                        },
-                        dev_mode: true,
-                        ip,
-                        gateway,
-                        properties,
-                        firewall: local_image.firewall_config.into(),
-                        display_name: "".to_string(),
-                        org_id: "dev-node-org-id".to_string(),
-                        org_name: "dev node org name".to_string(),
-                        protocol_name: "dev node protocol name".to_string(),
-                        dns_name: "dev.node.dns.name".to_string(),
-                        vm_config: VmConfig {
-                            vcpu_count: 0,
-                            mem_size_mb: 0,
-                            disk_size_gb: 0,
-                            babel_config: BabelConfig {
-                                ramdisks: variant
-                                    .ramdisks
-                                    .into_iter()
-                                    .map(|ramdisk| RamdiskConfiguration {
-                                        ram_disk_mount_point: ramdisk.mount,
-                                        ram_disk_size_mb: ramdisk.size_bytes,
-                                    })
-                                    .collect(),
-                            },
-                        },
-                        image: NodeImage {
-                            id: "dev-node-image-id".to_string(),
-                            version: local_image.version,
-                            config_id: "dev-node-config-id".to_string(),
-                            archive_id: "dev-node-archive-id".to_string(),
-                            uri: local_image.container_uri,
-                        },
-                        assigned_cpus: vec![],
-                        expected_status: VmStatus::Stopped,
-                        started_at: None,
-                        initialized: false,
-                        restarting: false,
-                        apptainer_config: None,
+                .create_dev_node(NodeState {
+                    id: Uuid::new_v4(),
+                    name: Petnames::default().generate_one(3, "-"),
+                    protocol_id: "dev-node-protocol-id".to_string(),
+                    image_key: ProtocolImageKey {
+                        protocol_key: local_image.protocol_key,
+                        variant_key: variant.key.clone(),
                     },
+                    dev_mode: true,
+                    ip,
+                    gateway,
+                    properties,
+                    firewall: local_image.firewall_config.into(),
+                    display_name: "".to_string(),
+                    org_id: "dev-node-org-id".to_string(),
+                    org_name: "dev node org name".to_string(),
+                    protocol_name: "dev node protocol name".to_string(),
+                    dns_name: "dev.node.dns.name".to_string(),
+                    vm_config: variant.into(),
+                    image: NodeImage {
+                        id: format!("dev-node-image-id-{}", local_image.version),
+                        version: local_image.version,
+                        config_id: "dev-node-config-id".to_string(),
+                        archive_id: "dev-node-archive-id".to_string(),
+                        uri: local_image.container_uri,
+                    },
+                    assigned_cpus: vec![],
+                    expected_status: VmStatus::Stopped,
+                    started_at: None,
+                    initialized: false,
+                    restarting: false,
+                    apptainer_config: None,
                 })
                 .await?
                 .into_inner();
@@ -158,6 +143,48 @@ pub async fn process_image_command(
                 &std::env::current_dir()?,
                 node.state.id,
                 &node.state.name,
+            );
+        }
+        ImageCommand::Upgrade { path, id_or_name } => {
+            let bv_config = load_bv_config(bv_root).await?;
+            let bv_url = format!("http://localhost:{}", bv_config.blockvisor_port);
+            let mut bv_client = internal_server::service_client::ServiceClient::connect(
+                Endpoint::from_shared(bv_url)?
+                    .connect_timeout(BV_CONNECT_TIMEOUT)
+                    .timeout(BV_REQUEST_TIMEOUT),
+            )
+            .await?;
+            let id_or_name = node_id_with_fallback(id_or_name)?;
+            let id = match Uuid::parse_str(&id_or_name) {
+                Ok(v) => v,
+                Err(_) => {
+                    let id = bv_client
+                        .get_node_id_for_name(id_or_name)
+                        .await?
+                        .into_inner();
+                    Uuid::parse_str(&id)?
+                }
+            };
+            let local_image: protocol::Image =
+                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
+            let mut node = bv_client.get_node(id).await?.into_inner().state;
+            node.firewall = local_image.firewall_config.into();
+            let variant = local_image
+                .variants
+                .into_iter()
+                .find(|variant| variant.key == node.image_key.variant_key)
+                .ok_or(anyhow!(
+                    "variant {} not found in image definition",
+                    node.image_key.variant_key
+                ))?;
+            node.vm_config = variant.into();
+            node.image.id = format!("dev-node-image-id-{}", local_image.version);
+            node.image.version = local_image.version;
+            node.image.uri = local_image.container_uri;
+            let node = bv_client.upgrade_dev_node(node).await?.into_inner();
+            println!(
+                "Upgraded dev_node with ID `{}` and name `{}`\n{:#?}",
+                node.state.id, node.state.name, node.state
             );
         }
         ImageCommand::Check {
@@ -422,6 +449,26 @@ impl From<protocol::FirewallConfig> for firewall::Config {
             default_out: value.default_out.into(),
             default_in: value.default_in.into(),
             rules: value.rules.into_iter().map(|rule| rule.into()).collect(),
+        }
+    }
+}
+
+impl From<Variant> for VmConfig {
+    fn from(value: Variant) -> Self {
+        Self {
+            vcpu_count: value.min_cpu as usize,
+            mem_size_mb: value.min_memory_bytes / 1_000_000,
+            disk_size_gb: value.min_disk_bytes / 1_000_000_000,
+            babel_config: BabelConfig {
+                ramdisks: value
+                    .ramdisks
+                    .into_iter()
+                    .map(|ramdisk| RamdiskConfiguration {
+                        ram_disk_mount_point: ramdisk.mount,
+                        ram_disk_size_mb: ramdisk.size_bytes,
+                    })
+                    .collect(),
+            },
         }
     }
 }

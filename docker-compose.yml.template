@@ -28,8 +28,26 @@ services:
       - 8883:8883
       - 18083:18083
 
+
+  vault:
+    image: hashicorp/vault:1.17
+    ports:
+      - 28200:8200
+    environment:
+      VAULT_ADDR: "http://0.0.0.0:8200"
+      VAULT_DEV_ROOT_TOKEN_ID: "vault-root-token"
+    cap_add:
+      - IPC_LOCK
+
+  vault-init:
+    image: vault:latest
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+    cap_add:
+      - IPC_LOCK
+
   api:
-    image: 'us-docker.pkg.dev/blockjoy-deployer/blockvisor-api/dev-blockvisor-api:latest'
+    image: 'api:latest'
     ports:
       - 8080:8080
     environment:
@@ -53,10 +71,8 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: us-east-1
       STORAGE_URL: https://${AWS_ACCOUNT_ID}.r2.cloudflarestorage.com
-      COOKBOOK_BUCKET: cookbook-dev
-      BUNDLE_BUCKET: bundle-dev
-      KERNEL_BUCKET: kernel-dev
-      ARCHIVE_BUCKET: archive-dev
+      BUNDLE_BUCKET: bundle-ci
+      ARCHIVE_BUCKET: archive-ci
       DIR_CHAINS_PREFIX: chains
       PRESIGNED_URL_EXPIRATION: 1h
       # key service
@@ -75,6 +91,11 @@ services:
       # logs
       LOG_ENVIRONMENT: dev
       OPENTELEMETRY_ENDPOINT: http://api:8080
+      # vault
+      VAULT_SERVER_ADDRESS: "http://vault:8200"
+      VAULT_ACCESS_TOKEN: "vault-root-token"
+      VAULT_KV_MOUNT: "blockjoy"
+
 
     depends_on:
       database:

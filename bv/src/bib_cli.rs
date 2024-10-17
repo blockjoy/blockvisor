@@ -53,7 +53,8 @@ pub enum ImageCommand {
 
     /// Print associated container image URI.
     ContainerUri {
-        #[clap(default_value = "babel.yaml")]
+        /// Image definition file path.
+        #[clap(long, default_value = "babel.yaml")]
         path: PathBuf,
     },
 
@@ -75,8 +76,19 @@ pub enum ImageCommand {
         #[clap(long)]
         variant: Option<String>,
 
-        #[clap(default_value = "babel.yaml")]
+        /// Image definition file path.
+        #[clap(long, default_value = "babel.yaml")]
         path: PathBuf,
+    },
+
+    /// Upgrade existing dev node with the given image.
+    Upgrade {
+        /// Image definition file path.
+        #[clap(long, default_value = "babel.yaml")]
+        path: PathBuf,
+
+        /// Node id or name.
+        id_or_name: Option<String>,
     },
 
     /// Run sanity checks on given image and embedded plugin.
@@ -89,13 +101,15 @@ pub enum ImageCommand {
         #[clap(long)]
         variant: Option<String>,
 
-        #[clap(default_value = "babel.yaml")]
+        /// Image definition file path.
+        #[clap(long, default_value = "babel.yaml")]
         path: PathBuf,
     },
 
     /// Push image to the API.
     Push {
-        #[clap(default_value = "babel.yaml")]
+        /// Image definition file path.
+        #[clap(long, default_value = "babel.yaml")]
         path: PathBuf,
     },
 }
@@ -107,7 +121,8 @@ pub enum ProtocolCommand {
     List,
     /// Push protocols to the API.
     Push {
-        #[clap(default_value = "protocols.yaml")]
+        /// Protocol definition file path.
+        #[clap(long, default_value = "protocols.yaml")]
         path: PathBuf,
     },
 }
