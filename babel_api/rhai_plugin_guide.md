@@ -144,6 +144,12 @@ To make implementation of Babel Plugin interface possible, BV provides following
 - `run_sh(body)` - Run Sh script on the blockchain VM and return [ShResponse](#shresponse) (with default 15s timeout).
 - `run_sh(body, timeout)` - Same as above, but with custom execution timeout (in seconds).
 - `parse_hex(hex)` - Convert `0x` hex string into decimal number.
+- `parse_json(json)` - Parse json string into a Rhai object.
+- `system_time()` - Get system time in seconds since UNIX EPOCH.
+- `parse_rfc3339(date_time)` - Parse an RFC 3339 date-and-time string into seconds since UNIX EPOCH.
+- `parse_rfc2822(date_time)` - Parse an RFC 2822 date-and-time string into seconds since UNIX EPOCH.
+- `parse_time(date_time, format)` - Parse date-and-time string into seconds since UNIX EPOCH, with respect to given format.
+  See [chrono::format::strftime](https://docs.rs/chrono/latest/chrono/format/strftime/index.html) for format details.
 - `sanitize_sh_param(param)` - Allowing people to substitute arbitrary data into sh-commands is unsafe.
   Call this function over each value before passing it to `run_sh`. This function is deliberately more
   restrictive than needed; it just filters out each character that is not a number or a

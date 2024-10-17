@@ -563,6 +563,7 @@ name = "babel_api"
 version = "1.13.1"
 dependencies = [
  "bv_tests_utils",
+ "chrono",
  "cidr-utils",
  "eyre",
  "futures-core",

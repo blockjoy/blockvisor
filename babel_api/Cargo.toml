@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 cidr-utils = "0.5.10"
+chrono = "0.4.38"
 eyre = "0.6.8"
 futures-core = "0.3.29"
 rhai = { version = "1.17.1", features = ["serde", "sync"] }
