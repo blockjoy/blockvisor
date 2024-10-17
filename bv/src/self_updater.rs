@@ -105,7 +105,7 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector + Clone> SelfUpdater<T, C> 
         .with_context(|| "cannot list bundle versions")?
         .into_inner();
         let mut versions = resp
-            .ids
+            .bundle_ids
             .into_iter()
             .map(|bundle_id| semver::Version::parse(&bundle_id.version))
             .collect::<Result<Vec<_>, _>>()
@@ -136,7 +136,7 @@ impl<T: AsyncTimer, C: services::ApiServiceConnector + Clone> SelfUpdater<T, C> 
         let url = api_with_retry!(
             client,
             client.retrieve(tonic::Request::new(pb::BundleServiceRetrieveRequest {
-                id: Some(bundle.clone()),
+                bundle_id: Some(bundle.clone()),
             }))
         )?
         .into_inner()
@@ -329,7 +329,7 @@ mod tests {
 
         let mut bundles_mock = MockTestBundleService::new();
         bundles_mock.expect_list_versions().once().returning(|_| {
-            let reply = pb::BundleServiceListVersionsResponse { ids: vec![] };
+            let reply = pb::BundleServiceListVersionsResponse { bundle_ids: vec![] };
             Ok(Response::new(reply))
         });
         let expected_bundle_id = bundle_id.clone();
@@ -338,7 +338,7 @@ mod tests {
             .once()
             .returning(move |_| {
                 let reply = pb::BundleServiceListVersionsResponse {
-                    ids: vec![
+                    bundle_ids: vec![
                         pb::BundleIdentifier {
                             version: "1.2.3".to_string(),
                         },
@@ -477,7 +477,7 @@ mod tests {
             .once()
             .returning(move |_| {
                 let reply = pb::BundleServiceListVersionsResponse {
-                    ids: vec![expected_bundle_id.clone()],
+                    bundle_ids: vec![expected_bundle_id.clone()],
                 };
                 Ok(Response::new(reply))
             });
@@ -487,7 +487,7 @@ mod tests {
             .once()
             .withf(
                 move |req: &tonic::Request<pb::BundleServiceRetrieveRequest>| {
-                    req.get_ref().id.as_ref().unwrap() == &bundle_id
+                    req.get_ref().bundle_id.as_ref().unwrap() == &bundle_id
                 },
             )
             .returning(move |_| {
@@ -534,7 +534,7 @@ mod tests {
             .returning(move |_| {
                 let reply: pb::BundleServiceListVersionsResponse =
                     pb::BundleServiceListVersionsResponse {
-                        ids: vec![expected_bundle_id.clone()],
+                        bundle_ids: vec![expected_bundle_id.clone()],
                     };
                 Ok(Response::new(reply))
             });

@@ -130,6 +130,10 @@ impl TestEnv {
         try_bv_run(commands, stdout_pattern, Some(&self.bv_root))
     }
 
+    pub fn bib_run(&self, commands: &[&str], stdout_pattern: &str) {
+        bib_run(commands, stdout_pattern, Some(&self.bv_root));
+    }
+
     pub async fn wait_for_running_node(&self, vm_id: &str, timeout: Duration) {
         wait_for_node_status(vm_id, "Running", timeout, Some(&self.bv_root)).await
     }
@@ -179,6 +183,7 @@ impl TestEnv {
                 "216.18.214.193",
                 "--ip",
                 ip,
+                "--path",
                 &path.to_string_lossy(),
             ])
             .env("BV_ROOT", &self.bv_root);
@@ -227,7 +232,7 @@ pub fn link_apptainer_config(bv_root: &Path) -> Result<()> {
 
 impl Drop for TestEnv {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.bv_root);
+        // let _ = fs::remove_dir_all(&self.bv_root);
     }
 }
 

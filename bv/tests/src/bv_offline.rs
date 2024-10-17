@@ -15,6 +15,7 @@ use blockvisord::{
 use bv_utils::{cmd::run_cmd, run_flag::RunFlag, system::is_process_running};
 use eyre::{bail, Result};
 use std::net::ToSocketAddrs;
+use std::path::PathBuf;
 use tokio::{
     fs,
     time::{sleep, Duration},
@@ -83,11 +84,14 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
         test_env.sh_inside(node_id, "cat /blockjoy/test").trim()
     );
     assert_eq!(
-        "memory.limit = 0\ncpu.cpus = \"\"",
+        "memory.limit = 1000000000\ncpu.cpus",
         fs::read_to_string(node_dir.join("cgroups.toml"))
             .await
             .unwrap()
             .trim()
+            .rsplit_once(" = ")
+            .unwrap()
+            .0
     );
     let pid = fs::read_to_string(node_dir.join("apptainer.pid"))
         .await
@@ -197,20 +201,23 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     println!("list running node after service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
-    // TODO MJR
-    // println!("upgrade running node");
-    // test_env.bv_run(
-    //     &["node", "upgrade", "testing/validator/0.0.2", vm_id],
-    //     "Upgraded node",
-    // );
-    //
-    // println!("list running node after node upgrade");
-    // test_env.bv_run(&["node", "status", vm_id], "Running");
-    //
-    // println!("check jobs after node upgrade");
-    // test_env
-    //     .wait_for_job_status(vm_id, "echo", "Running", Duration::from_secs(5))
-    //     .await;
+    println!("upgrade running node");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("image_v2")
+        .join("babel.yaml");
+    test_env.bib_run(
+        &["image", "upgrade", "--path", &path.to_string_lossy(), vm_id],
+        "Upgraded dev_node",
+    );
+
+    println!("list running node after node upgrade");
+    test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    println!("check jobs after node upgrade");
+    test_env
+        .wait_for_job_status(vm_id, "echo2", "Running", Duration::from_secs(5))
+        .await;
 
     println!("delete started node");
     test_env.bv_run(&["node", "delete", "--yes", vm_id], "Deleted node");

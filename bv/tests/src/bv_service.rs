@@ -216,6 +216,7 @@ async fn test_bv_service_e2e() {
         &[
             "protocol",
             "push",
+            "--path",
             &test_dir.join("protocols.yaml").to_string_lossy(),
         ],
         "Protocol 'testing' added",
@@ -229,6 +230,7 @@ async fn test_bv_service_e2e() {
             "check",
             "--props",
             r#"{"TEST_PARAM":"testing value"}"#,
+            "--path",
             &test_dir
                 .join("image_v1")
                 .join("babel.yaml")
@@ -243,6 +245,7 @@ async fn test_bv_service_e2e() {
         &[
             "image",
             "push",
+            "--path",
             &test_dir
                 .join("image_v1")
                 .join("babel.yaml")
@@ -287,6 +290,7 @@ async fn test_bv_service_e2e() {
         &[
             "image",
             "push",
+            "--path",
             &test_dir
                 .join("image_v2")
                 .join("babel.yaml")

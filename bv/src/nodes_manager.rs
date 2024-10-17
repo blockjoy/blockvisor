@@ -290,7 +290,10 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn upgrade(&self, desired_state: NodeState) -> commands::Result<()> {
+    pub async fn upgrade(
+        &self,
+        desired_state: NodeState,
+    ) -> commands::Result<(NodeState, VmStatus)> {
         let id = desired_state.id;
         let nodes_lock = self.nodes.read().await;
         let MaybeNode::Node(node_lock) =
@@ -300,9 +303,13 @@ where
                 "Cannot upgrade broken node `{id}`"
             )));
         };
-        let data = node_lock.read().await.state.clone();
-        if desired_state.image.id != data.image.id {
-            let node = node_lock.read().await.state.clone();
+
+        let read_node = node_lock.read().await;
+        if desired_state.image.id == read_node.state.image.id {
+            Ok((read_node.state.clone(), read_node.status().await))
+        } else {
+            let node = read_node.state.clone();
+            drop(read_node);
 
             if desired_state.image_key.protocol_key != node.image_key.protocol_key {
                 command_failed!(Error::Internal(anyhow!(
@@ -352,8 +359,8 @@ where
                     .await
                     .insert(id, node.state.clone());
             }
+            Ok((node.state.clone(), node.status().await))
         }
-        Ok(())
     }
 
     async fn update_cpu_assignment(
@@ -1265,7 +1272,10 @@ mod tests {
             .expect_plugin_path()
             .once()
             .returning(move || Ok(updated_plugin_path.clone()));
-        vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
+        vm_mock
+            .expect_state()
+            .times(2)
+            .return_const(VmState::SHUTOFF);
         vm_mock.expect_upgrade().return_once(|_| Ok(()));
         add_create_node_expectations(&mut pal, 1, node_state.clone(), vm_mock);
         pal.expect_available_resources()

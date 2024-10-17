@@ -383,7 +383,7 @@ pub fn build_service_job_config(
         } else {
             None
         },
-        wait_for: if service.use_blockchain_data {
+        wait_for: if service.use_protocol_data {
             Some(wait_for)
         } else {
             None

@@ -1,4 +1,3 @@
-use crate::node_state::ProtocolImageKey;
 use crate::{
     apptainer_machine::ROOTFS_DIR,
     bv_cli::{
@@ -11,10 +10,11 @@ use crate::{
     linux_platform::bv_root,
     node_context::build_node_dir,
     node_env::NODE_ENV_FILE_PATH,
-    node_state::VmStatus,
+    node_state::{ProtocolImageKey, VmStatus},
     pretty_table::{PrettyTable, PrettyTableRow},
     services,
     services::protocol::ProtocolService,
+    utils::{node_id_with_fallback, node_ids_with_fallback},
     workspace,
 };
 use babel_api::engine::JobStatus;
@@ -596,36 +596,4 @@ impl NodeClient {
 fn fmt_opt<T: std::fmt::Debug>(opt: Option<T>) -> String {
     opt.map(|t| format!("{t:?}"))
         .unwrap_or_else(|| "-".to_string())
-}
-
-fn node_id_with_fallback(node_id: Option<String>) -> Result<String> {
-    Ok(match node_id {
-        None => {
-            if let Ok(workspace::Workspace {
-                active_node: Some(workspace::ActiveNode { id, .. }),
-                ..
-            }) = workspace::read(&std::env::current_dir()?)
-            {
-                id.to_string()
-            } else {
-                bail!("<ID_OR_NAME> neither provided nor found in the workspace");
-            }
-        }
-        Some(id) => id,
-    })
-}
-
-fn node_ids_with_fallback(mut node_ids: Vec<String>, required: bool) -> Result<Vec<String>> {
-    if node_ids.is_empty() {
-        if let Ok(workspace::Workspace {
-            active_node: Some(workspace::ActiveNode { id, .. }),
-            ..
-        }) = workspace::read(&std::env::current_dir()?)
-        {
-            node_ids.push(id.to_string());
-        } else if required {
-            bail!("<ID_OR_NAMES> neither provided nor found in the workspace");
-        }
-    }
-    Ok(node_ids)
 }

@@ -37,11 +37,6 @@ pub struct CreateNodeRequest {
     pub properties: NodeProperties,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct CreateDevNodeRequest {
-    pub new_node_state: NodeState,
-}
-
 #[tonic_rpc::tonic_rpc(bincode)]
 trait Service {
     fn info() -> String;
@@ -52,10 +47,11 @@ trait Service {
     fn get_node(id: Uuid) -> NodeDisplayInfo;
     fn get_nodes() -> Vec<NodeDisplayInfo>;
     fn create_node(req: CreateNodeRequest) -> NodeDisplayInfo;
-    fn create_dev_node(req: CreateDevNodeRequest) -> NodeDisplayInfo;
+    fn create_dev_node(req: NodeState) -> NodeDisplayInfo;
     fn start_node(id: Uuid);
     fn stop_node(id: Uuid, force: bool);
     fn upgrade_node(id: Uuid);
+    fn upgrade_dev_node(req: NodeState) -> NodeDisplayInfo;
     fn delete_node(id: Uuid);
     fn get_node_jobs(id: Uuid) -> JobsInfo;
     fn get_node_job_info(id: Uuid, job_name: String) -> babel_api::engine::JobInfo;
@@ -210,11 +206,11 @@ where
     #[instrument(skip(self), ret(Debug))]
     async fn create_dev_node(
         &self,
-        request: Request<CreateDevNodeRequest>,
+        request: Request<NodeState>,
     ) -> Result<Response<NodeDisplayInfo>, Status> {
         status_check().await?;
         Ok(Response::new(
-            self.create_dev_node(request.into_inner().new_node_state)
+            self.create_dev_node(request.into_inner())
                 .await
                 .map_err(|err| Status::unknown(format!("{err:#}")))?,
         ))
@@ -267,7 +263,7 @@ where
         status_check().await?;
         let id = request.into_inner();
         if self.is_dev_node(id).await? {
-            return Err(Status::unimplemented("dev node upgrade is not supported"));
+            Err(Status::unimplemented("dev node upgrade is not supported"))
         } else {
             let node = self
                 .nodes_manager
@@ -304,8 +300,28 @@ where
                 })
                 .await
                 .map_err(|e| Status::unknown(format!("{e:#}")))?;
+            Ok(Response::new(()))
         }
-        Ok(Response::new(()))
+    }
+
+    #[instrument(skip(self), ret(Debug))]
+    async fn upgrade_dev_node(
+        &self,
+        request: Request<NodeState>,
+    ) -> Result<Response<NodeDisplayInfo>, Status> {
+        status_check().await?;
+        let desired_node_state = request.into_inner();
+        if !self.is_dev_node(desired_node_state.id).await? {
+            Err(Status::unimplemented(
+                "can't upgrade non dev node with dev image",
+            ))
+        } else {
+            Ok(Response::new(
+                self.upgrade_dev_node(desired_node_state)
+                    .await
+                    .map_err(|err| Status::unknown(format!("{err:#}")))?,
+            ))
+        }
     }
 
     #[instrument(skip(self), ret(Debug))]
@@ -620,6 +636,14 @@ where
             state: self.nodes_manager.create(new_node_state).await?,
             status: VmStatus::Stopped,
         })
+    }
+
+    async fn upgrade_dev_node(
+        &self,
+        desired_node_state: NodeState,
+    ) -> eyre::Result<NodeDisplayInfo> {
+        let (state, status) = self.nodes_manager.upgrade(desired_node_state).await?;
+        Ok(NodeDisplayInfo { state, status })
     }
 
     /// Get org_id associated with this host.
