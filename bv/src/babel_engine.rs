@@ -201,7 +201,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     pub async fn init(&mut self) -> Result<()> {
-        self.on_plugin(move |plugin| plugin.init()).await
+        self.on_plugin(move |mut plugin| plugin.init()).await
     }
 
     /// This function calls babel by sending a protocol command using the specified method name.
@@ -979,7 +979,7 @@ mod tests {
             self.engine.run_sh("capabilities", None).unwrap();
             vec!["some_method".to_string()]
         }
-        fn init(&self) -> Result<()> {
+        fn init(&mut self) -> Result<()> {
             self.engine.render_template(
                 Path::new("template"),
                 Path::new("config"),
@@ -1202,6 +1202,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_async_bridge_to_babel() -> Result<()> {
         let mut babel_mock = MockBabelService::new();
+        let return_request = |req: Request<String>| {
+            Ok(Response::new(ShResponse {
+                exit_code: 0,
+                stdout: req.into_inner(),
+                stderr: "".to_string(),
+            }))
+        };
         // from init
         babel_mock
             .expect_render_template()
@@ -1212,6 +1219,14 @@ mod tests {
                     && params == "init_params"
             })
             .return_once(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| {
+                let req = req.get_ref().to_string();
+                req == "capabilities"
+            })
+            .times(2)
+            .returning(return_request);
         // from custom_method
         babel_mock
             .expect_run_sh()
@@ -1308,13 +1323,6 @@ mod tests {
             .return_once(|_| Ok(Response::new(())));
 
         // others
-        let return_request = |req: Request<String>| {
-            Ok(Response::new(ShResponse {
-                exit_code: 0,
-                stdout: req.into_inner(),
-                stderr: "".to_string(),
-            }))
-        };
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "height")
@@ -1339,10 +1347,6 @@ mod tests {
         babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "application_status")
-            .return_once(return_request);
-        babel_mock
-            .expect_run_sh()
-            .withf(|req| req.get_ref() == "capabilities")
             .return_once(return_request);
         babel_mock
             .expect_run_sh()

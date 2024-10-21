@@ -470,7 +470,11 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn reload_plugin(&mut self) -> Result<()> {
         let plugin_path = self.machine.plugin_path().await?;
         self.babel_engine
-            .update_plugin(|engine| RhaiPlugin::from_file(plugin_path, engine))
+            .update_plugin(|engine| {
+                let mut plugin = RhaiPlugin::from_file(plugin_path, engine)?;
+                plugin.evaluate_plugin_config()?;
+                Ok(plugin)
+            })
             .await
     }
 

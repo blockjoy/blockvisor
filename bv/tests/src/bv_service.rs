@@ -129,7 +129,7 @@ async fn test_bv_service_e2e() {
     rbac::setup_rbac(db_url).await;
     println!("create user");
     let user_query = r#"INSERT INTO users
-        VALUES ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', 'tester@blockjoy.com', '57snVgOUjwtfOrMxLHez8KOQaTNaNnLXMkUpzaxoRDs', 'cM4OaOTJUottdF4i8unbuA', '2023-01-17 22:13:52.422342+00', 'Luuk', 'Wester', '2023-01-17 22:14:06.297602+00', NULL, NULL);
+        VALUES ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', 'tester@blockjoy.com', '57snVgOUjwtfOrMxLHez8KOQaTNaNnLXMkUpzaxoRDs', 'cM4OaOTJUottdF4i8unbuA', '2023-01-17 22:13:52.422342+00', 'Luuk', 'Wester', '2023-01-17 22:14:06.297602+00');
         "#;
     execute_sql_insert(db_url, user_query);
 
