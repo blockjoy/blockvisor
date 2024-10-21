@@ -132,38 +132,39 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         Self::new(ast, babel_engine, rhai_engine)
     }
 
-    fn new(ast: AST, babel_engine: Arc<E>, rhai_engine: rhai::Engine) -> Result<Self> {
-        check_babel_version(&ast)?;
+    pub fn evaluate_plugin_config(&mut self) -> Result<()> {
         let mut scope = build_scope();
-        rhai_engine.run_ast_with_scope(&mut scope, &ast)?;
-        let base_config = if let Some(dynamic) = scope.get(BASE_CONFIG_CONST_NAME) {
+        self.rhai_engine
+            .run_ast_with_scope(&mut scope, &self.bare.ast)?;
+        if let Some(dynamic) = scope.get(BASE_CONFIG_CONST_NAME) {
             let value: BaseConfig = from_dynamic(dynamic).with_context(|| {
                 format!("Invalid Rhai script - failed to deserialize {BASE_CONFIG_CONST_NAME}")
             })?;
-            Some(value)
-        } else {
-            None
-        };
-        let plugin_config = if let Some(dynamic) = scope.get(PLUGIN_CONFIG_CONST_NAME) {
+            self.bare.base_config = Some(value);
+        }
+        if let Some(dynamic) = scope.get(PLUGIN_CONFIG_CONST_NAME) {
             let value: PluginConfig = from_dynamic(dynamic).with_context(|| {
                 format!("Invalid Rhai script - failed to deserialize {PLUGIN_CONFIG_CONST_NAME}")
             })?;
             value.validate(
-                base_config
+                self.bare
+                    .base_config
                     .as_ref()
                     .and_then(|config| config.services.as_ref()),
             )?;
-            Some(value)
-        } else {
-            None
-        };
+            self.bare.plugin_config = Some(value);
+        }
+        Ok(())
+    }
 
+    fn new(ast: AST, babel_engine: Arc<E>, rhai_engine: rhai::Engine) -> Result<Self> {
+        check_babel_version(&ast)?;
         let mut plugin = RhaiPlugin {
             bare: BarePlugin {
                 babel_engine,
                 ast,
-                plugin_config,
-                base_config,
+                plugin_config: None,
+                base_config: None,
             },
             rhai_engine,
         };
@@ -594,6 +595,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             .iter_functions()
             .map(|meta| meta.name.to_string())
             .collect();
+
         if self.bare.plugin_config.is_some() {
             if !capabilities.contains(&UPLOAD_JOB_NAME.to_string()) {
                 capabilities.push(UPLOAD_JOB_NAME.to_string())
@@ -605,7 +607,9 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
         capabilities
     }
 
-    fn init(&self) -> Result<()> {
+    fn init(&mut self) -> Result<()> {
+        self.evaluate_plugin_config()?;
+
         if let Some(init_meta) = self
             .bare
             .ast
@@ -1009,7 +1013,7 @@ mod tests {
         babel
             .expect_get_jobs()
             .return_once(|| Ok(HashMap::default()));
-        let plugin = RhaiPlugin::from_str(script, babel)?.clone(); // call clone() to make sure it works as well
+        let mut plugin = RhaiPlugin::from_str(script, babel)?.clone(); // call clone() to make sure it works as well
         plugin.init()?;
         plugin.upload()?;
         assert_eq!(77, plugin.height()?);
@@ -1403,6 +1407,8 @@ mod tests {
                 ],
             };
 
+            fn init() {}
+
             fn application_status() {
                 #{state: "delinquent", health: "unhealthy"}
             }
@@ -1463,7 +1469,8 @@ mod tests {
             .once()
             .returning(|| Ok(HashMap::default()));
 
-        let plugin = RhaiPlugin::from_str(script, babel)?;
+        let mut plugin = RhaiPlugin::from_str(script, babel)?;
+        plugin.init()?;
         assert_eq!(
             ProtocolStatus {
                 state: DOWNLOADING_STATE_NAME.to_owned(),
@@ -1561,6 +1568,7 @@ mod tests {
                     }
                 ],
             };
+            fn init() {}
             "#;
         let mut babel = MockBabelEngine::new();
         babel
@@ -1667,7 +1675,8 @@ mod tests {
             .once()
             .returning(|_| Ok(()));
 
-        let plugin = RhaiPlugin::from_str(script, babel)?;
+        let mut plugin = RhaiPlugin::from_str(script, babel)?;
+        plugin.init()?;
         assert!(plugin.capabilities().iter().any(|v| v == "upload"));
         plugin.upload().unwrap();
         Ok(())
@@ -1959,9 +1968,9 @@ mod tests {
             )
             .once()
             .returning(|_, _, _, _| Ok(()));
-        let plugin = RhaiPlugin::from_str(script, babel)?;
-        assert!(plugin.capabilities().iter().any(|v| v == "init"));
+        let mut plugin = RhaiPlugin::from_str(script, babel)?;
         plugin.init().unwrap();
+        assert!(plugin.capabilities().iter().any(|v| v == "init"));
         Ok(())
     }
 

@@ -8,7 +8,7 @@ pub trait Plugin {
     fn capabilities(&self) -> Vec<String>;
 
     /// Init method is called by engine on node start.
-    fn init(&self) -> Result<()>;
+    fn init(&mut self) -> Result<()>;
 
     /// Upload protocol data to remote storage.
     fn upload(&self) -> Result<()>;

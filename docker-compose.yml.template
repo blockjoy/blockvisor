@@ -39,15 +39,15 @@ services:
     cap_add:
       - IPC_LOCK
 
-  vault-init:
-    image: vault:latest
-    environment:
-      VAULT_ADDR: "http://vault:8200"
-    cap_add:
-      - IPC_LOCK
+#  vault-init:
+#    image: vault:latest
+#    environment:
+#      VAULT_ADDR: "http://vault:8200"
+#    cap_add:
+#      - IPC_LOCK
 
   api:
-    image: 'api:latest'
+    image: 'us-docker.pkg.dev/blockjoy-deployer/blockvisor-api/dev-blockvisor-api:latest'
     ports:
       - 8080:8080
     environment:

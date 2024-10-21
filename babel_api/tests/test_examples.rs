@@ -121,7 +121,7 @@ fn test_rhai_syntax() {
 #[test]
 fn test_custom_download_upload() {
     let dummy_babel = dummy_babel_engine();
-    let plugin = rhai_plugin::RhaiPlugin::from_file(
+    let mut plugin = rhai_plugin::RhaiPlugin::from_file(
         PathBuf::from("examples/custom_download_upload.rhai"),
         dummy_babel,
     )
@@ -133,7 +133,7 @@ fn test_custom_download_upload() {
 #[test]
 fn test_init_minimal() {
     let dummy_babel = dummy_babel_engine();
-    let plugin = rhai_plugin::RhaiPlugin::from_file(
+    let mut plugin = rhai_plugin::RhaiPlugin::from_file(
         PathBuf::from("examples/init_minimal.rhai"),
         dummy_babel,
     )
@@ -144,7 +144,7 @@ fn test_init_minimal() {
 #[test]
 fn test_jobs() {
     let dummy_babel = dummy_babel_engine();
-    let plugin =
+    let mut plugin =
         rhai_plugin::RhaiPlugin::from_file(PathBuf::from("examples/jobs.rhai"), dummy_babel)
             .unwrap();
     plugin.init().unwrap();
@@ -639,7 +639,7 @@ fn test_plugin_config() -> eyre::Result<()> {
             })
         });
 
-    let plugin =
+    let mut plugin =
         rhai_plugin::RhaiPlugin::from_file(PathBuf::from("examples/plugin_config.rhai"), babel)?;
 
     plugin.init().unwrap();
