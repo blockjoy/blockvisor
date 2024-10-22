@@ -31,6 +31,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use thiserror::Error;
 use tokio::{sync::Semaphore, task::JoinError};
 use tracing::error;
 
@@ -39,6 +40,23 @@ use tracing::error;
 const UPLOAD_SINGLE_CHUNK_TIMEOUT: Duration = Duration::from_secs(50 * 60);
 const BLUEPRINT_FILENAME: &str = "upload.blueprint";
 const CHUNKS_FILENAME: &str = "upload.chunks";
+
+#[derive(Debug, Error)]
+pub enum NonRecoverableError {
+    #[error("file {file_path} disapeared: {err:#}")]
+    DataFileDisappeared {
+        file_path: PathBuf,
+        err: std::io::Error,
+    },
+    #[error("can't read file: {0:#}")]
+    ReadDataFileFailed(std::io::Error),
+    #[error("missing chunk {0} url")]
+    MissingUrl(String),
+    #[error("uploader internal error: {0:#}")]
+    InternalInconsistency(#[from] eyre::Error),
+    #[error("corrupted manifest - expected at least one destination file in chunk")]
+    InvalidManifest,
+}
 
 pub fn cleanup_job(meta_dir: &Path) -> Result<()> {
     let blueprint_path = meta_dir.join(BLUEPRINT_FILENAME);
@@ -158,7 +176,12 @@ impl<C: BabelEngineConnector + Send> Runner for Uploader<C> {
                 None => break,
             }
         }
-        uploaders_state.result?;
+        if let Err(err) = uploaders_state.result {
+            if err.chain().any(|cause| cause.is::<NonRecoverableError>()) {
+                cleanup_job(&self.config.archive_jobs_meta_dir)?;
+            }
+            return Err(err);
+        }
         if !run.load() {
             bail!("upload interrupted");
         }
@@ -461,7 +484,9 @@ impl ChunkUploader {
                             self.chunk
                                 .url
                                 .as_ref()
-                                .ok_or_else(|| anyhow!("missing chunk {} url", self.chunk.key))?
+                                .ok_or_else(|| {
+                                    NonRecoverableError::MissingUrl(self.chunk.key.clone())
+                                })?
                                 .clone(),
                         )
                         .header("Content-Length", format!("{}", self.chunk.size))
@@ -540,15 +565,17 @@ impl<E: Coder> DestinationsReader<E> {
                 let err_msg = "corrupted manifest - this is internal BV error, manifest shall be already validated";
                 error!(err_msg);
                 let _ = with_retry!(client.bv_error(err_msg.to_string()));
-                Err(anyhow!(
-                    "corrupted manifest - expected at least one destination file in chunk"
-                ))
+                Err(NonRecoverableError::InvalidManifest)
             }
             Some(first) => Ok(first),
         }?;
         let current = FileDescriptor {
-            file: File::open(&last.path)
-                .with_context(|| format!("can't open '{}'", last.path.display()))?,
+            file: File::open(&last.path).map_err(|err| {
+                NonRecoverableError::DataFileDisappeared {
+                    file_path: last.path.clone(),
+                    err,
+                }
+            })?,
             offset: last.pos,
             bytes_remaining: last.size,
         };
@@ -570,14 +597,21 @@ impl<E: Coder> DestinationsReader<E> {
             loop {
                 // first try to read some data from disk
                 let buffer = self.read_data()?;
-                self.bytes_read += u64::try_from(buffer.len())?;
+                self.bytes_read += u64::try_from(buffer.len())
+                    .map_err(|err| NonRecoverableError::InternalInconsistency(err.into()))?;
                 if self.iter.is_empty() && self.current.bytes_remaining == 0 {
                     // it is end of chunk, so we can take interim_buffer (won't be used anymore) and finalize its members
                     let mut interim = self.interim_buffer.take().unwrap();
                     // feed encoder with last data if any
-                    interim.encoder.feed(buffer)?;
+                    interim
+                        .encoder
+                        .feed(buffer)
+                        .map_err(NonRecoverableError::InternalInconsistency)?;
                     // finalize compression, since no more data will come
-                    let compressed = interim.encoder.finalize()?;
+                    let compressed = interim
+                        .encoder
+                        .finalize()
+                        .map_err(NonRecoverableError::InternalInconsistency)?;
                     interim.digest.update(&compressed);
                     // finalize checksum and send summary to uploader
                     let _ = interim
@@ -588,9 +622,15 @@ impl<E: Coder> DestinationsReader<E> {
                 } else {
                     // somewhere in the middle, so take only reference to interim_buffer
                     let interim = self.interim_buffer.as_mut().unwrap();
-                    interim.encoder.feed(buffer)?;
+                    interim
+                        .encoder
+                        .feed(buffer)
+                        .map_err(NonRecoverableError::InternalInconsistency)?;
                     // try to consume compressed data from encoder
-                    let compressed = interim.encoder.consume()?;
+                    let compressed = interim
+                        .encoder
+                        .consume()
+                        .map_err(NonRecoverableError::InternalInconsistency)?;
                     if !compressed.is_empty() {
                         interim.digest.update(&compressed);
                         break Some(compressed);
@@ -610,22 +650,29 @@ impl<E: Coder> DestinationsReader<E> {
                     break;
                 };
                 self.current = FileDescriptor {
-                    file: File::open(&next.path)
-                        .with_context(|| format!("can't open '{}'", next.path.display()))?,
+                    file: File::open(&next.path).map_err(|err| {
+                        NonRecoverableError::DataFileDisappeared {
+                            file_path: next.path.clone(),
+                            err,
+                        }
+                    })?,
                     offset: next.pos,
                     bytes_remaining: next.size,
                 };
             }
             let bytes_to_read = min(
                 self.current.bytes_remaining,
-                u64::try_from(buffer.capacity() - buffer.len())?,
+                u64::try_from(buffer.capacity() - buffer.len())
+                    .map_err(|err| NonRecoverableError::InternalInconsistency(err.into()))?,
             );
-            let end = usize::try_from(bytes_to_read)?;
+            let end = usize::try_from(bytes_to_read)
+                .map_err(|err| NonRecoverableError::InternalInconsistency(err.into()))?;
             let start = buffer.len();
             buffer.resize(start + end, 0);
             self.current
                 .file
-                .read_exact_at(&mut buffer[start..(start + end)], self.current.offset)?;
+                .read_exact_at(&mut buffer[start..(start + end)], self.current.offset)
+                .map_err(NonRecoverableError::ReadDataFileFailed)?;
             self.current.bytes_remaining -= bytes_to_read;
             self.current.offset += bytes_to_read;
         }
