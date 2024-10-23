@@ -21,7 +21,7 @@ pub const DEFAULT_API_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub const TOKEN_EXPIRED_MESSAGE: &str = "TOKEN_EXPIRED";
 lazy_static::lazy_static! {
     pub static ref NON_RETRIABLE: Vec<tonic::Code> = vec![tonic::Code::Unauthenticated, tonic::Code::InvalidArgument,
-        tonic::Code::Unimplemented, tonic::Code::PermissionDenied];
+        tonic::Code::Unimplemented, tonic::Code::PermissionDenied, tonic::Code::NotFound];
 }
 
 #[macro_export]

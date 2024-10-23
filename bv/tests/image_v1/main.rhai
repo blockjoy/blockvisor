@@ -87,17 +87,17 @@ fn download(param) {
     "Download started!"
 }
 
-fn config_check(param) {
+fn secret_check(param) {
     try {
-        let config = get_config("config_key");
+        let config = get_secret("secret_key");
     } catch (err) {
         if err == "not_found" {
-            put_config("config_key", "config-value".to_blob());
-            let config = get_config("config_key").as_string();
-            return if config == "config-value" {"ok"} else {"got unexpected config: $config"}
+            put_secret("secret_key", "secret-value".to_blob());
+            let secret = get_secret("secret_key").as_string();
+            return if secret == "secret-value" {"ok"} else {"got unexpected secret: secret"}
         }
     }
-    throw "first get_config should fail"
+    throw "first get_secret should fail"
 }
 
 fn file_access_check(param) {

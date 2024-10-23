@@ -201,7 +201,11 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     pub async fn init(&mut self) -> Result<()> {
-        self.on_plugin(move |mut plugin| plugin.init()).await
+        self.on_plugin(move |mut plugin| plugin.init()).await?;
+        self.capabilities = self
+            .on_plugin(move |plugin| Ok(plugin.capabilities()))
+            .await?;
+        Ok(())
     }
 
     /// This function calls babel by sending a protocol command using the specified method name.
