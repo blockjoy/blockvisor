@@ -4,7 +4,7 @@ container_uri: docker-daemon://test_v2:latest
 sku_code: SKU_code
 org_id: null
 description: Example image description
-visibility: private
+visibility: public
 
 protocol_key: testing
 variants:

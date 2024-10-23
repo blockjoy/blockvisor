@@ -1,4 +1,5 @@
 use crate::engine::JobStatus;
+use crate::plugin::Plugin;
 use crate::rhai_plugin::PLUGIN_CONFIG_CONST_NAME;
 use crate::{
     engine::{
@@ -19,13 +20,14 @@ pub fn check(
     node_properties: HashMap<String, String>,
 ) -> eyre::Result<()> {
     let mut warnings = vec![];
-    let rhai_plugin = RhaiPlugin::from_file(
+    let mut rhai_plugin = RhaiPlugin::from_file(
         plugin_path,
         LinterEngine {
             node_properties,
             node_env,
         },
     )?;
+    rhai_plugin.init()?;
     if rhai_plugin.bare.plugin_config.is_none() {
         warnings.push(format!(
             "Deprecated API used: missing {PLUGIN_CONFIG_CONST_NAME}"
