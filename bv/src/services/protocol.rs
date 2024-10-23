@@ -86,10 +86,11 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             semantic_version: version,
             build_version,
         };
-
-        let resp = api_with_retry!(client, client.get_image(req.clone()))?.into_inner();
-
-        Ok(resp.image)
+        match api_with_retry!(client, client.get_image(req.clone())) {
+            Ok(resp) => Ok(resp.into_inner().image),
+            Err(err) if err.code() == tonic::Code::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
     }
 
     #[instrument(skip(self))]
@@ -102,8 +103,11 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             version_key: Some(image_key.into()),
             org_id: None,
         };
-        let resp = api_with_retry!(client, client.get_latest(req.clone()))?.into_inner();
-        Ok(resp.protocol_version)
+        match api_with_retry!(client, client.get_latest(req.clone())) {
+            Ok(resp) => Ok(resp.into_inner().protocol_version),
+            Err(err) if err.code() == tonic::Code::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
     }
 
     pub async fn get_protocol_by_name(&mut self, name: &str) -> Result<Vec<pb::Protocol>> {
@@ -131,11 +135,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             org_ids: vec![],
             offset: 0,
             limit: 0,
-            search: Some(pb::ProtocolSearch {
-                operator: common::SearchOperator::Or.into(),
-                protocol_id: None,
-                name: None,
-            }),
+            search: None,
             sort: vec![pb::ProtocolSort {
                 field: pb::ProtocolSortField::Name.into(),
                 order: common::SortOrder::Ascending.into(),
