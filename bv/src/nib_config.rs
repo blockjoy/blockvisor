@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tracing::debug;
 
-const CONFIG_FILENAME: &str = ".bib.json";
+const CONFIG_FILENAME: &str = ".nib.json";
 
 pub fn default_blockvisor_port() -> u16 {
     9001
@@ -23,14 +23,14 @@ impl Config {
             .ok_or(anyhow!("can't get home directory"))?
             .join(CONFIG_FILENAME);
         if !path.exists() {
-            bail!("Bib is not configured yet, please run `bib config` first.");
+            bail!("Bib is not configured yet, please run `nib config` first.");
         }
-        debug!("Reading bib config: {}", path.display());
+        debug!("Reading nib config: {}", path.display());
         let config = fs::read_to_string(&path)
             .await
-            .with_context(|| format!("failed to read bib config: {}", path.display()))?;
+            .with_context(|| format!("failed to read nib config: {}", path.display()))?;
         let config: Config = serde_json::from_str(&config)
-            .with_context(|| format!("failed to parse bib config: {}", path.display()))?;
+            .with_context(|| format!("failed to parse nib config: {}", path.display()))?;
         Ok(config)
     }
 
@@ -38,11 +38,11 @@ impl Config {
         let path = homedir::my_home()?
             .ok_or(anyhow!("can't get home directory"))?
             .join(CONFIG_FILENAME);
-        debug!("Writing bib config: {}", path.display());
+        debug!("Writing nib config: {}", path.display());
         let config = serde_json::to_string(self)?;
         fs::write(&path, config)
             .await
-            .with_context(|| format!("failed to save bib config: {}", path.display()))?;
+            .with_context(|| format!("failed to save nib config: {}", path.display()))?;
         Ok(())
     }
 }

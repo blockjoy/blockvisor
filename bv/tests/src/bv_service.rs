@@ -201,7 +201,7 @@ async fn test_bv_service_e2e() {
         .unwrap()
         .into_inner();
     let api_key = response.api_key.unwrap();
-    println!("bib api_key: {api_key}");
+    println!("nib api_key: {api_key}");
 
     println!("stop blockvisor");
     test_env::bv_run(&["stop"], "blockvisor service stopped successfully", None);
@@ -228,7 +228,7 @@ async fn test_bv_service_e2e() {
     let host_id = config.id.clone();
     println!("got host id: {host_id}");
 
-    test_env::bib_run(&["config", &api_key, "--api", url], "", None);
+    test_env::nib_run(&["config", &api_key, "--api", url], "", None);
 
     println!("start blockvisor");
     test_env::bv_run(&["start"], "blockvisor service started successfully", None);
@@ -238,7 +238,7 @@ async fn test_bv_service_e2e() {
 
     let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
     println!("push testing protocol");
-    test_env::bib_run(
+    test_env::nib_run(
         &[
             "protocol",
             "push",
@@ -250,7 +250,7 @@ async fn test_bv_service_e2e() {
     );
 
     println!("check test image");
-    test_env::bib_run(
+    test_env::nib_run(
         &[
             "image",
             "check",
@@ -267,7 +267,7 @@ async fn test_bv_service_e2e() {
     );
 
     println!("push test image v1");
-    test_env::bib_run(
+    test_env::nib_run(
         &[
             "image",
             "push",
@@ -313,7 +313,7 @@ async fn test_bv_service_e2e() {
         .await;
 
     println!("push test image v2");
-    test_env::bib_run(
+    test_env::nib_run(
         &[
             "image",
             "push",

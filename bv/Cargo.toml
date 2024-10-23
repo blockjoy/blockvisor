@@ -32,8 +32,8 @@ name = "blockvisord-dev"
 path = "src/bin/blockvisord-dev.rs"
 
 [[bin]]
-name = "bib"
-path = "src/bin/bib.rs"
+name = "nib"
+path = "src/bin/nib.rs"
 
 [dependencies]
 aws-sdk-s3 = { version = "1.5.0", features = ["behavior-version-latest"] }

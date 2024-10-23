@@ -10,12 +10,12 @@ mod bv {
     include!("src/bv_cli.rs");
 }
 
-mod bib {
-    include!("src/bib_cli.rs");
+mod nib {
+    include!("src/nib_cli.rs");
 }
 fn main() -> Result<()> {
     let mut bv = bv::App::command();
-    let mut bib = bib::App::command();
+    let mut nib = nib::App::command();
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let mut iter = out_dir.ancestors().into_iter().step_by(3);
@@ -25,8 +25,8 @@ fn main() -> Result<()> {
     for shell in [clap_complete::Shell::Bash, clap_complete::Shell::Zsh] {
         clap_complete::generate_to(shell, &mut bv, "bv", &complete_out)
             .unwrap_or_else(|_| panic!("failed to generate {shell} complete for bv"));
-        clap_complete::generate_to(shell, &mut bib, "bib", &complete_out)
-            .unwrap_or_else(|_| panic!("failed to generate {shell} complete for bib"));
+        clap_complete::generate_to(shell, &mut nib, "nib", &complete_out)
+            .unwrap_or_else(|_| panic!("failed to generate {shell} complete for nib"));
     }
 
     tonic_build::configure()
