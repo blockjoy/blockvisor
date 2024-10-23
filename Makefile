@@ -5,7 +5,7 @@ build:
 build-release:
 	cargo build -p blockvisord --target x86_64-unknown-linux-musl --release
 	strip target/x86_64-unknown-linux-musl/release/bv
-	strip target/x86_64-unknown-linux-musl/release/bib
+	strip target/x86_64-unknown-linux-musl/release/nib
 	strip target/x86_64-unknown-linux-musl/release/bvup
 	strip target/x86_64-unknown-linux-musl/release/blockvisord
 	strip target/x86_64-unknown-linux-musl/release/blockvisord-dev
@@ -32,18 +32,18 @@ bundle: bundle-base
 
 bundle-dev: bundle-base
 	cp target/x86_64-unknown-linux-musl/release/blockvisord-dev /tmp/bundle/blockvisor/bin/blockvisord
-	cp target/x86_64-unknown-linux-musl/release/bib /tmp/bundle/blockvisor/bin
+	cp target/x86_64-unknown-linux-musl/release/nib /tmp/bundle/blockvisor/bin
 	rm -rf /tmp/bundle-dev.tar.gz
 	tar -C /tmp -czvf /tmp/bundle-dev.tar.gz bundle
 
 ci-setup: bundle-base
-	cp target/x86_64-unknown-linux-musl/release/bib /tmp/bundle/blockvisor/bin
+	cp target/x86_64-unknown-linux-musl/release/nib /tmp/bundle/blockvisor/bin
 	systemctl stop blockvisor.service || true
 	rm -rf /opt/blockvisor
 	/tmp/bundle/installer
 	docker build -t test_v1 bv/tests/image_v1
 	docker build -t test_v2 bv/tests/image_v2
-	bib config test-token
+	nib config test-token
 	systemctl start blockvisor.service
 
 ci-cleanup:

@@ -206,7 +206,7 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
         .join("tests")
         .join("image_v2")
         .join("babel.yaml");
-    test_env.bib_run(
+    test_env.nib_run(
         &["image", "upgrade", "--path", &path.to_string_lossy(), vm_id],
         "Upgraded dev_node",
     );

@@ -18,10 +18,10 @@ use tracing::{debug, info, warn};
 const SYSTEM_SERVICES: &str = "etc/systemd/system";
 const COMPLETION_DIR_BASH: &str = "usr/local/share/bash-completion/completions";
 const BV_COMPLETION_FILE_BASH: &str = "bv.bash";
-const BIB_COMPLETION_FILE_BASH: &str = "bib.bash";
+const NIB_COMPLETION_FILE_BASH: &str = "nib.bash";
 const COMPLETION_DIR_ZSH: &str = "usr/local/share/zsh/site-functions";
 const BV_COMPLETION_FILE_ZSH: &str = "_bv";
-const BIB_COMPLETION_FILE_ZSH: &str = "_bib";
+const NIB_COMPLETION_FILE_ZSH: &str = "_nib";
 const SYSTEM_BIN: &str = "usr/bin";
 pub const INSTALL_PATH: &str = "opt/blockvisor";
 pub const BLACKLIST: &str = "blacklist";
@@ -328,8 +328,8 @@ impl<T: Timer, S: BvService> Installer<T, S> {
         };
         symlink_sh_complete(COMPLETION_DIR_BASH, BV_COMPLETION_FILE_BASH);
         symlink_sh_complete(COMPLETION_DIR_ZSH, BV_COMPLETION_FILE_ZSH);
-        symlink_sh_complete(COMPLETION_DIR_BASH, BIB_COMPLETION_FILE_BASH);
-        symlink_sh_complete(COMPLETION_DIR_ZSH, BIB_COMPLETION_FILE_ZSH);
+        symlink_sh_complete(COMPLETION_DIR_BASH, NIB_COMPLETION_FILE_BASH);
+        symlink_sh_complete(COMPLETION_DIR_ZSH, NIB_COMPLETION_FILE_ZSH);
         Ok(())
     }
 

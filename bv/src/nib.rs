@@ -1,8 +1,8 @@
 use crate::{
     apptainer_machine::{PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
-    bib_cli::{ImageCommand, ProtocolCommand},
     bv_config, firewall,
     internal_server::{self, NodeDisplayInfo},
+    nib_cli::{ImageCommand, ProtocolCommand},
     node_state::{NodeImage, NodeState, ProtocolImageKey, VmConfig, VmStatus},
     protocol::{self, Variant},
     services::{self, protocol::PushResult, ApiServiceConnector},
@@ -200,7 +200,7 @@ pub async fn process_image_command(
             } else {
                 Default::default()
             };
-            let tmp_dir = tempdir::TempDir::new("bib_check")?;
+            let tmp_dir = tempdir::TempDir::new("nib_check")?;
             let rootfs_path = tmp_dir.path();
             run_cmd(
                 "apptainer",

@@ -1,8 +1,8 @@
 use blockvisord::{
-    bib,
-    bib_cli::{self, App, Command},
-    bib_config::Config,
     linux_platform::bv_root,
+    nib,
+    nib_cli::{self, App, Command},
+    nib_config::Config,
 };
 use clap::Parser;
 use eyre::Result;
@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
     let bv_root = bv_root();
 
     match args.command {
-        Command::Config(bib_cli::ConfigArgs {
+        Command::Config(nib_cli::ConfigArgs {
             token,
             blockjoy_api_url,
         }) => {
@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
                 token: config.token,
                 url: config.blockjoy_api_url,
             };
-            bib::process_image_command(connector, &bv_root, command).await?;
+            nib::process_image_command(connector, &bv_root, command).await?;
         }
         Command::Protocol { command } => {
             let config = Config::load().await?;
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
                 token: config.token,
                 url: config.blockjoy_api_url,
             };
-            bib::process_protocol_command(connector, command).await?;
+            nib::process_protocol_command(connector, command).await?;
         }
     }
     Ok(())

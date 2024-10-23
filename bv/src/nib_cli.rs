@@ -2,7 +2,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[clap(name = "bib", author, version, about)]
+#[clap(name = "nib", author, version, about)]
 pub struct App {
     #[clap(flatten)]
     pub global_opts: GlobalOpts,
@@ -23,7 +23,7 @@ pub struct ConfigArgs {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Connect bib to the API.
+    /// Connect nib to the API.
     Config(ConfigArgs),
 
     /// Manage images and send them to the API.

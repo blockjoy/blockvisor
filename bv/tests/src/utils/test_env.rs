@@ -130,8 +130,8 @@ impl TestEnv {
         try_bv_run(commands, stdout_pattern, Some(&self.bv_root))
     }
 
-    pub fn bib_run(&self, commands: &[&str], stdout_pattern: &str) {
-        bib_run(commands, stdout_pattern, Some(&self.bv_root));
+    pub fn nib_run(&self, commands: &[&str], stdout_pattern: &str) {
+        nib_run(commands, stdout_pattern, Some(&self.bv_root));
     }
 
     pub async fn wait_for_running_node(&self, vm_id: &str, timeout: Duration) {
@@ -168,7 +168,7 @@ impl TestEnv {
     }
 
     pub fn create_node(&self, image: &str, ip: &str) -> (String, String) {
-        let mut cmd = Command::cargo_bin("bib").unwrap();
+        let mut cmd = Command::cargo_bin("nib").unwrap();
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests")
             .join(image)
@@ -244,8 +244,8 @@ pub fn try_bv_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path
     try_bv_tool_run("bv", commands, stdout_pattern, bv_root)
 }
 
-pub fn bib_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
-    bv_tool_run("bib", commands, stdout_pattern, bv_root)
+pub fn nib_run(commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
+    bv_tool_run("nib", commands, stdout_pattern, bv_root)
 }
 
 fn bv_tool_run(tool_name: &str, commands: &[&str], stdout_pattern: &str, bv_root: Option<&Path>) {
