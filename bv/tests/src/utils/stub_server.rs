@@ -47,7 +47,8 @@ impl pb::host_service_server::HostService for StubHostsServer {
         let reply = pb::HostServiceCreateResponse {
             host: Some(pb::Host {
                 host_id: "497d13b1-ddbe-4ee7-bfc7-752c7b710afe".to_string(),
-                name: "hostname".to_string(),
+                network_name: "hostname".to_string(),
+                display_name: None,
                 bv_version: "1.0".to_string(),
                 cpu_cores: 1,
                 memory_bytes: 1,
@@ -71,13 +72,15 @@ impl pb::host_service_server::HostService for StubHostsServer {
                         assigned: false,
                     },
                 ],
-                managed_by: pb::ManagedBy::Automatic.into(),
+                schedule_type: pb::ScheduleType::Automatic.into(),
                 tags: Some(common::Tags {
                     tags: vec![common::Tag {
                         name: "testing".to_string(),
                     }],
                 }),
                 private_org_id: None,
+                created_by: None,
+                updated_at: None,
             }),
             token: "awesome-token".to_string(),
             refresh: "even-more-awesomer-token".to_string(),

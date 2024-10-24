@@ -608,7 +608,7 @@ where
                 placement: Some(common::NodePlacement {
                     placement: Some(common::node_placement::Placement::HostId(host_id)),
                 }),
-                changes: properties,
+                new_values: properties,
                 image_id,
                 add_rules: vec![],
                 tags: None,

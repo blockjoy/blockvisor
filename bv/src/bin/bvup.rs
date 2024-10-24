@@ -194,7 +194,8 @@ async fn main() -> Result<()> {
         let create = pb::HostServiceCreateRequest {
             provision_token: cmd_args.provision_token.unwrap(),
             private_org_id: None,
-            name: host_info.name.clone(),
+            network_name: host_info.name.clone(),
+            display_name: None,
             bv_version: crate_version!().to_string(),
             cpu_cores: cpu_count,
             memory_bytes: host_info.memory_bytes,
@@ -204,7 +205,7 @@ async fn main() -> Result<()> {
             ip_address: ip.clone(),
             ip_gateway: gateway,
             region: cmd_args.region,
-            managed_by: Some(pb::ManagedBy::Automatic.into()),
+            schedule_type: pb::ScheduleType::Automatic.into(),
             ips,
             tags: Some(common::Tags {
                 tags: vec![common::Tag {
