@@ -313,12 +313,12 @@ pub async fn process_protocol_command(
             }
         }
         ProtocolCommand::Push { path } => {
-            let protocols = client.list_protocols(None, 4096).await?; // TODO MJR fixme
             let local_protocols: Vec<protocol::Protocol> =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             for local in local_protocols {
                 let protocol_key = local.key.clone();
-                if let Some(remote) = protocols.iter().find(|protocol| protocol.key == local.key) {
+
+                if let Some(remote) = client.get_protocol(protocol_key.clone()).await? {
                     client
                         .update_protocol(remote.protocol_id.clone(), local)
                         .await?;
