@@ -175,14 +175,17 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
     .await?;
     let update = pb::HostServiceUpdateRequest {
         host_id: config.read().await.id,
-        name: Some(info.name),
+        network_name: Some(info.name),
+        display_name: None,
         bv_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        cpu_cores: None,
         os: Some(info.os),
         os_version: Some(info.os_version),
         region: None,
         disk_bytes: Some(info.disk_space_bytes),
-        managed_by: None,
+        schedule_type: None,
         update_tags: None,
+        memory_bytes: None,
     };
     api_with_retry!(client, client.update(update.clone()))?;
 

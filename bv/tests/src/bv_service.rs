@@ -330,19 +330,18 @@ async fn test_bv_service_e2e() {
         None,
     );
 
-    //TODO MJR uncomment when fixed
-    // println!("trigger second node upgrade");
-    // bv_run(&["node", "upgrade", &second_node_id]);
-    //
-    // println!("wait for second node to be upgraded");
-    // let start = std::time::Instant::now();
-    // while node_version(&second_node_id).await != "0.0.2" {
-    //     if start.elapsed() < Duration::from_secs(300) {
-    //         sleep(Duration::from_secs(1)).await;
-    //     } else {
-    //         panic!("timeout expired")
-    //     }
-    // }
+    println!("trigger second node upgrade");
+    bv_run(&["node", "upgrade", &second_node_id]);
+
+    println!("wait for second node to be upgraded");
+    let start = std::time::Instant::now();
+    while node_version(&second_node_id).await != "0.0.2" {
+        if start.elapsed() < Duration::from_secs(300) {
+            sleep(Duration::from_secs(1)).await;
+        } else {
+            panic!("timeout expired")
+        }
+    }
 
     println!("check crypt service");
     test_env::bv_run(
