@@ -281,9 +281,12 @@ async fn test_bv_service_e2e() {
         None,
     );
 
-    //TODO MJR uncomment when fixed
-    //    println!("test chain list query");
-    //    test_env::bv_run(&["protocol", "list", "testing"], "test/0.0.1", None);
+    println!("test chain list query");
+    test_env::bv_run(
+        &["protocol", "list", "--name", "Testing protocol"],
+        "* test/0.0.1",
+        None,
+    );
 
     let stdout = bv_run(&[
         "node",

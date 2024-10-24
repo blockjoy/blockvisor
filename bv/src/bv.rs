@@ -174,12 +174,16 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             client.stop_nodes(&ids, force).await?;
             client.start_nodes(&ids).await?;
         }
-        NodeCommand::Upgrade { id_or_names } => {
+        NodeCommand::Upgrade {
+            id_or_names,
+            version,
+            build,
+        } => {
             let ids = client
                 .get_node_ids(node_ids_with_fallback(id_or_names, false)?)
                 .await?;
             for id in ids {
-                client.upgrade_node(id).await?;
+                client.upgrade_node((id, version.clone(), build)).await?;
                 println!("Node `{id}` upgrade triggered");
             }
         }
@@ -464,23 +468,11 @@ pub async fn process_protocol_command(
     command: ProtocolCommand,
 ) -> Result<()> {
     match command {
-        ProtocolCommand::List { protocol, number } => {
+        ProtocolCommand::List { name, number } => {
             let mut protocol_service =
                 ProtocolService::new(services::DefaultConnector { config }).await?;
-            let protocols = protocol_service.get_protocol_by_name(&protocol).await?;
-            for protocol in protocols {
-                for version in protocol
-                    .versions
-                    .into_iter()
-                    .take(number)
-                    .filter_map(|version| {
-                        version.version_key.map(|version_key| {
-                            format!("{}/{}", version_key.variant_key, version.semantic_version)
-                        })
-                    })
-                {
-                    println!("{version}");
-                }
+            for protocol in protocol_service.list_protocols(name, number).await? {
+                println!("{protocol}");
             }
         }
     }

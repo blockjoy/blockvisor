@@ -50,7 +50,7 @@ trait Service {
     fn create_dev_node(req: NodeState) -> NodeDisplayInfo;
     fn start_node(id: Uuid);
     fn stop_node(id: Uuid, force: bool);
-    fn upgrade_node(id: Uuid);
+    fn upgrade_node(id: Uuid, version: Option<String>, build: Option<u64>);
     fn upgrade_dev_node(req: NodeState) -> NodeDisplayInfo;
     fn delete_node(id: Uuid);
     fn get_node_jobs(id: Uuid) -> JobsInfo;
@@ -259,9 +259,12 @@ where
     }
 
     #[instrument(skip(self), ret(Debug))]
-    async fn upgrade_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
+    async fn upgrade_node(
+        &self,
+        request: Request<(Uuid, Option<String>, Option<u64>)>,
+    ) -> Result<Response<()>, Status> {
         status_check().await?;
-        let id = request.into_inner();
+        let (id, version, build) = request.into_inner();
         if self.is_dev_node(id).await? {
             Err(Status::unimplemented("dev node upgrade is not supported"))
         } else {
@@ -279,8 +282,8 @@ where
             .get_image(pb::ImageServiceGetImageRequest {
                 version_key: Some(node.image_key.clone().into()),
                 org_id: None,
-                semantic_version: None,
-                build_version: None,
+                semantic_version: version,
+                build_version: build,
             })
             .await
             .map_err(|e| Status::unknown(format!("{e:#}")))?

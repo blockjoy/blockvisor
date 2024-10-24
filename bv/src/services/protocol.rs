@@ -10,8 +10,10 @@ use crate::{
         ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService,
     },
 };
+use core::fmt;
 use eyre::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::fmt::Formatter;
 use tonic::transport::Channel;
 use tracing::instrument;
 
@@ -110,32 +112,21 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
         }
     }
 
-    pub async fn get_protocol_by_name(&mut self, name: &str) -> Result<Vec<pb::Protocol>> {
+    pub async fn list_protocols(
+        &mut self,
+        name: Option<String>,
+        limit: u64,
+    ) -> Result<Vec<pb::Protocol>> {
         let mut client = self.connect_protocol_service().await?;
         let req = pb::ProtocolServiceListProtocolsRequest {
             org_ids: vec![],
             offset: 0,
-            limit: 2,
-            search: Some(pb::ProtocolSearch {
+            limit,
+            search: name.map(|name| pb::ProtocolSearch {
                 operator: common::SearchOperator::Or.into(),
                 protocol_id: None,
                 name: Some(name.to_string()),
             }),
-            sort: vec![],
-        };
-
-        Ok(api_with_retry!(client, client.list_protocols(req.clone()))?
-            .into_inner()
-            .protocols)
-    }
-
-    pub async fn list_protocols(&mut self) -> Result<Vec<pb::Protocol>> {
-        let mut client = self.connect_protocol_service().await?;
-        let req = pb::ProtocolServiceListProtocolsRequest {
-            org_ids: vec![],
-            offset: 0,
-            limit: 0,
-            search: None,
             sort: vec![pb::ProtocolSort {
                 field: pb::ProtocolSortField::Name.into(),
                 order: common::SortOrder::Ascending.into(),
@@ -537,4 +528,24 @@ fn add_properties(image_properties: Vec<protocol::ImageProperty>) -> Vec<pb::Add
         }
     }
     add_properties
+}
+
+impl fmt::Display for pb::Protocol {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(description) = &self.description {
+            writeln!(f, "- {} [{}]: {}", self.name, self.key, description)?;
+        } else {
+            writeln!(f, "- {} ({})", self.name, self.key)?;
+        }
+        for version in &self.versions {
+            if let Some(variant) = &version.version_key {
+                writeln!(
+                    f,
+                    "   * {}/{}",
+                    variant.variant_key, version.semantic_version
+                )?;
+            }
+        }
+        Ok(())
+    }
 }

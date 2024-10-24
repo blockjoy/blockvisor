@@ -125,6 +125,12 @@ pub enum NodeCommand {
 
     /// Trigger node upgrade.
     Upgrade {
+        /// Version of image, or skip to use latest,
+        #[clap(long)]
+        version: Option<String>,
+        /// Version of image build, or skip to use latest,
+        #[clap(long)]
+        build: Option<u64>,
         /// Node id or name.
         #[clap(required(false))]
         id_or_names: Vec<String>,
@@ -272,11 +278,12 @@ pub enum ProtocolCommand {
     #[clap(alias = "ls")]
     List {
         /// Protocol name (e.g. helium, eth)
-        protocol: String,
+        #[clap(long)]
+        name: Option<String>,
 
         /// Display the first N items
-        #[clap(long, short, default_value = "10")]
-        number: usize,
+        #[clap(long, short, default_value = "50")]
+        number: u64,
     },
 }
 
