@@ -112,6 +112,20 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
         }
     }
 
+    pub async fn get_protocol(&mut self, key: String) -> Result<Option<pb::Protocol>> {
+        let mut client = self.connect_protocol_service().await?;
+        let req = pb::ProtocolServiceGetProtocolRequest {
+            org_id: None,
+            protocol: Some(pb::protocol_service_get_protocol_request::Protocol::ProtocolKey(key)),
+        };
+
+        match api_with_retry!(client, client.get_protocol(req.clone())) {
+            Ok(resp) => Ok(resp.into_inner().protocol),
+            Err(err) if err.code() == tonic::Code::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     pub async fn list_protocols(
         &mut self,
         name: Option<String>,
@@ -125,7 +139,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             search: name.map(|name| pb::ProtocolSearch {
                 operator: common::SearchOperator::Or.into(),
                 protocol_id: None,
-                name: Some(name.to_string()),
+                name: Some(format!("%{name}%")),
             }),
             sort: vec![pb::ProtocolSort {
                 field: pb::ProtocolSortField::Name.into(),
