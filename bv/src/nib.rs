@@ -306,19 +306,14 @@ pub async fn process_protocol_command(
     command: ProtocolCommand,
 ) -> eyre::Result<()> {
     let mut client = services::protocol::ProtocolService::new(connector).await?;
-    let protocols = client.list_protocols().await?;
     match command {
-        ProtocolCommand::List => {
-            for protocol in protocols {
-                println!(
-                    "{} ({}) - {}",
-                    protocol.name,
-                    protocol.key,
-                    protocol.description.unwrap_or_default()
-                );
+        ProtocolCommand::List { name, number } => {
+            for protocol in client.list_protocols(name, number).await? {
+                println!("{protocol}");
             }
         }
         ProtocolCommand::Push { path } => {
+            let protocols = client.list_protocols(None, 4096).await?; // TODO MJR fixme
             let local_protocols: Vec<protocol::Protocol> =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             for local in local_protocols {

@@ -27,7 +27,7 @@ pub enum Command {
     Config(ConfigArgs),
 
     /// Manage images and send them to the API.
-    #[clap(alias = "img")]
+    #[clap(alias = "i")]
     Image {
         #[clap(subcommand)]
         command: ImageCommand,
@@ -54,7 +54,7 @@ pub enum ImageCommand {
     /// Print associated container image URI.
     ContainerUri {
         /// Image definition file path.
-        #[clap(long, default_value = "babel.yaml")]
+        #[clap(long, short = 'u', default_value = "babel.yaml")]
         path: PathBuf,
     },
 
@@ -118,7 +118,15 @@ pub enum ImageCommand {
 pub enum ProtocolCommand {
     /// Show protocols list.
     #[clap(alias = "ls")]
-    List,
+    List {
+        /// Protocol name (e.g. helium, eth)
+        #[clap(long)]
+        name: Option<String>,
+
+        /// Display the first N items
+        #[clap(long, short, default_value = "50")]
+        number: u64,
+    },
     /// Push protocols to the API.
     Push {
         /// Protocol definition file path.
