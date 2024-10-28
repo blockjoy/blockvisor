@@ -89,6 +89,7 @@ pub trait Pal {
 pub struct NodeFirewallConfig {
     pub id: Uuid,
     pub ip: IpAddr,
+    pub iface: String,
     pub config: firewall::Config,
 }
 pub type AvailableResources = Requirements;

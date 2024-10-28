@@ -41,17 +41,18 @@ async fn apply_firewall_config_with(
     runner: impl UfwRunner,
 ) -> Result<()> {
     let id = config.id;
+    let iface = config.iface.clone();
     // first convert config to convenient structure
     let rule_args = RuleArgs::from_rules(config);
     // dry-run rules to make sure they are valid
     for args in &rule_args {
-        dry_run(&runner, &args.into()).await?;
+        dry_run(&runner, &args.as_vec(&iface)).await?;
     }
     //clean old node rules
     cleanup_node_rules_with(id, &runner).await?;
     // and apply new rules
     for args in &rule_args {
-        runner.run(&args.into()).await?;
+        runner.run(&args.as_vec(&iface)).await?;
     }
     Ok(())
 }
@@ -152,10 +153,13 @@ impl RuleArgs {
         rule_args
     }
 
-    fn into(&self) -> Vec<&str> {
+    fn as_vec<'a>(&'a self, iface: &'a str) -> Vec<&'a str> {
         let mut args = vec![
+            "route",
             self.policy.as_str(),
             to_variant_name(&self.direction).unwrap(),
+            "on",
+            iface,
             "from",
             &self.ip_from,
             "to",
@@ -215,6 +219,7 @@ mod tests {
         NodeFirewallConfig {
             id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
             ip: IpAddr::from_str("192.168.0.7").unwrap(),
+            iface: "bvbr0".to_string(),
             config: firewall::Config {
                 default_in: Action::Deny,
                 default_out: Action::Allow,
@@ -233,8 +238,11 @@ mod tests {
             .withf(|args| {
                 args == [
                     "--dry-run",
+                    "route",
                     "deny",
                     "in",
+                    "on",
+                    "bvbr0",
                     "from",
                     "any",
                     "to",
@@ -263,8 +271,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "deny",
                 "in",
+                "on",
+                "bvbr0",
                 "from",
                 "any",
                 "to",
@@ -277,8 +288,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -300,8 +314,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "deny",
                 "in",
+                "on",
+                "bvbr0",
                 "from",
                 "any",
                 "to",
@@ -313,8 +330,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -370,8 +390,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -386,8 +409,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -400,8 +426,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "allow",
                 "in",
+                "on",
+                "bvbr0",
                 "from",
                 "ip.is.validated.before",
                 "to",
@@ -418,8 +447,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "allow",
                 "in",
+                "on",
+                "bvbr0",
                 "from",
                 "ip.is.validated.before",
                 "to",
@@ -436,8 +468,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -452,8 +487,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "deny",
                 "in",
+                "on",
+                "bvbr0",
                 "from",
                 "any",
                 "to",
@@ -466,8 +504,11 @@ mod tests {
             &mut mock_runner,
             &[
                 "--dry-run",
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -482,8 +523,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -497,8 +541,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -510,8 +557,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "allow",
                 "in",
+                "on",
+                "bvbr0",
                 "from",
                 "ip.is.validated.before",
                 "to",
@@ -527,8 +577,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "allow",
                 "in",
+                "on",
+                "bvbr0",
                 "from",
                 "ip.is.validated.before",
                 "to",
@@ -544,8 +597,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",
@@ -559,8 +615,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "deny",
                 "in",
+                "on",
+                "bvbr0",
                 "from",
                 "any",
                 "to",
@@ -572,8 +631,11 @@ mod tests {
         expect_with_args(
             &mut mock_runner,
             &[
+                "route",
                 "allow",
                 "out",
+                "on",
+                "bvbr0",
                 "from",
                 "192.168.0.7",
                 "to",

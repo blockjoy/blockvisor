@@ -91,6 +91,7 @@ impl<P: Pal> MaybeNode<P> {
             pal.apply_firewall_config(NodeFirewallConfig {
                 id: self.state.id,
                 ip: self.state.network_interface.ip,
+                iface: bv_context.iface.clone(),
                 config: build_firewall_rules(&self.state.firewall_rules, &metadata.firewall),
             })
             .await,
@@ -387,6 +388,7 @@ impl<P: Pal + Debug> Node<P> {
             .apply_firewall_config(NodeFirewallConfig {
                 id: self.state.id,
                 ip: self.state.network_interface.ip,
+                iface: self.bv_context.iface.clone(),
                 config: build_firewall_rules(&self.state.firewall_rules, &self.metadata.firewall),
             })
             .await
@@ -443,6 +445,7 @@ impl<P: Pal + Debug> Node<P> {
             .apply_firewall_config(NodeFirewallConfig {
                 id: self.state.id,
                 ip: self.state.network_interface.ip,
+                iface: self.bv_context.iface.clone(),
                 config: build_firewall_rules(&self.state.firewall_rules, &self.metadata.firewall),
             })
             .await?;
@@ -926,6 +929,7 @@ pub mod tests {
         NodeFirewallConfig {
             id,
             ip,
+            iface: "bvbr7".to_string(),
             config: firewall::Config {
                 default_in: firewall::Action::Deny,
                 default_out: firewall::Action::Allow,
@@ -956,6 +960,7 @@ pub mod tests {
             id: "host_id".to_string(),
             name: "host_name".to_string(),
             url: "api.url".to_string(),
+            iface: "bvbr7".to_string(),
         }
     }
 

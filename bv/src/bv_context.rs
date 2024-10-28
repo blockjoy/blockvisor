@@ -5,6 +5,7 @@ pub struct BvContext {
     pub id: String,
     pub name: String,
     pub url: String,
+    pub iface: String,
 }
 
 impl BvContext {
@@ -13,6 +14,7 @@ impl BvContext {
             id: config.id,
             name: config.name,
             url: config.blockjoy_api_url,
+            iface: config.iface,
         }
     }
 }
