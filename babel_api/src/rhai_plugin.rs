@@ -695,7 +695,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             })
         } else {
             Ok(from_dynamic(
-                &self.call_fn::<_, Dynamic>("application_status", ())?,
+                &self.call_fn::<_, Dynamic>("protocol_status", ())?,
             )?)
         }
     }
@@ -997,7 +997,7 @@ mod tests {
             true
         }
 
-        fn application_status() {
+        fn protocol_status() {
             #{state: "delinquent", health: "unhealthy"}
         }
 "#;
@@ -1392,7 +1392,7 @@ mod tests {
     }
 
     #[test]
-    fn test_application_status() -> Result<()> {
+    fn test_protocol_status() -> Result<()> {
         let script = r#"
             const PLUGIN_CONFIG = #{
                 services: [
@@ -1409,7 +1409,7 @@ mod tests {
 
             fn init() {}
 
-            fn application_status() {
+            fn protocol_status() {
                 #{state: "delinquent", health: "unhealthy"}
             }
             "#;
