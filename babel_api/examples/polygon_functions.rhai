@@ -4,7 +4,7 @@ fn address(){
     run_sh(`heimdalld show-account | grep address | awk -F\" '{ print $4}'`).unwrap().to_string();
 }
 
-fn application_status() {
+fn protocol_status() {
     let res = run_jrpc(#{
         host: `${global::POLYGON_RPC_URL}`,
         method: "eth_blockNumber",

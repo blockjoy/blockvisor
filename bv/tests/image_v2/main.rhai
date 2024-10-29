@@ -45,7 +45,7 @@ const PLUGIN_CONFIG = #{
     },
 };
 
-fn application_status() {
+fn protocol_status() {
     #{state: "broadcasting", health: "healthy"}
 }
 

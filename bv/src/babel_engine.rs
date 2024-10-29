@@ -221,7 +221,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             "name" => self.name().await?,
             "address" => self.address().await?,
             "consensus" => self.consensus().await?.to_string(),
-            "application_status" => serde_json::to_string(&self.protocol_status().await?)?,
+            "protocol_status" => serde_json::to_string(&self.protocol_status().await?)?,
             "upload" => serde_json::to_string(&self.upload().await?)?,
             _ => {
                 let method_name = name.to_owned();
@@ -1016,7 +1016,7 @@ mod tests {
             Ok(true)
         }
         fn protocol_status(&self) -> Result<ProtocolStatus> {
-            self.engine.run_sh("application_status", None)?;
+            self.engine.run_sh("protocol_status", None)?;
             Ok(ProtocolStatus {
                 state: "disabled".to_string(),
                 health: NodeHealth::Neutral,
@@ -1350,7 +1350,7 @@ mod tests {
             .return_once(return_request);
         babel_mock
             .expect_run_sh()
-            .withf(|req| req.get_ref() == "application_status")
+            .withf(|req| req.get_ref() == "protocol_status")
             .return_once(return_request);
         babel_mock
             .expect_run_sh()

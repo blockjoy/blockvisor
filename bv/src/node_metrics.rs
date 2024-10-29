@@ -36,7 +36,7 @@ pub struct Metric {
     pub height: Option<u64>,
     pub block_age: Option<u64>,
     pub consensus: Option<bool>,
-    pub application_status: Option<ProtocolStatus>,
+    pub protocol_status: Option<ProtocolStatus>,
     pub jobs: JobsInfo,
 }
 
@@ -46,7 +46,7 @@ impl Metrics {
             m.height.is_some()
                 || m.block_age.is_some()
                 || m.consensus.is_some()
-                || m.application_status.is_some()
+                || m.protocol_status.is_some()
                 || !m.jobs.is_empty()
         })
     }
@@ -110,8 +110,8 @@ where
 pub async fn collect_metric<N: NodeConnection>(
     babel_engine: &mut BabelEngine<N>,
 ) -> Option<Metric> {
-    let application_status = timeout(babel_engine.protocol_status()).await.ok();
-    match &application_status {
+    let protocol_status = timeout(babel_engine.protocol_status()).await.ok();
+    match &protocol_status {
         None => {
             let jobs = timeout(babel_engine.get_jobs())
                 .await
@@ -122,7 +122,7 @@ pub async fn collect_metric<N: NodeConnection>(
                 height: None,
                 block_age: None,
                 consensus: None,
-                application_status,
+                protocol_status,
                 jobs,
             })
         }
@@ -139,7 +139,7 @@ pub async fn collect_metric<N: NodeConnection>(
                 height: None,
                 block_age: None,
                 consensus: None,
-                application_status,
+                protocol_status,
                 jobs,
             })
         }
@@ -172,7 +172,7 @@ pub async fn collect_metric<N: NodeConnection>(
                 block_age,
                 consensus,
                 // these are expected in every chain
-                application_status,
+                protocol_status,
                 jobs,
             })
         }
@@ -197,7 +197,7 @@ where
 }
 
 /// Here is how we convert the metrics we aggregated to their representation that we use over gRPC.
-/// Note that even though this may fail, i.e. the application_status may not be
+/// Note that even though this may fail, i.e. the protocol_status may not be
 /// something we can make sense of, we still provide an infallible `From` implementation (not
 /// `TryFrom`). This is because if the node goes to the sad place, it may start sending malformed
 /// responses (think instead of block_height: 3 it will send block_height: aaaaaaaaaaaa). Even when
@@ -249,8 +249,8 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
                     block_age: v.block_age,
                     consensus: v.consensus,
                     node_status: v
-                        .application_status
-                        .map(|application_status| application_status.into()),
+                        .protocol_status
+                        .map(|protocol_status| protocol_status.into()),
                     jobs,
                 };
                 (k.to_string(), metrics)
