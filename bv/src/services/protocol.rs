@@ -1,7 +1,8 @@
+use crate::nib_meta::StorePointer;
 use crate::{
     api_with_retry,
+    nib_meta::{self, UiType},
     node_state::ProtocolImageKey,
-    protocol::{self, UiType},
     services::{
         api::{
             common,
@@ -155,7 +156,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     pub async fn update_protocol(
         &mut self,
         protocol_id: String,
-        protocol: protocol::Protocol,
+        protocol: nib_meta::Protocol,
     ) -> Result<()> {
         let mut client = self.connect_protocol_service().await?;
         let visibility: common::Visibility = protocol.visibility.into();
@@ -169,7 +170,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
         Ok(())
     }
 
-    pub async fn add_protocol(&mut self, protocol: protocol::Protocol) -> Result<()> {
+    pub async fn add_protocol(&mut self, protocol: nib_meta::Protocol) -> Result<()> {
         let mut client = self.connect_protocol_service().await?;
         let req = pb::ProtocolServiceAddProtocolRequest {
             org_id: protocol.org_id,
@@ -197,7 +198,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     pub async fn update_protocol_version(
         &mut self,
         remote: pb::ProtocolVersion,
-        image: protocol::Image,
+        image: nib_meta::Image,
     ) -> Result<()> {
         let mut client = self.connect_protocol_service().await?;
         let visibility: common::Visibility = image.visibility.into();
@@ -218,8 +219,8 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
 
     pub async fn add_protocol_version(
         &mut self,
-        image: protocol::Image,
-        variant: protocol::Variant,
+        image: nib_meta::Image,
+        variant: nib_meta::Variant,
     ) -> Result<pb::ProtocolVersion> {
         let mut client = self.connect_protocol_service().await?;
         let req = pb::ProtocolServiceAddVersionRequest {
@@ -251,8 +252,8 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     pub async fn push_image(
         &mut self,
         protocol_version_id: String,
-        image: protocol::Image,
-        variant: protocol::Variant,
+        image: nib_meta::Image,
+        variant: nib_meta::Variant,
     ) -> Result<PushResult<pb::Image>> {
         let mut client = self.connect_image_service().await?;
         let mut firewall: common::FirewallConfig = image.firewall_config.into();
@@ -271,6 +272,11 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
                 .ramdisks
                 .into_iter()
                 .map(|ramdisk| ramdisk.into())
+                .collect(),
+            archive_pointers: variant
+                .archive_pointers
+                .into_iter()
+                .map(|pointer| pointer.into())
                 .collect(),
         };
         if let Some(mut remote) = self
@@ -293,15 +299,16 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
                 .into_iter()
                 .map(|property| pb::AddImageProperty {
                     key: property.key,
+                    key_group: property.key_group,
                     description: property.description,
                     new_archive: property.new_archive,
                     default_value: property.default_value,
-                    key_default: property.key_default,
                     dynamic_value: property.dynamic_value,
                     ui_type: property.ui_type,
                     add_cpu_cores: property.add_cpu_cores,
                     add_memory_bytes: property.add_memory_bytes,
                     add_disk_bytes: property.add_disk_bytes,
+                    is_group_default: property.is_group_default,
                 })
                 .collect::<Vec<_>>();
             remote_properties.sort_by(|a, b| a.key.cmp(&b.key));
@@ -351,12 +358,12 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     }
 }
 
-impl From<protocol::Visibility> for common::Visibility {
-    fn from(value: protocol::Visibility) -> Self {
+impl From<nib_meta::Visibility> for common::Visibility {
+    fn from(value: nib_meta::Visibility) -> Self {
         match value {
-            protocol::Visibility::Private => common::Visibility::Private,
-            protocol::Visibility::Development => common::Visibility::Development,
-            protocol::Visibility::Public => common::Visibility::Public,
+            nib_meta::Visibility::Private => common::Visibility::Private,
+            nib_meta::Visibility::Development => common::Visibility::Development,
+            nib_meta::Visibility::Public => common::Visibility::Public,
         }
     }
 }
@@ -370,37 +377,37 @@ impl From<ProtocolImageKey> for common::ProtocolVersionKey {
     }
 }
 
-impl From<protocol::Action> for common::FirewallAction {
-    fn from(value: protocol::Action) -> Self {
+impl From<nib_meta::Action> for common::FirewallAction {
+    fn from(value: nib_meta::Action) -> Self {
         match value {
-            protocol::Action::Allow => common::FirewallAction::Allow,
-            protocol::Action::Deny => common::FirewallAction::Drop,
-            protocol::Action::Reject => common::FirewallAction::Reject,
+            nib_meta::Action::Allow => common::FirewallAction::Allow,
+            nib_meta::Action::Deny => common::FirewallAction::Drop,
+            nib_meta::Action::Reject => common::FirewallAction::Reject,
         }
     }
 }
 
-impl From<protocol::NetProtocol> for common::FirewallProtocol {
-    fn from(value: protocol::NetProtocol) -> Self {
+impl From<nib_meta::NetProtocol> for common::FirewallProtocol {
+    fn from(value: nib_meta::NetProtocol) -> Self {
         match value {
-            protocol::NetProtocol::Tcp => common::FirewallProtocol::Tcp,
-            protocol::NetProtocol::Udp => common::FirewallProtocol::Udp,
-            protocol::NetProtocol::Both => common::FirewallProtocol::Both,
+            nib_meta::NetProtocol::Tcp => common::FirewallProtocol::Tcp,
+            nib_meta::NetProtocol::Udp => common::FirewallProtocol::Udp,
+            nib_meta::NetProtocol::Both => common::FirewallProtocol::Both,
         }
     }
 }
 
-impl From<protocol::Direction> for common::FirewallDirection {
-    fn from(value: protocol::Direction) -> Self {
+impl From<nib_meta::Direction> for common::FirewallDirection {
+    fn from(value: nib_meta::Direction) -> Self {
         match value {
-            protocol::Direction::In => common::FirewallDirection::Inbound,
-            protocol::Direction::Out => common::FirewallDirection::Outbound,
+            nib_meta::Direction::In => common::FirewallDirection::Inbound,
+            nib_meta::Direction::Out => common::FirewallDirection::Outbound,
         }
     }
 }
 
-impl From<protocol::FirewallRule> for common::FirewallRule {
-    fn from(value: protocol::FirewallRule) -> Self {
+impl From<nib_meta::FirewallRule> for common::FirewallRule {
+    fn from(value: nib_meta::FirewallRule) -> Self {
         let action: common::FirewallAction = value.action.into();
         let direction: common::FirewallDirection = value.direction.into();
         let protocol: common::FirewallProtocol = value.protocol.into();
@@ -431,8 +438,8 @@ impl From<protocol::FirewallRule> for common::FirewallRule {
     }
 }
 
-impl From<protocol::FirewallConfig> for common::FirewallConfig {
-    fn from(value: protocol::FirewallConfig) -> Self {
+impl From<nib_meta::FirewallConfig> for common::FirewallConfig {
+    fn from(value: nib_meta::FirewallConfig) -> Self {
         let default_in: common::FirewallAction = value.default_in.into();
         let default_out: common::FirewallAction = value.default_out.into();
         Self {
@@ -443,8 +450,8 @@ impl From<protocol::FirewallConfig> for common::FirewallConfig {
     }
 }
 
-impl From<protocol::RamdiskConfig> for common::RamdiskConfig {
-    fn from(value: protocol::RamdiskConfig) -> Self {
+impl From<nib_meta::RamdiskConfig> for common::RamdiskConfig {
+    fn from(value: nib_meta::RamdiskConfig) -> Self {
         Self {
             mount: value.mount,
             size_bytes: value.size_bytes,
@@ -452,37 +459,51 @@ impl From<protocol::RamdiskConfig> for common::RamdiskConfig {
     }
 }
 
-fn add_properties(image_properties: Vec<protocol::ImageProperty>) -> Vec<pb::AddImageProperty> {
+impl From<nib_meta::ArchivePointer> for pb::ArchivePointer {
+    fn from(value: nib_meta::ArchivePointer) -> Self {
+        Self {
+            new_archive_keys: value.new_archive_properties,
+            pointer: Some(match value.pointer {
+                StorePointer::CombinationDisallowed => pb::archive_pointer::Pointer::Disallowed(()),
+                StorePointer::StoreId(id) => pb::archive_pointer::Pointer::StoreId(id),
+            }),
+        }
+    }
+}
+
+fn add_properties(image_properties: Vec<nib_meta::ImageProperty>) -> Vec<pb::AddImageProperty> {
     let mut add_properties = vec![];
     for property in image_properties {
         match property.ui_type {
             UiType::Text(impact) | UiType::Password(impact) => {
                 add_properties.push(pb::AddImageProperty {
                     key: property.key,
+                    key_group: None,
                     description: property.description,
                     new_archive: impact
                         .as_ref()
                         .map(|impact| impact.new_archive)
                         .unwrap_or_default(),
-                    key_default: None,
                     default_value: property.default_value,
                     dynamic_value: property.dynamic_value,
                     ui_type: common::UiType::Text.into(),
                     add_cpu_cores: impact.as_ref().and_then(|impact| impact.add_cpu),
                     add_memory_bytes: impact.as_ref().and_then(|impact| impact.add_memory_bytes),
                     add_disk_bytes: impact.as_ref().and_then(|impact| impact.add_disk_bytes),
+                    is_group_default: None,
                 })
             }
             UiType::Switch { on, off } => {
                 add_properties.push(pb::AddImageProperty {
-                    key: property.key.clone(),
+                    key: format!("{}-{}", property.key, on.value),
+                    key_group: Some(property.key.clone()),
                     description: property.description.clone(),
                     new_archive: on
                         .impact
                         .as_ref()
                         .map(|impact| impact.new_archive)
                         .unwrap_or_default(),
-                    key_default: Some(property.default_value == on.value),
+                    is_group_default: Some(property.default_value == on.value),
                     default_value: on.value,
                     dynamic_value: property.dynamic_value,
                     ui_type: common::UiType::Switch.into(),
@@ -494,14 +515,15 @@ fn add_properties(image_properties: Vec<protocol::ImageProperty>) -> Vec<pb::Add
                     add_disk_bytes: on.impact.as_ref().and_then(|impact| impact.add_disk_bytes),
                 });
                 add_properties.push(pb::AddImageProperty {
-                    key: property.key,
+                    key: format!("{}-{}", property.key, off.value),
+                    key_group: Some(property.key.clone()),
                     description: property.description,
                     new_archive: off
                         .impact
                         .as_ref()
                         .map(|impact| impact.new_archive)
                         .unwrap_or_default(),
-                    key_default: Some(property.default_value == off.value),
+                    is_group_default: Some(property.default_value == off.value),
                     default_value: off.value,
                     dynamic_value: property.dynamic_value,
                     ui_type: common::UiType::Switch.into(),
@@ -516,14 +538,15 @@ fn add_properties(image_properties: Vec<protocol::ImageProperty>) -> Vec<pb::Add
             UiType::Enum(variants) => {
                 for variant in variants {
                     add_properties.push(pb::AddImageProperty {
-                        key: property.key.clone(),
+                        key: format!("{}-{}", property.key, variant.value),
+                        key_group: Some(property.key.clone()),
                         description: property.description.clone(),
                         new_archive: variant
                             .impact
                             .as_ref()
                             .map(|impact| impact.new_archive)
                             .unwrap_or_default(),
-                        key_default: Some(property.default_value == variant.value),
+                        is_group_default: Some(property.default_value == variant.value),
                         default_value: variant.value,
                         dynamic_value: property.dynamic_value,
                         ui_type: common::UiType::Enum.into(),

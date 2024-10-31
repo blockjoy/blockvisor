@@ -18,13 +18,35 @@ description: Example image description
 visibility: private
 
 # Name of protocol that is expected to be already populated in the API.
+# It is required to be lower-kebab-case.
 protocol_key: {{protocol_key}}
 
 variants:
   # The same protocol can have different implementations. This field let identify what implementation(s) has been used.
   # Variant name may additional contain protocol network name e.g. "eth-mainnet".
   # This value will be available in a Rhai runtime via `node_env().variant_key`.
+  # It is required to be lower-kebab-case.
   - key: {{variant_key}}
+    # List of protocol data archive pointers.
+    archive_pointers:
+      # Association of image variant with protocol data archive. Identify protocol data archive that will be used
+      # with given image variant and combination of properties that affect protocol data set (property with `new_archive` flag true).
+      - pointer: !store_id
+          # Unique `store_id` should change whenever protocol data set (or format) changes. E.g. if some version of the image
+          # breaks backward compatibility of the data, then `store_id` must be change (e.g. by appending version postfix).
+          # `store_id` can be also reused if some image variants (even from different protocols) can use the same data archives.
+          # `store_id` is required to be lower-kebab-case.
+          unique-id-v1
+      - pointer: !store_id unique-id-x-v1
+        # Combination of properties (with new_archive flag true).
+        # Typically, properties doesn't affect data set and there is only one `store_id`, but
+        # if it is necessary to introduce properties with `new_archive` flag true, all combinations must be defined here.
+        new_archive_properties: [ "switch-property-on-value" ]
+      - pointer: !store_id unique-id-y-v1
+        new_archive_properties: [ "enum-property-variant-c" ]
+      # `pointer` can be set to `combination_disallowed` if given properties combination isn't valid.
+      - pointer: !combination_disallowed
+        new_archive_properties: [ "switch-property-on-value" , "enum-property-variant-c" ]
 
     # Minimum CPU required to run image.
     min_cpu: 1
@@ -91,7 +113,8 @@ firewall_config:
 properties:
 
   # Unique property key. Property value will be available in a Rhai runtime via `node_params().<key>` (e.g. `node_params().arbitrary_property`).
-  - key: arbitrary text property
+  # It is required to be lower-kebab-case.
+  - key: arbitrary-text-property
 
     # [optional] Brief property description.
     description: this is some text property example
@@ -117,32 +140,32 @@ properties:
       # [optional] How existence of property affect required disk space.
       add_disk_bytes: 10
 
-  - key: switch property
+  - key: switch-property
     description: this is some switch example
     dynamic_value: true
-    default_value: off_value
+    default_value: off-value
     ui_type: !switch
       on:
-        value: on_value
+        value: on-value
         impact:
           new_archive: true
           add_cpu: 3
           add_memory_bytes: 10000000
           add_disk_bytes: 10000000000
       off:
-        value: off_value
+        value: off-value
         impact: null
 
-  - key: enum property
+  - key: enum-property
     description: this is some enum example
     dynamic_value: true
-    default_value: variant_a
+    default_value: variant-a
     ui_type: !enum
-      - value: variant_a
+      - value: variant-a
         impact: null
-      - value: variant_b
+      - value: variant-b
         impact: null
-      - value: variant_c
+      - value: variant-c
         impact:
           new_archive: true
           add_cpu: -1

@@ -9,6 +9,8 @@ visibility: public
 protocol_key: testing
 variants:
   - key: test
+    archive_pointers:
+      - pointer: !store_id unique-store-id-v1
     min_cpu: 1
     min_memory_bytes: 1000000000
     min_disk_bytes: 2000000000
@@ -46,7 +48,6 @@ properties:
       on:
         value: on_value
         impact:
-          new_archive: true
           add_cpu: 3
           add_memory_bytes: 10000000
           add_disk_bytes: 10000000000
@@ -65,7 +66,6 @@ properties:
         impact: null
       - value: variant_c
         impact:
-          new_archive: true
           add_cpu: -1
           add_memory_bytes: 1000000
           add_disk_bytes: 1000000000
