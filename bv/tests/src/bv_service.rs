@@ -155,7 +155,7 @@ async fn test_bv_service_e2e() {
 
     println!("get user org and token");
     let org_query = r#"INSERT INTO orgs VALUES ('53b28794-fb68-4cd1-8165-b98a51a19c46', 'Personal', TRUE, now(), now(), NULL);
-        INSERT INTO tokens (token_type, token, created_by_resource, created_by, org_id, created_at) VALUES ('host_provision', 'rgfr4YJZ8dIA', 'user', '1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', now());
+        INSERT INTO tokens (token_type, token, created_by_type, created_by_id, org_id, created_at) VALUES ('host_provision', 'rgfr4YJZ8dIA', 'user', '1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', now());
         INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'org-personal');
         INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'grpc-login');
         INSERT INTO user_roles (user_id, org_id, role) values ('1cff0487-412b-4ca4-a6cd-fdb9957d5d2f', '53b28794-fb68-4cd1-8165-b98a51a19c46', 'grpc-new-host');
@@ -190,9 +190,9 @@ async fn test_bv_service_e2e() {
         .create(with_auth(
             pb::ApiKeyServiceCreateRequest {
                 label: "token".to_string(),
-                scope: Some(pb::ApiKeyScope {
-                    resource: common::Resource::User.into(),
-                    resource_id: Some(user_id.to_string()),
+                resource: Some(common::Resource {
+                    resource_type: common::ResourceType::User.into(),
+                    resource_id: user_id.to_string(),
                 }),
             },
             &auth_token,

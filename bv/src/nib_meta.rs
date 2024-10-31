@@ -18,11 +18,26 @@ pub struct Protocol {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Variant {
     pub key: String,
+    pub archive_pointers: Vec<ArchivePointer>,
     pub min_cpu: u64,
     pub min_memory_bytes: u64,
     pub min_disk_bytes: u64,
     #[serde(default)]
     pub ramdisks: Vec<RamdiskConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ArchivePointer {
+    pub pointer: StorePointer,
+    #[serde(default)]
+    pub new_archive_properties: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum StorePointer {
+    CombinationDisallowed,
+    StoreId(String),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -118,6 +133,7 @@ pub struct ImageProperty {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ImageImpact {
+    #[serde(default)]
     pub new_archive: bool,
     pub add_cpu: Option<i64>,
     pub add_memory_bytes: Option<i64>,

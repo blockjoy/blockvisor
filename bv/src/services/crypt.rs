@@ -37,8 +37,10 @@ pub async fn put_key(config: &SharedConfig, node_id: Uuid, name: &str, value: &[
     api_with_retry!(
         client,
         client.put_secret(pb::CryptServicePutSecretRequest {
-            resource: common::Resource::Node.into(),
-            resource_id: node_id.to_string(),
+            resource: Some(common::Resource {
+                resource_type: common::ResourceType::Node.into(),
+                resource_id: node_id.to_string()
+            }),
             name: name.to_string(),
             value: value.to_vec(),
         })
@@ -54,8 +56,10 @@ pub async fn get_key(config: &SharedConfig, node_id: Uuid, name: &str) -> Result
         match api_with_retry!(
             client,
             client.get_secret(pb::CryptServiceGetSecretRequest {
-                resource: common::Resource::Node.into(),
-                resource_id: node_id.to_string(),
+                resource: Some(common::Resource {
+                    resource_type: common::ResourceType::Node.into(),
+                    resource_id: node_id.to_string()
+                }),
                 name: name.to_string(),
             })
         ) {

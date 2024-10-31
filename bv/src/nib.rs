@@ -3,8 +3,8 @@ use crate::{
     bv_config, firewall,
     internal_server::{self, NodeDisplayInfo},
     nib_cli::{ImageCommand, ProtocolCommand},
+    nib_meta::{self, Variant},
     node_state::{NodeImage, NodeState, ProtocolImageKey, VmConfig, VmStatus},
-    protocol::{self, Variant},
     services::{self, protocol::PushResult, ApiServiceConnector},
     utils::{self, node_id_with_fallback},
     workspace,
@@ -66,7 +66,7 @@ pub async fn process_image_command(
             )?;
         }
         ImageCommand::ContainerUri { path } => {
-            let local_image: protocol::Image =
+            let local_image: nib_meta::Image =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             println!("{}", local_image.container_uri);
         }
@@ -85,7 +85,7 @@ pub async fn process_image_command(
                     .timeout(BV_REQUEST_TIMEOUT),
             )
             .await?;
-            let local_image: protocol::Image =
+            let local_image: nib_meta::Image =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
 
             let variant = pick_variant(local_image.variants, variant)?;
@@ -165,7 +165,7 @@ pub async fn process_image_command(
                     Uuid::parse_str(&id)?
                 }
             };
-            let local_image: protocol::Image =
+            let local_image: nib_meta::Image =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             let mut node = bv_client.get_node(id).await?.into_inner().state;
             node.firewall = local_image.firewall_config.into();
@@ -192,7 +192,7 @@ pub async fn process_image_command(
             path,
             variant,
         } => {
-            let local_image: protocol::Image =
+            let local_image: nib_meta::Image =
                 serde_yaml::from_str(&fs::read_to_string(&path).await?)?;
             let variant = pick_variant(local_image.variants, variant)?;
             let properties = if let Some(props) = props {
@@ -244,7 +244,7 @@ pub async fn process_image_command(
         }
         ImageCommand::Push { path } => {
             let mut client = services::protocol::ProtocolService::new(connector).await?;
-            let local_image: protocol::Image =
+            let local_image: nib_meta::Image =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             for variant in &local_image.variants {
                 let image_key = ProtocolImageKey {
@@ -313,7 +313,7 @@ pub async fn process_protocol_command(
             }
         }
         ProtocolCommand::Push { path } => {
-            let local_protocols: Vec<protocol::Protocol> =
+            let local_protocols: Vec<nib_meta::Protocol> =
                 serde_yaml::from_str(&fs::read_to_string(path).await?)?;
             for local in local_protocols {
                 let protocol_key = local.key.clone();
@@ -396,37 +396,37 @@ fn pick_variant(variants: Vec<Variant>, variant_key: Option<String>) -> eyre::Re
     }
 }
 
-impl From<protocol::Action> for firewall::Action {
-    fn from(value: protocol::Action) -> Self {
+impl From<nib_meta::Action> for firewall::Action {
+    fn from(value: nib_meta::Action) -> Self {
         match value {
-            protocol::Action::Allow => firewall::Action::Allow,
-            protocol::Action::Deny => firewall::Action::Deny,
-            protocol::Action::Reject => firewall::Action::Reject,
+            nib_meta::Action::Allow => firewall::Action::Allow,
+            nib_meta::Action::Deny => firewall::Action::Deny,
+            nib_meta::Action::Reject => firewall::Action::Reject,
         }
     }
 }
 
-impl From<protocol::NetProtocol> for firewall::Protocol {
-    fn from(value: protocol::NetProtocol) -> Self {
+impl From<nib_meta::NetProtocol> for firewall::Protocol {
+    fn from(value: nib_meta::NetProtocol) -> Self {
         match value {
-            protocol::NetProtocol::Tcp => firewall::Protocol::Tcp,
-            protocol::NetProtocol::Udp => firewall::Protocol::Udp,
-            protocol::NetProtocol::Both => firewall::Protocol::Both,
+            nib_meta::NetProtocol::Tcp => firewall::Protocol::Tcp,
+            nib_meta::NetProtocol::Udp => firewall::Protocol::Udp,
+            nib_meta::NetProtocol::Both => firewall::Protocol::Both,
         }
     }
 }
 
-impl From<protocol::Direction> for firewall::Direction {
-    fn from(value: protocol::Direction) -> Self {
+impl From<nib_meta::Direction> for firewall::Direction {
+    fn from(value: nib_meta::Direction) -> Self {
         match value {
-            protocol::Direction::In => firewall::Direction::In,
-            protocol::Direction::Out => firewall::Direction::Out,
+            nib_meta::Direction::In => firewall::Direction::In,
+            nib_meta::Direction::Out => firewall::Direction::Out,
         }
     }
 }
 
-impl From<protocol::FirewallRule> for firewall::Rule {
-    fn from(value: protocol::FirewallRule) -> Self {
+impl From<nib_meta::FirewallRule> for firewall::Rule {
+    fn from(value: nib_meta::FirewallRule) -> Self {
         Self {
             name: value.key,
             action: value.action.into(),
@@ -438,8 +438,8 @@ impl From<protocol::FirewallRule> for firewall::Rule {
     }
 }
 
-impl From<protocol::FirewallConfig> for firewall::Config {
-    fn from(value: protocol::FirewallConfig) -> Self {
+impl From<nib_meta::FirewallConfig> for firewall::Config {
+    fn from(value: nib_meta::FirewallConfig) -> Self {
         Self {
             default_out: value.default_out.into(),
             default_in: value.default_in.into(),
@@ -470,7 +470,7 @@ impl From<Variant> for VmConfig {
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{protocol, utils};
+    use crate::{nib_meta, utils};
     use assert_fs::TempDir;
     use std::fs;
 
@@ -492,7 +492,7 @@ pub mod tests {
         .unwrap();
 
         let image =
-            serde_yaml::from_str::<protocol::Image>(&fs::read_to_string(babel_path).unwrap())
+            serde_yaml::from_str::<nib_meta::Image>(&fs::read_to_string(babel_path).unwrap())
                 .unwrap();
         println!("{image:?}");
     }
