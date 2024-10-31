@@ -5,9 +5,6 @@
 This guide aims to provide the necessary steps a BRE engineer needs to take in order
 to add support for a new protocol type to Blockvisor or update existing node images.
 Below instructions is not the only way to create/update node images, but recommended one.
-While this guide will describe the steps needed to create an image from scratch,
-it is recommended to use the bv image clone feature if the new protocol requires similar configurations as an existing one
-whose image is readily available.
 
 Across this guide, we will refer to the physical machines as HOSTS that will run our different protocol Apptainer containers which we call NODES.
 
@@ -22,20 +19,21 @@ It is recommended to familiarize with rest of documentation, to get a feel of th
 Since BV itself is protocol agnostic, specific protocol support is plugged-into BV by "Node Image".
 
 Each "Node Image" consists of:
-- protocol `os.img`, that is used to run VM: it is a rootfs containing protocol specific SW and BV agent (so called babelsup)
-- babel plugin that translates BV protocol agnostic interface (aka Babel API) into protocol specific calls.
+- Container image, typically defined by `Dockerfile` and pushed to some registry.
+- Babel plugin that translates BV protocol agnostic interface (aka Babel API) into protocol specific calls.
+  Plugin code shall be included in container image.
+- Image metadata that let Blockvisor API understand image properties and its place in the Blockjoy ecosystem.
 
 ## Prerequisites
 
-- Provisioned host according to [BlockVisor Host Setup Guide](host_setup_guide.md). 
-
-ALTERNATIVELY: Provision host, but without BV installed yet (add `--skip-download` flag to `bvup` call).<br>
+- Provisioned host according to [BlockVisor Host Setup Guide](host_setup_guide.md), but without BV installed yet (add `--skip-download` flag to `bvup` call).<br>
 Then install [bundle-dev](https://github.com/blockjoy/blockvisor/releases/latest) on the host (instead of standard `bundle`).
 Download, untar, and run `./bundle/installer`.<br>
-`bundle-dev` is a special variant of BV with `blockvisord` that runs in, so called, "dev" mode.
+`bundle-dev` includes `nib` (Node Image Builder) tool and a special variant of BV with `blockvisord` that runs in, so called, "dev" mode.
 It means no regular cloud communication (only when need to download existing images) and commands handling.
 Also, other housekeeping tasks, like node recovery, metrics gathering or auto update, are disabled in that variant.<br>
-This variant may be more convenient in some cases.
+
+- Generate API key for `nib` and configure it `nib config <API_KEY> --api='<api_url>''`
 
 - [optional] VS Code installed on developer PC, with following extensions installed:
     - "Remote - SSH"
@@ -47,85 +45,41 @@ but can be also handy when running typical actions on a node.
 
 ## Typical Workflow
 
-### Prepare workspace
+![](blockjoy_image_builder.jpg)
 
-Workspace is a convenient way to work with concrete image and node.
-To create BV workspace run `bv workspace create <WORKSPACE_NAME>`.
-While running `bv` commands from workspace directory, you can skip image and node ids.
-Creating/cloning image while being in workspace set it automatically as active one,
-but you can always change it with `bv workspace set-active-image <image_id>`. The same is with nodes, `bv node create`
-set node automatically as active one, but it can always changed with `bv set-active-node <node id or name>`.
+### Create Protocol
 
-Follow below steps to create and use workspace from VS Code.
-1. Open remote session in your VS Code.
-<br>![](vscode_remote.jpg)
-2. Open new terminal and create BV workspace with `bv workspace create <WORKSPACE_NAME>`, e.g. `bv workspace create example`.
-3. In VS Code "File -> Open Wrokspace from File..." `example/.code-workspace`. 
-4. In "Run and Debug" menu several configurations should show up. See `example/.code-workspace` for more details.
-<br>![](vscode_run_nd_debug.jpg)
+Node images are grouped by protocols they implement. Hence, the first step is to add protocols metadata definition
+and push it to the API (with `nib` CLI).
+Protocols are typically defined in `protocols.yaml` file in a top directory, since they are common for multiple images.
 
-### Create or Clone Image
+```shell
+nib protocol push
+```
+
+### Create Image
 
 First, we need to create the image that the node will run. 
-Use predefined "Run and Debug" or `bv image` CLI to create/clone node image. E.g.:
+Use `nib image create <PROTOCOL_KEY> <IMAGE_KEY>` CLI to create node image blueprint.
+Protocol and image keys shall be lower-kebab-case.
+
 ```shell
-bv image clone algorand/validator/0.0.1 example/node/1.2.3
-```
-or
-```
-bv image create example/node/1.2.3 --rootfs-size 20
+nib image create protocol-key variant-key
 ```
 
-__HINT 1__: You can check that the image is created by running `ls -al /var/lib/blockvisor/images/example/node/1.2.3`
+Above command will create subdirectory named `variant-key` with following files inside:
+- `Dockerfile` - Blueprint of recipe how to build node rootfs with all necessary binaries.
+- `main.rhai` - Blueprint of plugin main file. See comments inside for more details. Shall be included in docker image.
+- `babel.yaml` - Blueprint of image metadata file. See comments inside for more details.
 
-__HINT 2__: If image is created/cloned while in bv workspace directory, it is set as active image, and you don't need to pass
-`[IMAGE_ID]` argument to other `bv` commands (since it will fallback to active one).
+### Create Dev Node
 
-Now set a root password for your newly created node:
-```
-mount -o loop /var/lib/blockvisor/images/example/node/1.2.3/os.img /mnt
-chroot /mnt /usr/bin/passwd (get password from 1password)
-umount /mnt
-```
+To create fist node image:
 
-### Create Node
-
-Once image is created, it can be used to create a node instance with standard `bv node create` CLI
-(Again predefined "Run and Debug" can be used as well).
-
-
-__HINT 1__: If node is created while in bv workspace directory, it is set as active node, and you don't need to pass
-`[NODE_ID_OR_NAME]` argument to other `bv` commands (since it will fall back to active one).
-Additionally `babel.rhai` symbolic link is created. It points to rhai script instance used by active node.
-
-__HINT 2__: You can check what blockvisor is doing on the host by running `journalctl -u blockvisor -fn 50`.
-
-__HINT 3__: The `bv node create` command copy RHAI script from active image (e.g. `/var/lib/blockvisor/images/example/node/1.2.3/babel.rhai`)
-to `/var/lib/blockvisor/nodes/<image_id>/babel.rhai`. Hence, editing `babel.rhai` from image won't affect created node.
-
-__HINT 4__: When using standard (not `dev`) BV bundle, it is recommended to use `--dev-mode` flag,
-while adding support for a new node. All commands, run on a node created in dev mode, will bypass the API.
-Hence, node won't be visible for the API, as it would normally be.
-
-__HINT 5__: Once created node is started, `apptainer shell` can be used, to modify rootfs and install/update protocol specific software.
-<br>Adding below alias to your `~/.bashrc` will allow you to quickly attach  to it (don't forget to install `jq` first):
-```
-alias node_shell='apptainer shell instance://$(cat .bv-workspace |jq .active_node.name| xargs)'
-```
-Now doing `node_shell` in your workspace folder will run active node shell.
-
-#### Example
-```
-bv node create --network test --dev-mode
-```
-Check that your node has been created:
-```
-root@bvhost:~/workspaces/example# bv node ls
------------------------------------------------------------------------------------------------------------------------------------
- ID                                    Name                        Image                       State    IP Address      Uptime (s)
- c1855039-c2b6-472a-a7bd-4b82c51eb613  recently_enough_cowbird     example_image/node/1.2.3   Stopped  64.140.168.131  -
------------------------------------------------------------------------------------------------------------------------------------
-```
+1. Build docker image `docker build -t variant-key .`
+2. Set `container_uri` in `babel.yaml` to `docker-daemon://variant-key:latest`
+3. Run some basic sanity checks on the image `nib image check`
+3. Use `nib image play --props '{"property_key":"some property value"}'` to create dev node.
 
 ### Add Required Binaries and Snapshots
 
@@ -134,7 +88,7 @@ First you need to provision the binaries and configurations needed for the proto
 Below steps should be considered generic and suitable for any protocol:
 - Identify the documentation for the project you're trying to add support for.
 - Discern what kind of node you want to add as different types of nodes will imply different approaches (Light/Full/Archive).
-- Use `apptainer shell` to attach to the node and go through the protocol specific installation as you would normally do on any machine.
+- Use `bv node shell` to attach to the node and go through the protocol specific installation as you would normally do on any machine.
 - Ensure all the binaries recommended in the documentation are compiled/installed properly on the node.
 - Look through the documentation and try to find any protocol provided snapshots;
 especially when running archive nodes, it can take weeks to sync a node to the tip of the chain
@@ -143,43 +97,44 @@ without first downloading snapshots of the protocol data.
 type of node and customer needs
   - we're purposefully avoiding any startup mechanisms like systemd,
   since the Babel will take care of running the binaries through the jobs we'll configure
-- Once the binaries and the protocol data are in place, and you have a sense of what it means to run nodes
-on different networks of the same protocol, you can move on to implement/customize Babel Plugin (rhai script).
 
-Also make sure that following tools, required by Babel, are available:
-- `fallocate`
+Finally, having knowledge gained in previous steps, go back to `Dockerfile` and update it with all necessary steps
+to prepare sufficient node rootfs.
 
-### Define Default Services as needed
-You can define additional services that will be automatically started on all nodes of given kind in
-`/var/lib/babel/base.rhai` file (on rootfs). See [Services Example](babel_api/examples/base.rhai) for more details.
+__NOTE__: It is strongly recommended to put all common definition info some base docker image and then
+reuse it in node specific `Dockerfile`s. Base docker images may also contain common babel plugin code
+e.g. with `BASE_CONFIG` definition.
 
-It is the place to define protocol unrelated services like monitoring agent or proxy servers.
+__HINT 1__: You can check what blockvisor is doing on the host by running `journalctl -u blockvisor -fn 50`.
 
 ### Implementing/Customizing Babel Plugin for New Protocol
 
-Once you've created the node, you should be able to find it's rhai script in `<workspace>/node/babel.rhai`.
-Whole node directory is automatically symlinked into workspace dir as `node`.
+Once the binaries and the protocol data are in place, and you have a sense of what it means to run nodes
+on different networks of the same protocol, you can move on to implement/customize Babel Plugin (rhai script).
 
-__WARNING__: Pay attention to what you're editing - Rhai scripts in `/var/lib/blockvisor/nodes/<node_id>/babel.rhai`
-are what's actually running on the nodes, not the ones in `/var/lib/blockvisor/images`.
-<br>It is strongly recommended to use VS Code and workspace with auto-generated symlinks to avoid misuse. 
+BV expect to find plugin code in:
+</br>`/var/lib/blockvisor/<node_id>/rootfs/var/lib/babel/plugin/`
+
+Entrypoint is always `main.rhai` file, but other files from the same dir can be imported using
+standard `import` statement (see [The Rhai Book](https://rhai.rs/book/language/modules/import.html)).
+
+Rhai code can be split not only into multiple file, but also multiple container images.
+Important thing is that they all ends up in `plugin` dir.
+
+```dockerfile
+COPY ./helpers.rhai /var/lib/babel/plugin/
+COPY ./main.rhai /var/lib/babel/plugin/
+```
+
+__WARNING__: Pay attention to what you're editing - `*.rhai` files are copied into the container image used to create node.
+Hence, editing `*.rhai` files from image dir won't affect created node.
+</br>If you want change `*.rhai` files for specific  node, then look for them in
+`/var/lib/blockvisor/<node_id>/rootfs/var/lib/babel/plugin/`.
 
 __NOTE 1__: All of Rhai functions can be immediately tested, just after file is saved (including `init()` function).
 Use `bv node run <METHOD>` to run specific Rhai function from script.
 
-__NOTE 2__: Use `bv node check` for quick `babel.rhai` script smoke tests.
-<br>It executes set of build in functions and all other functions that starts with `test_` prefix.
-This can be used to implement protocol specific a'la unit tests, that will validate other functions output and throw
-exception when assertion fail.
-**Example:**
-```
-fn test_height_value(param) {
-    if height() < 0 {
-        throw "Invalid node height value: " + height();
-    }
-    param
-}
-```
+__NOTE 2__: Use `nib image check` for quick `babel.rhai` script smoke tests and other sanity checks.
 
 __NOTE 3__: Experimenting with `init()` function may result in some unwanted jobs running.
 Use `bv n job` CLI to stop or cleanup unwanted jobs.
@@ -188,31 +143,29 @@ Use `bv n job` CLI to stop or cleanup unwanted jobs.
 Go to [Rhai Plugin Scripting Guide](babel_api/rhai_plugin_guide.md) for further details
 on how to properly implement Babel Plugin in Rhai language.
 
-### Capture and Upload Image
+#### Define Default Services as needed
 
-All changes applied on the node are NOT automatically propagated to its source image. Therefore, once node changes are done,
-`bv image capture` must be called, so all changes are applied to source image.
+You can define additional services that will be automatically started on all nodes of given kind in via `BASE_CONFIG`
+constant in Rhai script. See [Services Example](babel_api/examples/base.rhai) for more details.
 
-__NOTE 1__: Sometimes running node generates files (e.g. cache) in rootfs that should not go into the captured image.
-All that files can be excluded using `/etc/bvignore` file (on rootfs), which format is the same as `.gitignore`.
+It is the place to define protocol unrelated services like monitoring agent or proxy servers.
 
-Updated image can be now used again to create fresh node for final testing (e.g. `init()` function).
+Hence, it is strongly recommended to put `BASE_CONFIG` definition in a rhai file that will be included
+in some base container image. Then it can be imported and used by node specific `main.rhai` scripts.
 
-Once everything is verified, use `bv image upload` to easily put image files on R2.
-<br>You will need to export the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for R2.
+### Push Image to the API
 
-See `bv image upload --help` for more details.
+Test image and make all necessary adjustments. Once it is ready, push container image to registry,
+update `container_uri` in `babel.yaml` with final one, and push image to the API:
 
-#### Example
-```
-root@bvhost:~/workspaces/example# bv image capture
-root@bvhost:~/workspaces/example# export AWS_SECRET_ACCESS_KEY=***;export AWS_ACCESS_KEY_ID=***
-root@bvhost:~/workspaces/example# bv image upload
-Uploading babel.rhai to cookbook-dev/chains/example/node/1.2.3/babel.rhai ...
-Archiving os.img ...
-Uploading blockjoy.gz to cookbook-dev/chains/example/node/1.2.3/blockjoy.gz ...
+```shell
+nib image push
 ```
 
-__NOTE 2__: Before you can use the newly updated image, its version needs to be added to the API (ask the dev team for assistance about it).
+__NOTE__: If you change existing node image, remember to update `version` field.
+
+Once image is pushed to the API, it can be used to create a node instance with standard `bv node create` CLI or web frontend.
+
+Updated image can be now used again to create fresh node for final testing.
 
 __Congratulations, you have just added new protocol support, to the great BlockJoy ecosystem!__

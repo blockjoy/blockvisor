@@ -6,8 +6,7 @@ use crate::{
     nib_meta::{self, Variant},
     node_state::{NodeImage, NodeState, ProtocolImageKey, VmConfig, VmStatus},
     services::{self, protocol::PushResult, ApiServiceConnector},
-    utils::{self, node_id_with_fallback},
-    workspace,
+    utils,
 };
 use babel_api::{
     engine::NodeEnv,
@@ -139,11 +138,6 @@ pub async fn process_image_command(
                 "Created new dev_node with ID `{}` and name `{}`\n{:#?}",
                 node.state.id, node.state.name, node.state
             );
-            let _ = workspace::set_active_node(
-                &std::env::current_dir()?,
-                node.state.id,
-                &node.state.name,
-            );
         }
         ImageCommand::Upgrade { path, id_or_name } => {
             let bv_config = load_bv_config(bv_root).await?;
@@ -154,7 +148,6 @@ pub async fn process_image_command(
                     .timeout(BV_REQUEST_TIMEOUT),
             )
             .await?;
-            let id_or_name = node_id_with_fallback(id_or_name)?;
             let id = match Uuid::parse_str(&id_or_name) {
                 Ok(v) => v,
                 Err(_) => {

@@ -1,4 +1,3 @@
-use crate::workspace;
 use bv_utils::{cmd::run_cmd, with_retry};
 use cidr_utils::cidr::Ipv4Cidr;
 use eyre::{anyhow, bail, Context, Result};
@@ -252,38 +251,6 @@ pub fn render_template(template: &str, destination: &Path, params: &[(&str, &str
     let destination_file = std::fs::File::create(destination)?;
     tera.render_to("template", &context, destination_file)?;
     Ok(())
-}
-
-pub fn node_id_with_fallback(node_id: Option<String>) -> Result<String> {
-    Ok(match node_id {
-        None => {
-            if let Ok(workspace::Workspace {
-                active_node: Some(workspace::ActiveNode { id, .. }),
-                ..
-            }) = workspace::read(&std::env::current_dir()?)
-            {
-                id.to_string()
-            } else {
-                bail!("<ID_OR_NAME> neither provided nor found in the workspace");
-            }
-        }
-        Some(id) => id,
-    })
-}
-
-pub fn node_ids_with_fallback(mut node_ids: Vec<String>, required: bool) -> Result<Vec<String>> {
-    if node_ids.is_empty() {
-        if let Ok(workspace::Workspace {
-            active_node: Some(workspace::ActiveNode { id, .. }),
-            ..
-        }) = workspace::read(&std::env::current_dir()?)
-        {
-            node_ids.push(id.to_string());
-        } else if required {
-            bail!("<ID_OR_NAMES> neither provided nor found in the workspace");
-        }
-    }
-    Ok(node_ids)
 }
 
 #[cfg(test)]

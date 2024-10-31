@@ -1,8 +1,6 @@
 use crate::{
     apptainer_machine::ROOTFS_DIR,
-    bv_cli::{
-        ClusterCommand, HostCommand, JobCommand, NodeCommand, ProtocolCommand, WorkspaceCommand,
-    },
+    bv_cli::{ClusterCommand, HostCommand, JobCommand, NodeCommand, ProtocolCommand},
     bv_config::SharedConfig,
     hosts::{self, HostInfo},
     internal_server,
@@ -14,8 +12,6 @@ use crate::{
     pretty_table::{PrettyTable, PrettyTableRow},
     services,
     services::protocol::ProtocolService,
-    utils::{node_id_with_fallback, node_ids_with_fallback},
-    workspace,
 };
 use babel_api::engine::JobStatus;
 use bv_utils::cmd::ask_confirm;
@@ -100,7 +96,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     table.push(PrettyTableRow {
                         id: node.state.id.to_string(),
                         name: node.state.name,
-                        triple: format!(
+                        image: format!(
                             "{}/{}/{}",
                             node.state.image_key.protocol_key,
                             node.state.image_key.variant_key,
@@ -149,28 +145,20 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 "Created new node with ID `{}` and name `{}`\n{:#?}",
                 node.state.id, node.state.name, node.state
             );
-            let _ = workspace::set_active_node(
-                &std::env::current_dir()?,
-                node.state.id,
-                &node.state.name,
-            );
         }
         NodeCommand::Start { id_or_names } => {
-            let ids = client
-                .get_node_ids(node_ids_with_fallback(id_or_names, false)?)
-                .await?;
+            let ids = client.get_node_ids(id_or_names).await?;
             client.start_nodes(&ids).await?;
         }
         NodeCommand::Stop { id_or_names, force } => {
-            let ids = client
-                .get_node_ids(node_ids_with_fallback(id_or_names, false)?)
-                .await?;
+            let ids = client.get_node_ids(id_or_names).await?;
             client.stop_nodes(&ids, force).await?;
         }
         NodeCommand::Restart { id_or_names, force } => {
-            let ids = client
-                .get_node_ids(node_ids_with_fallback(id_or_names, true)?)
-                .await?;
+            if id_or_names.is_empty() {
+                bail!("<ID_OR_NAMES> can't be empty list");
+            }
+            let ids = client.get_node_ids(id_or_names).await?;
             client.stop_nodes(&ids, force).await?;
             client.start_nodes(&ids).await?;
         }
@@ -179,20 +167,17 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             version,
             build,
         } => {
-            let ids = client
-                .get_node_ids(node_ids_with_fallback(id_or_names, false)?)
-                .await?;
+            let ids = client.get_node_ids(id_or_names).await?;
             for id in ids {
                 client.upgrade_node((id, version.clone(), build)).await?;
                 println!("Node `{id}` upgrade triggered");
             }
         }
         NodeCommand::Delete {
-            id_or_names,
+            mut id_or_names,
             all,
             yes,
         } => {
-            let mut id_or_names = node_ids_with_fallback(id_or_names, false)?;
             // We only respect the `--all` flag when `id_or_names` is empty, in order to
             // prevent a typo from accidentally deleting all nodes.
             if id_or_names.is_empty() {
@@ -209,7 +194,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                         return Ok(());
                     }
                 } else {
-                    bail!("<ID_OR_NAMES> neither provided nor found in the workspace");
+                    bail!("<ID_OR_NAMES> can't be empty list");
                 }
             } else if !ask_confirm(
                 &format!("Are you sure you want to delete following node(s)?\n{id_or_names:?}"),
@@ -220,7 +205,6 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             for id_or_name in id_or_names {
                 let id = client.resolve_id_or_name(&id_or_name).await?;
                 client.delete_node(id).await?;
-                let _ = workspace::unset_active_node(&std::env::current_dir()?, id);
                 println!("Deleted node `{id_or_name}`");
             }
         }
@@ -228,9 +212,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             command,
             id_or_name,
         } => {
-            let id = client
-                .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
-                .await?;
+            let id = client.resolve_id_or_name(&id_or_name).await?;
             match command {
                 JobCommand::List => {
                     let jobs = client.get_node_jobs(id).await?.into_inner();
@@ -312,7 +294,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             }
         }
         NodeCommand::Status { id_or_names } => {
-            for id_or_name in node_ids_with_fallback(id_or_names, true)? {
+            for id_or_name in id_or_names {
                 let id = client.resolve_id_or_name(&id_or_name).await?;
                 let status = client.get_node_status(id).await?;
                 let status = status.into_inner();
@@ -320,9 +302,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             }
         }
         NodeCommand::Capabilities { id_or_name } => {
-            let id = client
-                .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
-                .await?;
+            let id = client.resolve_id_or_name(&id_or_name).await?;
             let caps = client.list_capabilities(id).await?.into_inner();
             for cap in caps {
                 println!("{cap}");
@@ -334,9 +314,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             param,
             param_file,
         } => {
-            let id = client
-                .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
-                .await?;
+            let id = client.resolve_id_or_name(&id_or_name).await?;
             let param = match param {
                 Some(param) => param,
                 None => {
@@ -366,9 +344,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             }
         }
         NodeCommand::Info { id_or_name } => {
-            let id = client
-                .resolve_id_or_name(&node_id_with_fallback(id_or_name)?)
-                .await?;
+            let id = client.resolve_id_or_name(&id_or_name).await?;
             let node_info = client.get_node(id).await?.into_inner();
             println!("Name:           {}", node_info.state.name);
             println!("Id:             {}", node_info.state.id);
@@ -421,27 +397,12 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             println!("Assigned CPUs:  {:?}", node_info.state.assigned_cpus);
         }
         NodeCommand::Shell { id_or_name } => {
-            let (name, id) = match id_or_name {
-                None => {
-                    if let Ok(workspace::Workspace {
-                        active_node: Some(workspace::ActiveNode { name, id }),
-                        ..
-                    }) = workspace::read(&std::env::current_dir()?)
-                    {
-                        (name, id)
-                    } else {
-                        bail!("<ID_OR_NAME> neither provided nor found in the workspace");
-                    }
-                }
-                Some(id_or_name) => match Uuid::parse_str(&id_or_name) {
-                    Ok(id) => (client.get_node(id).await?.into_inner().state.name, id),
-                    Err(_) => (
-                        id_or_name.clone(),
-                        Uuid::parse_str(
-                            &client.get_node_id_for_name(id_or_name).await?.into_inner(),
-                        )?,
-                    ),
-                },
+            let (name, id) = match Uuid::parse_str(&id_or_name) {
+                Ok(id) => (client.get_node(id).await?.into_inner().state.name, id),
+                Err(_) => (
+                    id_or_name.clone(),
+                    Uuid::parse_str(&client.get_node_id_for_name(id_or_name).await?.into_inner())?,
+                ),
             };
 
             let mut cmd = Command::new("apptainer");
@@ -474,22 +435,6 @@ pub async fn process_protocol_command(
         }
     }
 
-    Ok(())
-}
-
-pub async fn process_workspace_command(bv_url: String, command: WorkspaceCommand) -> Result<()> {
-    let current_dir = std::env::current_dir()?;
-    match command {
-        WorkspaceCommand::Create { path } => {
-            workspace::create(&current_dir.join(path))?;
-        }
-        WorkspaceCommand::SetActiveNode { id_or_name } => {
-            let mut client = NodeClient::new(bv_url).await?;
-            let id = client.resolve_id_or_name(&id_or_name).await?;
-            let node = client.get_node(id).await?.into_inner();
-            workspace::set_active_node(&current_dir, id, &node.state.name)?;
-        }
-    }
     Ok(())
 }
 

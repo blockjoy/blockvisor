@@ -32,7 +32,6 @@ pub mod self_updater;
 pub mod services;
 pub mod ufw_wrapper;
 pub mod utils;
-pub mod workspace;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;

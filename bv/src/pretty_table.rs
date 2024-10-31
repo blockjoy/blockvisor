@@ -23,8 +23,8 @@ pub struct PrettyTableRow {
     pub id: String,
     #[table(title = "Name", color = "Cyan")]
     pub name: String,
-    #[table(title = "Triple", color = "Blue")]
-    pub triple: String,
+    #[table(title = "Image", color = "Blue")]
+    pub image: String,
     #[table(title = "State", customize_fn = "style_node_status")]
     pub status: VmStatus,
     #[table(title = "IP Address", color = "Yellow")]

@@ -88,7 +88,7 @@ pub enum ImageCommand {
         path: PathBuf,
 
         /// Node id or name.
-        id_or_name: Option<String>,
+        id_or_name: String,
     },
 
     /// Run sanity checks on given image and embedded plugin.
