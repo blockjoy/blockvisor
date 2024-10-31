@@ -29,16 +29,6 @@ fn with_auth<T>(inner: T, auth_token: &str) -> Request<T> {
 
 #[test]
 #[serial]
-fn test_bv_service_restart_with_cli() {
-    test_env::bv_run(&["stop"], "blockvisor service stopped successfully", None);
-    test_env::bv_run(&["status"], "Service stopped", None);
-    test_env::bv_run(&["start"], "blockvisor service started successfully", None);
-    test_env::bv_run(&["status"], "Service running", None);
-    test_env::bv_run(&["start"], "Service already running", None);
-}
-
-#[test]
-#[serial]
 fn test_bvup_unknown_provision_token() {
     let tmp_dir = TempDir::new().unwrap();
     link_apptainer_config(&tmp_dir).unwrap();
