@@ -11,7 +11,7 @@ use url::Url;
 
 pub const DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_JOB_SHUTDOWN_SIGNAL: PosixSignal = PosixSignal::SIGTERM;
-pub const DATA_DRIVE_MOUNT_POINT: &str = "/blockjoy/";
+pub const DATA_DRIVE_MOUNT_POINT: &str = "/blockjoy/"; // TODO MJR move paths definition to vm
 lazy_static::lazy_static! {
     pub static ref PROTOCOL_DATA_PATH: &'static Path = Path::new("/blockjoy/protocol_data");
 }

@@ -81,6 +81,9 @@ pub async fn new(
     let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
     let data_dir = node_dir.join(DATA_DIR);
     fs::create_dir_all(&data_dir).await?;
+    // TODO MJR merge and copy rhai into plugin dir
+    // TODO MJR create dummy .singularity.d/Singularity file
+    // TODO MJR set vm_id to vm_name for legacy nodes, to keep container id backward compatibility
     Ok(ApptainerMachine {
         node_dir,
         babel_path,
@@ -415,6 +418,7 @@ impl pal::VirtualMachine for ApptainerMachine {
         if self.is_container_running().await {
             bail!("can't upgrade running vm")
         }
+        // TODO MJR migrate legacy blockchain_data dir (rename)
         fs::remove_dir_all(&self.chroot_dir).await?;
         fs::create_dir_all(&self.chroot_dir).await?;
         self.image_uri = node_state.image.uri.clone();

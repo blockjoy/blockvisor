@@ -99,6 +99,8 @@ async fn load_jobs(
         "Loading jobs list from {} ...",
         jobs_context.jobs_data.jobs_config_dir.display()
     );
+    // TODO MJR load jobs also from legacy directories
+    // TODO MJR keep logs config, status and progress paths in Job structure
     let dir = read_dir(&jobs_context.jobs_data.jobs_config_dir).with_context(|| {
         format!(
             "failed to read jobs from dir {}",
@@ -120,8 +122,10 @@ async fn load_jobs(
                         find_processes(job_runner_bin_path, &[&name], ps).next()
                     {
                         info!("{name} - Active(PID: {pid})");
+                        // TODO MJR let legacy node running, but add legacy metadata
                         JobState::Active(*pid)
                     } else {
+                        // TODO MJR job can be migrated to new version (move files)
                         let status = jobs_context.jobs_data.load_status(&name).unwrap_or(
                             JobStatus::Pending {
                                 waiting_for: config.waiting_for(),
@@ -654,6 +658,7 @@ impl<C: BabelEngineConnector> Manager<C> {
             }
             Ok(status) => status,
         };
+        // TODO MJR migrate job if it was legacy job
         match status {
             JobStatus::Finished { .. } | JobStatus::Stopped => {
                 info!("job '{name}' finished with {status:?}");

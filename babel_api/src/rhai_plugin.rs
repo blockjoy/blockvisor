@@ -77,6 +77,7 @@ fn build_scope() -> rhai::Scope<'static> {
         "PROTOCOL_DATA_PATH",
         engine::PROTOCOL_DATA_PATH.to_string_lossy().to_string(),
     );
+    // TODO MJR add BLOCKCHAIN_DATA_PATH for legacy nodes
     scope
 }
 
@@ -694,6 +695,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 health: NodeHealth::Neutral,
             })
         } else {
+            // TODO MJR support also legacy application_status()
             Ok(from_dynamic(
                 &self.call_fn::<_, Dynamic>("protocol_status", ())?,
             )?)

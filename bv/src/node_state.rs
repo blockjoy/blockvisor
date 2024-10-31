@@ -35,10 +35,10 @@ impl fmt::Display for VmStatus {
 pub struct NodeImage {
     pub id: String,
     pub version: String,
-    pub config_id: String,
+    pub config_id: String, // TODO MJR 00000000-0000-0000-0000-000000000000 for legacy nodes
     pub archive_id: String,
     pub store_id: String,
-    pub uri: String,
+    pub uri: String, // TODO MJR encode legacy info here
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -68,7 +68,7 @@ pub struct NodeState {
     pub gateway: IpAddr,
 
     // dynamic
-    pub properties: NodeProperties,
+    pub properties: NodeProperties, // TODO MJR add NETWORK property for legacy nodes
     pub firewall: firewall::Config,
 
     // dynamic-description
@@ -91,6 +91,7 @@ pub struct NodeState {
     pub initialized: bool,
     pub restarting: bool,
     pub apptainer_config: Option<ApptainerConfig>,
+    // TODO MJR handle legacy state
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
