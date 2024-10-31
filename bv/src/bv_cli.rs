@@ -52,13 +52,6 @@ pub enum Command {
         command: ProtocolCommand,
     },
 
-    /// Manage workspace
-    #[clap(alias = "w")]
-    Workspace {
-        #[clap(subcommand)]
-        command: WorkspaceCommand,
-    },
-
     /// Manage host cluster connections
     #[clap(alias = "p2p")]
     Cluster {
@@ -115,7 +108,6 @@ pub enum NodeCommand {
     /// Restart node.
     Restart {
         /// One or more node id or names.
-        #[clap(required(false))]
         id_or_names: Vec<String>,
 
         /// Try to restart node, even if its in failed state.
@@ -155,15 +147,14 @@ pub enum NodeCommand {
     /// Get node status.
     Status {
         /// One or more node id or names.
-        #[clap(required(false))]
         id_or_names: Vec<String>,
     },
 
     /// Return supported methods that could be executed on running node via `bv node run`.
     #[clap(alias = "caps")]
     Capabilities {
-        /// Node id or name. BV tries to get it from workspace if not provided.
-        id_or_name: Option<String>,
+        /// Node id or name.
+        id_or_name: String,
     },
 
     /// Runs a babel method defined by babel plugin.
@@ -171,8 +162,8 @@ pub enum NodeCommand {
         /// The method that should be called. This should be one of the methods listed when
         /// `bv node capabilities <id_or_name>` is ran.
         method: String,
-        /// The id or name of the node that the command should be run against. BV tries to get it from workspace if not provided.
-        id_or_name: Option<String>,
+        /// The id or name of the node that the command should be run against
+        id_or_name: String,
         /// String parameter passed to the method.
         #[clap(long)]
         param: Option<String>,
@@ -183,8 +174,8 @@ pub enum NodeCommand {
 
     /// Check current state of the node (including metrics).
     Info {
-        /// The id or name of the node to be checked. BV tries to get it from workspace if not provided.
-        id_or_name: Option<String>,
+        /// The id or name of the node to be checked.
+        id_or_name: String,
     },
 
     /// Manage jobs on given node.
@@ -193,14 +184,14 @@ pub enum NodeCommand {
         #[clap(subcommand)]
         command: JobCommand,
 
-        /// The id or name of the node to check. BV tries to get it from workspace if not provided.
-        id_or_name: Option<String>,
+        /// The id or name of the node to check.
+        id_or_name: String,
     },
 
     /// Shell-into the node.
     Shell {
-        /// The id or name of the node. BV tries to get it from workspace if not provided.
-        id_or_name: Option<String>,
+        /// The id or name of the node.
+        id_or_name: String,
     },
 }
 
@@ -284,23 +275,6 @@ pub enum ProtocolCommand {
         /// Display the first N items
         #[clap(long, short, default_value = "50")]
         number: u64,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum WorkspaceCommand {
-    /// Create new BV workspace
-    #[clap(alias = "c")]
-    Create {
-        /// workspace relative path
-        path: String,
-    },
-
-    /// Set active node for current workspace (override previously set).
-    #[clap(alias = "n")]
-    SetActiveNode {
-        /// The id or name of the node
-        id_or_name: String,
     },
 }
 

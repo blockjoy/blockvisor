@@ -1,14 +1,9 @@
 /// You can define some constants to use in the code
 const NETS = #{
-    test: #{
+    {{variant_key}}: #{
         url: "https://testnet-api.helium.wtf/v1/",
         net_type: "test",
         seeds: "test seed"
-    },
-    main: #{
-        url: "https://rpc.ankr.com/eth",
-        net_type: "main",
-        seeds: "main seed"
     },
 };
 

@@ -3,13 +3,13 @@ FROM rust:alpine as build
 
 WORKDIR /src
 
-RUN git clone <service_repo_url> .
-RUN cargo build --release
-RUN strip /src/target/release/service
+RUN touch dummy_service
+#RUN git clone <service_repo_url> .
+#RUN cargo build --release
+#RUN strip /src/target/release/service
 
 ### App container
-FROM blockjoy/base
+FROM ubuntu:24.10
 COPY ./main.rhai /var/lib/babel/plugin/
 
-COPY --from=build /src/target/release/service /usr/bin/
-
+COPY --from=build /src/dummy_service /usr/bin/
