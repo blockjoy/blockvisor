@@ -37,6 +37,7 @@ pub struct NodeImage {
     pub version: String,
     pub config_id: String,
     pub archive_id: String,
+    pub store_id: String,
     pub uri: String,
 }
 

@@ -123,6 +123,7 @@ pub async fn process_image_command(
                         version: local_image.version,
                         config_id: "dev-node-config-id".to_string(),
                         archive_id: "dev-node-archive-id".to_string(),
+                        store_id: "dev-node-store-id".to_string(),
                         uri: local_image.container_uri,
                     },
                     assigned_cpus: vec![],

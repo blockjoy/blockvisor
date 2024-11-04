@@ -305,6 +305,19 @@ async fn test_bv_service_e2e() {
     test_env::wait_for_node_status(&second_node_id, "Running", Duration::from_secs(300), None)
         .await;
 
+    let start = std::time::Instant::now();
+    while let Err(err) = test_env::try_bv_run(
+        &["node", "job", &second_node_id, "info", "init_job"],
+        "status:           Finished with exit code 0",
+        None,
+    ) {
+        if start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_secs(1));
+        } else {
+            panic!("timeout expired: {err:#}")
+        }
+    }
+
     println!("push test image v2");
     test_env::nib_run(
         &[

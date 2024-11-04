@@ -323,10 +323,10 @@ where
                     desired_state.image_key.variant_key
                 )));
             }
-            if desired_state.image.archive_id != node.image.archive_id {
+            if desired_state.image.store_id != node.image.store_id {
                 command_failed!(Error::Internal(anyhow!(
-                    "Cannot upgrade node to version that uses different data set `{}`",
-                    desired_state.image.archive_id
+                    "Cannot upgrade node to version that uses different data set: `{}`",
+                    desired_state.image.store_id
                 )));
             }
             if !node.dev_mode {
@@ -1377,9 +1377,9 @@ mod tests {
                 .to_string()
         );
         let mut new_archive_node_state = new_state.clone();
-        new_archive_node_state.image.archive_id = "different_archive".to_string();
+        new_archive_node_state.image.store_id = "different_store_id".to_string();
         assert_eq!(
-            "BV internal error: Cannot upgrade node to version that uses different data set `different_archive`",
+            "BV internal error: Cannot upgrade node to version that uses different data set: `different_store_id`",
             nodes
                 .upgrade(new_archive_node_state)
                 .await

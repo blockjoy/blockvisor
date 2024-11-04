@@ -966,6 +966,7 @@ pub mod tests {
                 version: "1.2.3".to_string(),
                 config_id: "config_id".to_string(),
                 archive_id: "archive_id".to_string(),
+                store_id: "store_id".to_string(),
                 uri: "image.uri".to_string(),
             },
             ip: IpAddr::from_str("172.16.0.10").unwrap(),
