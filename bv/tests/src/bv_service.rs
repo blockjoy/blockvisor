@@ -12,7 +12,6 @@ use blockvisord::{
     services::api::{common, pb},
 };
 use predicates::prelude::*;
-use serial_test::serial;
 use std::path::PathBuf;
 use std::{net::ToSocketAddrs, path::Path, str};
 use tokio::time::{sleep, Duration};
@@ -27,9 +26,8 @@ fn with_auth<T>(inner: T, auth_token: &str) -> Request<T> {
     request
 }
 
-#[test]
-#[serial]
-fn test_bvup_unknown_provision_token() {
+#[tokio::test]
+async fn test_bv_service_e2e() {
     let tmp_dir = TempDir::new().unwrap();
     link_apptainer_config(&tmp_dir).unwrap();
 
@@ -53,11 +51,6 @@ fn test_bvup_unknown_provision_token() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Invalid token"));
-}
-
-#[tokio::test]
-#[serial]
-async fn test_bvup() {
     let server = StubHostsServer {};
 
     let server_future = async {
@@ -112,11 +105,7 @@ async fn test_bvup() {
     })
     .await
     .unwrap();
-}
 
-#[tokio::test]
-#[serial]
-async fn test_bv_service_e2e() {
     let url = "http://localhost:8080";
     let email = "tester@blockjoy.com";
     let password = "ilovemytests";

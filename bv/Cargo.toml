@@ -98,7 +98,6 @@ jsonwebtoken = "9.1.0"
 local-ip-address = "0.5.1"
 mockall = "0.11.3"
 predicates = "3.0.4"
-serial_test = "2.0.0"
 tokio-stream = { version = "0.1.14", features = ["net"] }
 http = "1.0.0"
 hyper = "1.0.1"
