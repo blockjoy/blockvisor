@@ -24,23 +24,6 @@ jobs:
       - name: Get branch name
         id: branch-names
         uses: tj-actions/branch-names@v8
-      - name: Checkout API
-        uses: actions/checkout@v3
-        if: steps.branch-names.outputs.current_branch == 'master'
-        with:
-          submodules: true
-          repository: blockjoy/blockvisor-api
-          token: ${{ secrets.CHECKOUT_BLOCKJOY }}
-          path: api
-      - name: Checkout API
-        uses: actions/checkout@v3
-        if: steps.branch-names.outputs.current_branch != 'master'
-        with:
-          submodules: true
-          repository: blockjoy/blockvisor-api
-          token: ${{ secrets.CHECKOUT_BLOCKJOY }}
-          path: api
-          ref: ${{ steps.branch-names.outputs.current_branch }}
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -77,10 +60,14 @@ jobs:
           envsubst < docker-compose.yml.template > docker-compose.yml
           echo '${{ steps.auth.outputs.access_token }}' | docker login -u oauth2accesstoken --password-stdin https://us-docker.pkg.dev
 
-      - name: Build API images
+      - name: Fetch and Build API images
         run: |
-          docker build -t api -f api/docker/Dockerfile api/
-          docker build -t vault-init -f api/docker/vault/Dockerfile api/docker/vault/
+          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-api.git blockvisor-api
+          cd blockvisor-api
+          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
+          git submodule update --init
+          docker build -t api -f ./docker/Dockerfile ./
+          docker build -t vault-init -f ./docker/vault/Dockerfile ./docker/vault/
 
       - name: Pull images
         run: >
