@@ -19,7 +19,6 @@ use bv_utils::rpc::RPC_CONNECT_TIMEOUT;
 use chrono::Utc;
 use cli_table::print_stdout;
 use eyre::{bail, Result};
-use std::ffi::OsString;
 use std::{
     ffi::OsStr,
     fs,
@@ -267,28 +266,57 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     lines,
                     follow,
                 } => {
-                    let logs_path = build_node_dir(&bv_root(), id)
+                    let jobs_path = build_node_dir(&bv_root(), id)
                         .join(ROOTFS_DIR)
-                        .join("var/lib/babel/jobs/logs");
+                        .join("var/lib/babel/jobs");
                     if let Some(name) = &name {
-                        if !logs_path.join(name).exists() {
+                        if !jobs_path.join(name).exists() {
                             bail!("No logs for '{name}' job found!")
                         }
                     }
                     let mut cmd = Command::new("tail");
-                    cmd.current_dir(&logs_path);
+                    cmd.current_dir(&jobs_path);
                     cmd.args(["-n", &format!("{lines}")]);
                     if follow {
                         cmd.arg("-f");
                     }
-                    let names = if let Some(name) = name {
-                        vec![OsString::from(name)]
+                    let jobs = if let Some(name) = name {
+                        vec![name]
                     } else {
-                        fs::read_dir(logs_path)?
-                            .map(|entry| entry.map(|entry| entry.file_name()))
+                        fs::read_dir(&jobs_path)?
+                            .filter_map(|entry| match entry {
+                                Ok(entry) => {
+                                    if entry.path().is_dir() {
+                                        Some(Ok(entry.file_name().to_string_lossy().to_string()))
+                                    } else {
+                                        None
+                                    }
+                                }
+                                Err(err) => Some(Err(err)),
+                            })
                             .collect::<Result<Vec<_>, std::io::Error>>()?
                     };
-                    cmd.args(names);
+                    let mut log_files = vec![];
+                    for job_name in jobs {
+                        log_files.append(
+                            &mut fs::read_dir(jobs_path.join(&job_name))?
+                                .filter_map(|entry| match entry {
+                                    Ok(entry) => {
+                                        if entry.file_name().to_string_lossy().starts_with("logs") {
+                                            Some(Ok(format!(
+                                                "{job_name}/{}",
+                                                entry.file_name().to_string_lossy()
+                                            )))
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    Err(err) => Some(Err(err)),
+                                })
+                                .collect::<Result<Vec<_>, std::io::Error>>()?,
+                        )
+                    }
+                    cmd.args(log_files);
                     cmd.spawn()?.wait().await?;
                 }
             }
@@ -397,12 +425,11 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             println!("Assigned CPUs:  {:?}", node_info.state.assigned_cpus);
         }
         NodeCommand::Shell { id_or_name } => {
-            let (name, id) = match Uuid::parse_str(&id_or_name) {
-                Ok(id) => (client.get_node(id).await?.into_inner().state.name, id),
-                Err(_) => (
-                    id_or_name.clone(),
-                    Uuid::parse_str(&client.get_node_id_for_name(id_or_name).await?.into_inner())?,
-                ),
+            let id = match Uuid::parse_str(&id_or_name) {
+                Ok(id) => id,
+                Err(_) => {
+                    Uuid::parse_str(&client.get_node_id_for_name(id_or_name).await?.into_inner())?
+                }
             };
 
             let mut cmd = Command::new("apptainer");
@@ -414,7 +441,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     .join(NODE_ENV_FILE_PATH)
                     .as_os_str(),
             ]);
-            cmd.arg(format!("instance://{name}"));
+            cmd.arg(format!("instance://{id}"));
             cmd.spawn()?.wait().await?;
         }
     }

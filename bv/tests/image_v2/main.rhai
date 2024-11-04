@@ -118,7 +118,7 @@ fn sh_inside(param) {
 fn start_progress_job(name) {
     start_job(name, #{
         job_type: #{
-            run_sh: "i=0;while true; do echo {\\\"current\\\":$i,\\\"total\\\":100,\\\"message\\\":\\\"items\\\"} > /var/lib/babel/jobs/status/" + name + ".progress; i=$((1+i%100)); sleep 1; done",
+            run_sh: "i=0;while true; do echo {\\\"current\\\":$i,\\\"total\\\":100,\\\"message\\\":\\\"items\\\"} > /var/lib/babel/jobs/" + name + "/progress.json; i=$((1+i%100)); sleep 1; done",
         },
         restart: "never",
     });

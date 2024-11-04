@@ -180,7 +180,7 @@ impl ApptainerMachine {
             let json: serde_json::Value = serde_json::from_str(
                 &run_cmd(
                     APPTAINER_BIN_NAME,
-                    ["instance", "list", "--json", &self.vm_name],
+                    ["instance", "list", "--json", &self.vm_id.to_string()],
                 )
                 .await?,
             )?;
@@ -209,12 +209,12 @@ impl ApptainerMachine {
     }
 
     async fn stop_container(&mut self) -> Result<()> {
+        let vm_id = self.vm_id.to_string();
         if self.is_container_running().await {
-            if let Err(err) = run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &self.vm_name]).await
-            {
-                if run_cmd(APPTAINER_BIN_NAME, ["instance", "list", &self.vm_name])
+            if let Err(err) = run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &vm_id]).await {
+                if run_cmd(APPTAINER_BIN_NAME, ["instance", "list", &vm_id])
                     .await?
-                    .contains(&self.vm_name)
+                    .contains(&vm_id)
                 {
                     return Err(err.into());
                 } else {
@@ -231,6 +231,7 @@ impl ApptainerMachine {
 
     async fn start_container(&mut self) -> Result<()> {
         if !self.is_container_running().await {
+            let vm_id = self.vm_id.to_string();
             let hostname = self.vm_name.replace('_', "-");
             let chroot_path = self.chroot_dir.to_string_lossy();
             let cgroups_path = self.cgroups_path.to_string_lossy();
@@ -270,7 +271,7 @@ impl ApptainerMachine {
                 args.append(&mut extra_args.iter().map(|i| i.as_str()).collect());
             }
             args.push(&chroot_path);
-            args.push(&self.vm_name);
+            args.push(&vm_id);
             run_cmd(APPTAINER_BIN_NAME, args).await?;
             self.load_apptainer_pid().await?;
         }
@@ -332,7 +333,7 @@ impl ApptainerMachine {
             self.chroot_dir.join(NODE_ENV_FILE_PATH).as_os_str(),
         ]);
         cmd.args([
-            &format!("instance://{}", self.vm_name),
+            &format!("instance://{}", self.vm_id),
             BABEL_BIN_NAME,
             &self.chroot_dir.to_string_lossy(),
         ]);

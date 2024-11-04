@@ -151,7 +151,7 @@ async fn test_bv_cmd_jobs() -> Result<()> {
 
     assert!(fs::read_to_string(
         build_rootfs_dir(&build_node_dir(&test_env.bv_root, Uuid::parse_str(vm_id)?))
-            .join("var/lib/babel/jobs/logs/init_job"),
+            .join("var/lib/babel/jobs/init_job/logs"),
     )
     .await?
     .contains("dummy_init"));
@@ -230,7 +230,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
     test_env.run_blockvisord(RunFlag::default()).await?;
 
     println!("create a node");
-    let (vm_id, vm_name) = &test_env.create_node("image_v1", "216.18.214.195");
+    let (vm_id, _) = &test_env.create_node("image_v1", "216.18.214.195");
     println!("create vm_id: {vm_id}");
 
     println!("start stopped node");
@@ -266,7 +266,7 @@ async fn test_bv_cmd_node_recovery() -> Result<()> {
         .await;
 
     println!("stop container - break node");
-    run_cmd("apptainer", ["instance", "stop", vm_name])
+    run_cmd("apptainer", ["instance", "stop", vm_id])
         .await
         .unwrap();
 

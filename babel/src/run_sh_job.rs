@@ -110,7 +110,6 @@ impl<T: AsyncTimer + Send> JobRunnerImpl for RunShJob<T> {
 mod tests {
     use super::*;
     use crate::jobs;
-    use crate::jobs::{CONFIG_SUBDIR, STATUS_SUBDIR};
     use assert_fs::TempDir;
     use babel_api::engine::RestartConfig;
     use bv_utils::timer::MockAsyncTimer;
@@ -122,8 +121,8 @@ mod tests {
         let job_name = "job_name".to_string();
         let tmp_root = TempDir::new()?.to_path_buf();
         let jobs_dir = tmp_root.join("jobs");
-        fs::create_dir_all(jobs_dir.join(CONFIG_SUBDIR))?;
-        fs::create_dir_all(jobs_dir.join(STATUS_SUBDIR))?;
+        let job_dir = jobs_dir.join(&job_name);
+        fs::create_dir_all(&job_dir)?;
         let test_run = RunFlag::default();
         let log_buffer = LogBuffer::default();
         let mut log_rx = log_buffer.subscribe();
@@ -160,10 +159,7 @@ mod tests {
         .run(test_run, &job_name, &jobs_dir)
         .await;
 
-        let status = jobs::load_status(&jobs::status_file_path(
-            &job_name,
-            &jobs_dir.join(STATUS_SUBDIR),
-        ))?;
+        let status = jobs::load_status(&job_dir)?;
         assert_eq!(
             status,
             JobStatus::Finished {

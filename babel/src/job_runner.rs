@@ -54,7 +54,7 @@ impl<T: JobRunnerImpl + Send> JobRunner for T {
 }
 
 pub async fn save_job_status(status: &JobStatus, name: &str, jobs_dir: &Path) {
-    if let Err(err) = jobs::save_status(status, name, &jobs_dir.join(jobs::STATUS_SUBDIR)) {
+    if let Err(err) = jobs::save_status(status, &jobs_dir.join(name)) {
         let err_msg =
             format!("job status changed to {status:?}, but failed to save job data: {err:#}");
         error!(err_msg);

@@ -21,9 +21,10 @@ lazy_static::lazy_static! {
     pub static ref ARCHIVE_JOBS_META_DIR: &'static Path = Path::new("/blockjoy/.babel_jobs");
 }
 
-pub const CONFIG_SUBDIR: &str = "config";
-pub const STATUS_SUBDIR: &str = "status";
-pub const LOGS_SUBDIR: &str = "logs";
+pub const CONFIG_FILENAME: &str = "config.json";
+pub const STATUS_FILENAME: &str = "status.json";
+pub const PROGRESS_FILENAME: &str = "progress.json";
+pub const LOGS_FILENAME: &str = "logs";
 pub const LOG_EXPIRE_DAYS: i64 = 1;
 pub const MAX_JOB_LOGS: usize = 1024;
 pub const MAX_LOG_ENTRY_LEN: usize = 1024;
@@ -32,14 +33,8 @@ pub type JobsRegistry<C> = Arc<Mutex<JobsContext<C>>>;
 
 pub struct JobsContext<C> {
     pub jobs: HashMap<String, Job>,
-    pub jobs_data: JobsData,
+    pub jobs_dir: PathBuf,
     pub connector: C,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct JobsData {
-    pub jobs_config_dir: PathBuf,
-    jobs_status_dir: PathBuf,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -50,17 +45,19 @@ pub enum JobState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Job {
-    pub state: JobState,
+    pub job_dir: PathBuf,
     pub config: JobConfig,
+    pub state: JobState,
     pub logs: Vec<(DateTime<Local>, String)>,
     pub restart_stamps: HashSet<DateTime<Local>>,
 }
 
 impl Job {
-    pub fn new(state: JobState, config: JobConfig) -> Self {
+    pub fn new(job_dir: PathBuf, config: JobConfig, state: JobState) -> Self {
         Self {
-            state,
+            job_dir,
             config,
+            state,
             logs: Default::default(),
             restart_stamps: Default::default(),
         }
@@ -95,42 +92,41 @@ impl Job {
         }
         time
     }
-}
 
-impl JobsData {
-    pub fn new(jobs_dir: &Path) -> Self {
-        Self {
-            jobs_config_dir: jobs_dir.join(CONFIG_SUBDIR),
-            jobs_status_dir: jobs_dir.join(STATUS_SUBDIR),
-        }
+    pub fn save_config(&self) -> Result<()> {
+        save_config(&self.config, &self.job_dir)
     }
 
-    pub fn save_config(&self, config: &JobConfig, name: &str) -> Result<()> {
-        save_config(config, name, &self.jobs_config_dir)
-    }
-
-    pub fn clear_status(&self, name: &str) -> Result<()> {
-        let path = status_file_path(name, &self.jobs_status_dir);
+    pub fn clear_status(&self) -> Result<()> {
+        let path = self.job_dir.join(STATUS_FILENAME);
         if path.exists() {
             fs::remove_file(path)?;
         }
         Ok(())
     }
 
-    pub fn save_status(&self, status: &JobStatus, name: &str) -> Result<()> {
-        save_status(status, name, &self.jobs_status_dir)
+    pub fn save_status(&self) -> Result<()> {
+        match &self.state {
+            JobState::Active(_) => Ok(()),
+            JobState::Inactive(status) => match status {
+                JobStatus::Pending { .. } | JobStatus::Running => self.clear_status(),
+                JobStatus::Finished { .. } | JobStatus::Stopped => {
+                    save_status(status, &self.job_dir)
+                }
+            },
+        }
     }
 
-    pub fn load_status(&self, name: &str) -> Result<JobStatus> {
-        load_status(&status_file_path(name, &self.jobs_status_dir))
+    pub fn load_status(&self) -> Result<JobStatus> {
+        load_status(&self.job_dir)
     }
 
-    pub fn load_progress(&self, name: &str) -> Option<JobProgress> {
-        load_job_data(&progress_file_path(name, &self.jobs_status_dir)).ok()
+    pub fn load_progress(&self) -> Option<JobProgress> {
+        load_job_data(&self.job_dir.join(PROGRESS_FILENAME)).ok()
     }
 
-    pub fn cleanup_job(config: &JobConfig) -> Result<()> {
-        match &config.job_type {
+    pub fn cleanup(&self) -> Result<()> {
+        match &self.config.job_type {
             JobType::Download { .. } => {
                 download_job::cleanup_job(&ARCHIVE_JOBS_META_DIR, &PROTOCOL_DATA_PATH)?
             }
@@ -149,49 +145,40 @@ pub fn save_job_data<T: Serialize>(file_path: &Path, data: &T) -> eyre::Result<(
     Ok(fs::write(file_path, serde_json::to_string(data)?)?)
 }
 
-pub fn load_config(path: &Path) -> Result<JobConfig> {
+pub fn load_config(job_dir: &Path) -> Result<JobConfig> {
+    let path = job_dir.join(CONFIG_FILENAME);
     info!("Reading job config file: {}", path.display());
-    fs::read_to_string(path)
+    fs::read_to_string(&path)
         .and_then(|s| serde_json::from_str::<JobConfig>(&s).map_err(Into::into))
         .with_context(|| format!("failed to read job config file `{}`", path.display()))
 }
 
-pub fn save_config(config: &JobConfig, name: &str, jobs_config_dir: &Path) -> Result<()> {
-    let path = config_file_path(name, jobs_config_dir);
+pub fn save_config(config: &JobConfig, job_dir: &Path) -> Result<()> {
+    let path = job_dir.join(CONFIG_FILENAME);
     info!("Writing job config: {}", path.display());
     let config = serde_json::to_string(config)?;
     fs::write(&path, config)?;
     Ok(())
 }
 
-pub fn load_status(path: &Path) -> Result<JobStatus> {
+pub fn load_status(job_dir: &Path) -> Result<JobStatus> {
+    let path = job_dir.join(STATUS_FILENAME);
     info!("Reading job status file: {}", path.display());
-    fs::read_to_string(path)
+    fs::read_to_string(&path)
         .and_then(|s| serde_json::from_str::<JobStatus>(&s).map_err(Into::into))
         .with_context(|| format!("Failed to read job status file `{}`", path.display()))
 }
 
-pub fn save_status(status: &JobStatus, name: &str, jobs_status_dir: &Path) -> Result<()> {
-    let path = status_file_path(name, jobs_status_dir);
+pub fn save_status(status: &JobStatus, job_dir: &Path) -> Result<()> {
+    let path = job_dir.join(STATUS_FILENAME);
     info!("Writing job status: {}", path.display());
     let status = serde_json::to_string(status)?;
-    fs::write(&path, &status)
-        .with_context(|| format!("failed to save job '{}' status {:?}", name, status))
-}
-
-pub fn config_file_path(name: &str, jobs_config_dir: &Path) -> PathBuf {
-    let filename = format!("{}.cfg", name);
-    jobs_config_dir.join(filename)
-}
-
-pub fn status_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
-    let filename = format!("{}.status", name);
-    jobs_status_dir.join(filename)
-}
-
-pub fn progress_file_path(name: &str, jobs_status_dir: &Path) -> PathBuf {
-    let filename = format!("{}.progress", name);
-    jobs_status_dir.join(filename)
+    fs::write(&path, &status).with_context(|| {
+        format!(
+            "failed to save job status {status:?} to: {}",
+            path.display(),
+        )
+    })
 }
 
 pub fn load_chunks(path: &Path) -> Result<Vec<Chunk>> {

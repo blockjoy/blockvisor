@@ -67,10 +67,10 @@ used during debugging issues, not printed by default
 - `/usr/bin/babel`
 - `/usr/bin/babel_job_runner`
 - `/etc/babel.conf`
-- `/var/lib/babel/jobs/config/<job_name>.cfg`
-- `/var/lib/babel/jobs/status/<job_name>.status`
-- `/var/lib/babel/jobs/status/<job_name>.progress`
-- `/var/lib/babel/jobs/logs/<job_name>`
+- `/var/lib/babel/jobs/<job_name>/config.json`
+- `/var/lib/babel/jobs/<job_name>/status.json`
+- `/var/lib/babel/jobs/<job_name>/progress.json`
+- `/var/lib/babel/jobs/<job_name>/logs`
 - `/var/lib/babel/jobs_monitor.socket`
 - `/var/lib/babel/node_env`
 - `/var/lib/babel/post_setup.sh`

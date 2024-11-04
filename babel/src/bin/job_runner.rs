@@ -1,23 +1,23 @@
-use babel::job_runner::save_job_status;
 use babel::{
     chroot_platform::UdsConnector,
     download_job::{is_download_completed, Downloader},
-    job_runner::{ArchiveJobRunner, TransferConfig},
+    job_runner::{save_job_status, ArchiveJobRunner, TransferConfig},
     jobs,
     log_buffer::LogBuffer,
     pal::BabelEngineConnector,
     run_sh_job::RunShJob,
     upload_job::Uploader,
 };
-use babel_api::engine::JobType;
 use babel_api::engine::{
-    Compression, JobStatus, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
+    Compression, JobStatus, JobType, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
 use bv_utils::{logging::setup_logging, run_flag::RunFlag};
 use eyre::{anyhow, bail};
-use std::io::Write;
-use std::path::PathBuf;
-use std::{env, fs, time::Duration};
+use std::{
+    io::Write,
+    path::PathBuf,
+    {env, fs, time::Duration},
+};
 use tokio::join;
 use tracing::{error, info, warn};
 
@@ -69,22 +69,15 @@ async fn run_job(
     connector: impl BabelEngineConnector + Copy + Send + Sync + 'static,
 ) -> eyre::Result<()> {
     let mut run = RunFlag::run_until_ctrlc();
-
-    let job_config = jobs::load_config(&jobs::config_file_path(
-        &job_name,
-        &jobs::JOBS_DIR.join(jobs::CONFIG_SUBDIR),
-    ))?;
+    let job_dir = jobs::JOBS_DIR.join(&job_name);
+    let job_config = jobs::load_config(&job_dir)?;
     match job_config.job_type {
         JobType::RunSh(body) => {
             let log_buffer = LogBuffer::default();
-            let logs_dir = jobs::JOBS_DIR.join(jobs::LOGS_SUBDIR);
-            if !logs_dir.exists() {
-                fs::create_dir_all(&logs_dir)?;
-            }
             let log_handler = tokio::spawn(run_log_handler(
                 run.clone(),
                 log_buffer.subscribe(),
-                logs_dir.join(&job_name),
+                job_dir.join(jobs::LOGS_FILENAME),
                 job_config
                     .log_buffer_capacity_mb
                     .unwrap_or(DEFAULT_LOG_BUFFER_CAPACITY_MB),
@@ -132,7 +125,7 @@ async fn run_job(
                         connector,
                         babel_api::engine::PROTOCOL_DATA_PATH.to_path_buf(),
                         build_transfer_config(
-                            &job_name,
+                            job_dir.join(jobs::PROGRESS_FILENAME),
                             None,
                             max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
                             max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
@@ -163,7 +156,7 @@ async fn run_job(
                     url_expires_secs,
                     data_version,
                     build_transfer_config(
-                        &job_name,
+                        job_dir.join(jobs::PROGRESS_FILENAME),
                         compression,
                         max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
                         max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
@@ -178,7 +171,7 @@ async fn run_job(
 }
 
 fn build_transfer_config(
-    job_name: &str,
+    progress_file_path: PathBuf,
     compression: Option<Compression>,
     max_connections: usize,
     max_runners: usize,
@@ -188,7 +181,7 @@ fn build_transfer_config(
     }
     TransferConfig::new(
         jobs::ARCHIVE_JOBS_META_DIR.to_path_buf(),
-        jobs::progress_file_path(job_name, &jobs::JOBS_DIR.join(jobs::STATUS_SUBDIR)),
+        progress_file_path,
         compression,
         max_connections,
         max_runners,
