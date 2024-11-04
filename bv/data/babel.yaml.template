@@ -36,7 +36,7 @@ variants:
           # breaks backward compatibility of the data, then `store_id` must be change (e.g. by appending version postfix).
           # `store_id` can be also reused if some image variants (even from different protocols) can use the same data archives.
           # `store_id` is required to be lower-kebab-case.
-          unique-id-v1
+          {{protocol_key}}-{{variant_key}}-v1
       - pointer: !store_id unique-id-x-v1
         # Combination of properties (with new_archive flag true).
         # Typically, properties doesn't affect data set and there is only one `store_id`, but
