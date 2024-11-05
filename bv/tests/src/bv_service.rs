@@ -26,8 +26,8 @@ fn with_auth<T>(inner: T, auth_token: &str) -> Request<T> {
     request
 }
 
-#[tokio::test]
-async fn test_bv_service_e2e() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn test_bvup() {
     let tmp_dir = TempDir::new().unwrap();
     link_apptainer_config(&tmp_dir).unwrap();
 
@@ -65,47 +65,45 @@ async fn test_bv_service_e2e() {
     tokio::spawn(server_future);
     sleep(Duration::from_secs(5)).await;
 
-    tokio::task::spawn_blocking(move || {
-        let tmp_dir = TempDir::new().unwrap();
-        let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
-        let url = "http://localhost:8082";
-        let mqtt = "mqtt://localhost:1883";
-        let provision_token = "AWESOME";
-        let config_path = format!("{}/etc/blockvisor.json", tmp_dir.to_string_lossy());
+    let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
+    let url = "http://localhost:8082";
+    let mqtt = "mqtt://localhost:1883";
+    let provision_token = "AWESOME";
+    let config_path = format!("{}/etc/blockvisor.json", tmp_dir.to_string_lossy());
 
-        // make sure blockvisord is running
-        test_env::bv_run(&["start"], "", None);
+    // make sure blockvisord is running
+    test_env::bv_run(&["start"], "", None);
 
-        let mut cmd = Command::cargo_bin("bvup").unwrap();
-        cmd.args([provision_token, "--skip-download"])
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("Can't provision and init blockvisor configuration, while it is running, `bv stop` first."));
+    let mut cmd = Command::cargo_bin("bvup").unwrap();
+    cmd.args([provision_token, "--skip-download"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Can't provision and init blockvisor configuration, while it is running, `bv stop` first."));
 
-        test_env::bv_run(&["stop"], "", None);
-        println!("bvup");
-        Command::cargo_bin("bvup")
-            .unwrap()
-            .args([provision_token, "--skip-download"])
-            .args(["--ifa", ifa])
-            .args(["--api", url])
-            .args(["--mqtt", mqtt])
-            .args(["--ip-gateway", "216.18.214.193"])
-            .args(["--ip-range-from", "216.18.214.195"])
-            .args(["--ip-range-to", "216.18.214.206"])
-            .args(["--yes", "--use-host-network"])
-            .env("BV_ROOT", tmp_dir.as_os_str())
-            .assert()
-            .success()
-            .stdout(predicate::str::contains(
-                "Provision and init blockvisor configuration",
-            ));
+    test_env::bv_run(&["stop"], "", None);
+    println!("bvup");
+    Command::cargo_bin("bvup")
+        .unwrap()
+        .args([provision_token, "--skip-download"])
+        .args(["--ifa", ifa])
+        .args(["--api", url])
+        .args(["--mqtt", mqtt])
+        .args(["--ip-gateway", "216.18.214.193"])
+        .args(["--ip-range-from", "216.18.214.195"])
+        .args(["--ip-range-to", "216.18.214.206"])
+        .args(["--yes", "--use-host-network"])
+        .env("BV_ROOT", tmp_dir.as_os_str())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Provision and init blockvisor configuration",
+        ));
 
-        assert!(Path::new(&config_path).exists());
-    })
-    .await
-    .unwrap();
+    assert!(Path::new(&config_path).exists());
+}
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn test_bv_service_e2e() {
     let url = "http://localhost:8080";
     let email = "tester@blockjoy.com";
     let password = "ilovemytests";
