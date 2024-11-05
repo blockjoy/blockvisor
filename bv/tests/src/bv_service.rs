@@ -27,7 +27,7 @@ fn with_auth<T>(inner: T, auth_token: &str) -> Request<T> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
-async fn test_bvup() {
+async fn test_bv_service_e2e() {
     let tmp_dir = TempDir::new().unwrap();
     link_apptainer_config(&tmp_dir).unwrap();
 
@@ -63,7 +63,6 @@ async fn test_bvup() {
     };
 
     tokio::spawn(server_future);
-    sleep(Duration::from_secs(5)).await;
 
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
     let url = "http://localhost:8082";
@@ -100,10 +99,7 @@ async fn test_bvup() {
         ));
 
     assert!(Path::new(&config_path).exists());
-}
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
-async fn test_bv_service_e2e() {
     let url = "http://localhost:8080";
     let email = "tester@blockjoy.com";
     let password = "ilovemytests";

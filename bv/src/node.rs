@@ -74,9 +74,9 @@ impl<P: Pal> MaybeNode<P> {
         );
         let bv_context = BvContext::from_config(api_config.config.read().await.clone());
         let vm = check!(pal.create_vm(&bv_context, &self.state).await, self);
-        let script = vm.plugin_path().await;
+        let plugin_path = vm.plugin_path().await;
         self.machine = Some(vm);
-        let plugin_path = check!(script, self);
+        let plugin_path = check!(plugin_path, self);
         let iface = bv_context.iface.clone();
         check!(
             pal.apply_firewall_config(NodeFirewallConfig {
