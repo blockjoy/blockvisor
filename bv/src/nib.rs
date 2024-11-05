@@ -79,9 +79,7 @@ pub async fn process_image_command(
             let bv_config = load_bv_config(bv_root).await?;
             let bv_url = format!("http://localhost:{}", bv_config.blockvisor_port);
             let mut bv_client = internal_server::service_client::ServiceClient::connect(
-                Endpoint::from_shared(bv_url)?
-                    .connect_timeout(BV_CONNECT_TIMEOUT)
-                    .timeout(BV_REQUEST_TIMEOUT),
+                Endpoint::from_shared(bv_url)?.connect_timeout(BV_CONNECT_TIMEOUT),
             )
             .await?;
             let local_image: nib_meta::Image =
