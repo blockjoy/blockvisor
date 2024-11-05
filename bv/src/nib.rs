@@ -40,7 +40,7 @@ pub async fn process_image_command(
                 ("variant_key", variant.as_str()),
                 ("babel_version", env!("CARGO_PKG_VERSION")),
             ];
-            let image_path = std::env::current_dir()?.join(&variant);
+            let image_path = std::env::current_dir()?.join(format!("{}_{}", protocol, variant));
             fs::create_dir_all(&image_path).await?;
             let babel_file_path = image_path.join("babel.yaml");
             println!("Render babel file at `{}`", babel_file_path.display());
@@ -446,15 +446,15 @@ impl From<Variant> for VmConfig {
     fn from(value: Variant) -> Self {
         Self {
             vcpu_count: value.min_cpu as usize,
-            mem_size_mb: value.min_memory_bytes / 1_000_000,
-            disk_size_gb: value.min_disk_bytes / 1_000_000_000,
+            mem_size_mb: value.min_memory_mb,
+            disk_size_gb: value.min_disk_gb,
             babel_config: BabelConfig {
                 ramdisks: value
                     .ramdisks
                     .into_iter()
                     .map(|ramdisk| RamdiskConfiguration {
                         ram_disk_mount_point: ramdisk.mount,
-                        ram_disk_size_mb: ramdisk.size_bytes,
+                        ram_disk_size_mb: ramdisk.size_mb,
                     })
                     .collect(),
             },

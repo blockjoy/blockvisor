@@ -20,8 +20,8 @@ pub struct Variant {
     pub key: String,
     pub archive_pointers: Vec<ArchivePointer>,
     pub min_cpu: u64,
-    pub min_memory_bytes: u64,
-    pub min_disk_bytes: u64,
+    pub min_memory_mb: u64,
+    pub min_disk_gb: u64,
     #[serde(default)]
     pub ramdisks: Vec<RamdiskConfig>,
 }
@@ -58,7 +58,7 @@ pub struct Image {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RamdiskConfig {
     pub mount: String,
-    pub size_bytes: u64,
+    pub size_mb: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -136,8 +136,8 @@ pub struct ImageImpact {
     #[serde(default)]
     pub new_archive: bool,
     pub add_cpu: Option<i64>,
-    pub add_memory_bytes: Option<i64>,
-    pub add_disk_bytes: Option<i64>,
+    pub add_memory_mb: Option<i64>,
+    pub add_disk_gb: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

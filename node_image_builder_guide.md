@@ -67,7 +67,7 @@ Protocol and image keys shall be lower-kebab-case.
 nib image create protocol-key variant-key
 ```
 
-Above command will create subdirectory named `variant-key` with following files inside:
+Above command will create subdirectory named `protocol-key_variant-key` with following files inside:
 - `Dockerfile` - Blueprint of recipe how to build node rootfs with all necessary binaries.
 - `main.rhai` - Blueprint of plugin main file. See comments inside for more details. Shall be included in docker image.
 - `babel.yaml` - Blueprint of image metadata file. See comments inside for more details.
@@ -77,9 +77,10 @@ Above command will create subdirectory named `variant-key` with following files 
 To create fist node image:
 
 1. Build docker image `docker build -t variant-key .`
-2. Set `container_uri` in `babel.yaml` to `docker-daemon://variant-key:latest`
+2. Update image metadata in `babel.yaml` file.
+In particular, set `container_uri` to `docker-daemon://variant-key:latest`
 3. Run some basic sanity checks on the image `nib image check`
-3. Use `nib image play --props '{"property_key":"some property value"}'` to create dev node.
+4. Use `nib image play --props '{"property_key":"some property value"}'` to create dev node.
 
 ### Add Required Binaries and Snapshots
 

@@ -265,8 +265,8 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             properties: add_properties(image.properties),
             firewall: Some(firewall),
             min_cpu_cores: variant.min_cpu,
-            min_memory_bytes: variant.min_memory_bytes,
-            min_disk_bytes: variant.min_disk_bytes,
+            min_memory_bytes: variant.min_memory_mb * 1_000_000,
+            min_disk_bytes: variant.min_disk_gb * 1_000_000_000,
             image_uri: image.container_uri,
             ramdisks: variant
                 .ramdisks
@@ -454,7 +454,7 @@ impl From<nib_meta::RamdiskConfig> for common::RamdiskConfig {
     fn from(value: nib_meta::RamdiskConfig) -> Self {
         Self {
             mount: value.mount,
-            size_bytes: value.size_bytes,
+            size_bytes: value.size_mb * 1_000_000,
         }
     }
 }
@@ -488,8 +488,12 @@ fn add_properties(image_properties: Vec<nib_meta::ImageProperty>) -> Vec<pb::Add
                     dynamic_value: property.dynamic_value,
                     ui_type: common::UiType::Text.into(),
                     add_cpu_cores: impact.as_ref().and_then(|impact| impact.add_cpu),
-                    add_memory_bytes: impact.as_ref().and_then(|impact| impact.add_memory_bytes),
-                    add_disk_bytes: impact.as_ref().and_then(|impact| impact.add_disk_bytes),
+                    add_memory_bytes: impact
+                        .as_ref()
+                        .and_then(|impact| impact.add_memory_mb.map(|value| value * 1_000_000)),
+                    add_disk_bytes: impact
+                        .as_ref()
+                        .and_then(|impact| impact.add_disk_gb.map(|value| value * 1_000_000_000)),
                     is_group_default: None,
                 })
             }
@@ -511,8 +515,11 @@ fn add_properties(image_properties: Vec<nib_meta::ImageProperty>) -> Vec<pb::Add
                     add_memory_bytes: on
                         .impact
                         .as_ref()
-                        .and_then(|impact| impact.add_memory_bytes),
-                    add_disk_bytes: on.impact.as_ref().and_then(|impact| impact.add_disk_bytes),
+                        .and_then(|impact| impact.add_memory_mb.map(|value| value * 1_000_000)),
+                    add_disk_bytes: on
+                        .impact
+                        .as_ref()
+                        .and_then(|impact| impact.add_disk_gb.map(|value| value * 1_000_000_000)),
                 });
                 add_properties.push(pb::AddImageProperty {
                     key: format!("{}-{}", property.key, off.value),
@@ -531,8 +538,11 @@ fn add_properties(image_properties: Vec<nib_meta::ImageProperty>) -> Vec<pb::Add
                     add_memory_bytes: off
                         .impact
                         .as_ref()
-                        .and_then(|impact| impact.add_memory_bytes),
-                    add_disk_bytes: off.impact.as_ref().and_then(|impact| impact.add_disk_bytes),
+                        .and_then(|impact| impact.add_memory_mb.map(|value| value * 1_000_000)),
+                    add_disk_bytes: off
+                        .impact
+                        .as_ref()
+                        .and_then(|impact| impact.add_disk_gb.map(|value| value * 1_000_000_000)),
                 });
             }
             UiType::Enum(variants) => {
@@ -554,11 +564,10 @@ fn add_properties(image_properties: Vec<nib_meta::ImageProperty>) -> Vec<pb::Add
                         add_memory_bytes: variant
                             .impact
                             .as_ref()
-                            .and_then(|impact| impact.add_memory_bytes),
-                        add_disk_bytes: variant
-                            .impact
-                            .as_ref()
-                            .and_then(|impact| impact.add_disk_bytes),
+                            .and_then(|impact| impact.add_memory_mb.map(|value| value * 1_000_000)),
+                        add_disk_bytes: variant.impact.as_ref().and_then(|impact| {
+                            impact.add_disk_gb.map(|value| value * 1_000_000_000)
+                        }),
                     })
                 }
             }

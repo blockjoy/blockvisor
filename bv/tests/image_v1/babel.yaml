@@ -12,8 +12,8 @@ variants:
     archive_pointers:
       - pointer: !store_id unique-store-id-v1
     min_cpu: 1
-    min_memory_bytes: 1000000000
-    min_disk_bytes: 2000000000
+    min_memory_mb: 1000
+    min_disk_gb: 2
 
 firewall_config:
   default_in: deny
@@ -38,8 +38,8 @@ properties:
     ui_type: !text
       new_archive: false
       add_cpu: 1
-      add_memory_bytes: -1
-      add_disk_bytes: 10
+      add_memory_mb: -10
+      add_disk_gb: 1
   - key: switch property
     description: this is some switch example
     dynamic_value: true
@@ -49,8 +49,8 @@ properties:
         value: on_value
         impact:
           add_cpu: 3
-          add_memory_bytes: 10000000
-          add_disk_bytes: 10000000000
+          add_memory_mb: 10
+          add_disk_gb: 1
       off:
         value: off_value
         impact: null
@@ -67,5 +67,5 @@ properties:
       - value: variant_c
         impact:
           add_cpu: -1
-          add_memory_bytes: 1000000
-          add_disk_bytes: 1000000000
+          add_memory_mb: 1
+          add_disk_bg: 1

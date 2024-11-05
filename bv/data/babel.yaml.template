@@ -24,7 +24,7 @@ protocol_key: {{protocol_key}}
 variants:
   # The same protocol can have different implementations. This field let identify what implementation(s) has been used.
   # Variant name may additional contain protocol network name e.g. "eth-mainnet".
-  # This value will be available in a Rhai runtime via `node_env().variant_key`.
+  # This value will be available in a Rhai runtime via `node_env().node_variant`.
   # It is required to be lower-kebab-case.
   - key: {{variant_key}}
     # List of protocol data archive pointers.
@@ -37,12 +37,12 @@ variants:
           # `store_id` can be also reused if some image variants (even from different protocols) can use the same data archives.
           # `store_id` is required to be lower-kebab-case.
           {{protocol_key}}-{{variant_key}}-v1
-      - pointer: !store_id unique-id-x-v1
+      - pointer: !store_id {{protocol_key}}-{{variant_key}}-v1-switch-property-on-value
         # Combination of properties (with new_archive flag true).
         # Typically, properties doesn't affect data set and there is only one `store_id`, but
         # if it is necessary to introduce properties with `new_archive` flag true, all combinations must be defined here.
         new_archive_properties: [ "switch-property-on-value" ]
-      - pointer: !store_id unique-id-y-v1
+      - pointer: !store_id {{protocol_key}}-{{variant_key}}-v1-enum-property-variant-c
         new_archive_properties: [ "enum-property-variant-c" ]
       # `pointer` can be set to `combination_disallowed` if given properties combination isn't valid.
       - pointer: !combination_disallowed
@@ -52,10 +52,10 @@ variants:
     min_cpu: 1
 
     # Minimum RAM memory required to run image.
-    min_memory_bytes: 1000000000
+    min_memory_mb: 1000
 
     # Minimum disk space required to run image.
-    min_disk_bytes: 2000000000
+    min_disk_gb: 2
 
     # [optional] Ram disks to be created inside the node.
     ramdisks:
@@ -63,7 +63,7 @@ variants:
       # Path to mount RAM disk to.
       - mount: /mnt/ramdisk
         # RAM disk size.
-        size_bytes: 100000000
+        size_mb: 100
 
 # Default firewall configuration.
 firewall_config:
@@ -135,10 +135,10 @@ properties:
       add_cpu: 1
 
       # [optional] How existence of property affect required memory.
-      add_memory_bytes: -1
+      add_memory_mb: -1
 
       # [optional] How existence of property affect required disk space.
-      add_disk_bytes: 10
+      add_disk_gb: 1
 
   - key: switch-property
     description: this is some switch example
@@ -150,8 +150,8 @@ properties:
         impact:
           new_archive: true
           add_cpu: 3
-          add_memory_bytes: 10000000
-          add_disk_bytes: 10000000000
+          add_memory_mb: 10
+          add_disk_gb: 10
       off:
         value: off-value
         impact: null
@@ -169,5 +169,5 @@ properties:
         impact:
           new_archive: true
           add_cpu: -1
-          add_memory_bytes: 1000000
-          add_disk_bytes: 1000000000
+          add_memory_mb: 1
+          add_disk_gb: 1
