@@ -8,7 +8,6 @@ use crate::{api_with_retry, services};
 use eyre::{anyhow, Context, Result};
 use metrics::{register_gauge, Gauge};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, System, SystemExt};
 use systemstat::{saturating_sub_bytes, Platform, System as System2};
 
@@ -148,20 +147,20 @@ impl HostMetrics {
 
 impl pb::MetricsServiceHostRequest {
     pub fn new(host_id: String, metrics: HostMetrics) -> Self {
-        let metrics = pb::HostMetrics {
-            used_cpu_hundreths: Some(metrics.used_cpu),
-            used_memory_bytes: Some(metrics.used_memory_bytes),
-            used_disk_bytes: Some(metrics.used_disk_space_bytes),
-            load_one_percent: Some(metrics.load_one),
-            load_five_percent: Some(metrics.load_five),
-            load_fifteen_percent: Some(metrics.load_fifteen),
-            network_received_bytes: Some(metrics.network_received_bytes),
-            network_sent_bytes: Some(metrics.network_sent_bytes),
-            used_ips: metrics.used_ips,
-            uptime_seconds: Some(metrics.uptime_secs),
-        };
         Self {
-            metrics: HashMap::from([(host_id, metrics)]),
+            metrics: Some(pb::HostMetrics {
+                host_id,
+                used_cpu_hundreths: Some(metrics.used_cpu),
+                used_memory_bytes: Some(metrics.used_memory_bytes),
+                used_disk_bytes: Some(metrics.used_disk_space_bytes),
+                load_one_percent: Some(metrics.load_one),
+                load_five_percent: Some(metrics.load_five),
+                load_fifteen_percent: Some(metrics.load_fifteen),
+                network_received_bytes: Some(metrics.network_received_bytes),
+                network_sent_bytes: Some(metrics.network_sent_bytes),
+                used_ips: metrics.used_ips,
+                uptime_seconds: Some(metrics.uptime_secs),
+            }),
         }
     }
 }

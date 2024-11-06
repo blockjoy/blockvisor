@@ -244,7 +244,8 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
                         }
                     })
                     .collect();
-                let metrics = pb::NodeMetrics {
+                pb::NodeMetrics {
+                    node_id: k.to_string(),
                     height: v.height,
                     block_age: v.block_age,
                     consensus: v.consensus,
@@ -252,8 +253,7 @@ impl From<Metrics> for pb::MetricsServiceNodeRequest {
                         .protocol_status
                         .map(|protocol_status| protocol_status.into()),
                     jobs,
-                };
-                (k.to_string(), metrics)
+                }
             })
             .collect();
         Self { metrics }

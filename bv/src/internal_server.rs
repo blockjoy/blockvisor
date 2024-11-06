@@ -590,7 +590,7 @@ where
             .into_iter()
             .map(|(key, value)| common::ImagePropertyValue { key, value })
             .collect::<Vec<_>>();
-        let (host_id, org_id) = self.get_host_and_org_id().await?;
+        let config = self.config.read().await;
         let image_id = self
             .get_image_id(
                 &req.protocol_image_key.protocol_key,
@@ -604,9 +604,11 @@ where
         let mut created_nodes = node_client
             .create(pb::NodeServiceCreateRequest {
                 old_node_id: None,
-                org_id,
+                org_id: config.private_org_id.ok_or(anyhow!(
+                    "create node is not supported on public hosts - use web frontend"
+                ))?,
                 placement: Some(common::NodePlacement {
-                    placement: Some(common::node_placement::Placement::HostId(host_id)),
+                    placement: Some(common::node_placement::Placement::HostId(config.id)),
                 }),
                 new_values: properties,
                 image_id,
@@ -647,30 +649,6 @@ where
     ) -> eyre::Result<NodeDisplayInfo> {
         let (state, status) = self.nodes_manager.upgrade(desired_node_state).await?;
         Ok(NodeDisplayInfo { state, status })
-    }
-
-    /// Get org_id associated with this host.
-    async fn get_host_and_org_id(&self) -> eyre::Result<(String, String)> {
-        let host_id = self.config.read().await.id;
-        let mut host_client = services::connect_to_api_service(
-            &self.config,
-            pb::host_service_client::HostServiceClient::with_interceptor,
-        )
-        .await
-        .with_context(|| "error connecting to api")?;
-        Ok((
-            host_id.clone(),
-            host_client
-                .get(pb::HostServiceGetRequest {
-                    host_id: host_id.clone(),
-                })
-                .await
-                .with_context(|| "can't fetch host organization id")?
-                .into_inner()
-                .host
-                .ok_or(anyhow!("host {host_id} not found in API"))?
-                .created_org_id,
-        ))
     }
 
     /// Find image id by protocol name and version.

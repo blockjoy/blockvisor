@@ -14,9 +14,8 @@ use babel_api::utils::{BabelConfig, RamdiskConfiguration};
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
-    archive_service_client, command_service_client, discovery_service_client, host_service_client,
-    image_service_client, metrics_service_client, node_command::Command, node_service_client,
-    protocol_service_client,
+    archive_service_client, command_service_client, discovery_service_client, image_service_client,
+    metrics_service_client, node_command::Command, node_service_client, protocol_service_client,
 };
 use std::{
     collections::HashMap,
@@ -64,7 +63,6 @@ pub type ProtocolServiceClient =
 pub type ArchiveServiceClient = archive_service_client::ArchiveServiceClient<AuthenticatedService>;
 pub type DiscoveryServiceClient =
     discovery_service_client::DiscoveryServiceClient<AuthenticatedService>;
-pub type HostsServiceClient = host_service_client::HostServiceClient<AuthenticatedService>;
 pub type NodesServiceClient = node_service_client::NodeServiceClient<AuthenticatedService>;
 pub type ImageServiceClient = image_service_client::ImageServiceClient<AuthenticatedService>;
 pub type CommandServiceClient = command_service_client::CommandServiceClient<AuthenticatedService>;

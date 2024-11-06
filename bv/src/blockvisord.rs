@@ -137,14 +137,10 @@ where
 
         let node_metrics_future =
             Self::node_metrics(run.clone(), nodes_manager.clone(), self.config.clone());
-        let host_metrics_future = Self::host_metrics(
-            run.clone(),
-            nodes_manager.clone(),
-            config.id,
-            self.config.clone(),
-        );
+        let host_metrics_future =
+            Self::host_metrics(run.clone(), nodes_manager.clone(), self.config.clone());
 
-        // send up to date information about host software
+        // send up-to-date information about host software
         if let Err(e) = hosts::send_info_update(self.config.clone()).await {
             warn!("Cannot send host info update: {e:#}");
         }
@@ -439,7 +435,6 @@ where
     async fn host_metrics(
         mut run: RunFlag,
         nodes_manager: Arc<NodesManager<P>>,
-        host_id: String,
         config: SharedConfig,
     ) -> Option<()> {
         while run.load() {
@@ -453,7 +448,8 @@ where
                 Ok(metrics) => {
                     if let Ok(mut client) = Self::connect_metrics_service(&config).await {
                         metrics.set_all_gauges();
-                        let metrics = pb::MetricsServiceHostRequest::new(host_id.clone(), metrics);
+                        let metrics =
+                            pb::MetricsServiceHostRequest::new(config.read().await.id, metrics);
                         if let Err(err) = api_with_retry!(client, client.host(metrics.clone())) {
                             warn!("Could not send host metrics! `{err:#}`");
                         }

@@ -93,6 +93,8 @@ impl Default for ApptainerConfig {
 pub struct Config {
     /// Host uuid
     pub id: String,
+    /// Org uuid to which private host belongs to.
+    pub private_org_id: Option<String>,
     /// Host name
     #[serde(default = "default_hostname")]
     pub name: String,

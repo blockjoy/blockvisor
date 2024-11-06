@@ -71,6 +71,10 @@ pub struct CmdArgs {
     #[clap(long = "skip-download")]
     pub skip_download: bool,
 
+    /// Make host private - visible only for your organisation.
+    #[clap(long = "private")]
+    pub private: bool,
+
     /// Use host network directly
     #[clap(long)]
     use_host_network: bool,
@@ -193,7 +197,7 @@ async fn main() -> Result<()> {
 
         let create = pb::HostServiceCreateRequest {
             provision_token: cmd_args.provision_token.unwrap(),
-            private_org_id: None,
+            is_private: cmd_args.private,
             network_name: host_info.name.clone(),
             display_name: None,
             bv_version: crate_version!().to_string(),
@@ -228,6 +232,7 @@ async fn main() -> Result<()> {
                 .host
                 .ok_or_else(|| anyhow!("No `host` in response"))?
                 .host_id,
+            private_org_id: cmd_args.private.then_some(host.provision_org_id),
             name: host_info.name,
             api_config: ApiConfig {
                 token: host.token,

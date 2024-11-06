@@ -1,6 +1,5 @@
 use crate::src::utils::{
     execute_sql_insert, rbac,
-    stub_server::StubHostsServer,
     test_env::{self, link_apptainer_config},
 };
 use assert_cmd::Command;
@@ -13,9 +12,9 @@ use blockvisord::{
 };
 use predicates::prelude::*;
 use std::path::PathBuf;
-use std::{net::ToSocketAddrs, path::Path, str};
+use std::{path::Path, str};
 use tokio::time::{sleep, Duration};
-use tonic::{transport::Server, Request};
+use tonic::Request;
 
 fn with_auth<T>(inner: T, auth_token: &str) -> Request<T> {
     let mut request = Request::new(inner);
@@ -51,54 +50,6 @@ async fn test_bv_service_e2e() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Invalid token"));
-    let server = StubHostsServer {};
-
-    let server_future = async {
-        Server::builder()
-            .max_concurrent_streams(1)
-            .add_service(pb::host_service_server::HostServiceServer::new(server))
-            .serve("0.0.0.0:8082".to_socket_addrs().unwrap().next().unwrap())
-            .await
-            .unwrap()
-    };
-
-    tokio::spawn(server_future);
-
-    let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
-    let url = "http://localhost:8082";
-    let mqtt = "mqtt://localhost:1883";
-    let provision_token = "AWESOME";
-    let config_path = format!("{}/etc/blockvisor.json", tmp_dir.to_string_lossy());
-
-    // make sure blockvisord is running
-    test_env::bv_run(&["start"], "", None);
-
-    let mut cmd = Command::cargo_bin("bvup").unwrap();
-    cmd.args([provision_token, "--skip-download"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Can't provision and init blockvisor configuration, while it is running, `bv stop` first."));
-
-    test_env::bv_run(&["stop"], "", None);
-    println!("bvup");
-    Command::cargo_bin("bvup")
-        .unwrap()
-        .args([provision_token, "--skip-download"])
-        .args(["--ifa", ifa])
-        .args(["--api", url])
-        .args(["--mqtt", mqtt])
-        .args(["--ip-gateway", "216.18.214.193"])
-        .args(["--ip-range-from", "216.18.214.195"])
-        .args(["--ip-range-to", "216.18.214.206"])
-        .args(["--yes", "--use-host-network"])
-        .env("BV_ROOT", tmp_dir.as_os_str())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "Provision and init blockvisor configuration",
-        ));
-
-    assert!(Path::new(&config_path).exists());
 
     let url = "http://localhost:8080";
     let email = "tester@blockjoy.com";
@@ -189,7 +140,7 @@ async fn test_bv_service_e2e() {
         .args(["--region", "EU1"]) // this region will be auto-created in API
         .args(["--api", url])
         .args(["--mqtt", mqtt])
-        .args(["--yes", "--use-host-network"])
+        .args(["--yes", "--use-host-network", "--private"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
