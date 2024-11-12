@@ -1,3 +1,4 @@
+use crate::engine::NodeEnv;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -19,6 +20,7 @@ pub enum Binary {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct BabelConfig {
+    pub node_env: NodeEnv,
     /// RAM disks configuration.
     pub ramdisks: Vec<RamdiskConfiguration>,
 }

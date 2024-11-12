@@ -11,10 +11,6 @@ use url::Url;
 
 pub const DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_JOB_SHUTDOWN_SIGNAL: PosixSignal = PosixSignal::SIGTERM;
-pub const DATA_DRIVE_MOUNT_POINT: &str = "/blockjoy/"; // TODO MJR move paths definition to vm
-lazy_static::lazy_static! {
-    pub static ref PROTOCOL_DATA_PATH: &'static Path = Path::new("/blockjoy/protocol_data");
-}
 
 /// Plugin engine must implement this interface, so it can be used by babel plugins.
 pub trait Engine {
@@ -118,6 +114,10 @@ pub struct NodeEnv {
     pub bv_api_url: String,
     /// Organisation id to which node belongs to.
     pub org_id: String,
+    /// Absolute path to directory where data drive is mounted.
+    pub data_mount_point: PathBuf,
+    /// Absolute path to directory where protocol data are stored.
+    pub protocol_data_path: PathBuf,
 }
 
 /// Structure describing where decompressed data shall be written to and how many bytes.

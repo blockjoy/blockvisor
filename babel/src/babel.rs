@@ -1,17 +1,22 @@
-use crate::pal::BabelServer;
 use crate::{
-    babel_service, is_babel_config_applied, jobs::JOBS_DIR, jobs_manager,
-    jobs_manager::JobsManagerState, load_config, pal, utils, JOBS_MONITOR_UDS_PATH,
+    babel_service, is_babel_config_applied, jobs,
+    jobs::JOBS_DIR,
+    jobs_manager,
+    jobs_manager::JobsManagerState,
+    load_config,
+    pal::{self, BabelServer},
+    utils, JOBS_MONITOR_UDS_PATH,
 };
 use bv_utils::run_flag::RunFlag;
+use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
 use tokio::{fs, sync::RwLock};
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 
 lazy_static::lazy_static! {
+    pub static ref BABEL_CONFIG_PATH: &'static Path = Path::new("/etc/babel.conf");
     static ref JOB_RUNNER_BIN_PATH: &'static Path = Path::new("/usr/bin/babel_job_runner");
-    static ref BABEL_CONFIG_PATH: &'static Path = Path::new("/etc/babel.conf");
 }
 
 pub async fn run<P>(pal: P) -> eyre::Result<()>
@@ -24,18 +29,23 @@ where
         utils::file_checksum(&JOB_RUNNER_BIN_PATH).await.ok(),
     ));
 
-    let jobs_manager_state = if let Ok(config) = load_config(&BABEL_CONFIG_PATH).await {
+    let (jobs_manager_state, node_env) = if let Ok(config) = load_config(&BABEL_CONFIG_PATH).await {
         if is_babel_config_applied(&pal, &config).await? {
-            JobsManagerState::Ready
+            (JobsManagerState::Ready, Some(config.node_env))
         } else {
-            JobsManagerState::NotReady
+            (JobsManagerState::NotReady, None)
         }
     } else {
-        JobsManagerState::NotReady
+        (JobsManagerState::NotReady, None)
     };
-
+    let jobs_context = jobs::JobsContext {
+        jobs: HashMap::new(),
+        node_env,
+        jobs_dir: JOBS_DIR.to_path_buf(),
+        connector: pal.connector(),
+    };
     let (client, monitor, manager) = jobs_manager::create(
-        pal.connector(),
+        jobs_context,
         &JOBS_DIR,
         job_runner_lock.clone(),
         &JOB_RUNNER_BIN_PATH,

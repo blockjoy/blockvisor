@@ -994,7 +994,8 @@ mod tests {
         let plugin_path = test_env.default_plugin_path.clone();
         vm_mock
             .expect_plugin_path()
-            .returning(move || Ok(plugin_path.clone()));
+            .returning(move || plugin_path.clone());
+        vm_mock.expect_node_env().returning(Default::default);
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         vm_mock
             .expect_delete()
@@ -1010,7 +1011,8 @@ mod tests {
         let plugin_path = test_env.default_plugin_path.clone();
         vm_mock
             .expect_plugin_path()
-            .returning(move || Ok(plugin_path.clone()));
+            .returning(move || plugin_path.clone());
+        vm_mock.expect_node_env().returning(Default::default);
         vm_mock.expect_state().once().return_const(VmState::SHUTOFF);
         add_create_node_expectations(&mut pal, 2, second_node_state.clone(), vm_mock);
 
@@ -1183,7 +1185,8 @@ mod tests {
                 let mut vm = MockTestVM::new();
                 let plugin_path = plugin_path.clone();
                 vm.expect_plugin_path()
-                    .returning(move || Ok(plugin_path.clone()));
+                    .returning(move || plugin_path.clone());
+                vm.expect_node_env().returning(Default::default);
                 vm.expect_state().return_const(VmState::SHUTOFF);
                 Ok(vm)
             });
@@ -1261,7 +1264,8 @@ mod tests {
         vm_mock
             .expect_plugin_path()
             .once()
-            .returning(move || Ok(plugin_path.clone()));
+            .returning(move || plugin_path.clone());
+        vm_mock.expect_node_env().once().returning(Default::default);
         let updated_plugin_path = test_env.tmp_root.join("updated.rhai");
         let mut truncated = fs::read_to_string(test_env.default_plugin_path)
             .await
@@ -1271,7 +1275,7 @@ mod tests {
         vm_mock
             .expect_plugin_path()
             .once()
-            .returning(move || Ok(updated_plugin_path.clone()));
+            .returning(move || updated_plugin_path.clone());
         vm_mock
             .expect_state()
             .times(2)
@@ -1413,7 +1417,11 @@ mod tests {
             mock.expect_plugin_path()
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(move || Ok(plugin_path.clone()));
+                .returning(move || plugin_path.clone());
+            mock.expect_node_env()
+                .times(1)
+                .in_sequence(&mut seq)
+                .returning(Default::default);
             mock.expect_state()
                 .times(6)
                 .in_sequence(&mut seq)

@@ -1,8 +1,10 @@
 use babel::{
+    babel::BABEL_CONFIG_PATH,
     chroot_platform::UdsConnector,
     download_job::{is_download_completed, Downloader},
     job_runner::{save_job_status, ArchiveJobRunner, TransferConfig},
-    jobs,
+    jobs::{self, ARCHIVE_JOBS_META_DIR},
+    load_config,
     log_buffer::LogBuffer,
     pal::BabelEngineConnector,
     run_sh_job::RunShJob,
@@ -71,6 +73,7 @@ async fn run_job(
     let mut run = RunFlag::run_until_ctrlc();
     let job_dir = jobs::JOBS_DIR.join(&job_name);
     let job_config = jobs::load_config(&job_dir)?;
+    let babel_config = load_config(&BABEL_CONFIG_PATH).await?;
     match job_config.job_type {
         JobType::RunSh(body) => {
             let log_buffer = LogBuffer::default();
@@ -107,7 +110,12 @@ async fn run_job(
             max_connections,
             max_runners,
         } => {
-            if is_download_completed() {
+            if is_download_completed(
+                babel_config
+                    .node_env
+                    .data_mount_point
+                    .join(ARCHIVE_JOBS_META_DIR),
+            ) {
                 save_job_status(
                     &JobStatus::Finished {
                         exit_code: Some(0),
@@ -123,8 +131,12 @@ async fn run_job(
                     job_config.restart,
                     Downloader::new(
                         connector,
-                        babel_api::engine::PROTOCOL_DATA_PATH.to_path_buf(),
+                        babel_config.node_env.protocol_data_path,
                         build_transfer_config(
+                            babel_config
+                                .node_env
+                                .data_mount_point
+                                .join(ARCHIVE_JOBS_META_DIR),
                             job_dir.join(jobs::PROGRESS_FILENAME),
                             None,
                             max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
@@ -150,12 +162,16 @@ async fn run_job(
                 job_config.restart,
                 Uploader::new(
                     connector,
-                    babel_api::engine::PROTOCOL_DATA_PATH.to_path_buf(),
+                    babel_config.node_env.protocol_data_path,
                     exclude.unwrap_or_default(),
                     number_of_chunks,
                     url_expires_secs,
                     data_version,
                     build_transfer_config(
+                        babel_config
+                            .node_env
+                            .data_mount_point
+                            .join(ARCHIVE_JOBS_META_DIR),
                         job_dir.join(jobs::PROGRESS_FILENAME),
                         compression,
                         max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
@@ -171,16 +187,17 @@ async fn run_job(
 }
 
 fn build_transfer_config(
+    archive_jobs_meta_dir: PathBuf,
     progress_file_path: PathBuf,
     compression: Option<Compression>,
     max_connections: usize,
     max_runners: usize,
 ) -> eyre::Result<TransferConfig> {
-    if !jobs::ARCHIVE_JOBS_META_DIR.exists() {
-        fs::create_dir_all(*jobs::ARCHIVE_JOBS_META_DIR)?;
+    if !archive_jobs_meta_dir.exists() {
+        fs::create_dir_all(&archive_jobs_meta_dir)?;
     }
     TransferConfig::new(
-        jobs::ARCHIVE_JOBS_META_DIR.to_path_buf(),
+        archive_jobs_meta_dir,
         progress_file_path,
         compression,
         max_connections,

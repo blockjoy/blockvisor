@@ -1,3 +1,4 @@
+use crate::bv_context::BvContext;
 use crate::{
     bv_config::ApptainerConfig,
     node_context, node_env,
@@ -7,7 +8,7 @@ use crate::{
     utils::{get_process_pid, GetProcessIdError},
 };
 use async_trait::async_trait;
-use babel_api::engine::{NodeEnv, PosixSignal, DATA_DRIVE_MOUNT_POINT};
+use babel_api::engine::{NodeEnv, PosixSignal};
 use bv_utils::{
     cmd::run_cmd,
     system::{gracefully_terminate_process, is_process_running, kill_all_processes},
@@ -39,6 +40,10 @@ const BABEL_KILL_TIMEOUT: Duration = Duration::from_secs(60);
 const BABEL_BIN_PATH: &str = "/usr/bin/babel";
 const APPTAINER_BIN_NAME: &str = "apptainer";
 const BABEL_VAR_PATH: &str = "var/lib/babel";
+const DATA_DRIVE_MOUNT_POINT: &str = "/blockjoy";
+const PROTOCOL_DATA_PATH: &str = "/blockjoy/protocol_data";
+// LEGACY node support - remove once all nodes upgraded
+const BLOCKCHAIN_DATA_PATH: &str = "/blockjoy/blockchain_data";
 
 pub fn build_rootfs_dir(node_dir: &Path) -> PathBuf {
     node_dir.join(ROOTFS_DIR)
@@ -70,7 +75,7 @@ pub async fn new(
     bv_root: &Path,
     gateway: IpAddr,
     mask_bits: u8,
-    node_env: NodeEnv,
+    bv_context: &BvContext,
     node_state: &NodeState,
     babel_path: PathBuf,
     config: ApptainerConfig,
@@ -102,7 +107,17 @@ pub async fn new(
         vm_config: node_state.vm_config.clone(),
         cpus: node_state.assigned_cpus.clone(),
         config,
-        node_env,
+        node_env: node_env::new(
+            bv_context,
+            node_state,
+            PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
+            if node_state.image.uri.starts_with("legacy::") {
+                // LEGACY node support - remove once all nodes upgraded
+                PathBuf::from_str(BLOCKCHAIN_DATA_PATH)?
+            } else {
+                PathBuf::from_str(PROTOCOL_DATA_PATH)?
+            },
+        ),
     })
 }
 
@@ -448,7 +463,11 @@ impl pal::VirtualMachine for ApptainerMachine {
         }
     }
 
-    async fn plugin_path(&self) -> Result<PathBuf> {
-        Ok(self.chroot_dir.join(PLUGIN_PATH).join(PLUGIN_MAIN_FILENAME))
+    fn node_env(&self) -> NodeEnv {
+        self.node_env.clone()
+    }
+
+    fn plugin_path(&self) -> PathBuf {
+        self.chroot_dir.join(PLUGIN_PATH).join(PLUGIN_MAIN_FILENAME)
     }
 }

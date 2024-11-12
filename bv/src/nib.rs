@@ -8,14 +8,11 @@ use crate::{
     services::{self, protocol::PushResult, ApiServiceConnector},
     utils,
 };
-use babel_api::{
-    engine::NodeEnv,
-    rhai_plugin_linter,
-    utils::{BabelConfig, RamdiskConfiguration},
-};
+use babel_api::{engine::NodeEnv, rhai_plugin_linter, utils::RamdiskConfiguration};
 use bv_utils::cmd::run_cmd;
 use eyre::{anyhow, bail};
 use petname::Petnames;
+use std::path::PathBuf;
 use std::{
     ffi::OsStr,
     {net::IpAddr, path::Path, str::FromStr, time::Duration},
@@ -229,6 +226,8 @@ pub async fn process_image_command(
                         bv_host_name: "nostname".to_string(),
                         bv_api_url: "none.com".to_string(),
                         org_id: "org-id".to_string(),
+                        data_mount_point: PathBuf::from("/blockjoy"),
+                        protocol_data_path: PathBuf::from("/blockjoy/protocol_data"),
                     },
                     properties,
                 )
@@ -446,16 +445,14 @@ impl From<Variant> for VmConfig {
             vcpu_count: value.min_cpu as usize,
             mem_size_mb: value.min_memory_mb,
             disk_size_gb: value.min_disk_gb,
-            babel_config: BabelConfig {
-                ramdisks: value
-                    .ramdisks
-                    .into_iter()
-                    .map(|ramdisk| RamdiskConfiguration {
-                        ram_disk_mount_point: ramdisk.mount,
-                        ram_disk_size_mb: ramdisk.size_mb,
-                    })
-                    .collect(),
-            },
+            ramdisks: value
+                .ramdisks
+                .into_iter()
+                .map(|ramdisk| RamdiskConfiguration {
+                    ram_disk_mount_point: ramdisk.mount,
+                    ram_disk_size_mb: ramdisk.size_mb,
+                })
+                .collect(),
         }
     }
 }

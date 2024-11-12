@@ -10,7 +10,6 @@ use blockvisord::{
     bv_context::BvContext,
     node_context,
     node_context::NODES_DIR,
-    node_env,
     node_state::{NodeState, VmStatus},
     nodes_manager::NodesDataCache,
     pal::{AvailableResources, NodeFirewallConfig, RecoverBackoff},
@@ -366,7 +365,7 @@ impl Pal for DummyPlatform {
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
             24,
-            node_env::new(bv_context, node_state),
+            bv_context,
             node_state,
             self.babel_path.clone(),
             ApptainerConfig {
@@ -390,7 +389,7 @@ impl Pal for DummyPlatform {
             &self.bv_root,
             IpAddr::from_str("216.18.214.90")?,
             24,
-            node_env::new(bv_context, node_state),
+            bv_context,
             node_state,
             self.babel_path.clone(),
             ApptainerConfig {

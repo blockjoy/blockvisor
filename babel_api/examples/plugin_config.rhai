@@ -15,8 +15,8 @@ const NETS = #{
 };
 
 const API_HOST = "http://localhost:4467/";
-const A_DIR = PROTOCOL_DATA_PATH + "/A";
-const B_DIR = PROTOCOL_DATA_PATH + "/B";
+const A_DIR = node_env().protocol_data_path + "/A";
+const B_DIR = node_env().protocol_data_path + "/B";
 const NET =  global::NETS[node_env().node_variant];
 
 const BABEL_VERSION = "0.9.0";
@@ -188,7 +188,7 @@ const PLUGIN_CONFIG = #{
     /// [optional] Upload configuration.
     /// Built-in upload can be manually triggered with `bv node run upload`.
     upload: #{
-        /// [optional] List of exclude patterns. Files in `PROTOCOL_DATA_PATH` directory that match any of pattern,
+        /// [optional] List of exclude patterns. Files in `node_env().protocol_data_path` directory that match any of pattern,
         /// won't be taken into account.
         exclude: [
             "**/something_to_ignore*",

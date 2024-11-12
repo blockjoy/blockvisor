@@ -1,6 +1,6 @@
 use crate::bv_config::ApptainerConfig;
 use crate::firewall;
-use babel_api::utils::BabelConfig;
+use babel_api::utils::RamdiskConfiguration;
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
 use eyre::{Context, Result};
@@ -110,7 +110,8 @@ pub struct VmConfig {
     pub mem_size_mb: u64,
     /// Size of data drive for storing protocol data (not to be confused with OS drive).
     pub disk_size_gb: u64,
-    pub babel_config: BabelConfig,
+    /// RAM disks configuration.
+    pub ramdisks: Vec<RamdiskConfiguration>,
 }
 
 impl NodeState {

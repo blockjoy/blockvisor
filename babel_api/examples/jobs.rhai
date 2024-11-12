@@ -95,7 +95,7 @@ fn init() {
     let upload_job_config = #{
         job_type: #{
             upload: #{
-                // [optional] List of exclude patterns. Files in `PROTOCOL_DATA_PATH` directory that match any of pattern,
+                // [optional] List of exclude patterns. Files in `node_env().protocol_data_path` directory that match any of pattern,
                 // won't be taken into account.
                 exclude: ["file_to_be_excluded", "or_more/**"],
                 // [optional] Compression to be used on chunks.

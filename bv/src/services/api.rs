@@ -10,7 +10,7 @@ use crate::{
     services::{ApiClient, ApiInterceptor, ApiServiceConnector, AuthenticatedService},
     ServiceStatus,
 };
-use babel_api::utils::{BabelConfig, RamdiskConfiguration};
+use babel_api::utils::RamdiskConfiguration;
 use eyre::{anyhow, bail, Context, Result};
 use metrics::{register_counter, Counter};
 use pb::{
@@ -438,16 +438,14 @@ impl From<common::VmConfig> for node_state::VmConfig {
             vcpu_count: value.cpu_cores as usize,
             mem_size_mb: value.memory_bytes / 1_000_000,
             disk_size_gb: value.disk_bytes / 1_000_000_000,
-            babel_config: BabelConfig {
-                ramdisks: value
-                    .ramdisks
-                    .into_iter()
-                    .map(|ramdisk| RamdiskConfiguration {
-                        ram_disk_mount_point: ramdisk.mount,
-                        ram_disk_size_mb: ramdisk.size_bytes / 1_000_000,
-                    })
-                    .collect(),
-            },
+            ramdisks: value
+                .ramdisks
+                .into_iter()
+                .map(|ramdisk| RamdiskConfiguration {
+                    ram_disk_mount_point: ramdisk.mount,
+                    ram_disk_size_mb: ramdisk.size_bytes / 1_000_000,
+                })
+                .collect(),
         }
     }
 }

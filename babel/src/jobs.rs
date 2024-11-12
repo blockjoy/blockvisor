@@ -1,5 +1,5 @@
 use crate::{download_job, upload_job};
-use babel_api::engine::{Chunk, JobConfig, JobProgress, JobStatus, JobType, PROTOCOL_DATA_PATH};
+use babel_api::engine::{Chunk, JobConfig, JobProgress, JobStatus, JobType, NodeEnv};
 use bv_utils::run_flag::RunFlag;
 use chrono::{DateTime, Local};
 use eyre::{Context, Result};
@@ -18,13 +18,13 @@ use tracing::info;
 
 lazy_static::lazy_static! {
     pub static ref JOBS_DIR: &'static Path = Path::new("/var/lib/babel/jobs");
-    pub static ref ARCHIVE_JOBS_META_DIR: &'static Path = Path::new("/blockjoy/.babel_jobs");
 }
 
 pub const CONFIG_FILENAME: &str = "config.json";
 pub const STATUS_FILENAME: &str = "status.json";
 pub const PROGRESS_FILENAME: &str = "progress.json";
 pub const LOGS_FILENAME: &str = "logs";
+pub const ARCHIVE_JOBS_META_DIR: &str = ".babel_jobs";
 pub const LOG_EXPIRE_DAYS: i64 = 1;
 pub const MAX_JOB_LOGS: usize = 1024;
 pub const MAX_LOG_ENTRY_LEN: usize = 1024;
@@ -33,6 +33,7 @@ pub type JobsRegistry<C> = Arc<Mutex<JobsContext<C>>>;
 
 pub struct JobsContext<C> {
     pub jobs: HashMap<String, Job>,
+    pub node_env: Option<NodeEnv>,
     pub jobs_dir: PathBuf,
     pub connector: C,
 }
@@ -125,12 +126,13 @@ impl Job {
         load_job_data(&self.job_dir.join(PROGRESS_FILENAME)).ok()
     }
 
-    pub fn cleanup(&self) -> Result<()> {
+    pub fn cleanup(&self, node_env: &NodeEnv) -> Result<()> {
+        let archive_jobs_dir = node_env.data_mount_point.join(ARCHIVE_JOBS_META_DIR);
         match &self.config.job_type {
             JobType::Download { .. } => {
-                download_job::cleanup_job(&ARCHIVE_JOBS_META_DIR, &PROTOCOL_DATA_PATH)?
+                download_job::cleanup_job(&archive_jobs_dir, &node_env.protocol_data_path)?
             }
-            JobType::Upload { .. } => upload_job::cleanup_job(&ARCHIVE_JOBS_META_DIR)?,
+            JobType::Upload { .. } => upload_job::cleanup_job(&archive_jobs_dir)?,
             _ => {}
         }
         Ok(())

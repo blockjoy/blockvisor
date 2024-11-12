@@ -7,12 +7,12 @@ use crate::{
     commands::into_internal,
     firewall,
     node_context::NodeContext,
-    node_env,
     node_state::{NodeProperties, NodeState, VmStatus},
     pal::{self, NodeConnection, NodeFirewallConfig, Pal, RecoverBackoff, VirtualMachine},
     scheduler,
 };
-use babel_api::{engine::JobStatus, rhai_plugin::RhaiPlugin};
+use babel_api::engine::NodeEnv;
+use babel_api::{engine::JobStatus, rhai_plugin::RhaiPlugin, utils::BabelConfig};
 use bv_utils::{rpc::with_timeout, with_retry};
 use chrono::Utc;
 use eyre::{anyhow, bail, Context, Report, Result};
@@ -35,6 +35,7 @@ pub struct Node<P: Pal> {
     pub babel_engine: BabelEngine<P::NodeConnection>,
     machine: P::VirtualMachine,
     context: NodeContext,
+    node_env: NodeEnv,
     bv_context: BvContext,
     pal: Arc<P>,
     recovery_backoff: P::RecoveryBackoff,
@@ -74,9 +75,9 @@ impl<P: Pal> MaybeNode<P> {
         );
         let bv_context = BvContext::from_config(api_config.config.read().await.clone());
         let vm = check!(pal.create_vm(&bv_context, &self.state).await, self);
-        let plugin_path = vm.plugin_path().await;
+        let plugin_path = vm.plugin_path();
+        let node_env = vm.node_env();
         self.machine = Some(vm);
-        let plugin_path = check!(plugin_path, self);
         let iface = bv_context.iface.clone();
         check!(
             pal.apply_firewall_config(NodeFirewallConfig {
@@ -97,7 +98,7 @@ impl<P: Pal> MaybeNode<P> {
                     image: self.state.image.clone(),
                     properties: self.state.properties.clone(),
                 },
-                node_env::new(&bv_context, &self.state),
+                node_env.clone(),
                 pal.create_node_connection(node_id),
                 api_config,
                 |engine| RhaiPlugin::from_file(plugin_path, engine),
@@ -114,6 +115,7 @@ impl<P: Pal> MaybeNode<P> {
             // if we got into that place, then it is safe to unwrap
             machine: self.machine.unwrap(),
             context: self.context,
+            node_env,
             bv_context,
             pal,
             recovery_backoff,
@@ -173,10 +175,8 @@ impl<P: Pal + Debug> Node<P> {
             .attach_vm(&bv_context, &state)
             .await
             .with_context(|| "attach vm failed")?;
-        let plugin_path = machine
-            .plugin_path()
-            .await
-            .with_context(|| "load rhai script failed")?;
+        let plugin_path = machine.plugin_path();
+        let node_env = machine.node_env();
         if machine.state().await == pal::VmState::RUNNING {
             debug!("connecting to babel ...");
             // Since this is the startup phase it doesn't make sense to wait a long time
@@ -196,7 +196,7 @@ impl<P: Pal + Debug> Node<P> {
                 image: state.image.clone(),
                 properties: state.properties.clone(),
             },
-            node_env::new(&bv_context, &state),
+            node_env.clone(),
             node_conn,
             api_config,
             |engine| RhaiPlugin::from_file(plugin_path, engine),
@@ -216,6 +216,7 @@ impl<P: Pal + Debug> Node<P> {
             babel_engine,
             machine,
             context,
+            node_env,
             bv_context,
             pal,
             recovery_backoff,
@@ -283,7 +284,11 @@ impl<P: Pal + Debug> Node<P> {
 
         // setup babel
         let babel_client = self.babel_engine.node_connection.babel_client().await?;
-        with_retry!(babel_client.setup_babel(self.state.vm_config.babel_config.clone()))?;
+        let babel_config = BabelConfig {
+            node_env: self.node_env.clone(),
+            ramdisks: self.state.vm_config.ramdisks.clone(),
+        };
+        with_retry!(babel_client.setup_babel(babel_config.clone()))?;
 
         if !self.state.initialized {
             if let Err(err) = self.babel_engine.init().await {
@@ -429,7 +434,7 @@ impl<P: Pal + Debug> Node<P> {
             self.stop(false).await?;
         }
         self.machine.upgrade(&desired_state).await?;
-        let plugin_path = self.machine.plugin_path().await?;
+        let plugin_path = self.machine.plugin_path();
         self.babel_engine
             .update_plugin(|engine| RhaiPlugin::from_file(plugin_path, engine))
             .await?;
@@ -468,7 +473,7 @@ impl<P: Pal + Debug> Node<P> {
 
     /// Read script content and update plugin with metadata
     pub async fn reload_plugin(&mut self) -> Result<()> {
-        let plugin_path = self.machine.plugin_path().await?;
+        let plugin_path = self.machine.plugin_path();
         self.babel_engine
             .update_plugin(|engine| {
                 let mut plugin = RhaiPlugin::from_file(plugin_path, engine)?;
@@ -643,7 +648,7 @@ pub mod tests {
     use babel_api::engine::JobsInfo;
     use babel_api::utils::{BabelConfig, RamdiskConfiguration};
     use babel_api::{
-        engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, RestRequest, ShResponse},
+        engine::{HttpResponse, JobConfig, JobInfo, JrpcRequest, NodeEnv, RestRequest, ShResponse},
         utils::BinaryStatus,
     };
     use bv_tests_utils::{rpc::test_channel, start_test_server};
@@ -767,7 +772,8 @@ pub mod tests {
             async fn start(&mut self) -> Result<()>;
             async fn upgrade(&mut self, node_state: &NodeState) -> Result<()>;
             async fn recover(&mut self) -> Result<()>;
-            async fn plugin_path(&self) -> Result<PathBuf>;
+            fn node_env(&self) -> NodeEnv;
+            fn plugin_path(&self) -> PathBuf;
         }
     }
 
@@ -976,12 +982,10 @@ pub mod tests {
                 vcpu_count: 1,
                 mem_size_mb: 2048,
                 disk_size_gb: 1,
-                babel_config: BabelConfig {
-                    ramdisks: vec![RamdiskConfiguration {
-                        ram_disk_mount_point: "/mnt/ramdisk".to_string(),
-                        ram_disk_size_mb: 512,
-                    }],
-                },
+                ramdisks: vec![RamdiskConfiguration {
+                    ram_disk_mount_point: "/mnt/ramdisk".to_string(),
+                    ram_disk_size_mb: 512,
+                }],
             },
             firewall: firewall::Config {
                 default_in: firewall::Action::Deny,
@@ -1038,6 +1042,7 @@ pub mod tests {
         tmp_root: PathBuf,
         nodes_dir: PathBuf,
         default_plugin_path: PathBuf,
+        node_env: NodeEnv,
         tx: mpsc::Sender<scheduler::Action>,
         _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
@@ -1053,6 +1058,12 @@ pub mod tests {
                 tmp_root,
                 nodes_dir,
                 default_plugin_path: testing_babel_path_absolute(),
+                node_env: NodeEnv {
+                    node_version: "test".to_string(),
+                    node_protocol: "testing".to_string(),
+                    dev_mode: true,
+                    ..Default::default()
+                },
                 tx,
                 _async_panic_checker: Default::default(),
             })
@@ -1115,21 +1126,6 @@ pub mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _| bail!("create VM error"));
 
-        pal.expect_create_vm()
-            .with(
-                predicate::eq(bv_context.clone()),
-                predicate::eq(node_state.clone()),
-            )
-            .once()
-            .in_sequence(&mut seq)
-            .returning(move |_, _| {
-                let mut vm = MockTestVM::new();
-                vm.expect_plugin_path()
-                    .returning(|| bail!("Babel plugin not found"));
-                vm.expect_delete().returning(|| Ok(()));
-                Ok(vm)
-            });
-
         let malformed_rhai_path = test_env.tmp_root.join("malformed.rhai");
         fs::write(&malformed_rhai_path, "malformed rhai script")
             .await
@@ -1145,7 +1141,8 @@ pub mod tests {
                 let mut vm = MockTestVM::new();
                 let malformed_rhai_path = malformed_rhai_path.clone();
                 vm.expect_plugin_path()
-                    .returning(move || Ok(malformed_rhai_path.clone()));
+                    .returning(move || malformed_rhai_path.clone());
+                vm.expect_node_env().returning(Default::default);
                 vm.expect_delete().returning(|| Ok(()));
                 Ok(vm)
             });
@@ -1173,7 +1170,8 @@ pub mod tests {
                 let mut vm = MockTestVM::new();
                 let empty_rhai_path = empty_rhai_path.clone();
                 vm.expect_plugin_path()
-                    .returning(move || Ok(empty_rhai_path.clone()));
+                    .returning(move || empty_rhai_path.clone());
+                vm.expect_node_env().returning(Default::default);
                 vm.expect_delete().returning(|| Ok(()));
                 Ok(vm)
             });
@@ -1192,7 +1190,8 @@ pub mod tests {
                 let mut vm = MockTestVM::new();
                 let plugin_path = plugin_path.clone();
                 vm.expect_plugin_path()
-                    .returning(move || Ok(plugin_path.clone()));
+                    .returning(move || plugin_path.clone());
+                vm.expect_node_env().returning(Default::default);
                 Ok(vm)
             });
         pal.expect_apply_firewall_config()
@@ -1209,19 +1208,6 @@ pub mod tests {
 
         assert_eq!(
             "create VM error",
-            Node::create(
-                pal.clone(),
-                config.clone(),
-                node_state.clone(),
-                test_env.tx.clone()
-            )
-            .await
-            .unwrap_err()
-            .to_string()
-        );
-
-        assert_eq!(
-            "Babel plugin not found",
             Node::create(
                 pal.clone(),
                 config.clone(),
@@ -1294,25 +1280,7 @@ pub mod tests {
             .once()
             .in_sequence(&mut seq)
             .returning(dummy_connection_mock);
-        pal.expect_attach_vm()
-            .with(
-                predicate::eq(bv_context.clone()),
-                predicate::eq(node_state.clone()),
-            )
-            .once()
-            .in_sequence(&mut seq)
-            .returning(|_, _| {
-                let mut vm = MockTestVM::new();
-                vm.expect_plugin_path()
-                    .returning(|| bail!("load plugin error"));
-                Ok(vm)
-            });
 
-        pal.expect_create_node_connection()
-            .with(predicate::eq(node_state.id))
-            .once()
-            .in_sequence(&mut seq)
-            .returning(dummy_connection_mock);
         let malformed_rhai_path = test_env.tmp_root.join("malformed.rhai");
         fs::write(&malformed_rhai_path, "malformed rhai script")
             .await
@@ -1329,7 +1297,8 @@ pub mod tests {
                 vm.expect_state().returning(|| pal::VmState::SHUTOFF);
                 let malformed_rhai_path = malformed_rhai_path.clone();
                 vm.expect_plugin_path()
-                    .returning(move || Ok(malformed_rhai_path.clone()));
+                    .returning(move || malformed_rhai_path.clone());
+                vm.expect_node_env().returning(Default::default);
                 Ok(vm)
             });
 
@@ -1359,7 +1328,8 @@ pub mod tests {
                 vm.expect_state().returning(|| pal::VmState::RUNNING);
                 let plugin_path = plugin_path.clone();
                 vm.expect_plugin_path()
-                    .returning(move || Ok(plugin_path.clone()));
+                    .returning(move || plugin_path.clone());
+                vm.expect_node_env().returning(Default::default);
                 Ok(vm)
             });
 
@@ -1391,7 +1361,8 @@ pub mod tests {
                 vm.expect_state().returning(|| pal::VmState::RUNNING);
                 let plugin_path = plugin_path.clone();
                 vm.expect_plugin_path()
-                    .returning(move || Ok(plugin_path.clone()));
+                    .returning(move || plugin_path.clone());
+                vm.expect_node_env().returning(Default::default);
                 Ok(vm)
             });
         let mut babel_mock = MockTestBabelService::new();
@@ -1415,20 +1386,6 @@ pub mod tests {
                 config.clone(),
                 node_state.clone(),
                 test_env.tx.clone()
-            )
-            .await
-            .unwrap_err()
-            .root_cause()
-            .to_string()
-        );
-
-        assert_eq!(
-            "load plugin error",
-            Node::attach(
-                pal.clone(),
-                config.clone(),
-                node_state.clone(),
-                test_env.tx.clone(),
             )
             .await
             .unwrap_err()
@@ -1493,6 +1450,7 @@ pub mod tests {
         });
         add_firewall_expectation(&mut pal, node_state.clone());
         let plugin_path = test_env.default_plugin_path.clone();
+        let node_env = test_env.node_env.clone();
         pal.expect_create_vm().return_once(move |_, _| {
             let mut mock = MockTestVM::new();
             let plugin_path = plugin_path.clone();
@@ -1500,7 +1458,12 @@ pub mod tests {
             mock.expect_plugin_path()
                 .once()
                 .in_sequence(&mut seq)
-                .returning(move || Ok(plugin_path.clone()));
+                .returning(move || plugin_path.clone());
+            let node_env = node_env.clone();
+            mock.expect_node_env()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(move || node_env.clone());
             // already started
             mock.expect_state()
                 .once()
@@ -1582,7 +1545,10 @@ pub mod tests {
             .expect_check_job_runner()
             .times(3)
             .returning(|_| Ok(Response::new(BinaryStatus::Ok)));
-        let expected_config = node_state.vm_config.babel_config.clone();
+        let expected_config = BabelConfig {
+            node_env: test_env.node_env.clone(),
+            ramdisks: node_state.vm_config.ramdisks.clone(),
+        };
         babel_mock
             .expect_setup_babel()
             .withf(move |req| {
@@ -1676,7 +1642,11 @@ pub mod tests {
             mock.expect_plugin_path()
                 .once()
                 .in_sequence(&mut seq)
-                .returning(move || Ok(plugin_path.clone()));
+                .returning(move || plugin_path.clone());
+            mock.expect_node_env()
+                .once()
+                .in_sequence(&mut seq)
+                .returning(Default::default);
             // already stopped
             mock.expect_state()
                 .once()
@@ -1790,7 +1760,8 @@ pub mod tests {
             let plugin_path = plugin_path.clone();
             mock.expect_plugin_path()
                 .once()
-                .returning(move || Ok(plugin_path.clone()));
+                .returning(move || plugin_path.clone());
+            mock.expect_node_env().returning(Default::default);
             Ok(mock)
         });
 
@@ -1889,7 +1860,8 @@ pub mod tests {
             let plugin_path = plugin_path.clone();
             mock.expect_plugin_path()
                 .once()
-                .returning(move || Ok(plugin_path.clone()));
+                .returning(move || plugin_path.clone());
+            mock.expect_node_env().returning(Default::default);
             mock.expect_state().once().returning(|| VmState::RUNNING);
             Ok(mock)
         });

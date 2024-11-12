@@ -158,7 +158,7 @@ To make implementation of Babel Plugin interface possible, BV provides following
   restrictive than needed; it just filters out each character that is not a number or a
   string or absolutely needed to form an url or json file.
 - `render_template(template, destination, params)` - This function renders configuration template with provided `params`.
-  See [Tera Docs](https://tera.netlify.app/docs/#templates) for details on templating syntax.
+  See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
   `params` is expected to be Map object serializable to JSON.
   It assumes that file pointed by `template` argument exists.
   File pointed by `destination` path will be overwritten if exists.
@@ -172,8 +172,6 @@ To make implementation of Babel Plugin interface possible, BV provides following
 - `get_secret(key)` - Get plugin secret data from encrypted cloud storage. It takes string `key` and returns BLOB (as it was passed to `put_secret`). Use `as_string` if you expect simple string.
 - `file_write(path, content)` - Write binary `content` (BLOB) into node filesystem. Use `to_blob` if you want to store simple string.
 - `file_read(path)` - Read binary content (BLOB) from node filesystem. Use `as_string` if you expect simple string.
-- `DATA_DRIVE_MOUNT_POINT` - Globally available constant, containing absolute path to directory where data drive is mounted.
-- `PROTOCOL_DATA_PATH` - Globally available constant, containing absolute path to directory where protocol data are stored.
   This is the path, where protocol data archives are downloaded to, and where are uploaded from.
 
 ### HttpResponse
@@ -227,6 +225,10 @@ pub struct NodeEnv {
     pub bv_api_url: String,
     /// Organisation id to which node belongs to.
     pub org_id: String,
+    /// Absolute path to directory where data drive is mounted.
+    pub data_mount_point: String,
+    /// Absolute path to directory where protocol data are stored.
+    pub protocol_data_path: String,
 }
 ```
 

@@ -1,4 +1,3 @@
-use crate::jobs::{load_chunks, save_chunk, RunnersState};
 /// This module implements job runner for downloading data. It downloads data according to given
 /// manifest and destination dir. In case of recoverable errors download is retried according to given
 /// `RestartPolicy`, with exponential backoff timeout and max retries (if configured).
@@ -8,8 +7,7 @@ use crate::{
     compression::{Coder, NoCoder, ZstdDecoder},
     job_runner::Runner,
     job_runner::{ConnectionPool, TransferConfig},
-    jobs,
-    jobs::{load_job_data, save_job_data},
+    jobs::{load_chunks, load_job_data, save_chunk, save_job_data, RunnersState},
     pal::BabelEngineConnector,
     with_selective_retry,
 };
@@ -78,10 +76,8 @@ pub fn cleanup_job(meta_dir: &Path, destination_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn is_download_completed() -> bool {
-    jobs::ARCHIVE_JOBS_META_DIR
-        .join(COMPLETED_FILENAME)
-        .exists()
+pub fn is_download_completed(archive_jobs_meta_dir: PathBuf) -> bool {
+    archive_jobs_meta_dir.join(COMPLETED_FILENAME).exists()
 }
 
 pub fn remove_remnants(chunks: Vec<Chunk>, destination_dir: &Path) -> Result<()> {

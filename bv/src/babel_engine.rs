@@ -1157,17 +1157,8 @@ mod tests {
                 },
                 NodeEnv {
                     node_id: node_id.to_string(),
-                    node_name: "".to_string(),
-                    node_version: "".to_string(),
-                    node_protocol: "".to_string(),
-                    node_ip: "".to_string(),
-                    node_gateway: "".to_string(),
-                    dev_mode: false,
-                    bv_host_id: "".to_string(),
-                    bv_host_name: "".to_string(),
-                    bv_api_url: "".to_string(),
                     org_id: "org_id".to_string(),
-                    node_variant: "".to_string(),
+                    ..Default::default()
                 },
                 connection,
                 SharedConfig::new(

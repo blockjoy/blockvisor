@@ -4,8 +4,8 @@ const NETS = #{
     },
 };
 
-const A_DIR = PROTOCOL_DATA_PATH + "/A/";
-const B_DIR = PROTOCOL_DATA_PATH + "/B/";
+const A_DIR = node_env().protocol_data_path + "/A/";
+const B_DIR = node_env().protocol_data_path + "/B/";
 const NET =  global::NETS[node_env().node_variant];
 
 fn stop_protocol() {

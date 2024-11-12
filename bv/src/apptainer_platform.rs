@@ -6,7 +6,7 @@ use crate::{
     bv_context::BvContext,
     linux_platform,
     node::NODE_REQUEST_TIMEOUT,
-    node_context, node_env,
+    node_context,
     node_state::NodeState,
     nodes_manager::NodesDataCache,
     pal::{self, AvailableResources, NodeConnection, NodeFirewallConfig, Pal},
@@ -90,7 +90,7 @@ impl ApptainerPlatform {
             &self.bv_root,
             self.bridge_ip,
             self.mask_bits,
-            node_env::new(bv_context, node_state),
+            bv_context,
             node_state,
             self.babel_path.clone(),
             node_state

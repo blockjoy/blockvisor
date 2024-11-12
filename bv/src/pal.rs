@@ -8,6 +8,7 @@ use crate::{
     nodes_manager::NodesDataCache, services,
 };
 use async_trait::async_trait;
+use babel_api::engine::NodeEnv;
 use eyre::Result;
 use std::path::PathBuf;
 use std::{fmt::Debug, net::IpAddr, path::Path};
@@ -168,8 +169,10 @@ pub trait VirtualMachine {
     async fn upgrade(&mut self, node_state: &NodeState) -> Result<()>;
     /// Try recover VM that is in INVALID state.
     async fn recover(&mut self) -> Result<()>;
+    /// Get associated NodeEnv.
+    fn node_env(&self) -> NodeEnv;
     /// Get plugin path.
-    async fn plugin_path(&self) -> Result<PathBuf>;
+    fn plugin_path(&self) -> PathBuf;
 }
 
 pub trait RecoverBackoff {

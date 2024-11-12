@@ -5,8 +5,8 @@ const NETS = #{
 };
 
 fn init() {
-  let A_DIR = PROTOCOL_DATA_PATH + "/A/";
-  let B_DIR = PROTOCOL_DATA_PATH + "/B/";
+  let A_DIR = node_env().protocol_data_path + "/A/";
+  let B_DIR = node_env().protocol_data_path + "/B/";
   let NET =  global::NETS[node_env().node_variant];
 
   run_sh(`mkdir -p ${A_DIR} ${B_DIR} && mkdir -p /opt/netdata/var/cache/netdata && mkdir -p /opt/netdata/var/lib/netdata && rm -rf /opt/netdata/var/lib/netdata/* && rm -rf /opt/netdata/var/cache/netdata/*`).unwrap();

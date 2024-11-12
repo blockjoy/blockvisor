@@ -23,7 +23,7 @@ impl Config {
             .ok_or(anyhow!("can't get home directory"))?
             .join(CONFIG_FILENAME);
         if !path.exists() {
-            bail!("Bib is not configured yet, please run `nib config` first.");
+            bail!("You are not logged-in yet, please run `nib login` first.");
         }
         debug!("Reading nib config: {}", path.display());
         let config = fs::read_to_string(&path)

@@ -1,6 +1,6 @@
 use crate::{
-    apply_babel_config, download_job::is_download_completed, jobs_manager::JobsManagerClient,
-    pal::BabelPal, utils,
+    apply_babel_config, download_job::is_download_completed, jobs::ARCHIVE_JOBS_META_DIR,
+    jobs_manager::JobsManagerClient, load_config, pal::BabelPal, utils,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -72,7 +72,7 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             .await
             .map_err(|err| Status::internal(format!("failed to setup node with: {err:#}")))?;
         self.jobs_manager
-            .startup()
+            .startup(config.node_env)
             .await
             .map_err(|err| Status::internal(format!("failed to startup jobs_manger: {err:#}")))?;
         Ok(Response::new(()))
@@ -273,7 +273,15 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
     }
 
     async fn is_download_completed(&self, _request: Request<()>) -> Result<Response<bool>, Status> {
-        Ok(Response::new(is_download_completed()))
+        let babel_config = load_config(&self.babel_cfg_path)
+            .await
+            .map_err(|err| Status::internal(format!("failed to read babel config: {err:#}")))?;
+        Ok(Response::new(is_download_completed(
+            babel_config
+                .node_env
+                .data_mount_point
+                .join(ARCHIVE_JOBS_META_DIR),
+        )))
     }
 }
 
@@ -393,6 +401,7 @@ mod tests {
     use crate::chroot_platform::{UdsConnector, UdsServer};
     use assert_fs::TempDir;
     use babel_api::babel::{babel_client::BabelClient, babel_server::Babel};
+    use babel_api::engine::NodeEnv;
     use babel_api::utils::RamdiskConfiguration;
     use bv_tests_utils::start_test_server;
     use mockall::*;
@@ -406,7 +415,7 @@ mod tests {
 
         #[async_trait]
         impl JobsManagerClient for JobsManager {
-            async fn startup(&self) -> Result<()>;
+            async fn startup(&self, node_env: NodeEnv) -> Result<()>;
             async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
             async fn shutdown(&self, force: bool) -> Result<()>;
             async fn list(&self) -> Result<JobsInfo>;
@@ -468,7 +477,7 @@ mod tests {
         let job_runner_lock = Arc::new(RwLock::new(None));
         let client = test_client(&tmp_root)?;
         let mut jobs_manager_mock = MockJobsManager::new();
-        jobs_manager_mock.expect_startup().returning(|| Ok(()));
+        jobs_manager_mock.expect_startup().returning(|_| Ok(()));
         let babel_service = BabelService::new(
             job_runner_lock.clone(),
             job_runner_path.clone(),

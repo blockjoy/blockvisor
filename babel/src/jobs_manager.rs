@@ -11,7 +11,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use babel_api::engine::{
-    JobConfig, JobInfo, JobStatus, JobsInfo, PosixSignal, RestartPolicy,
+    JobConfig, JobInfo, JobStatus, JobsInfo, NodeEnv, PosixSignal, RestartPolicy,
     DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
 };
 use bv_utils::{
@@ -46,7 +46,7 @@ enum JobReport {
 }
 
 pub async fn create<C: BabelEngineConnector>(
-    connector: C,
+    mut jobs_context: JobsContext<C>,
     jobs_dir: &Path,
     job_runner_lock: JobRunnerLock,
     job_runner_bin_path: &Path,
@@ -55,11 +55,6 @@ pub async fn create<C: BabelEngineConnector>(
     if !jobs_dir.exists() {
         fs::create_dir_all(jobs_dir).await?;
     }
-    let mut jobs_context = JobsContext {
-        jobs: HashMap::new(),
-        jobs_dir: jobs_dir.to_path_buf(),
-        connector,
-    };
     if state == JobsManagerState::Ready {
         load_jobs(&mut jobs_context, &job_runner_bin_path.to_string_lossy()).await?;
     }
@@ -172,7 +167,7 @@ async fn load_jobs(
 
 #[async_trait]
 pub trait JobsManagerClient {
-    async fn startup(&self) -> Result<()>;
+    async fn startup(&self, node_env: NodeEnv) -> Result<()>;
     async fn get_active_jobs_shutdown_timeout(&self) -> Duration;
     async fn shutdown(&self, force: bool) -> Result<()>;
     async fn list(&self) -> Result<JobsInfo>;
@@ -195,9 +190,10 @@ pub struct Client<C> {
 
 #[async_trait]
 impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
-    async fn startup(&self) -> Result<()> {
+    async fn startup(&self, node_env: NodeEnv) -> Result<()> {
         info!("Startup jobs manager - load jobs and set state to 'Ready'");
         let mut jobs_context = self.jobs_registry.lock().await;
+        jobs_context.node_env = Some(node_env);
         load_jobs(&mut *jobs_context, &self.job_runner_bin_path).await?;
         self.jobs_manager_state_tx.send(JobsManagerState::Ready)?;
         Ok(())
@@ -381,14 +377,16 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
     async fn cleanup(&self, name: &str) -> Result<()> {
         info!("Requested '{name} job to cleanup'");
         let jobs_context = self.jobs_registry.lock().await;
-        if let Some(job) = jobs_context.jobs.get(name) {
-            if let JobState::Inactive(_) = job.state {
-                job.cleanup()
-            } else {
-                bail!("can't cleanup active job '{name}'");
-            }
+        let Some(job) = jobs_context.jobs.get(name) else {
+            bail!("can't cleanup, job '{name}' not found")
+        };
+        let Some(node_env) = &jobs_context.node_env else {
+            bail!("can't cleanup, job '{name}', missing node_env")
+        };
+        if let JobState::Inactive(_) = job.state {
+            job.cleanup(node_env)
         } else {
-            bail!("can't cleanup, job '{name}' not found");
+            bail!("can't cleanup active job '{name}'");
         }
     }
 
@@ -789,8 +787,13 @@ mod tests {
                 babel_api::babel::babel_engine_server::BabelEngineServer::new(engine_mock)
             );
             let (client, _monitor, manager) = create(
-                utils::tests::DummyConnector {
-                    tmp_dir: tmp_dir.clone(),
+                JobsContext {
+                    jobs: Default::default(),
+                    node_env: None,
+                    jobs_dir: jobs_dir.clone(),
+                    connector: utils::tests::DummyConnector {
+                        tmp_dir: tmp_dir.clone(),
+                    },
                 },
                 &jobs_dir,
                 Arc::new(RwLock::new(Some(0))),
@@ -1028,6 +1031,7 @@ mod tests {
         let test_env = TestEnv::setup().await?;
         let mut jobs_context = JobsContext {
             jobs: HashMap::new(),
+            node_env: None,
             jobs_dir: test_env.jobs_dir.clone(),
             connector: utils::tests::DummyConnector {
                 tmp_dir: test_env.tmp_dir.clone(),
@@ -1153,7 +1157,7 @@ mod tests {
         );
 
         let _ = test_env.wait_for_job_runner("test_job").await.unwrap_err();
-        test_env.client.startup().await?;
+        test_env.client.startup(Default::default()).await?;
         test_env.wait_for_job_runner("test_job").await?;
 
         assert_eq!(

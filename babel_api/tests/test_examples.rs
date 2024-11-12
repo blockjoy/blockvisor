@@ -84,16 +84,8 @@ fn dummy_babel_engine() -> MockBabelEngine {
     babel.expect_node_env().returning(|| NodeEnv {
         node_id: "node_id".to_string(),
         node_name: "node name".to_string(),
-        node_version: "".to_string(),
-        node_protocol: "".to_string(),
-        node_ip: "".to_string(),
-        node_gateway: "".to_string(),
-        dev_mode: false,
-        bv_host_id: "".to_string(),
-        bv_host_name: "".to_string(),
-        bv_api_url: "".to_string(),
-        org_id: "".to_string(),
         node_variant: "main".to_string(),
+        ..Default::default()
     });
     babel.expect_save_data().returning(|_| Ok(()));
     babel
@@ -153,6 +145,7 @@ fn test_jobs() {
 #[test]
 fn test_polygon_functions() {
     let mut dummy_babel = MockBabelEngine::new();
+    dummy_babel.expect_node_env().returning(Default::default);
     dummy_babel.expect_run_sh().returning(|_, _| {
         Ok(ShResponse {
             exit_code: 0,
@@ -206,16 +199,9 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel.expect_node_env().returning(|| NodeEnv {
         node_id: "node_id".to_string(),
         node_name: "node name".to_string(),
-        node_version: "".to_string(),
-        node_protocol: "".to_string(),
-        node_ip: "".to_string(),
-        node_gateway: "".to_string(),
-        dev_mode: false,
-        bv_host_id: "".to_string(),
-        bv_host_name: "".to_string(),
-        bv_api_url: "".to_string(),
-        org_id: "".to_string(),
         node_variant: "main".to_string(),
+        protocol_data_path: PathBuf::from("/blockjoy/protocol_data"),
+        ..Default::default()
     });
     babel
         .expect_render_template()

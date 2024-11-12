@@ -1,9 +1,7 @@
 use crate::plugin::NodeHealth;
 use crate::plugin_config::{DOWNLOADING_STATE_NAME, STARTING_STATE_NAME, UPLOADING_STATE_NAME};
 use crate::{
-    engine::{
-        self, Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse,
-    },
+    engine::{Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse},
     plugin::{Plugin, ProtocolStatus},
     plugin_config::{
         self, Actions, BaseConfig, ConfigFile, Job, PluginConfig, Service, DOWNLOAD_JOB_NAME,
@@ -70,17 +68,6 @@ fn new_rhai_engine() -> rhai::Engine {
     engine
 }
 
-fn build_scope() -> rhai::Scope<'static> {
-    let mut scope = rhai::Scope::new();
-    scope.push("DATA_DRIVE_MOUNT_POINT", engine::DATA_DRIVE_MOUNT_POINT);
-    scope.push(
-        "PROTOCOL_DATA_PATH",
-        engine::PROTOCOL_DATA_PATH.to_string_lossy().to_string(),
-    );
-    // TODO MJR add BLOCKCHAIN_DATA_PATH for legacy nodes
-    scope
-}
-
 fn find_const_in_ast<T: for<'a> Deserialize<'a>>(ast: &AST, name: &str) -> Result<T> {
     let mut vars = ast.iter_literal_variables(true, true);
     if let Some((_, _, dynamic)) = vars.find(|(v, _, _)| *v == name) {
@@ -134,7 +121,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
     }
 
     pub fn evaluate_plugin_config(&mut self) -> Result<()> {
-        let mut scope = build_scope();
+        let mut scope = self.build_scope();
         self.rhai_engine
             .run_ast_with_scope(&mut scope, &self.bare.ast)?;
         if let Some(dynamic) = scope.get(BASE_CONFIG_CONST_NAME) {
@@ -411,10 +398,20 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         name: &str,
         args: P,
     ) -> Result<R> {
-        let mut scope = build_scope();
+        let mut scope = self.build_scope();
         self.rhai_engine
             .call_fn::<R>(&mut scope, &self.bare.ast, name, args)
             .with_context(|| format!("Rhai function '{name}' returned error"))
+    }
+
+    // LEGACY node support - remove once all nodes upgraded
+    fn build_scope(&self) -> rhai::Scope<'static> {
+        let mut scope = rhai::Scope::new();
+        scope.push(
+            "BLOCKCHAIN_DATA_PATH",
+            self.bare.babel_engine.node_env().protocol_data_path,
+        );
+        scope
     }
 }
 
@@ -695,10 +692,24 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
                 health: NodeHealth::Neutral,
             })
         } else {
-            // TODO MJR support also legacy application_status()
-            Ok(from_dynamic(
-                &self.call_fn::<_, Dynamic>("protocol_status", ())?,
-            )?)
+            // LEGACY node support - remove once all nodes upgraded
+            if !self
+                .bare
+                .ast
+                .iter_functions()
+                .any(|function| function.name == "protocol_status" && function.params.is_empty())
+                && self.bare.ast.iter_functions().any(|function| {
+                    function.name == "application_status" && function.params.is_empty()
+                })
+            {
+                Ok(from_dynamic(
+                    &self.call_fn::<_, Dynamic>("application_status", ())?,
+                )?)
+            } else {
+                Ok(from_dynamic(
+                    &self.call_fn::<_, Dynamic>("protocol_status", ())?,
+                )?)
+            }
         }
     }
 
@@ -890,8 +901,8 @@ impl From<ShResponse> for DressedShResponse {
 mod tests {
     use super::*;
     use crate::engine::{
-        HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, NodeEnv, RestRequest,
-        RestartConfig, RestartPolicy, ShResponse,
+        self, HttpResponse, JobConfig, JobInfo, JobStatus, JobType, JrpcRequest, NodeEnv,
+        RestRequest, RestartConfig, RestartPolicy, ShResponse,
     };
     use crate::plugin::NodeHealth;
     use crate::plugin_config::{AlternativeDownload, Job};
@@ -1004,6 +1015,7 @@ mod tests {
         }
 "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_node_env().returning(Default::default);
         babel
             .expect_save_data()
             .with(predicate::eq(INIT_FN_NAME))
@@ -1322,19 +1334,9 @@ mod tests {
         babel
             .expect_node_params()
             .return_once(|| HashMap::from_iter([("key_A".to_string(), "value_A".to_string())]));
-        babel.expect_node_env().return_once(|| NodeEnv {
+        babel.expect_node_env().times(2).returning(|| NodeEnv {
             node_id: "node_id".to_string(),
-            node_name: "".to_string(),
-            node_version: "".to_string(),
-            node_protocol: "".to_string(),
-            node_variant: "".to_string(),
-            node_ip: "".to_string(),
-            node_gateway: "".to_string(),
-            dev_mode: false,
-            bv_host_id: "".to_string(),
-            bv_host_name: "".to_string(),
-            bv_api_url: "".to_string(),
-            org_id: "".to_string(),
+            ..Default::default()
         });
         babel
             .expect_save_data()
@@ -1416,6 +1418,7 @@ mod tests {
             }
             "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_node_env().returning(Default::default);
         babel.expect_get_jobs().once().returning(|| {
             Ok(HashMap::from_iter([(
                 "download".to_string(),
@@ -1573,6 +1576,7 @@ mod tests {
             fn init() {}
             "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_node_env().returning(Default::default);
         babel
             .expect_run_sh()
             .with(predicate::eq("echo pre_upload_cmd"), predicate::eq(None))
@@ -1761,16 +1765,7 @@ mod tests {
         babel.expect_node_env().returning(|| NodeEnv {
             node_id: "node-id".to_string(),
             node_name: "node name".to_string(),
-            node_version: "".to_string(),
-            node_protocol: "".to_string(),
-            node_variant: "".to_string(),
-            node_ip: "".to_string(),
-            node_gateway: "".to_string(),
-            dev_mode: false,
-            bv_host_id: "".to_string(),
-            bv_host_name: "".to_string(),
-            bv_api_url: "".to_string(),
-            org_id: "".to_string(),
+            ..Default::default()
         });
         babel
             .expect_render_template()
@@ -1989,6 +1984,7 @@ mod tests {
             }
         "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_node_env().returning(Default::default);
         babel
             .expect_load_data()
             .return_once(|| bail!("some Rust error"));
