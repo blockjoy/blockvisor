@@ -47,7 +47,6 @@ ci-setup: bundle-base
 	/tmp/bundle/installer
 	docker build -t test_v1 bv/tests/image_v1
 	docker build -t test_v2 bv/tests/image_v2
-	nib config test-token
 	systemctl start blockvisor.service
 
 ci-cleanup:

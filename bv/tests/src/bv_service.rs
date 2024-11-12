@@ -146,7 +146,13 @@ async fn test_bv_service_e2e() {
     let host_id = config.id.clone();
     println!("got host id: {host_id}");
 
-    test_env::nib_run(&["config", &api_key, "--api", url], "", None);
+    blockvisord::nib_config::Config {
+        token: api_key,
+        blockjoy_api_url: url.to_string(),
+    }
+    .save()
+    .await
+    .unwrap();
 
     println!("start blockvisor");
     test_env::bv_run(&["start"], "blockvisor service started successfully", None);
