@@ -111,7 +111,7 @@ pub async fn new(
             bv_context,
             node_state,
             PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
-            if node_state.image.uri.starts_with("legacy::") {
+            if node_state.image.uri.starts_with("legacy://") {
                 // LEGACY node support - remove once all nodes upgraded
                 PathBuf::from_str(BLOCKCHAIN_DATA_PATH)?
             } else {
@@ -430,7 +430,7 @@ impl pal::VirtualMachine for ApptainerMachine {
     }
 
     async fn upgrade(&mut self, node_state: &NodeState) -> Result<()> {
-        // TODO MJR implement backup and recovery
+        // TODO implement backup and recovery
         if self.is_container_running().await {
             bail!("can't upgrade running vm")
         }

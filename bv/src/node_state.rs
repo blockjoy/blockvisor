@@ -35,10 +35,10 @@ impl fmt::Display for VmStatus {
 pub struct NodeImage {
     pub id: String,
     pub version: String,
-    pub config_id: String, // TODO MJR 00000000-0000-0000-0000-000000000000 for legacy nodes
+    pub config_id: String,
     pub archive_id: String,
     pub store_id: String,
-    pub uri: String, // TODO MJR encode legacy info here
+    pub uri: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -54,7 +54,7 @@ pub struct NodeInfo {
     pub dev_mode: bool,
 }
 
-// NodeData that we store in state file
+/// Node state data that we store in state file
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct NodeState {
     // static properties
@@ -68,7 +68,7 @@ pub struct NodeState {
     pub gateway: IpAddr,
 
     // dynamic
-    pub properties: NodeProperties, // TODO MJR add NETWORK property for legacy nodes
+    pub properties: NodeProperties,
     pub firewall: firewall::Config,
 
     // dynamic-description
@@ -91,7 +91,6 @@ pub struct NodeState {
     pub initialized: bool,
     pub restarting: bool,
     pub apptainer_config: Option<ApptainerConfig>,
-    // TODO MJR handle legacy state
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -119,11 +118,16 @@ impl NodeState {
         info!("Reading node state file: {}", path.display());
         fs::read_to_string(&path)
             .await
-            .and_then(|s| match serde_json::from_str::<Self>(&s) {
-                Ok(r) => Ok(r),
+            .and_then(|content| match serde_json::from_str::<Self>(&content) {
+                Ok(state) => Ok(state),
                 Err(err) => {
-                    error!("{err:#}");
-                    Err(err.into())
+                    // LEGACY node support - remove once all nodes upgraded
+                    if let Ok(legacy_state) = serde_json::from_str::<LegacyState>(&content) {
+                        Ok(legacy_state.into())
+                    } else {
+                        error!("{err:#}");
+                        Err(err.into())
+                    }
                 }
             })
             .with_context(|| format!("Failed to read node state file `{}`", path.display()))
@@ -137,5 +141,106 @@ impl NodeState {
         let config = serde_json::to_string(self)?;
         fs::write(&path, &*config).await?;
         Ok(())
+    }
+}
+
+// LEGACY node support - remove once all nodes upgraded
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+struct LegacyState {
+    id: Uuid,
+    name: String,
+    expected_status: VmStatus,
+    #[serde(default, with = "ts_seconds_option")]
+    started_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    initialized: bool,
+    image: LegacyImage,
+    network_interface: NetInterface,
+    #[serde(default)]
+    assigned_cpus: Vec<usize>,
+    requirements: Requirements,
+    firewall_rules: Vec<firewall::Rule>,
+    #[serde(default)]
+    properties: NodeProperties,
+    network: String,
+    #[serde(default)]
+    dev_mode: bool,
+    #[serde(default)]
+    restarting: bool,
+    #[serde(default)]
+    org_id: String,
+    apptainer_config: Option<ApptainerConfig>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+struct NetInterface {
+    ip: IpAddr,
+    gateway: IpAddr,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct Requirements {
+    vcpu_count: usize,
+    mem_size_mb: u64,
+    disk_size_gb: u64,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+struct LegacyImage {
+    protocol: String,
+    node_type: String,
+    node_version: String,
+}
+
+impl From<LegacyState> for NodeState {
+    fn from(value: LegacyState) -> Self {
+        Self {
+            id: value.id,
+            name: value.name.clone(),
+            protocol_id: value.image.protocol.clone(),
+            image_key: ProtocolImageKey {
+                protocol_key: value.image.protocol.clone(),
+                variant_key: value.image.node_type.clone(),
+            },
+            dev_mode: value.dev_mode,
+            ip: value.network_interface.ip,
+            gateway: value.network_interface.gateway,
+            properties: value.properties,
+            firewall: Default::default(), // no need to convert, since it won't be applied anyway
+            display_name: value.name.clone(),
+            org_id: value.org_id.clone(),
+            org_name: value.org_id,
+            protocol_name: value.image.protocol.clone(),
+            dns_name: value.name,
+            vm_config: VmConfig {
+                vcpu_count: value.requirements.vcpu_count,
+                mem_size_mb: value.requirements.mem_size_mb,
+                disk_size_gb: value.requirements.disk_size_gb,
+                ramdisks: vec![], // not used, so no need to convert
+            },
+            image: NodeImage {
+                id: "00000000-0000-0000-0000-000000000000".to_string(),
+                version: value.image.node_version.clone(),
+                config_id: "00000000-0000-0000-0000-000000000000".to_string(),
+                archive_id: "00000000-0000-0000-0000-000000000000".to_string(),
+                store_id: format!(
+                    "legacy://{}/{}/{}/{}",
+                    value.image.protocol,
+                    value.image.node_type,
+                    value.image.node_version,
+                    value.network
+                ),
+                uri: format!(
+                    "legacy://{}/{}/{}",
+                    value.image.protocol, value.image.node_type, value.image.node_version,
+                ),
+            },
+            assigned_cpus: value.assigned_cpus,
+            expected_status: value.expected_status,
+            started_at: value.started_at,
+            initialized: value.initialized,
+            restarting: value.restarting,
+            apptainer_config: value.apptainer_config,
+        }
     }
 }

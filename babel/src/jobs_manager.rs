@@ -90,8 +90,6 @@ async fn load_jobs(
         "Loading jobs list from {} ...",
         jobs_context.jobs_dir.display()
     );
-    // TODO MJR load jobs also from legacy directories
-    // TODO MJR keep logs config, status and progress paths in Job structure
     let mut dir = fs::read_dir(&jobs_context.jobs_dir)
         .await
         .with_context(|| {
@@ -126,6 +124,9 @@ async fn load_jobs(
         let Some(name) = job_name(&job_dir) else {
             continue;
         };
+        // TODO MJR load jobs also from legacy directories
+        // TODO MJR keep logs config, status and progress paths in Job structure
+
         match jobs::load_config(&job_dir) {
             Ok(config) => {
                 let state = if let Some((pid, _)) =

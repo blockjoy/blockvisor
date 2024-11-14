@@ -188,6 +188,14 @@ impl<P: Pal + Debug> Node<P> {
             } else if let Err(err) = check_job_runner(&mut node_conn, pal.job_runner_path()).await {
                 warn!("failed to check/update job runner on running node {node_id}: {err:#}");
                 node_conn.close();
+            } else if state.image.uri.starts_with("legacy://") {
+                // LEGACY node support - remove once all nodes upgraded
+                let babel_client = node_conn.babel_client().await?;
+                let babel_config = BabelConfig {
+                    node_env: node_env.clone(),
+                    ramdisks: state.vm_config.ramdisks.clone(),
+                };
+                with_retry!(babel_client.setup_babel(babel_config.clone()))?;
             }
         }
         let mut babel_engine = BabelEngine::new(
