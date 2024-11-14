@@ -46,7 +46,9 @@ pub enum JobState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Job {
-    pub job_dir: PathBuf,
+    pub config_path: PathBuf,
+    pub status_path: PathBuf,
+    pub progress_path: PathBuf,
     pub config: JobConfig,
     pub state: JobState,
     pub logs: Vec<(DateTime<Local>, String)>,
@@ -56,7 +58,9 @@ pub struct Job {
 impl Job {
     pub fn new(job_dir: PathBuf, config: JobConfig, state: JobState) -> Self {
         Self {
-            job_dir,
+            config_path: job_dir.join(CONFIG_FILENAME),
+            status_path: job_dir.join(STATUS_FILENAME),
+            progress_path: job_dir.join(PROGRESS_FILENAME),
             config,
             state,
             logs: Default::default(),
@@ -95,13 +99,12 @@ impl Job {
     }
 
     pub fn save_config(&self) -> Result<()> {
-        save_config(&self.config, &self.job_dir)
+        save_config_file(&self.config, &self.config_path)
     }
 
     pub fn clear_status(&self) -> Result<()> {
-        let path = self.job_dir.join(STATUS_FILENAME);
-        if path.exists() {
-            fs::remove_file(path)?;
+        if self.status_path.exists() {
+            fs::remove_file(&self.status_path)?;
         }
         Ok(())
     }
@@ -112,18 +115,18 @@ impl Job {
             JobState::Inactive(status) => match status {
                 JobStatus::Pending { .. } | JobStatus::Running => self.clear_status(),
                 JobStatus::Finished { .. } | JobStatus::Stopped => {
-                    save_status(status, &self.job_dir)
+                    save_status_file(status, &self.status_path)
                 }
             },
         }
     }
 
     pub fn load_status(&self) -> Result<JobStatus> {
-        load_status(&self.job_dir)
+        load_status_file(&self.status_path)
     }
 
     pub fn load_progress(&self) -> Option<JobProgress> {
-        load_job_data(&self.job_dir.join(PROGRESS_FILENAME)).ok()
+        load_job_data(&self.progress_path).ok()
     }
 
     pub fn cleanup(&self, node_env: &NodeEnv) -> Result<()> {
@@ -148,34 +151,46 @@ pub fn save_job_data<T: Serialize>(file_path: &Path, data: &T) -> eyre::Result<(
 }
 
 pub fn load_config(job_dir: &Path) -> Result<JobConfig> {
-    let path = job_dir.join(CONFIG_FILENAME);
+    load_config_file(&job_dir.join(CONFIG_FILENAME))
+}
+
+fn load_config_file(path: &Path) -> Result<JobConfig> {
     info!("Reading job config file: {}", path.display());
-    fs::read_to_string(&path)
+    fs::read_to_string(path)
         .and_then(|s| serde_json::from_str::<JobConfig>(&s).map_err(Into::into))
         .with_context(|| format!("failed to read job config file `{}`", path.display()))
 }
 
 pub fn save_config(config: &JobConfig, job_dir: &Path) -> Result<()> {
-    let path = job_dir.join(CONFIG_FILENAME);
+    save_config_file(config, &job_dir.join(CONFIG_FILENAME))
+}
+
+pub fn save_config_file(config: &JobConfig, path: &Path) -> Result<()> {
     info!("Writing job config: {}", path.display());
     let config = serde_json::to_string(config)?;
-    fs::write(&path, config)?;
+    fs::write(path, config)?;
     Ok(())
 }
 
 pub fn load_status(job_dir: &Path) -> Result<JobStatus> {
-    let path = job_dir.join(STATUS_FILENAME);
+    load_status_file(&job_dir.join(STATUS_FILENAME))
+}
+
+pub fn load_status_file(path: &Path) -> Result<JobStatus> {
     info!("Reading job status file: {}", path.display());
-    fs::read_to_string(&path)
+    fs::read_to_string(path)
         .and_then(|s| serde_json::from_str::<JobStatus>(&s).map_err(Into::into))
         .with_context(|| format!("Failed to read job status file `{}`", path.display()))
 }
 
 pub fn save_status(status: &JobStatus, job_dir: &Path) -> Result<()> {
-    let path = job_dir.join(STATUS_FILENAME);
+    save_status_file(status, &job_dir.join(STATUS_FILENAME))
+}
+
+pub fn save_status_file(status: &JobStatus, path: &Path) -> Result<()> {
     info!("Writing job status: {}", path.display());
     let status = serde_json::to_string(status)?;
-    fs::write(&path, &status).with_context(|| {
+    fs::write(path, &status).with_context(|| {
         format!(
             "failed to save job status {status:?} to: {}",
             path.display(),

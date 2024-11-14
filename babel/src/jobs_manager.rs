@@ -21,6 +21,7 @@ use bv_utils::{
 };
 use eyre::{bail, Context, ContextCompat, Report, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
+use std::ffi::OsStr;
 use std::{collections::HashMap, path::Path, path::PathBuf, sync::Arc, time::Duration};
 use sysinfo::{Pid, PidExt, Process, System, SystemExt};
 use tokio::{
@@ -90,14 +91,6 @@ async fn load_jobs(
         "Loading jobs list from {} ...",
         jobs_context.jobs_dir.display()
     );
-    let mut dir = fs::read_dir(&jobs_context.jobs_dir)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to read jobs from dir {}",
-                jobs_context.jobs_dir.display()
-            )
-        })?;
     let job_name = |path: &Path| {
         if path.is_dir() {
             let config_path = path.join(jobs::CONFIG_FILENAME);
@@ -115,6 +108,14 @@ async fn load_jobs(
     let mut sys = System::new();
     sys.refresh_processes();
     let ps = sys.processes();
+    let mut dir = fs::read_dir(&jobs_context.jobs_dir)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to read jobs from dir {}",
+                jobs_context.jobs_dir.display()
+            )
+        })?;
     while let Some(entry) = dir
         .next_entry()
         .await
@@ -124,19 +125,14 @@ async fn load_jobs(
         let Some(name) = job_name(&job_dir) else {
             continue;
         };
-        // TODO MJR load jobs also from legacy directories
-        // TODO MJR keep logs config, status and progress paths in Job structure
-
         match jobs::load_config(&job_dir) {
             Ok(config) => {
                 let state = if let Some((pid, _)) =
                     find_processes(job_runner_bin_path, &[&name], ps).next()
                 {
                     info!("{name} - Active(PID: {pid})");
-                    // TODO MJR let legacy node running, but add legacy metadata
                     JobState::Active(*pid)
                 } else {
-                    // TODO MJR job can be migrated to new version (move files)
                     let status = jobs::load_status(&job_dir).unwrap_or(JobStatus::Pending {
                         waiting_for: config.waiting_for(),
                     });
@@ -160,6 +156,100 @@ async fn load_jobs(
                 let _ = with_retry!(client.bv_error(err_msg.clone()));
 
                 let _ = fs::remove_file(job_dir.join(jobs::CONFIG_FILENAME)).await;
+            }
+        }
+    }
+    // LEGACY node support - remove once all nodes upgraded
+    let legacy_jobs_dir = jobs_context.jobs_dir.join("config");
+    if legacy_jobs_dir.exists() {
+        let mut dir = fs::read_dir(&legacy_jobs_dir).await.with_context(|| {
+            format!(
+                "failed to read legacy jobs from dir {}",
+                legacy_jobs_dir.display()
+            )
+        })?;
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .with_context(|| "failed to read legacy jobs registry entry")?
+        {
+            let path = entry.path();
+            if path.extension() != Some(OsStr::new("cfg")) {
+                continue;
+            }
+
+            if let Some(name) = path.file_stem() {
+                let name = name.to_string_lossy().to_string();
+                if jobs_context.jobs.contains_key(&name) {
+                    continue;
+                }
+                info!("Reading legacy job config file: {}", path.display());
+                let config = fs::read_to_string(&path)
+                    .await
+                    .and_then(|s| serde_json::from_str::<JobConfig>(&s).map_err(Into::into))
+                    .with_context(|| {
+                        format!("failed to read legacy job config file `{}`", path.display())
+                    });
+                match config {
+                    Ok(config) => {
+                        let job_dir = jobs_context.jobs_dir.join(&name);
+                        fs::create_dir(&job_dir).await?;
+                        let legacy_status_path = jobs_context
+                            .jobs_dir
+                            .join("status")
+                            .join(format!("{}.status", name));
+                        let legacy_progress_path = jobs_context
+                            .jobs_dir
+                            .join("status")
+                            .join(format!("{}.progress", name));
+                        let state = if let Some((pid, _)) =
+                            find_processes(job_runner_bin_path, &[&name], ps).next()
+                        {
+                            info!("{name} - Active(PID: {pid})");
+                            JobState::Active(*pid)
+                        } else {
+                            let status = fs::read_to_string(&legacy_status_path)
+                                .await
+                                .and_then(|s| {
+                                    serde_json::from_str::<JobStatus>(&s).map_err(Into::into)
+                                })
+                                .unwrap_or(JobStatus::Pending {
+                                    waiting_for: config.waiting_for(),
+                                });
+                            info!("{name} - Inactive(status: {status:?})");
+                            JobState::Inactive(status)
+                        };
+                        let mut job = Job {
+                            config_path: path,
+                            status_path: legacy_status_path,
+                            progress_path: legacy_progress_path,
+                            config,
+                            state: state.clone(),
+                            logs: Default::default(),
+                            restart_stamps: Default::default(),
+                        };
+                        if let JobState::Inactive(_) = state {
+                            if let Err(err) =
+                                migrate_job(&name, &mut job, &jobs_context.jobs_dir).await
+                            {
+                                error!("legacy job migration failed: {err:#}");
+                            }
+                        }
+                        jobs_context.jobs.insert(name.clone(), job);
+                    }
+                    Err(err) => {
+                        // invalid job config file log error, remove invalid file and go to next one
+                        let err_msg = format!(
+                            "invalid legacy job '{}' config file in {}, load failed with: {:#}",
+                            name,
+                            path.display(),
+                            err
+                        );
+                        error!(err_msg);
+                        let mut client = jobs_context.connector.connect();
+                        let _ = with_retry!(client.bv_error(err_msg.clone()));
+                    }
+                }
             }
         }
     }
@@ -567,6 +657,10 @@ impl<C: BabelEngineConnector> Manager<C> {
             } = job
             {
                 if !ps.keys().any(|pid| pid == job_pid) {
+                    // LEGACY node support - remove once all nodes upgraded
+                    if let Err(err) = migrate_job(name, job, &jobs_context.jobs_dir).await {
+                        error!("legacy job migration failed: {err:#}");
+                    }
                     self.handle_stopped_job(name, job, &jobs_context.connector)
                         .await;
                 }
@@ -639,7 +733,6 @@ impl<C: BabelEngineConnector> Manager<C> {
             }
             Ok(status) => status,
         };
-        // TODO MJR migrate job if it was legacy job
         match status {
             JobStatus::Finished { .. } | JobStatus::Stopped => {
                 info!("job '{name}' finished with {status:?}");
@@ -704,6 +797,27 @@ impl<C: BabelEngineConnector> Manager<C> {
             bail!("missing job runner binary");
         }
     }
+}
+
+// LEGACY node support - remove once all nodes upgraded
+async fn migrate_job(name: &str, job: &mut Job, jobs_dir: &Path) -> Result<()> {
+    if job.config_path.extension() == Some(OsStr::new("cfg")) {
+        let job_dir = jobs_dir.join(name);
+        let config_path = job_dir.join(jobs::CONFIG_FILENAME);
+        let status_path = job_dir.join(jobs::STATUS_FILENAME);
+        let progress_path = job_dir.join(jobs::PROGRESS_FILENAME);
+        fs::copy(&job.config_path, &config_path).await?;
+        if job.status_path.exists() {
+            fs::copy(&job.status_path, &status_path).await?;
+        }
+        if job.progress_path.exists() {
+            fs::copy(&job.progress_path, &progress_path).await?;
+        }
+        job.config_path = config_path;
+        job.status_path = status_path;
+        job.progress_path = progress_path;
+    }
+    Ok(())
 }
 
 fn deps_finished(

@@ -404,9 +404,9 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
             .with_context(|| format!("Rhai function '{name}' returned error"))
     }
 
-    // LEGACY node support - remove once all nodes upgraded
     fn build_scope(&self) -> rhai::Scope<'static> {
         let mut scope = rhai::Scope::new();
+        // LEGACY node support - remove once all nodes upgraded
         scope.push(
             "BLOCKCHAIN_DATA_PATH",
             self.bare.babel_engine.node_env().protocol_data_path,
