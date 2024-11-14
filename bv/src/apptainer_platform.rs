@@ -25,7 +25,7 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
-use tracing::debug;
+use tracing::{debug, error};
 use uuid::Uuid;
 
 const ENGINE_SOCKET_NAME: &str = "engine.socket";
@@ -86,19 +86,37 @@ impl ApptainerPlatform {
         bv_context: &BvContext,
         node_state: &NodeState,
     ) -> Result<ApptainerMachine> {
-        apptainer_machine::new(
-            &self.bv_root,
-            self.bridge_ip,
-            self.mask_bits,
-            bv_context,
-            node_state,
-            self.babel_path.clone(),
-            node_state
-                .apptainer_config
-                .clone()
-                .unwrap_or(self.config.clone()),
-        )
-        .await
+        // LEGACY node support - remove once all nodes upgraded
+        if node_state.image.uri.starts_with("legacy://") {
+            apptainer_machine::new_legacy(
+                &self.bv_root,
+                self.bridge_ip,
+                self.mask_bits,
+                bv_context,
+                node_state,
+                self.babel_path.clone(),
+                node_state
+                    .apptainer_config
+                    .clone()
+                    .unwrap_or(self.config.clone()),
+            )
+            .await
+            .inspect_err(|err| error!("legacy node load failed: {err:#}"))
+        } else {
+            apptainer_machine::new(
+                &self.bv_root,
+                self.bridge_ip,
+                self.mask_bits,
+                bv_context,
+                node_state,
+                self.babel_path.clone(),
+                node_state
+                    .apptainer_config
+                    .clone()
+                    .unwrap_or(self.config.clone()),
+            )
+            .await
+        }
     }
 }
 

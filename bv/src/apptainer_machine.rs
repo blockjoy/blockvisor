@@ -12,6 +12,7 @@ use babel_api::engine::{NodeEnv, PosixSignal};
 use bv_utils::{
     cmd::run_cmd,
     system::{gracefully_terminate_process, is_process_running, kill_all_processes},
+    with_retry,
 };
 use eyre::{anyhow, bail, Context, Result};
 use std::{
@@ -26,7 +27,6 @@ use sysinfo::{Pid, PidExt};
 use tokio::{fs, process::Command};
 use tracing::log::warn;
 use tracing::{debug, error};
-use uuid::Uuid;
 
 pub const DATA_DIR: &str = "data";
 pub const ROOTFS_DIR: &str = "rootfs";
@@ -42,8 +42,6 @@ const APPTAINER_BIN_NAME: &str = "apptainer";
 const BABEL_VAR_PATH: &str = "var/lib/babel";
 const DATA_DRIVE_MOUNT_POINT: &str = "/blockjoy";
 const PROTOCOL_DATA_PATH: &str = "/blockjoy/protocol_data";
-// LEGACY node support - remove once all nodes upgraded
-const BLOCKCHAIN_DATA_PATH: &str = "/blockjoy/blockchain_data";
 
 pub fn build_rootfs_dir(node_dir: &Path) -> PathBuf {
     node_dir.join(ROOTFS_DIR)
@@ -60,7 +58,7 @@ pub struct ApptainerMachine {
     babel_pid: Option<Pid>,
     data_dir: PathBuf,
     image_uri: String,
-    vm_id: Uuid,
+    vm_id: String,
     vm_name: String,
     ip: IpAddr,
     mask_bits: u8,
@@ -85,10 +83,9 @@ pub async fn new(
     let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
     let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
     let data_dir = node_dir.join(DATA_DIR);
-    fs::create_dir_all(&data_dir).await?;
-    // TODO MJR merge and copy rhai into plugin dir
-    // TODO MJR create dummy .singularity.d/Singularity file
-    // TODO MJR set vm_id to vm_name for legacy nodes, to keep container id backward compatibility
+    if !data_dir.exists() {
+        fs::create_dir_all(&data_dir).await?;
+    }
     Ok(ApptainerMachine {
         node_dir,
         babel_path,
@@ -99,7 +96,7 @@ pub async fn new(
         babel_pid: None,
         data_dir,
         image_uri: node_state.image.uri.clone(),
-        vm_id: node_state.id,
+        vm_id: node_state.id.to_string(),
         vm_name: node_state.name.clone(),
         ip: node_state.ip,
         mask_bits,
@@ -111,12 +108,77 @@ pub async fn new(
             bv_context,
             node_state,
             PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
-            if node_state.image.uri.starts_with("legacy://") {
-                // LEGACY node support - remove once all nodes upgraded
-                PathBuf::from_str(BLOCKCHAIN_DATA_PATH)?
-            } else {
-                PathBuf::from_str(PROTOCOL_DATA_PATH)?
-            },
+            PathBuf::from_str(PROTOCOL_DATA_PATH)?,
+        ),
+    })
+}
+
+// LEGACY node support - remove once all nodes upgraded
+pub async fn new_legacy(
+    bv_root: &Path,
+    gateway: IpAddr,
+    mask_bits: u8,
+    bv_context: &BvContext,
+    node_state: &NodeState,
+    babel_path: PathBuf,
+    config: ApptainerConfig,
+) -> Result<ApptainerMachine> {
+    let node_dir = node_context::build_node_dir(bv_root, node_state.id);
+    let chroot_dir = build_rootfs_dir(&node_dir);
+    let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
+    let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
+    let data_dir = node_dir.join(DATA_DIR);
+    if !data_dir.exists() {
+        fs::create_dir_all(&data_dir).await?;
+    }
+    // migrate plugin script
+    let mut script = fs::read_to_string(node_dir.join("babel.rhai"))
+        .await
+        .with_context(|| "failed to load legacy script")?;
+    let base_config_path = chroot_dir.join("var/lib/babel/base.rhai");
+    if base_config_path.exists() {
+        script.push_str(&fs::read_to_string(base_config_path).await?);
+    }
+    let plugin_dir = chroot_dir.join(PLUGIN_PATH);
+    if !plugin_dir.exists() {
+        fs::create_dir_all(&plugin_dir).await?;
+    }
+    fs::write(plugin_dir.join(PLUGIN_MAIN_FILENAME), script)
+        .await
+        .with_context(|| "failed to migrate legacy plugin script")?;
+    // emulate singularity image
+    let singularity_dir = chroot_dir.join(".singularity.d");
+    if !singularity_dir.exists() {
+        fs::create_dir_all(&singularity_dir).await?;
+        fs::write(
+            singularity_dir.join("Singularity"),
+            format!("bootstrap: rootfs\nfrom: {}\n", node_state.image.uri),
+        )
+        .await?;
+    }
+    Ok(ApptainerMachine {
+        node_dir,
+        babel_path,
+        chroot_dir,
+        cgroups_path,
+        apptainer_pid_path,
+        apptainer_pid: None,
+        babel_pid: None,
+        data_dir,
+        image_uri: node_state.image.uri.clone(),
+        vm_id: node_state.name.clone(), // set vm_id to vm_name, to keep container id backward compatibility
+        vm_name: node_state.name.clone(),
+        ip: node_state.ip,
+        mask_bits,
+        gateway,
+        vm_config: node_state.vm_config.clone(),
+        cpus: node_state.assigned_cpus.clone(),
+        config,
+        node_env: node_env::new(
+            bv_context,
+            node_state,
+            PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
+            PathBuf::from_str("/blockjoy/blockchain_data")?, // old data location
         ),
     })
 }
@@ -195,7 +257,7 @@ impl ApptainerMachine {
             let json: serde_json::Value = serde_json::from_str(
                 &run_cmd(
                     APPTAINER_BIN_NAME,
-                    ["instance", "list", "--json", &self.vm_id.to_string()],
+                    ["instance", "list", "--json", &self.vm_id],
                 )
                 .await?,
             )?;
@@ -224,12 +286,11 @@ impl ApptainerMachine {
     }
 
     async fn stop_container(&mut self) -> Result<()> {
-        let vm_id = self.vm_id.to_string();
         if self.is_container_running().await {
-            if let Err(err) = run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &vm_id]).await {
-                if run_cmd(APPTAINER_BIN_NAME, ["instance", "list", &vm_id])
+            if let Err(err) = run_cmd(APPTAINER_BIN_NAME, ["instance", "stop", &self.vm_id]).await {
+                if run_cmd(APPTAINER_BIN_NAME, ["instance", "list", &self.vm_id])
                     .await?
-                    .contains(&vm_id)
+                    .contains(&self.vm_id)
                 {
                     return Err(err.into());
                 } else {
@@ -246,7 +307,6 @@ impl ApptainerMachine {
 
     async fn start_container(&mut self) -> Result<()> {
         if !self.is_container_running().await {
-            let vm_id = self.vm_id.to_string();
             let hostname = self.vm_name.replace('_', "-");
             let chroot_path = self.chroot_dir.to_string_lossy();
             let cgroups_path = self.cgroups_path.to_string_lossy();
@@ -286,7 +346,7 @@ impl ApptainerMachine {
                 args.append(&mut extra_args.iter().map(|i| i.as_str()).collect());
             }
             args.push(&chroot_path);
-            args.push(&vm_id);
+            args.push(&self.vm_id);
             run_cmd(APPTAINER_BIN_NAME, args).await?;
             self.load_apptainer_pid().await?;
         }
@@ -356,6 +416,28 @@ impl ApptainerMachine {
         self.babel_pid = cmd.spawn()?.id().map(Pid::from_u32);
         if self.babel_pid.is_none() {
             bail!("failed to start babel for {}", self.vm_id)
+        }
+        Ok(())
+    }
+
+    // LEGACY node support - remove once all nodes upgraded
+    async fn umount_all(&mut self) -> Result<()> {
+        let chroot_dir = self.chroot_dir.to_string_lossy();
+        let chroot_dir = chroot_dir.trim_end_matches('/');
+        let mount_points = run_cmd("df", ["--all", "--output=target"])
+            .await
+            .map_err(|err| anyhow!("can't check if root fs is mounted, df: {err:#}"))?;
+        let mut mount_points = mount_points
+            .split_whitespace()
+            .filter(|mount_point| mount_point.starts_with(chroot_dir))
+            .collect::<Vec<_>>();
+        mount_points.sort_by_key(|k| std::cmp::Reverse(k.len()));
+        if !mount_points.is_empty() {
+            let _ = run_cmd("fuser", ["-km", chroot_dir]).await;
+            for mount_point in mount_points {
+                with_retry!(run_cmd("umount", [mount_point]), 2, 1000)
+                    .map_err(|err| anyhow!("failed to umount {mount_point}: {err:#}"))?;
+            }
         }
         Ok(())
     }
@@ -434,7 +516,21 @@ impl pal::VirtualMachine for ApptainerMachine {
         if self.is_container_running().await {
             bail!("can't upgrade running vm")
         }
-        // TODO MJR migrate legacy blockchain_data dir (rename)
+        // LEGACY node support - remove once all nodes upgraded
+        if self.image_uri.starts_with("legacy://") {
+            self.umount_all().await?;
+        }
+        let desired_protocol_data_path = PathBuf::from_str(PROTOCOL_DATA_PATH)?;
+        if self.node_env.protocol_data_path != desired_protocol_data_path {
+            fs::rename(
+                &self.node_env.protocol_data_path,
+                &desired_protocol_data_path,
+            )
+            .await
+            .inspect_err(|err| error!("legacy node migration failed: {err:#}"))?;
+            self.node_env.protocol_data_path = desired_protocol_data_path;
+        }
+
         fs::remove_dir_all(&self.chroot_dir).await?;
         fs::create_dir_all(&self.chroot_dir).await?;
         self.image_uri = node_state.image.uri.clone();

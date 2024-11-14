@@ -67,7 +67,6 @@ pub struct NodeInfo {
 #[derive(Debug)]
 pub struct BabelEngine<N, P> {
     node_info: NodeInfo,
-    node_env: NodeEnv,
     pub node_connection: N,
     api_config: SharedConfig,
     plugin: P,
@@ -101,7 +100,6 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         let plugin = plugin_builder(engine)?;
         let mut babel_engine = Self {
             node_info,
-            node_env,
             node_connection,
             api_config,
             plugin,
@@ -142,12 +140,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     pub async fn update_plugin<F: FnOnce(Engine) -> Result<P>>(
         &mut self,
         plugin_builder: F,
+        node_env: NodeEnv,
     ) -> Result<()> {
         let engine = Engine {
             node_id: self.node_info.node_id,
             tx: self.engine_tx.clone(),
             params: self.node_info.properties.clone(),
-            node_env: self.node_env.clone(),
+            node_env,
             plugin_data_path: self.plugin_data_path.clone(),
         };
         self.plugin = plugin_builder(engine)?;

@@ -1276,6 +1276,7 @@ mod tests {
             .expect_plugin_path()
             .once()
             .returning(move || updated_plugin_path.clone());
+        vm_mock.expect_node_env().once().returning(Default::default);
         vm_mock
             .expect_state()
             .times(2)

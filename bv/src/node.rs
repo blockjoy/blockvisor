@@ -443,8 +443,13 @@ impl<P: Pal + Debug> Node<P> {
         }
         self.machine.upgrade(&desired_state).await?;
         let plugin_path = self.machine.plugin_path();
+        let node_env = self.machine.node_env();
+        self.node_env = node_env.clone();
         self.babel_engine
-            .update_plugin(|engine| RhaiPlugin::from_file(plugin_path, engine))
+            .update_plugin(
+                |engine| RhaiPlugin::from_file(plugin_path, engine),
+                node_env,
+            )
             .await?;
         self.pal
             .apply_firewall_config(NodeFirewallConfig {
@@ -483,11 +488,14 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn reload_plugin(&mut self) -> Result<()> {
         let plugin_path = self.machine.plugin_path();
         self.babel_engine
-            .update_plugin(|engine| {
-                let mut plugin = RhaiPlugin::from_file(plugin_path, engine)?;
-                plugin.evaluate_plugin_config()?;
-                Ok(plugin)
-            })
+            .update_plugin(
+                |engine| {
+                    let mut plugin = RhaiPlugin::from_file(plugin_path, engine)?;
+                    plugin.evaluate_plugin_config()?;
+                    Ok(plugin)
+                },
+                self.node_env.clone(),
+            )
             .await
     }
 
