@@ -5,10 +5,12 @@ on:
     branches:
       - "main"
       - "master"
+      - "legacy"
   pull_request:
     branches:
       - "main"
       - "master"
+      - "legacy"
 
 env:
   RUST_LOG: trace
