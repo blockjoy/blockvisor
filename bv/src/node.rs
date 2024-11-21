@@ -267,6 +267,10 @@ impl<P: Pal + Debug> Node<P> {
         self.state.expected_status
     }
 
+    pub async fn save_state(&self) -> Result<()> {
+        self.state.save(&self.context.nodes_dir).await
+    }
+
     /// Starts the node.
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
@@ -308,7 +312,7 @@ impl<P: Pal + Debug> Node<P> {
         }
         self.state.started_at = Some(Utc::now());
         self.state.restarting = false;
-        self.state.save(&self.context.nodes_dir).await?;
+        self.save_state().await?;
         debug!("Node started");
         Ok(())
     }
@@ -329,7 +333,7 @@ impl<P: Pal + Debug> Node<P> {
         }
         self.babel_engine.node_connection.close();
         self.state.started_at = None;
-        self.state.save(&self.context.nodes_dir).await?;
+        self.save_state().await?;
         match self.machine.state().await {
             pal::VmState::SHUTOFF => {}
             pal::VmState::RUNNING | pal::VmState::INVALID => {
@@ -411,7 +415,7 @@ impl<P: Pal + Debug> Node<P> {
             if res.is_err() {
                 self.state.expected_status = VmStatus::Failed;
             }
-            self.state.save(&self.context.nodes_dir).await?;
+            self.save_state().await?;
             res?
         }
         Ok(())
@@ -474,7 +478,7 @@ impl<P: Pal + Debug> Node<P> {
         self.state.display_name = desired_state.display_name;
         self.state.dns_name = desired_state.dns_name;
         self.state.initialized = false;
-        self.state.save(&self.context.nodes_dir).await?;
+        self.save_state().await?;
 
         if need_to_restart {
             self.start().await?;
@@ -558,7 +562,7 @@ impl<P: Pal + Debug> Node<P> {
 
     async fn save_expected_status(&mut self, status: VmStatus) -> Result<()> {
         self.state.expected_status = status;
-        self.state.save(&self.context.nodes_dir).await
+        self.save_state().await
     }
 
     async fn started_node_recovery(&mut self) -> Result<()> {

@@ -206,7 +206,7 @@ impl From<LegacyState> for NodeState {
             ip: value.network_interface.ip,
             gateway: value.network_interface.gateway,
             properties: value.properties,
-            firewall: Default::default(), // no need to convert, since it won't be applied anyway
+            firewall: Default::default(), // no need to convert, since it won't be applied anyway (until upgrade)
             display_name: value.name.clone(),
             org_id: value.org_id.clone(),
             org_name: value.org_id,
@@ -224,15 +224,12 @@ impl From<LegacyState> for NodeState {
                 config_id: "00000000-0000-0000-0000-000000000000".to_string(),
                 archive_id: "00000000-0000-0000-0000-000000000000".to_string(),
                 store_id: format!(
-                    "legacy://{}/{}/{}/{}",
-                    value.image.protocol,
-                    value.image.node_type,
-                    value.image.node_version,
-                    value.network
+                    "legacy-{}-{}-{}",
+                    value.image.protocol, value.image.node_type, value.network
                 ),
                 uri: format!(
                     "legacy://{}/{}/{}",
-                    value.image.protocol, value.image.node_type, value.image.node_version,
+                    value.image.protocol, value.image.node_type, value.network,
                 ),
             },
             assigned_cpus: value.assigned_cpus,

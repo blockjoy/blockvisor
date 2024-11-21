@@ -300,11 +300,11 @@ where
                 API_RESTART_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
             Command::Upgrade(args) => {
-                let node_config: NodeState = args
+                let desired_state: NodeState = args
                     .node
                     .ok_or_else(|| anyhow!("Missing node details"))?
                     .try_into()?;
-                nodes_manager.upgrade(node_config).await?;
+                nodes_manager.upgrade(desired_state).await?;
                 API_UPGRADE_COUNTER.increment(1);
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }

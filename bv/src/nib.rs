@@ -12,10 +12,15 @@ use babel_api::{engine::NodeEnv, rhai_plugin_linter, utils::RamdiskConfiguration
 use bv_utils::cmd::run_cmd;
 use eyre::{anyhow, bail};
 use petname::Petnames;
-use std::path::PathBuf;
 use std::{
     ffi::OsStr,
-    {net::IpAddr, path::Path, str::FromStr, time::Duration},
+    {
+        collections::HashMap,
+        net::IpAddr,
+        path::{Path, PathBuf},
+        str::FromStr,
+        time::Duration,
+    },
 };
 use tokio::fs;
 use tonic::transport::Endpoint;
@@ -31,6 +36,53 @@ pub async fn process_image_command(
     command: ImageCommand,
 ) -> eyre::Result<()> {
     match command {
+        ImageCommand::GenerateMapping => {
+            let mut dir = tokio::fs::read_dir(std::env::current_dir()?).await?;
+            let mut mapping: HashMap<String, (String, ProtocolImageKey)> = Default::default();
+            while let Some(entry) = dir.next_entry().await? {
+                let path = entry.path().join("babel.yaml");
+                if path.exists() {
+                    if let Ok(image) =
+                        serde_yaml::from_str::<nib_meta::Image>(&fs::read_to_string(path).await?)
+                    {
+                        let protocol_key = image.protocol_key;
+                        for variant in image.variants {
+                            let variant_key = variant.key;
+                            for pointer in variant.archive_pointers {
+                                let nib_meta::StorePointer::StoreId(store_id) = pointer.pointer
+                                else {
+                                    continue;
+                                };
+                                let Some(legacy_store_id) = pointer.legacy_store_id else {
+                                    continue;
+                                };
+                                if let Some((
+                                    _,
+                                    ProtocolImageKey {
+                                        protocol_key: first_protocol_key,
+                                        variant_key: first_variant_key,
+                                    },
+                                )) = mapping.get(&legacy_store_id)
+                                {
+                                    bail!("legacy_store_id '{legacy_store_id}' defined twice: first for {first_protocol_key}/{first_variant_key}, then for {protocol_key}/{variant_key}");
+                                }
+                                mapping.insert(
+                                    legacy_store_id,
+                                    (
+                                        store_id,
+                                        ProtocolImageKey {
+                                            protocol_key: protocol_key.clone(),
+                                            variant_key: variant_key.clone(),
+                                        },
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            println!("{}", serde_json::to_string(&mapping)?);
+        }
         ImageCommand::Create { protocol, variant } => {
             let params = [
                 ("protocol_key", protocol.as_str()),

@@ -37,6 +37,12 @@ variants:
           # `store_id` can be also reused if some image variants (even from different protocols) can use the same data archives.
           # `store_id` is required to be lower-kebab-case.
           {{protocol_key}}-{{variant_key}}-v1
+        ## LEGACY node support - remove once all nodes upgraded
+        # Store id of legacy nodes that are allowed to be upgraded to this image variant in following format:
+        # legacy-<legacy_protocol_name>-<legacy_node_type>-<legacy_network_name>
+        # Must be specified manually.
+        # E.g. legacy-ethereum-reth-node-main
+        legacy_store_id: legacy-legacy_protocol_name-legacy_node_type-legacy_network_name
       - pointer: !store_id {{protocol_key}}-{{variant_key}}-v1-switch-property-on-value
         # Combination of properties (with new_archive flag true).
         # Typically, properties doesn't affect data set and there is only one `store_id`, but

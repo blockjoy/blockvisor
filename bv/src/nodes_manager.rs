@@ -6,7 +6,7 @@ use crate::{
     node::Node,
     node_context::{build_nodes_dir, NODES_DIR},
     node_metrics,
-    node_state::{NodeImage, NodeProperties, NodeState, VmConfig, VmStatus, NODE_STATE_FILENAME},
+    node_state::{NodeProperties, NodeState, VmConfig, VmStatus, NODE_STATE_FILENAME},
     pal::Pal,
     scheduler,
     scheduler::{Action, Scheduled, Scheduler},
@@ -311,18 +311,6 @@ where
             let node = read_node.state.clone();
             drop(read_node);
 
-            if desired_state.image_key.protocol_key != node.image_key.protocol_key {
-                command_failed!(Error::Internal(anyhow!(
-                    "Cannot upgrade protocol to `{}`",
-                    desired_state.image_key.protocol_key
-                )));
-            }
-            if desired_state.image_key.variant_key != node.image_key.variant_key {
-                command_failed!(Error::Internal(anyhow!(
-                    "Cannot upgrade protocol variant to `{}`",
-                    desired_state.image_key.variant_key
-                )));
-            }
             if desired_state.image.store_id != node.image.store_id {
                 command_failed!(Error::Internal(anyhow!(
                     "Cannot upgrade node to version that uses different data set: `{}`",
@@ -705,19 +693,6 @@ where
             )));
         }
         Ok(())
-    }
-
-    #[instrument(skip(self))]
-    async fn image(&self, id: Uuid) -> commands::Result<NodeImage> {
-        let nodes_lock = self.nodes.read().await;
-        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound(id))?;
-        Ok(match maybe_node {
-            MaybeNode::Node(node_lock) => {
-                let node = node_lock.read().await;
-                node.state.image.clone()
-            }
-            MaybeNode::BrokenNode(state) => state.image.clone(),
-        })
     }
 
     pub async fn node_state_cache(&self, id: Uuid) -> commands::Result<NodeState> {
@@ -1357,26 +1332,6 @@ mod tests {
             "BV internal error: Not enough vcpu to allocate for the node",
             nodes
                 .upgrade(cpu_devourer_node_state.clone())
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-        let mut new_proto_node_state = new_state.clone();
-        new_proto_node_state.image_key.protocol_key = "different_protocol".to_string();
-        assert_eq!(
-            "BV internal error: Cannot upgrade protocol to `different_protocol`",
-            nodes
-                .upgrade(new_proto_node_state)
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-        let mut new_variant_node_state = new_state.clone();
-        new_variant_node_state.image_key.variant_key = "different_variant".to_string();
-        assert_eq!(
-            "BV internal error: Cannot upgrade protocol variant to `different_variant`",
-            nodes
-                .upgrade(new_variant_node_state)
                 .await
                 .unwrap_err()
                 .to_string()

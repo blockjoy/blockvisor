@@ -17,6 +17,7 @@ use babel_api::engine::JobsInfo;
 use eyre::{anyhow, bail, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use std::{fmt::Debug, sync::Arc};
 use tonic::{Request, Response, Status};
 use tracing::instrument;
@@ -39,6 +40,8 @@ pub struct CreateNodeRequest {
 
 #[tonic_rpc::tonic_rpc(bincode)]
 trait Service {
+    // LEGACY node support - remove once all nodes upgraded
+    fn fix_legacy_nodes(req: HashMap<String, (String, ProtocolImageKey)>) -> Vec<NodeDisplayInfo>;
     fn info() -> String;
     fn health() -> ServiceStatus;
     fn start_update() -> ServiceStatus;
@@ -91,6 +94,36 @@ where
     P::VirtualMachine: Send + Sync + 'static,
     P::RecoveryBackoff: Send + Sync + 'static,
 {
+    #[instrument(skip(self), ret(Debug))]
+    async fn fix_legacy_nodes(
+        &self,
+        request: Request<HashMap<String, (String, ProtocolImageKey)>>,
+    ) -> Result<Response<Vec<NodeDisplayInfo>>, Status> {
+        status_check().await?;
+        let mapping = request.into_inner();
+        let nodes_lock = self.nodes_manager.nodes_list().await;
+        let mut nodes = vec![];
+        for (_, node_lock) in nodes_lock.iter() {
+            if let MaybeNode::Node(node) = node_lock {
+                let mut node = node.write().await;
+                if let Some((new_store_id, new_image_key)) =
+                    mapping.get(&node.state.image.store_id).cloned()
+                {
+                    node.state.image.store_id = new_store_id;
+                    node.state.image_key = new_image_key;
+                    nodes.push(NodeDisplayInfo {
+                        state: node.state.clone(),
+                        status: VmStatus::Busy,
+                    });
+                    node.save_state().await.map_err(|err| {
+                        Status::internal(format!("failed to save node state: {err:#}"))
+                    })?;
+                }
+            }
+        }
+        Ok(Response::new(nodes))
+    }
+
     #[instrument(skip(self), ret(Debug))]
     async fn info(&self, _request: Request<()>) -> Result<Response<String>, Status> {
         let pal = ApptainerPlatform::default()

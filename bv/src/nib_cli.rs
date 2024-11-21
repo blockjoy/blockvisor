@@ -42,6 +42,11 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum ImageCommand {
+    // LEGACY node support - remove once all nodes upgraded
+    /// Generate legacy nodes image mapping. Search for all 'babel.yaml' files in subdirectories
+    /// and generate mapping based on 'legacy_store_id' found.
+    GenerateMapping,
+
     /// Create new image from scratch.
     Create {
         /// Associated protocol_key.

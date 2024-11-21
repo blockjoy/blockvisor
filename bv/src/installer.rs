@@ -546,7 +546,6 @@ mod tests {
     use std::sync::Arc;
     use std::thread::sleep;
     use std::time::Instant;
-    use tonic::Response;
     use uuid::Uuid;
 
     mock! {
@@ -554,6 +553,10 @@ mod tests {
 
         #[tonic::async_trait]
         impl internal_server::service_server::Service for TestBV {
+            async fn fix_legacy_nodes(
+                &self,
+                request: tonic::Request<std::collections::HashMap<String, (String, node_state::ProtocolImageKey)>>,
+            ) -> Result<tonic::Response<Vec<internal_server::NodeDisplayInfo>>, tonic::Status>;
             async fn info(
                 &self,
                 request: tonic::Request<()>,
@@ -735,7 +738,7 @@ mod tests {
         bv_mock
             .expect_start_update()
             .once()
-            .returning(|_| Ok(Response::new(ServiceStatus::Updating)));
+            .returning(|_| Ok(tonic::Response::new(ServiceStatus::Updating)));
         let mut timer_mock = MockTimer::new();
         timer_mock.expect_sleep().returning(|_| ());
         let now = Instant::now();
@@ -758,7 +761,7 @@ mod tests {
         let update_start_called_flag = update_start_called.clone();
         bv_mock.expect_start_update().once().returning(move |_| {
             update_start_called_flag.store(true, Relaxed);
-            Ok(Response::new(ServiceStatus::Ok))
+            Ok(tonic::Response::new(ServiceStatus::Ok))
         });
         let mut timer_mock = MockTimer::new();
         let now = Instant::now();
@@ -793,7 +796,7 @@ mod tests {
         bv_mock
             .expect_health()
             .times(2)
-            .returning(|_| Ok(Response::new(ServiceStatus::Ok)));
+            .returning(|_| Ok(tonic::Response::new(ServiceStatus::Ok)));
         let mut timer_mock = MockTimer::new();
         timer_mock.expect_now().returning(Instant::now);
         let server = test_env.start_test_server(bv_mock);
@@ -817,7 +820,7 @@ mod tests {
         let mut bv_mock = MockTestBV::new();
         bv_mock
             .expect_health()
-            .returning(|_| Ok(Response::new(ServiceStatus::Updating)));
+            .returning(|_| Ok(tonic::Response::new(ServiceStatus::Updating)));
         let mut timer_mock = MockTimer::new();
         let now = Instant::now();
         timer_mock.expect_now().once().returning(move || now);
