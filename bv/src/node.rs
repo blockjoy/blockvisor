@@ -431,14 +431,13 @@ impl<P: Pal + Debug> Node<P> {
         self.babel_engine.update_node_image(image.clone());
         self.state.image = image.clone();
         self.state.initialized = false;
-        let (script, metadata) = self
+        self.machine = self.pal.attach_vm(&self.bv_context, &self.state).await?;
+        let (script, meta) = self
             .context
             .copy_and_check_plugin(image, &rootfs_dir)
             .await?;
-        self.metadata = metadata;
-        self.state.requirements = self.metadata.requirements.clone();
+        self.metadata = meta;
         self.state.save(&self.context.nodes_dir).await?;
-        self.machine = self.pal.attach_vm(&self.bv_context, &self.state).await?;
         self.babel_engine
             .update_plugin(|engine| RhaiPlugin::new(&script, engine))
             .await?;

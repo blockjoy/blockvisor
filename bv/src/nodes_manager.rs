@@ -427,6 +427,7 @@ where
             let mut cpu_registry = self.cpu_registry.lock().await;
             cpu_registry.release(&mut node.state.assigned_cpus);
             node.state.assigned_cpus = cpu_registry.acquire(new_meta.requirements.vcpu_count)?;
+            node.state.requirements = new_meta.requirements;
             node.upgrade(&image).await?;
 
             let mut cache = self.node_state_cache.write().await;
