@@ -77,7 +77,10 @@ impl<P: Pal> MaybeNode<P> {
                 .map_err(Report::new),
             self
         );
-        let bv_context = BvContext::from_config(api_config.config.read().await.clone());
+        let bv_context = BvContext::from_config(
+            api_config.config.read().await.clone(),
+            self.state.apptainer_config.clone(),
+        );
         let vm = check!(pal.create_vm(&bv_context, &self.state).await, self);
         let rootfs_dir = vm.rootfs_dir().to_path_buf();
         self.machine = Some(vm);
@@ -91,7 +94,7 @@ impl<P: Pal> MaybeNode<P> {
             pal.apply_firewall_config(NodeFirewallConfig {
                 id: self.state.id,
                 ip: self.state.network_interface.ip,
-                iface: bv_context.iface.clone(),
+                bridge: bv_context.bridge.clone(),
                 config: build_firewall_rules(&self.state.firewall_rules, &metadata.firewall),
             })
             .await,
@@ -179,7 +182,10 @@ impl<P: Pal + Debug> Node<P> {
         info!("Attaching to node with ID: {node_id}");
 
         let mut node_conn = pal.create_node_connection(node_id);
-        let bv_context = BvContext::from_config(api_config.config.read().await.clone());
+        let bv_context = BvContext::from_config(
+            api_config.config.read().await.clone(),
+            state.apptainer_config.clone(),
+        );
         let machine = pal
             .attach_vm(&bv_context, &state)
             .await
@@ -388,7 +394,7 @@ impl<P: Pal + Debug> Node<P> {
             .apply_firewall_config(NodeFirewallConfig {
                 id: self.state.id,
                 ip: self.state.network_interface.ip,
-                iface: self.bv_context.iface.clone(),
+                bridge: self.bv_context.bridge.clone(),
                 config: build_firewall_rules(&self.state.firewall_rules, &self.metadata.firewall),
             })
             .await
@@ -445,7 +451,7 @@ impl<P: Pal + Debug> Node<P> {
             .apply_firewall_config(NodeFirewallConfig {
                 id: self.state.id,
                 ip: self.state.network_interface.ip,
-                iface: self.bv_context.iface.clone(),
+                bridge: self.bv_context.bridge.clone(),
                 config: build_firewall_rules(&self.state.firewall_rules, &self.metadata.firewall),
             })
             .await?;
@@ -929,7 +935,7 @@ pub mod tests {
         NodeFirewallConfig {
             id,
             ip,
-            iface: "bvbr7".to_string(),
+            bridge: Some("bvbr7".to_string()),
             config: firewall::Config {
                 default_in: firewall::Action::Deny,
                 default_out: firewall::Action::Allow,
@@ -960,7 +966,7 @@ pub mod tests {
             id: "host_id".to_string(),
             name: "host_name".to_string(),
             url: "api.url".to_string(),
-            iface: "bvbr7".to_string(),
+            bridge: Some("bvbr7".to_string()),
         }
     }
 

@@ -1691,7 +1691,7 @@ mod tests {
             .with(predicate::eq(NodeFirewallConfig {
                 id: node_id,
                 ip: IpAddr::from_str(&node_config.ip).unwrap(),
-                iface: "bvbr7".to_string(),
+                bridge: Some("bvbr7".to_string()),
                 config: firewall::Config {
                     default_in: firewall::Action::Deny,
                     default_out: firewall::Action::Allow,
