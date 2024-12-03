@@ -41,7 +41,7 @@ async fn apply_firewall_config_with(
     runner: impl UfwRunner,
 ) -> Result<()> {
     let id = config.id;
-    let iface = config.iface.clone();
+    let iface = config.bridge.clone();
     // first convert config to convenient structure
     let rule_args = RuleArgs::from_rules(config);
     // dry-run rules to make sure they are valid
@@ -181,18 +181,29 @@ impl RuleArgs {
         }
     }
 
-    fn as_vec<'a>(&'a self, iface: &'a str) -> Vec<&'a str> {
-        let mut args = vec![
-            "route",
-            self.policy.as_str(),
-            to_variant_name(&self.direction).unwrap(),
-            "on",
-            iface,
-            "from",
-            &self.ip_from,
-            "to",
-            &self.ip_to,
-        ];
+    fn as_vec<'a>(&'a self, iface: &'a Option<String>) -> Vec<&'a str> {
+        let mut args = if let Some(iface) = iface {
+            vec![
+                "route",
+                self.policy.as_str(),
+                to_variant_name(&self.direction).unwrap(),
+                "on",
+                iface,
+                "from",
+                &self.ip_from,
+                "to",
+                &self.ip_to,
+            ]
+        } else {
+            vec![
+                self.policy.as_str(),
+                to_variant_name(&self.direction).unwrap(),
+                "from",
+                &self.ip_from,
+                "to",
+                &self.ip_to,
+            ]
+        };
         if let Some(port) = &self.port {
             args.push("port");
             args.push(port.as_str());
@@ -247,7 +258,7 @@ mod tests {
         NodeFirewallConfig {
             id: Uuid::parse_str("4931bafa-92d9-4521-9fc6-a77eee047530").unwrap(),
             ip: IpAddr::from_str("192.168.0.7").unwrap(),
-            iface: "bvbr0".to_string(),
+            bridge: Some("bvbr0".to_string()),
             config: firewall::Config {
                 default_in: Action::Deny,
                 default_out: Action::Allow,
@@ -664,6 +675,112 @@ mod tests {
                 "out",
                 "on",
                 "bvbr0",
+                "from",
+                "192.168.0.7",
+                "to",
+                "any",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default out",
+            ],
+        );
+
+        apply_firewall_config_with(config, mock_runner).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_no_bridge() -> Result<()> {
+        let mut config = default_config();
+        config.bridge = None;
+        config.config.rules = vec![Rule {
+            name: "rule".to_string(),
+            action: Action::Allow,
+            direction: Direction::Out,
+            protocol: None,
+            ips: vec!["ip.is.validated.before".to_string()],
+            ports: vec![7],
+        }];
+        let mut mock_runner = MockTestRunner::new();
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "ip.is.validated.before",
+                "port",
+                "7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 rule",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "deny",
+                "in",
+                "from",
+                "any",
+                "to",
+                "192.168.0.7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default in",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "--dry-run",
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "any",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default out",
+            ],
+        );
+
+        expect_with_args(&mut mock_runner, &["status", "numbered"]);
+
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow",
+                "out",
+                "from",
+                "192.168.0.7",
+                "to",
+                "ip.is.validated.before",
+                "port",
+                "7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 rule",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "deny",
+                "in",
+                "from",
+                "any",
+                "to",
+                "192.168.0.7",
+                "comment",
+                "4931bafa-92d9-4521-9fc6-a77eee047530 default in",
+            ],
+        );
+        expect_with_args(
+            &mut mock_runner,
+            &[
+                "allow",
+                "out",
                 "from",
                 "192.168.0.7",
                 "to",

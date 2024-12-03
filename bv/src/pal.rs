@@ -90,7 +90,7 @@ pub trait Pal {
 pub struct NodeFirewallConfig {
     pub id: Uuid,
     pub ip: IpAddr,
-    pub iface: String,
+    pub bridge: Option<String>,
     pub config: firewall::Config,
 }
 
