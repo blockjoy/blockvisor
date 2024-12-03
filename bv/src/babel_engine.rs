@@ -1156,7 +1156,7 @@ mod tests {
                 },
                 NodeEnv {
                     node_id: node_id.to_string(),
-                    org_id: "org_id".to_string(),
+                    node_org_id: "org_id".to_string(),
                     ..Default::default()
                 },
                 connection,

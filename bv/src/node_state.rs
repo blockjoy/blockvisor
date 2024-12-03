@@ -5,11 +5,7 @@ use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
-use std::fmt::Debug;
-use std::net::IpAddr;
-use std::path::Path;
+use std::{collections::HashMap, fmt, fmt::Debug, mem, net::IpAddr, path::Path};
 use tokio::fs;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -90,7 +86,49 @@ pub struct NodeState {
     pub started_at: Option<DateTime<Utc>>,
     pub initialized: bool,
     pub restarting: bool,
+    pub upgrade_state: UpgradeState,
     pub apptainer_config: Option<ApptainerConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct UpgradeState {
+    pub active: bool,
+    pub state_backup: Option<StateBackup>,
+    pub need_rollback: Option<String>,
+    pub steps: Vec<UpgradeStep>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct StateBackup {
+    pub properties: NodeProperties,
+    pub firewall: firewall::Config,
+    pub display_name: String,
+    pub org_id: String,
+    pub org_name: String,
+    pub protocol_name: String,
+    pub dns_name: String,
+    pub vm_config: VmConfig,
+    pub image: NodeImage,
+    pub initialized: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum UpgradeStep {
+    Stop,
+    CpuAssignment(CpuAssignmentUpdate),
+    Vm,
+    Plugin,
+    Firewall,
+    Restart,
+    ReInit,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub enum CpuAssignmentUpdate {
+    #[default]
+    None,
+    AcquiredCpus(usize),
+    ReleasedCpus(Vec<usize>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -138,9 +176,52 @@ impl NodeState {
             .join(self.id.to_string())
             .join(NODE_STATE_FILENAME);
         info!("Writing node state: {}", path.display());
-        let config = serde_json::to_string(self)?;
-        fs::write(&path, &*config).await?;
+        let content = serde_json::to_string(self)?;
+        fs::write(&path, &*content).await?;
         Ok(())
+    }
+}
+
+impl StateBackup {
+    pub fn swap_state(&mut self, node_state: &mut NodeState) {
+        mem::swap(&mut self.image, &mut node_state.image);
+        mem::swap(&mut self.vm_config, &mut node_state.vm_config);
+        mem::swap(&mut self.properties, &mut node_state.properties);
+        mem::swap(&mut self.firewall, &mut node_state.firewall);
+        mem::swap(&mut self.protocol_name, &mut node_state.protocol_name);
+        mem::swap(&mut self.org_name, &mut node_state.org_name);
+        mem::swap(&mut self.org_id, &mut node_state.org_id);
+        mem::swap(&mut self.display_name, &mut node_state.display_name);
+        mem::swap(&mut self.dns_name, &mut node_state.dns_name);
+        mem::swap(&mut self.initialized, &mut node_state.initialized);
+    }
+}
+
+impl UpgradeState {
+    pub fn insert_step(&mut self, step: UpgradeStep) -> bool {
+        if self.steps.contains(&step) {
+            false
+        } else {
+            self.steps.push(step);
+            true
+        }
+    }
+}
+
+impl From<NodeState> for StateBackup {
+    fn from(value: NodeState) -> Self {
+        Self {
+            properties: value.properties,
+            firewall: value.firewall,
+            display_name: value.display_name,
+            org_id: value.org_id,
+            org_name: value.org_name,
+            protocol_name: value.protocol_name,
+            dns_name: value.dns_name,
+            vm_config: value.vm_config,
+            image: value.image,
+            initialized: false,
+        }
     }
 }
 
@@ -237,6 +318,7 @@ impl From<LegacyState> for NodeState {
             started_at: value.started_at,
             initialized: value.initialized,
             restarting: value.restarting,
+            upgrade_state: Default::default(),
             apptainer_config: value.apptainer_config,
         }
     }

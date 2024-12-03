@@ -178,6 +178,7 @@ pub async fn process_image_command(
                     started_at: None,
                     initialized: false,
                     restarting: false,
+                    upgrade_state: Default::default(),
                     apptainer_config: None,
                 })
                 .await?
@@ -277,7 +278,7 @@ pub async fn process_image_command(
                         bv_host_id: "host-id".to_string(),
                         bv_host_name: "nostname".to_string(),
                         bv_api_url: "none.com".to_string(),
-                        org_id: "org-id".to_string(),
+                        node_org_id: "org-id".to_string(),
                         data_mount_point: PathBuf::from("/blockjoy"),
                         protocol_data_path: PathBuf::from("/blockjoy/protocol_data"),
                     },

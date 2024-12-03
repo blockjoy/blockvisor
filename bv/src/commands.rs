@@ -1,6 +1,5 @@
 use std::time::Duration;
 use thiserror::Error;
-use uuid::Uuid;
 
 #[macro_export]
 macro_rules! command_failed {
@@ -25,8 +24,12 @@ pub enum Error {
     ServiceBroken,
     #[error("Command is not supported")]
     NotSupported,
-    #[error("Node with {0} not found")]
-    NodeNotFound(Uuid),
+    #[error("Node not found")]
+    NodeNotFound,
     #[error("Can't proceed while 'upgrade_blocking' job is running. Try again after {} seconds.", retry_hint.as_secs())]
     BlockingJobRunning { retry_hint: Duration },
+    #[error("Node upgrade failed, but it was successfully rolled back: {0:#}")]
+    NodeUpgradeRollback(eyre::Error),
+    #[error("Node upgrade failed, and node ended in failed state: {0:#}")]
+    NodeUpgradeFailure(eyre::Error),
 }

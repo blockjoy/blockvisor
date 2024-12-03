@@ -18,6 +18,7 @@ use eyre::{anyhow, bail, Context, Result};
 use std::{
     ffi::OsStr,
     fmt::Debug,
+    mem,
     net::IpAddr,
     path::{Path, PathBuf},
     str::FromStr,
@@ -30,6 +31,7 @@ use tracing::{debug, error};
 
 pub const DATA_DIR: &str = "data";
 pub const ROOTFS_DIR: &str = "rootfs";
+pub const BACKUP_ROOTFS_DIR: &str = "rootfs_backup";
 pub const PLUGIN_PATH: &str = "var/lib/babel/plugin";
 pub const PLUGIN_MAIN_FILENAME: &str = "main.rhai";
 const CGROUPS_CONF_FILE: &str = "cgroups.toml";
@@ -54,18 +56,29 @@ pub struct ApptainerMachine {
     chroot_dir: PathBuf,
     cgroups_path: PathBuf,
     apptainer_pid_path: PathBuf,
+    data_dir: PathBuf,
+
     apptainer_pid: Option<Pid>,
     babel_pid: Option<Pid>,
-    data_dir: PathBuf,
-    image_uri: String,
+
     vm_id: String,
     vm_name: String,
     ip: IpAddr,
     mask_bits: u8,
     gateway: IpAddr,
-    vm_config: VmConfig,
+
+    apptainer_config: ApptainerConfig,
+
+    config: Config,
+    backup_chroot_dir: PathBuf,
+    config_backup: Option<Config>,
+}
+
+#[derive(Debug, Clone)]
+struct Config {
+    image_uri: String,
+    vm: VmConfig,
     cpus: Vec<usize>,
-    config: ApptainerConfig,
     node_env: NodeEnv,
 }
 
@@ -80,6 +93,7 @@ pub async fn new(
 ) -> Result<ApptainerMachine> {
     let node_dir = node_context::build_node_dir(bv_root, node_state.id);
     let chroot_dir = build_rootfs_dir(&node_dir);
+    let backup_chroot_dir = node_dir.join(BACKUP_ROOTFS_DIR);
     let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
     let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
     let data_dir = node_dir.join(DATA_DIR);
@@ -90,26 +104,33 @@ pub async fn new(
         node_dir,
         babel_path,
         chroot_dir,
+        backup_chroot_dir,
         cgroups_path,
         apptainer_pid_path,
         apptainer_pid: None,
         babel_pid: None,
         data_dir,
-        image_uri: node_state.image.uri.clone(),
+
         vm_id: node_state.id.to_string(),
         vm_name: node_state.name.clone(),
         ip: node_state.ip,
         mask_bits,
         gateway,
-        vm_config: node_state.vm_config.clone(),
-        cpus: node_state.assigned_cpus.clone(),
-        config,
-        node_env: node_env::new(
-            bv_context,
-            node_state,
-            PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
-            PathBuf::from_str(PROTOCOL_DATA_PATH)?,
-        ),
+
+        apptainer_config: config,
+
+        config: Config {
+            image_uri: node_state.image.uri.clone(),
+            vm: node_state.vm_config.clone(),
+            cpus: node_state.assigned_cpus.clone(),
+            node_env: node_env::new(
+                bv_context,
+                node_state,
+                PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
+                PathBuf::from_str(PROTOCOL_DATA_PATH)?,
+            ),
+        },
+        config_backup: None,
     })
 }
 
@@ -125,6 +146,7 @@ pub async fn new_legacy(
 ) -> Result<ApptainerMachine> {
     let node_dir = node_context::build_node_dir(bv_root, node_state.id);
     let chroot_dir = build_rootfs_dir(&node_dir);
+    let backup_chroot_dir = node_dir.join(BACKUP_ROOTFS_DIR);
     let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
     let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
     let data_dir = node_dir.join(DATA_DIR);
@@ -160,31 +182,35 @@ pub async fn new_legacy(
         node_dir,
         babel_path,
         chroot_dir,
+        backup_chroot_dir,
         cgroups_path,
         apptainer_pid_path,
         apptainer_pid: None,
         babel_pid: None,
         data_dir,
-        image_uri: node_state.image.uri.clone(),
         vm_id: node_state.name.clone(), // set vm_id to vm_name, to keep container id backward compatibility
         vm_name: node_state.name.clone(),
         ip: node_state.ip,
         mask_bits,
         gateway,
-        vm_config: node_state.vm_config.clone(),
-        cpus: node_state.assigned_cpus.clone(),
-        config,
-        node_env: node_env::new(
-            bv_context,
-            node_state,
-            PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
-            PathBuf::from_str("/blockjoy/blockchain_data")?, // old data location
-        ),
+        apptainer_config: config,
+        config: Config {
+            image_uri: node_state.image.uri.clone(),
+            vm: node_state.vm_config.clone(),
+            cpus: node_state.assigned_cpus.clone(),
+            node_env: node_env::new(
+                bv_context,
+                node_state,
+                PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
+                PathBuf::from_str("/blockjoy/blockchain_data")?, // old data location
+            ),
+        },
+        config_backup: None,
     })
 }
 
 impl ApptainerMachine {
-    pub async fn create(&self) -> Result<()> {
+    pub async fn build(&self) -> Result<()> {
         if !is_built(&self.chroot_dir).await? {
             run_cmd(
                 "apptainer",
@@ -193,7 +219,7 @@ impl ApptainerMachine {
                     OsStr::new("--force"),
                     OsStr::new("--sandbox"),
                     &self.chroot_dir.clone().into_os_string(),
-                    OsStr::new(&self.image_uri),
+                    OsStr::new(&self.config.image_uri),
                 ],
             )
             .await
@@ -201,7 +227,7 @@ impl ApptainerMachine {
                 anyhow!(
                     "failed to build '{}' from `{}`: {err:#}",
                     self.vm_id,
-                    self.image_uri
+                    self.config.image_uri
                 )
             })?;
             fs::create_dir_all(
@@ -212,18 +238,19 @@ impl ApptainerMachine {
             fs::create_dir_all(self.chroot_dir.join(JOURNAL_DIR.trim_start_matches('/'))).await?;
             fs::create_dir_all(self.chroot_dir.join(BABEL_VAR_PATH)).await?;
         }
-        if self.config.cpu_limit || self.config.memory_limit {
+        if self.apptainer_config.cpu_limit || self.apptainer_config.memory_limit {
             let mut content = String::new();
-            if self.config.memory_limit {
+            if self.apptainer_config.memory_limit {
                 content += &format!(
                     "memory.limit = {}\n",
-                    self.vm_config.mem_size_mb * 1_000_000,
+                    self.config.vm.mem_size_mb * 1_000_000,
                 )
             }
-            if self.config.cpu_limit {
+            if self.apptainer_config.cpu_limit {
                 content += &format!(
                     "cpu.cpus = \"{}\"\n",
-                    self.cpus
+                    self.config
+                        .cpus
                         .iter()
                         .map(|cpu| cpu.to_string())
                         .collect::<Vec<_>>()
@@ -233,12 +260,12 @@ impl ApptainerMachine {
             fs::write(&self.cgroups_path, content).await?;
         }
 
-        node_env::save(&self.node_env, &self.chroot_dir).await?;
+        node_env::save(&self.config.node_env, &self.chroot_dir).await?;
         Ok(())
     }
 
     pub async fn attach(&mut self) -> Result<()> {
-        self.create().await?;
+        self.build().await?;
         self.load_apptainer_pid().await?;
         if self.is_container_running().await {
             self.stop_babel(false).await?;
@@ -329,11 +356,11 @@ impl ApptainerMachine {
                 "--no-mount",
                 "home,cwd,tmp",
             ];
-            if self.config.cpu_limit || self.config.memory_limit {
+            if self.apptainer_config.cpu_limit || self.apptainer_config.memory_limit {
                 args.push("--apply-cgroups");
                 args.push(&cgroups_path);
             }
-            if !self.config.host_network {
+            if !self.apptainer_config.host_network {
                 args.append(&mut vec![
                     "--net",
                     "--network",
@@ -342,7 +369,7 @@ impl ApptainerMachine {
                     &net,
                 ]);
             }
-            if let Some(extra_args) = self.config.extra_args.as_ref() {
+            if let Some(extra_args) = self.apptainer_config.extra_args.as_ref() {
                 args.append(&mut extra_args.iter().map(|i| i.as_str()).collect());
             }
             args.push(&chroot_path);
@@ -512,31 +539,70 @@ impl pal::VirtualMachine for ApptainerMachine {
     }
 
     async fn upgrade(&mut self, node_state: &NodeState) -> Result<()> {
-        // TODO implement backup and recovery
         if self.is_container_running().await {
             bail!("can't upgrade running vm")
         }
         // LEGACY node support - remove once all nodes upgraded
-        if self.image_uri.starts_with("legacy://") {
+        if self.config.image_uri.starts_with("legacy://") {
             self.umount_all().await?;
         }
         let desired_protocol_data_path = PathBuf::from_str(PROTOCOL_DATA_PATH)?;
-        if self.node_env.protocol_data_path != desired_protocol_data_path {
+        if self.config.node_env.protocol_data_path != desired_protocol_data_path {
             fs::rename(
-                &self.node_env.protocol_data_path,
+                &self.config.node_env.protocol_data_path,
                 &desired_protocol_data_path,
             )
             .await
             .inspect_err(|err| error!("legacy node migration failed: {err:#}"))?;
-            self.node_env.protocol_data_path = desired_protocol_data_path;
+            self.config.node_env.protocol_data_path = desired_protocol_data_path;
         }
 
-        fs::remove_dir_all(&self.chroot_dir).await?;
+        self.config_backup = Some(self.config.clone());
+        self.config.image_uri = node_state.image.uri.clone();
+        self.config.vm = node_state.vm_config.clone();
+        self.config.cpus = node_state.assigned_cpus.clone();
+        self.update_node_env(node_state);
+
+        fs::rename(&self.chroot_dir, &self.backup_chroot_dir).await?;
         fs::create_dir_all(&self.chroot_dir).await?;
-        self.image_uri = node_state.image.uri.clone();
-        self.vm_config = node_state.vm_config.clone();
-        self.cpus = node_state.assigned_cpus.clone();
-        self.create().await
+
+        self.build().await
+    }
+
+    async fn drop_backup(&mut self) -> Result<()> {
+        if self.backup_chroot_dir.exists() {
+            fs::remove_dir_all(&self.backup_chroot_dir).await?
+        }
+        self.config_backup = None;
+        Ok(())
+    }
+
+    async fn rollback(&mut self) -> Result<()> {
+        if self.backup_chroot_dir.exists() {
+            fs::remove_dir_all(&self.chroot_dir).await?;
+            fs::rename(&self.backup_chroot_dir, &self.chroot_dir).await?;
+        }
+
+        if let Some(mut backup) = self.config_backup.take() {
+            mem::swap(&mut backup, &mut self.config);
+            self.config_backup = Some(backup);
+        }
+        self.build().await?;
+
+        // LEGACY node support - remove once all nodes upgraded
+        if let Some(backup) = &self.config_backup {
+            if self.config.node_env.protocol_data_path != backup.node_env.protocol_data_path
+                && backup.node_env.protocol_data_path.exists()
+            {
+                fs::rename(
+                    &backup.node_env.protocol_data_path,
+                    &self.config.node_env.protocol_data_path,
+                )
+                .await
+                .inspect_err(|err| error!("legacy node rollback failed: {err:#}"))?;
+            }
+        }
+        Ok(())
     }
 
     async fn recover(&mut self) -> Result<()> {
@@ -560,7 +626,11 @@ impl pal::VirtualMachine for ApptainerMachine {
     }
 
     fn node_env(&self) -> NodeEnv {
-        self.node_env.clone()
+        self.config.node_env.clone()
+    }
+
+    fn update_node_env(&mut self, node_state: &NodeState) {
+        node_env::update_state(&mut self.config.node_env, node_state);
     }
 
     fn plugin_path(&self) -> PathBuf {

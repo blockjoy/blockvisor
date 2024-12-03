@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     match args.command {
         Command::Start(_) => {
             if let Ok(info) = service_info(bv_url.clone()).await {
-                println!("Service already running: {info}");
+                println!("blockvisor service started successfully: {info}");
                 return Ok(());
             }
 

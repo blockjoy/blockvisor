@@ -17,7 +17,7 @@ const PLUGIN_CONFIG = #{
     services: [
         #{
             name: "echo",
-            run_sh: "echo \"Testing entry_point not configured, but parametrized with " + sanitize_sh_param(node_params().TESTING_PARAM) + "!\"",
+            run_sh: "echo \"Testing entry_point not configured, but parametrized with " + sanitize_sh_param(node_params()["arbitrary-text-property"]) + "!\"",
             restart_config: #{
                 backoff_timeout_ms: 60000,
                 backoff_base_ms: 10000,

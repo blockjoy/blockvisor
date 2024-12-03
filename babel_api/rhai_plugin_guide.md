@@ -365,7 +365,7 @@ it should be sanitized with `sanitize_sh_param()`, to avoid malicious code injec
 **Example:**
 ```
 fn custom_function(arg) {
-  let user_param = sanitize_sh_param(node_params().USER_INPUT);
+  let user_param = sanitize_sh_param(node_params()["USER-INPUT"]);
   let res = run_sh("echo '" + user_param + "'");
   if res.exit_code == 0 {
     res.stdout

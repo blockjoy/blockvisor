@@ -58,6 +58,7 @@ ci-cleanup:
 	umount -A --recursive /var/lib/blockvisor/nodes/*/rootfs || true
 	umount -A --recursive /tmp/*/var/lib/blockvisor/nodes/*/rootfs || true
 	rm -rf /var/lib/blockvisor/nodes/
+	rm -f /var/lib/blockvisor/commands_cache.pb
 
 new-release:
 	cargo release --execute $$(git-conventional-commits version)

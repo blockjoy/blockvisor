@@ -94,6 +94,8 @@ pub struct NodeEnv {
     pub node_id: String,
     /// Node name.
     pub node_name: String,
+    /// Organisation id to which node belongs to.
+    pub node_org_id: String,
     /// Node version.
     pub node_version: String,
     /// Node protocol.
@@ -112,8 +114,6 @@ pub struct NodeEnv {
     pub bv_host_name: String,
     /// API url used by host.
     pub bv_api_url: String,
-    /// Organisation id to which node belongs to.
-    pub org_id: String,
     /// Absolute path to directory where data drive is mounted.
     pub data_mount_point: PathBuf,
     /// Absolute path to directory where protocol data are stored.

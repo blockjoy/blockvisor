@@ -20,7 +20,7 @@ firewall_config:
   default_in: deny
   default_out: allow
   rules:
-    - key: example_rule
+    - key: example-rule
       description: null
       protocol: both
       direction: in
@@ -32,7 +32,7 @@ firewall_config:
         - port: 12901
           name: service port
 properties:
-  - key: arbitrary text property
+  - key: arbitrary-text-property
     description: this is some text property example
     dynamic_value: true
     default_value: default_value
@@ -41,31 +41,31 @@ properties:
       add_cpu: 1
       add_memory_mb: -10
       add_disk_gb: 1
-  - key: switch property
+  - key: switch-property
     description: this is some switch example
     dynamic_value: true
-    default_value: off_value
+    default_value: off-value
     ui_type: !switch
       on:
-        value: on_value
+        value: on-value
         impact:
           add_cpu: 3
           add_memory_mb: 10
           add_disk_gb: 1
       off:
-        value: off_value
+        value: off-value
         impact: null
-  - key: enum property
+  - key: enum-property
     description: this is some enum example
     required: true
     dynamic_value: true
-    default_value: variant_a
+    default_value: variant-a
     ui_type: !enum
-      - value: variant_a
+      - value: variant-a
         impact: null
-      - value: variant_b
+      - value: variant-b
         impact: null
-      - value: variant_c
+      - value: variant-c
         impact:
           add_cpu: -1
           add_memory_mb: 1

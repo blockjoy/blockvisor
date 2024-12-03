@@ -10,6 +10,7 @@ pub mod bv_config;
 pub mod bv_context;
 pub mod cluster;
 pub mod commands;
+mod cpu_registry;
 pub mod firewall;
 pub mod hosts;
 pub mod installer;

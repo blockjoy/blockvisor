@@ -79,7 +79,10 @@ fn dummy_babel_engine() -> MockBabelEngine {
         .returning(|input| Ok(input.to_string()));
     babel.expect_render_template().returning(|_, _, _| Ok(()));
     babel.expect_node_params().returning(|| {
-        HashMap::from_iter([("TESTING_PARAM".to_string(), "testing_value".to_string())])
+        HashMap::from_iter([(
+            "arbitrary-text-property".to_string(),
+            "testing_value".to_string(),
+        )])
     });
     babel.expect_node_env().returning(|| NodeEnv {
         node_id: "node_id".to_string(),
@@ -222,7 +225,10 @@ fn test_plugin_config() -> eyre::Result<()> {
         .times(2)
         .returning(|_, _, _| Ok(()));
     babel.expect_node_params().returning(|| {
-        HashMap::from_iter([("TESTING_PARAM".to_string(), "testing_value".to_string())])
+        HashMap::from_iter([(
+            "arbitrary-text-property".to_string(),
+            "testing_value".to_string(),
+        )])
     });
     babel
         .expect_run_sh()

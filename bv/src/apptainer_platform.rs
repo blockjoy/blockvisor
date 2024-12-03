@@ -174,7 +174,7 @@ impl Pal for ApptainerPlatform {
         node_state: &NodeState,
     ) -> Result<Self::VirtualMachine> {
         let mut vm = self.new_vm(bv_context, node_state).await?;
-        if let Err(err) = vm.create().await {
+        if let Err(err) = vm.build().await {
             vm.delete().await?;
             Err(err)
         } else {

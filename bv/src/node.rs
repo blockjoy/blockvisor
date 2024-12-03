@@ -1,3 +1,4 @@
+use crate::node_state::StateBackup;
 use crate::{
     babel_engine,
     babel_engine::NodeInfo,
@@ -5,9 +6,12 @@ use crate::{
     bv_context::BvContext,
     command_failed, commands,
     commands::into_internal,
+    cpu_registry::CpuRegistry,
     firewall,
     node_context::NodeContext,
-    node_state::{NodeProperties, NodeState, VmStatus},
+    node_state::{
+        CpuAssignmentUpdate, NodeProperties, NodeState, UpgradeState, UpgradeStep, VmStatus,
+    },
     pal::{self, NodeConnection, NodeFirewallConfig, Pal, RecoverBackoff, VirtualMachine},
     scheduler,
 };
@@ -33,6 +37,7 @@ pub type BabelEngine<N> = babel_engine::BabelEngine<N, RhaiPlugin<babel_engine::
 pub struct Node<P: Pal> {
     pub state: NodeState,
     pub babel_engine: BabelEngine<P::NodeConnection>,
+    cpu_registry: CpuRegistry,
     machine: P::VirtualMachine,
     context: NodeContext,
     node_env: NodeEnv,
@@ -46,6 +51,7 @@ struct MaybeNode<P: Pal> {
     state: NodeState,
     machine: Option<P::VirtualMachine>,
     scheduler_tx: mpsc::Sender<scheduler::Action>,
+    cpu_registry: CpuRegistry,
 }
 
 macro_rules! check {
@@ -92,7 +98,13 @@ impl<P: Pal> MaybeNode<P> {
             .await,
             self
         );
-        check!(self.state.save(&self.context.nodes_dir).await, self);
+        check!(
+            self.state
+                .save(&self.context.nodes_dir)
+                .await
+                .with_context(|| "failed to save node state"),
+            self
+        );
 
         let babel_engine = check!(
             BabelEngine::new(
@@ -115,6 +127,7 @@ impl<P: Pal> MaybeNode<P> {
         Ok(Node {
             state: self.state,
             babel_engine,
+            cpu_registry: self.cpu_registry,
             // if we got into that place, then it is safe to unwrap
             machine: self.machine.unwrap(),
             context: self.context,
@@ -140,18 +153,25 @@ impl<P: Pal + Debug> Node<P> {
     pub async fn create(
         pal: Arc<P>,
         api_config: SharedConfig,
-        state: NodeState,
+        mut state: NodeState,
         scheduler_tx: mpsc::Sender<scheduler::Action>,
+        cpu_registry: CpuRegistry,
     ) -> Result<Self> {
+        state.assigned_cpus = cpu_registry.acquire(state.vm_config.vcpu_count).await?;
         let maybe_node = MaybeNode {
             context: NodeContext::build(pal.bv_root(), state.id),
             state,
             machine: None,
             scheduler_tx,
+            cpu_registry,
         };
         match maybe_node.try_create(pal.clone(), api_config).await {
             Ok(node) => Ok(node),
-            Err((err, maybe_node)) => {
+            Err((err, mut maybe_node)) => {
+                maybe_node
+                    .cpu_registry
+                    .release(&mut maybe_node.state.assigned_cpus)
+                    .await;
                 if let Err(err) = maybe_node.cleanup(pal).await {
                     error!("Cleanup failed after unsuccessful node create: {err:#}");
                 }
@@ -167,6 +187,7 @@ impl<P: Pal + Debug> Node<P> {
         api_config: SharedConfig,
         state: NodeState,
         scheduler_tx: mpsc::Sender<scheduler::Action>,
+        cpu_registry: CpuRegistry,
     ) -> Result<Self> {
         let node_id = state.id;
         let context = NodeContext::build(pal.bv_root(), node_id);
@@ -177,6 +198,17 @@ impl<P: Pal + Debug> Node<P> {
             api_config.config.read().await.clone(),
             state.apptainer_config.clone(),
         );
+        cpu_registry.mark_acquired(&state.assigned_cpus).await;
+        if state.upgrade_state.active {
+            if let Some(UpgradeStep::CpuAssignment(CpuAssignmentUpdate::ReleasedCpus(cpus))) = state
+                .upgrade_state
+                .steps
+                .iter()
+                .find(|item| matches!(item, UpgradeStep::CpuAssignment(_)))
+            {
+                cpu_registry.mark_acquired(cpus).await;
+            }
+        }
         let machine = pal
             .attach_vm(&bv_context, &state)
             .await
@@ -228,6 +260,7 @@ impl<P: Pal + Debug> Node<P> {
         Ok(Self {
             state,
             babel_engine,
+            cpu_registry,
             machine,
             context,
             node_env,
@@ -274,7 +307,10 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     pub async fn save_state(&self) -> Result<()> {
-        self.state.save(&self.context.nodes_dir).await
+        self.state
+            .save(&self.context.nodes_dir)
+            .await
+            .with_context(|| "failed to save node state")
     }
 
     /// Starts the node.
@@ -309,6 +345,11 @@ impl<P: Pal + Debug> Node<P> {
         with_retry!(babel_client.setup_babel(babel_config.clone()))?;
 
         if !self.state.initialized {
+            if self.state.upgrade_state.active
+                && self.state.upgrade_state.insert_step(UpgradeStep::ReInit)
+            {
+                self.save_state().await?;
+            }
             if let Err(err) = self.babel_engine.init().await {
                 // mark as permanently failed - non-recoverable
                 self.save_expected_status(VmStatus::Failed).await?;
@@ -382,6 +423,9 @@ impl<P: Pal + Debug> Node<P> {
         self.save_expected_status(VmStatus::Stopped).await?;
         self.babel_engine.stop().await?;
         self.machine.delete().await?;
+        self.cpu_registry
+            .release(&mut self.state.assigned_cpus)
+            .await;
         self.pal.cleanup_firewall_config(self.state.id).await?;
         self.context.delete().await
     }
@@ -424,10 +468,12 @@ impl<P: Pal + Debug> Node<P> {
             self.save_state().await?;
             res?
         }
+        self.machine.update_node_env(&self.state);
+        self.node_env = self.machine.node_env();
         Ok(())
     }
 
-    /// Updates OS image for VM.
+    /// Updates OS image and related config for VM.
     #[instrument(skip(self))]
     pub async fn upgrade(&mut self, desired_state: NodeState) -> commands::Result<()> {
         let status = self.status().await;
@@ -436,61 +482,245 @@ impl<P: Pal + Debug> Node<P> {
                 "can't upgrade node in Failed state"
             )));
         }
-        let need_to_restart = status == VmStatus::Running;
-        if need_to_restart {
-            if self
-                .babel_engine
-                .get_jobs()
-                .await?
-                .iter()
-                .any(|(_, job)| job.status == JobStatus::Running && job.upgrade_blocking)
-            {
-                command_failed!(commands::Error::BlockingJobRunning {
-                    retry_hint: DEFAULT_UPGRADE_RETRY_HINT,
-                });
-            }
-            self.stop(false).await?;
-        }
-        self.machine.upgrade(&desired_state).await?;
-        let plugin_path = self.machine.plugin_path();
-        let node_env = self.machine.node_env();
-        self.node_env = node_env.clone();
-        self.babel_engine
-            .update_plugin(
-                |engine| RhaiPlugin::from_file(plugin_path, engine),
-                node_env,
-            )
-            .await?;
-        self.pal
-            .apply_firewall_config(NodeFirewallConfig {
-                id: self.state.id,
-                ip: self.state.ip,
-                bridge: self.bv_context.bridge.clone(),
-                config: desired_state.firewall.clone(),
-            })
-            .await
-            .map_err(into_internal)?;
-        self.babel_engine.update_node_info(
-            desired_state.image.clone(),
-            desired_state.properties.clone(),
-        );
-        self.state.image = desired_state.image;
-        self.state.vm_config = desired_state.vm_config;
-        self.state.properties = desired_state.properties;
-        self.state.firewall = desired_state.firewall;
-        self.state.protocol_name = desired_state.protocol_name;
-        self.state.org_name = desired_state.org_name;
-        self.state.org_id = desired_state.org_id;
-        self.state.display_name = desired_state.display_name;
-        self.state.dns_name = desired_state.dns_name;
-        self.state.initialized = false;
-        self.save_state().await?;
 
-        if need_to_restart {
+        if !self.state.upgrade_state.active {
+            self.state.upgrade_state = UpgradeState::default();
+            if status == VmStatus::Running {
+                if self
+                    .babel_engine
+                    .get_jobs()
+                    .await?
+                    .iter()
+                    .any(|(_, job)| job.status == JobStatus::Running && job.upgrade_blocking)
+                {
+                    command_failed!(commands::Error::BlockingJobRunning {
+                        retry_hint: DEFAULT_UPGRADE_RETRY_HINT,
+                    });
+                }
+                self.state.upgrade_state.steps.push(UpgradeStep::Stop);
+                self.stop(false).await?;
+            }
+            self.state.upgrade_state.active = true;
+            let mut state_backup: StateBackup = desired_state.into();
+            state_backup.swap_state(&mut self.state);
+            self.state.upgrade_state.state_backup = Some(state_backup);
+            self.save_state().await?;
+        }
+
+        if let Some(err) = &self.state.upgrade_state.need_rollback {
+            self.rollback(err.clone()).await
+        } else if let Err(err) = self.try_upgrade().await {
+            if self
+                .state
+                .upgrade_state
+                .steps
+                .contains(&UpgradeStep::ReInit)
+            {
+                command_failed!(commands::Error::NodeUpgradeFailure(anyhow!("can't rollback node upgrade if 'init' was already started - protocol data could be changed")))
+            }
+            let error_str = format!("{err:#}");
+            self.state.upgrade_state.need_rollback = Some(error_str.clone());
+            self.save_state().await?;
+            self.rollback(error_str).await
+        } else {
+            info!("Node upgraded");
+            // some steps may still need cleanup
+            if let Some(UpgradeStep::CpuAssignment(CpuAssignmentUpdate::ReleasedCpus(cpus))) = &self
+                .state
+                .upgrade_state
+                .steps
+                .iter()
+                .find(|item| matches!(item, UpgradeStep::CpuAssignment(_)))
+            {
+                self.cpu_registry.release(&mut cpus.clone()).await;
+            }
+            if self.state.upgrade_state.steps.contains(&UpgradeStep::Vm) {
+                if let Err(err) = self.machine.drop_backup().await {
+                    warn!("failed to cleanup VM backup after upgrade: {err:#}");
+                }
+            }
+            self.state.upgrade_state.active = false;
+            self.save_state().await?;
+            Ok(())
+        }
+    }
+
+    #[instrument(skip(self))]
+    async fn rollback(&mut self, err: String) -> commands::Result<()> {
+        if let Err(err) = self.try_rollback().await {
+            error!(
+                "failed to rollback, after unsuccessful upgrade of node {}: {err:#}",
+                self.state.id
+            );
+            self.state.upgrade_state.active = false;
+            self.save_expected_status(VmStatus::Failed).await?;
+            command_failed!(commands::Error::NodeUpgradeFailure(err))
+        } else {
+            warn!(
+                "failed to upgrade node {}, but successfully rolled back: {err:#}",
+                self.state.id
+            );
+            self.state.upgrade_state.active = false;
+            self.save_state().await?;
+            command_failed!(commands::Error::NodeUpgradeRollback(anyhow!(err)))
+        }
+    }
+
+    #[instrument(skip(self))]
+    async fn try_upgrade(&mut self) -> Result<()> {
+        if self.state.assigned_cpus.len() != self.state.vm_config.vcpu_count {
+            if self.state.assigned_cpus.len() > self.state.vm_config.vcpu_count {
+                self.state
+                    .upgrade_state
+                    .steps
+                    .push(UpgradeStep::CpuAssignment(
+                        CpuAssignmentUpdate::ReleasedCpus(
+                            self.state
+                                .assigned_cpus
+                                .split_off(self.state.vm_config.vcpu_count),
+                        ),
+                    ));
+            } else {
+                self.state
+                    .upgrade_state
+                    .steps
+                    .push(UpgradeStep::CpuAssignment(
+                        CpuAssignmentUpdate::AcquiredCpus(self.state.assigned_cpus.len()),
+                    ));
+                let diff = self.state.vm_config.vcpu_count - self.state.assigned_cpus.len();
+                self.state
+                    .assigned_cpus
+                    .append(&mut self.cpu_registry.acquire(diff).await?);
+            }
+            self.save_state().await?;
+        }
+        if self.state.upgrade_state.insert_step(UpgradeStep::Vm) {
+            let res = self.machine.upgrade(&self.state).await;
+            self.save_state().await?;
+            res?;
+        }
+
+        if self.state.upgrade_state.insert_step(UpgradeStep::Plugin) {
+            let plugin_path = self.machine.plugin_path();
+            let node_env = self.machine.node_env();
+            self.node_env = node_env.clone();
+            self.babel_engine
+                .update_node_info(self.state.image.clone(), self.state.properties.clone());
+            let res = self
+                .babel_engine
+                .update_plugin(
+                    |engine| RhaiPlugin::from_file(plugin_path, engine),
+                    node_env,
+                )
+                .await;
+            self.save_state().await?;
+            res?;
+        }
+
+        if self.state.upgrade_state.insert_step(UpgradeStep::Firewall) {
+            let res = self
+                .pal
+                .apply_firewall_config(NodeFirewallConfig {
+                    id: self.state.id,
+                    ip: self.state.ip,
+                    bridge: self.bv_context.bridge.clone(),
+                    config: self.state.firewall.clone(),
+                })
+                .await
+                .map_err(into_internal);
+            self.save_state().await?;
+            res?
+        }
+
+        if self.state.upgrade_state.steps.contains(&UpgradeStep::Stop) {
             self.start().await?;
         }
 
         debug!("Node upgraded");
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn try_rollback(&mut self) -> Result<()> {
+        if self.status().await == VmStatus::Running {
+            self.stop(true).await?;
+        }
+        if let Some(cpus_index) = self
+            .state
+            .upgrade_state
+            .steps
+            .iter()
+            .position(|item| matches!(item, UpgradeStep::CpuAssignment(_)))
+        {
+            match self.state.upgrade_state.steps.swap_remove(cpus_index) {
+                UpgradeStep::CpuAssignment(CpuAssignmentUpdate::AcquiredCpus(orig_len)) => {
+                    self.cpu_registry
+                        .release(&mut self.state.assigned_cpus.split_off(orig_len))
+                        .await
+                }
+                UpgradeStep::CpuAssignment(CpuAssignmentUpdate::ReleasedCpus(mut cpus)) => {
+                    self.state.assigned_cpus.append(&mut cpus)
+                }
+                _ => {}
+            }
+            self.save_state().await?;
+        }
+        if let Some(vm_index) = self
+            .state
+            .upgrade_state
+            .steps
+            .iter()
+            .position(|item| matches!(item, UpgradeStep::Vm))
+        {
+            self.machine.rollback().await?;
+            self.state.upgrade_state.steps.swap_remove(vm_index);
+            self.save_state().await?;
+        }
+        if let Some(plugin_index) = self
+            .state
+            .upgrade_state
+            .steps
+            .iter()
+            .position(|item| matches!(item, UpgradeStep::Plugin))
+        {
+            let plugin_path = self.machine.plugin_path();
+            let node_env = self.machine.node_env();
+            self.node_env = node_env.clone();
+            self.babel_engine
+                .update_node_info(self.state.image.clone(), self.state.properties.clone());
+            self.babel_engine
+                .update_plugin(
+                    |engine| RhaiPlugin::from_file(plugin_path, engine),
+                    node_env,
+                )
+                .await?;
+            self.state.upgrade_state.steps.swap_remove(plugin_index);
+            self.save_state().await?;
+        }
+        if let Some(firewall_index) = self
+            .state
+            .upgrade_state
+            .steps
+            .iter()
+            .position(|item| matches!(item, UpgradeStep::Firewall))
+        {
+            self.pal
+                .apply_firewall_config(NodeFirewallConfig {
+                    id: self.state.id,
+                    ip: self.state.ip,
+                    bridge: self.bv_context.bridge.clone(),
+                    config: self.state.firewall.clone(),
+                })
+                .await
+                .map_err(into_internal)?;
+            self.state.upgrade_state.steps.swap_remove(firewall_index);
+            self.save_state().await?;
+        }
+
+        if self.state.upgrade_state.steps.contains(&UpgradeStep::Stop) {
+            self.start().await?;
+        }
+        debug!("Node rolled back");
         Ok(())
     }
 
@@ -797,8 +1027,11 @@ pub mod tests {
             async fn force_shutdown(&mut self) -> Result<()>;
             async fn start(&mut self) -> Result<()>;
             async fn upgrade(&mut self, node_state: &NodeState) -> Result<()>;
+            async fn drop_backup(&mut self) -> Result<()>;
+            async fn rollback(&mut self) -> Result<()>;
             async fn recover(&mut self) -> Result<()>;
             fn node_env(&self) -> NodeEnv;
+            fn update_node_env(&mut self, node_state: &NodeState);
             fn plugin_path(&self) -> PathBuf;
         }
     }
@@ -1003,7 +1236,7 @@ pub mod tests {
             },
             ip: IpAddr::from_str("172.16.0.10").unwrap(),
             gateway: IpAddr::from_str("172.16.0.1").unwrap(),
-            assigned_cpus: vec![0],
+            assigned_cpus: vec![3],
             vm_config: VmConfig {
                 vcpu_count: 1,
                 mem_size_mb: 2048,
@@ -1035,7 +1268,10 @@ pub mod tests {
                     },
                 ],
             },
-            properties: HashMap::from_iter([("TESTING_PARAM".to_string(), "any".to_string())]),
+            properties: HashMap::from_iter([(
+                "arbitrary-text-property".to_string(),
+                "any".to_string(),
+            )]),
             dev_mode: false,
             restarting: false,
             org_id: "org_id".to_string(),
@@ -1048,6 +1284,7 @@ pub mod tests {
             dns_name: "dns.name".to_string(),
             apptainer_config: None,
             display_name: "node display name".to_string(),
+            upgrade_state: Default::default(),
         }
     }
 
@@ -1130,6 +1367,10 @@ pub mod tests {
                 bv_utils::rpc::DefaultTimeout(Duration::from_secs(1)),
             ),
         ))
+    }
+
+    fn default_cpu_registry() -> CpuRegistry {
+        CpuRegistry::new(4)
     }
 
     #[tokio::test]
@@ -1238,7 +1479,8 @@ pub mod tests {
                 pal.clone(),
                 config.clone(),
                 node_state.clone(),
-                test_env.tx.clone()
+                test_env.tx.clone(),
+                default_cpu_registry(),
             )
             .await
             .unwrap_err()
@@ -1251,7 +1493,8 @@ pub mod tests {
                 pal.clone(),
                 config.clone(),
                 node_state.clone(),
-                test_env.tx.clone()
+                test_env.tx.clone(),
+                default_cpu_registry(),
             )
             .await
             .unwrap_err()
@@ -1264,14 +1507,22 @@ pub mod tests {
                 pal.clone(),
                 config.clone(),
                 node_state.clone(),
-                test_env.tx.clone()
+                test_env.tx.clone(),
+                default_cpu_registry(),
             )
             .await
             .unwrap_err()
             .to_string()
         );
 
-        let node = Node::create(pal, config, node_state, test_env.tx.clone()).await?;
+        let node = Node::create(
+            pal,
+            config,
+            node_state,
+            test_env.tx.clone(),
+            default_cpu_registry(),
+        )
+        .await?;
         assert_eq!(VmStatus::Running, node.expected_status());
         test_env.assert_node_state_saved(&node.state).await;
         Ok(())
@@ -1411,7 +1662,8 @@ pub mod tests {
                 pal.clone(),
                 config.clone(),
                 node_state.clone(),
-                test_env.tx.clone()
+                test_env.tx.clone(),
+                default_cpu_registry(),
             )
             .await
             .unwrap_err()
@@ -1425,7 +1677,8 @@ pub mod tests {
                 pal.clone(),
                 config.clone(),
                 node_state.clone(),
-                test_env.tx.clone()
+                test_env.tx.clone(),
+                default_cpu_registry(),
             )
             .await
             .unwrap_err()
@@ -1438,6 +1691,7 @@ pub mod tests {
             config.clone(),
             node_state.clone(),
             test_env.tx.clone(),
+            default_cpu_registry(),
         )
         .await?;
         assert_eq!(VmStatus::Failed, node.status().await);
@@ -1447,7 +1701,14 @@ pub mod tests {
             .await
             .unwrap();
         let server = test_env.start_server(babel_mock).await;
-        let node = Node::attach(pal, config, node_state, test_env.tx.clone()).await?;
+        let node = Node::attach(
+            pal,
+            config,
+            node_state,
+            test_env.tx.clone(),
+            default_cpu_registry(),
+        )
+        .await?;
         assert_eq!(VmStatus::Running, node.expected_status());
         server.assert().await;
         Ok(())
@@ -1548,6 +1809,7 @@ pub mod tests {
             config,
             node_state.clone(),
             test_env.tx.clone(),
+            default_cpu_registry(),
         )
         .await?;
         assert_eq!(VmStatus::Running, node.expected_status());
@@ -1703,7 +1965,14 @@ pub mod tests {
             Ok(mock)
         });
 
-        let mut node = Node::create(Arc::new(pal), config, node_state, test_env.tx.clone()).await?;
+        let mut node = Node::create(
+            Arc::new(pal),
+            config,
+            node_state,
+            test_env.tx.clone(),
+            default_cpu_registry(),
+        )
+        .await?;
         assert_eq!(VmStatus::Running, node.expected_status());
 
         node.state.expected_status = VmStatus::Stopped;
@@ -1788,6 +2057,7 @@ pub mod tests {
                 .once()
                 .returning(move || plugin_path.clone());
             mock.expect_node_env().returning(Default::default);
+            mock.expect_update_node_env().returning(|_| ());
             Ok(mock)
         });
 
@@ -1814,6 +2084,7 @@ pub mod tests {
             config,
             node_state.clone(),
             test_env.tx.clone(),
+            default_cpu_registry(),
         )
         .await?;
         assert_eq!(VmStatus::Running, node.expected_status());
@@ -1822,7 +2093,7 @@ pub mod tests {
         node.update(
             Some("new name".to_string()),
             Some(updated_rules.clone()),
-            Some("org_id".to_string()),
+            Some("new org_id".to_string()),
             Some("org name".to_string()),
             HashMap::from_iter([
                 ("new_key1".to_string(), "new value ".to_string()),
@@ -1832,7 +2103,7 @@ pub mod tests {
         .await?;
         assert_eq!(node.state.firewall, updated_rules);
         assert_eq!(node.state.display_name, "new name".to_string());
-        assert_eq!(node.state.org_id, "org_id".to_string());
+        assert_eq!(node.state.org_id, "new org_id".to_string());
         assert_eq!(node.state.org_name, "org name".to_string());
         assert_eq!(
             node.state.properties.get("new_key1"),
@@ -1897,6 +2168,7 @@ pub mod tests {
             config,
             node_state.clone(),
             test_env.tx.clone(),
+            default_cpu_registry(),
         )
         .await?;
         assert_eq!(VmStatus::Running, node.expected_status());

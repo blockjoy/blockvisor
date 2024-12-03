@@ -84,7 +84,7 @@ firewall_config:
   rules:
 
     # Unique rule key.
-    - key: example_rule
+    - key: example-rule
       # [optional] Brief rule description.
       description: null
 
@@ -118,7 +118,7 @@ firewall_config:
 # List of image properties, allowed values and the way they affect required resources.
 properties:
 
-  # Unique property key. Property value will be available in a Rhai runtime via `node_params().<key>` (e.g. `node_params().arbitrary_property`).
+  # Unique property key. Property value will be available in a Rhai runtime via `node_params()["<key>"]` (e.g. `node_params()["arbitrary-property"]`).
   # It is required to be lower-kebab-case.
   - key: arbitrary-text-property
 

@@ -167,10 +167,16 @@ pub trait VirtualMachine {
     async fn start(&mut self) -> Result<()>;
     /// Upgrade VM according to expected node_state.
     async fn upgrade(&mut self, node_state: &NodeState) -> Result<()>;
+    /// Drop VM backup saved during last upgrade.
+    async fn drop_backup(&mut self) -> Result<()>;
+    /// Roll back to old version saved during last upgrade.
+    async fn rollback(&mut self) -> Result<()>;
     /// Try recover VM that is in INVALID state.
     async fn recover(&mut self) -> Result<()>;
     /// Get associated NodeEnv.
     fn node_env(&self) -> NodeEnv;
+    /// Update associated NodeEnv with new NodeState.
+    fn update_node_env(&mut self, node_state: &NodeState);
     /// Get plugin path.
     fn plugin_path(&self) -> PathBuf;
 }

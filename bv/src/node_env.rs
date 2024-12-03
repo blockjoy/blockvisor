@@ -15,6 +15,7 @@ pub fn new(
     NodeEnv {
         node_id: node_state.id.to_string(),
         node_name: node_state.name.clone(),
+        node_org_id: node_state.org_id.clone(),
         node_version: node_state.image.version.clone(),
         node_protocol: node_state.image_key.protocol_key.clone(),
         node_variant: node_state.image_key.variant_key.clone(),
@@ -24,16 +25,28 @@ pub fn new(
         bv_host_id: bv_context.id.clone(),
         bv_host_name: bv_context.name.clone(),
         bv_api_url: bv_context.url.clone(),
-        org_id: node_state.org_id.clone(),
         data_mount_point,
         protocol_data_path,
     }
+}
+
+pub fn update_state(node_env: &mut NodeEnv, node_state: &NodeState) {
+    node_env.node_id = node_state.id.to_string();
+    node_env.node_name = node_state.name.clone();
+    node_env.node_org_id = node_state.org_id.clone();
+    node_env.node_version = node_state.image.version.clone();
+    node_env.node_protocol = node_state.image_key.protocol_key.clone();
+    node_env.node_variant = node_state.image_key.variant_key.clone();
+    node_env.node_ip = node_state.ip.to_string();
+    node_env.node_gateway = node_state.gateway.to_string();
+    node_env.dev_mode = node_state.dev_mode;
 }
 
 pub async fn save(env: &NodeEnv, babel_root: &Path) -> eyre::Result<()> {
     let mut node_env = format!(
         "NODE_ID=\"{}\"\n\
          NODE_NAME=\"{}\"\n\
+         NODE_ORG_ID=\"{}\"\n\
          NODE_VERSION=\"{}\"\n\
          NODE_PROTOCOL=\"{}\"\n\
          NODE_VARIANT=\"{}\"\n\
@@ -43,11 +56,11 @@ pub async fn save(env: &NodeEnv, babel_root: &Path) -> eyre::Result<()> {
          BV_HOST_ID=\"{}\"\n\
          BV_HOST_NAME=\"{}\"\n\
          BV_API_URL=\"{}\"\n\
-         ORG_ID=\"{}\"\n\
          DATA_MOUNT_POINT=\"{}\"\n\
          PROTOCOL_DATA_PATH=\"{}\"\n",
         env.node_id,
         env.node_name,
+        env.node_org_id,
         env.node_version,
         env.node_protocol,
         env.node_variant,
@@ -57,7 +70,6 @@ pub async fn save(env: &NodeEnv, babel_root: &Path) -> eyre::Result<()> {
         env.bv_host_id,
         env.bv_host_name,
         env.bv_api_url,
-        env.org_id,
         env.data_mount_point.display(),
         env.protocol_data_path.display(),
     );

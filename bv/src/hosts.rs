@@ -185,6 +185,7 @@ pub async fn send_info_update(config: SharedConfig) -> Result<()> {
         schedule_type: None,
         update_tags: None,
         memory_bytes: None,
+        cost: None,
     };
     api_with_retry!(client, client.update(update.clone()))?;
 

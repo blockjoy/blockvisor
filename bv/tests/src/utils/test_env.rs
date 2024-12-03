@@ -177,7 +177,7 @@ impl TestEnv {
                 "image",
                 "play",
                 "--props",
-                r#"{"network": "test", "TESTING_PARAM":"anything"}"#,
+                r#"{"network": "test", "arbitrary-text-property":"anything"}"#,
                 "--gateway",
                 "216.18.214.193",
                 "--ip",
@@ -376,7 +376,7 @@ impl Pal for DummyPlatform {
             },
         )
         .await?;
-        vm.create().await?;
+        vm.build().await?;
         Ok(vm)
     }
 

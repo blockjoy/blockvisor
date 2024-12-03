@@ -64,7 +64,7 @@ fn init() {
     let service_config = #{
         job_type: #{
             // Sh script body
-            run_sh: "echo \"Protocol service parametrized with " + node_params().TESTING + "\"",
+            run_sh: "echo \"Protocol service parametrized with " + node_params()["TESTING"] + "\"",
         },
 
         // Job restart policy.

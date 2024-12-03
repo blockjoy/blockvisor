@@ -12,12 +12,14 @@ use blockvisord::{
     services::api::{common, pb},
 };
 use predicates::prelude::*;
+use serial_test::serial;
 use std::path::PathBuf;
 use std::{path::Path, str};
 use tokio::time::{sleep, Duration};
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
-async fn test_bv_service_e2e() {
+#[test]
+#[serial]
+fn test_bvup_unknown_provision_token() {
     let tmp_dir = TempDir::new().unwrap();
     link_apptainer_config(&tmp_dir).unwrap();
 
@@ -41,7 +43,11 @@ async fn test_bv_service_e2e() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Invalid token"));
+}
 
+#[tokio::test]
+#[serial]
+async fn test_bv_service_e2e() {
     let url = "http://localhost:8080";
     let email = "tester@blockjoy.com";
     let password = "ilovemytests";
@@ -179,7 +185,7 @@ async fn test_bv_service_e2e() {
             "image",
             "check",
             "--props",
-            r#"{"TESTING_PARAM":"testing value"}"#,
+            r#"{"arbitrary-text-property":"testing value"}"#,
             "--path",
             &test_dir
                 .join("image_v1")
@@ -218,7 +224,7 @@ async fn test_bv_service_e2e() {
         "testing",
         "test",
         "--props",
-        r#"{"TESTING_PARAM":"I guess just some test value"}"#,
+        r#"{"arbitrary-text-property":"I guess just some test value"}"#,
     ]);
     let first_node_id = parse_out_node_id(stdout);
     println!("created first node: {first_node_id}");
@@ -229,7 +235,7 @@ async fn test_bv_service_e2e() {
         "testing",
         "test",
         "--props",
-        r#"{"TESTING_PARAM":"I guess just some test value"}"#,
+        r#"{"arbitrary-text-property":"I guess just some test value"}"#,
     ]);
     let second_node_id = parse_out_node_id(stdout);
     println!("created second node: {second_node_id}");
