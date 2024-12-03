@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "babel"
-version = "1.14.4"
+version = "1.14.5"
 dependencies = [
  "assert_fs",
  "async-trait",
@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "babel_api"
-version = "1.14.4"
+version = "1.14.5"
 dependencies = [
  "bv_tests_utils",
  "chrono",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "blockvisord"
-version = "1.14.4"
+version = "1.14.5"
 dependencies = [
  "assert_cmd",
  "assert_fs",
@@ -760,7 +760,7 @@ checksum = "7f30e7476521f6f8af1a1c4c0b8cc94f0bee37d91763d0ca2665f299b6cd8aec"
 
 [[package]]
 name = "bv_tests_utils"
-version = "1.14.4"
+version = "1.14.5"
 dependencies = [
  "babel_api",
  "bv_utils",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "bv_utils"
-version = "1.14.4"
+version = "1.14.5"
 dependencies = [
  "async-trait",
  "babel_api",
