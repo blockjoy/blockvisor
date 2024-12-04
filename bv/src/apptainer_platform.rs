@@ -64,21 +64,30 @@ impl ApptainerPlatform {
     }
 
     pub async fn new(iface: &str, config: ApptainerConfig) -> Result<Self> {
-        let routes = run_cmd("ip", ["--json", "route"]).await?;
-        let mut routes: Vec<crate::utils::IpRoute> = serde_json::from_str(&routes)?;
-        routes.retain(|route| is_dev_ip(route, iface));
-        let route = routes
-            .pop()
-            .ok_or(anyhow!("can't find {iface} ip in routing table"))?;
-        let cidr = Ipv4Cidr::from_str(&route.dst)
-            .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
+        if !config.host_network {
+            let routes = run_cmd("ip", ["--json", "route"]).await?;
+            let mut routes: Vec<crate::utils::IpRoute> = serde_json::from_str(&routes)?;
+            routes.retain(|route| is_dev_ip(route, iface));
+            let route = routes
+                .pop()
+                .ok_or(anyhow!("can't find {iface} ip in routing table"))?;
+            let cidr = Ipv4Cidr::from_str(&route.dst)
+                .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
 
-        Ok(Self {
-            base: linux_platform::LinuxPlatform::new().await?,
-            bridge_ip: IpAddr::from_str(&route.prefsrc.unwrap())?, // can safely unwrap here
-            mask_bits: cidr.get_bits(),
-            config,
-        })
+            Ok(Self {
+                base: linux_platform::LinuxPlatform::new().await?,
+                bridge_ip: IpAddr::from_str(&route.prefsrc.unwrap())?, // can safely unwrap here
+                mask_bits: cidr.get_bits(),
+                config,
+            })
+        } else {
+            Ok(Self {
+                base: linux_platform::LinuxPlatform::new().await?,
+                bridge_ip: IpAddr::from_str("127.0.0.1")?,
+                mask_bits: 28,
+                config,
+            })
+        }
     }
 
     async fn new_vm(
