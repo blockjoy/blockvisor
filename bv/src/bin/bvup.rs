@@ -107,19 +107,19 @@ async fn main() -> Result<()> {
             .ip_gateway
             .or(net.gateway)
             .ok_or_else(|| anyhow!("Failed to resolve `gateway` address"))?;
-        let range_from = cmd_args
-            .ip_range_from
-            .as_ref()
-            .or(net.ip_from.as_ref())
-            .ok_or_else(|| anyhow!("Failed to resolve `from` address"))?;
-        let range_to = cmd_args
-            .ip_range_to
-            .as_ref()
-            .or(net.ip_to.as_ref())
-            .ok_or_else(|| anyhow!("Failed to resolve `to` address"))?;
         let ips = if !cmd_args.use_host_network
             || (cmd_args.ip_range_from.is_some() && cmd_args.ip_range_to.is_some())
         {
+            let range_from = cmd_args
+                .ip_range_from
+                .as_ref()
+                .or(net.ip_from.as_ref())
+                .ok_or_else(|| anyhow!("Failed to resolve `from` address"))?;
+            let range_to = cmd_args
+                .ip_range_to
+                .as_ref()
+                .or(net.ip_to.as_ref())
+                .ok_or_else(|| anyhow!("Failed to resolve `to` address"))?;
             Ipv4AddrRange::new(
                 Ipv4Addr::from_str(range_from)?,
                 Ipv4Addr::from_str(range_to)?,
