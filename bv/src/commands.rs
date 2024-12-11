@@ -16,20 +16,20 @@ pub type Result<T> = eyre::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("BV internal error: {0:#}")]
+    #[error("BV internal error: '{0:#}'")]
     Internal(#[from] eyre::Error),
     #[error("BV service not ready, try again later")]
     ServiceNotReady,
     #[error("BV service is broken, call support")]
     ServiceBroken,
-    #[error("Command is not supported")]
+    #[error("command is not supported")]
     NotSupported,
-    #[error("Node not found")]
+    #[error("node not found")]
     NodeNotFound,
-    #[error("Can't proceed while 'upgrade_blocking' job is running. Try again after {} seconds.", retry_hint.as_secs())]
+    #[error("can't proceed while 'upgrade_blocking' job is running. Try again after {} seconds.", retry_hint.as_secs())]
     BlockingJobRunning { retry_hint: Duration },
-    #[error("Node upgrade failed, but it was successfully rolled back: {0:#}")]
+    #[error("node upgrade failed with: '{0:#}'; but then successfully rolled back")]
     NodeUpgradeRollback(eyre::Error),
-    #[error("Node upgrade failed, and node ended in failed state: {0:#}")]
-    NodeUpgradeFailure(eyre::Error),
+    #[error("node upgrade failed with: '{0:#}'; and then rollback failed with: '{1:#}'; node ended in failed state")]
+    NodeUpgradeFailure(String, eyre::Error),
 }

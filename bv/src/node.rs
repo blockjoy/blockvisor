@@ -489,6 +489,7 @@ impl<P: Pal + Debug> Node<P> {
                     });
                 }
                 self.state.upgrade_state.steps.push(UpgradeStep::Stop);
+                self.state.restarting = true;
                 self.stop(false).await?;
             }
             self.state.upgrade_state.active = true;
@@ -501,18 +502,27 @@ impl<P: Pal + Debug> Node<P> {
         if let Some(err) = &self.state.upgrade_state.need_rollback {
             self.rollback(err.clone()).await
         } else if let Err(err) = self.try_upgrade().await {
+            let error_str = format!("{err:#}");
             if self
                 .state
                 .upgrade_state
                 .steps
                 .contains(&UpgradeStep::ReInit)
             {
-                command_failed!(commands::Error::NodeUpgradeFailure(anyhow!("can't rollback node upgrade if 'init' was already started - protocol data could be changed")))
+                command_failed!(commands::Error::NodeUpgradeFailure(error_str, anyhow!("can't rollback node upgrade if 'init' was already started - protocol data could be changed")))
             }
-            let error_str = format!("{err:#}");
-            self.state.upgrade_state.need_rollback = Some(error_str.clone());
-            self.save_state().await?;
-            self.rollback(error_str).await
+            if let Some(mut state_backup) = self.state.upgrade_state.state_backup.take() {
+                state_backup.swap_state(&mut self.state);
+                self.state.upgrade_state.state_backup = Some(state_backup);
+                self.state.upgrade_state.need_rollback = Some(error_str.clone());
+                self.save_state().await?;
+                self.rollback(error_str).await
+            } else {
+                command_failed!(commands::Error::NodeUpgradeFailure(
+                    error_str,
+                    anyhow!("can't rollback node upgrade - backup not found")
+                ))
+            }
         } else {
             info!("Node upgraded");
             // some steps may still need cleanup
@@ -538,19 +548,11 @@ impl<P: Pal + Debug> Node<P> {
 
     #[instrument(skip(self))]
     async fn rollback(&mut self, err: String) -> commands::Result<()> {
-        if let Err(err) = self.try_rollback().await {
-            error!(
-                "failed to rollback, after unsuccessful upgrade of node {}: {err:#}",
-                self.state.id
-            );
+        if let Err(rollback_err) = self.try_rollback().await {
             self.state.upgrade_state.active = false;
             self.save_expected_status(VmStatus::Failed).await?;
-            command_failed!(commands::Error::NodeUpgradeFailure(err))
+            command_failed!(commands::Error::NodeUpgradeFailure(err, rollback_err))
         } else {
-            warn!(
-                "failed to upgrade node {}, but successfully rolled back: {err:#}",
-                self.state.id
-            );
             self.state.upgrade_state.active = false;
             self.save_state().await?;
             command_failed!(commands::Error::NodeUpgradeRollback(anyhow!(err)))
@@ -1336,6 +1338,7 @@ pub mod tests {
                 babel_api::babel::babel_server::BabelServer::new(babel_mock)
             )
         }
+
         async fn assert_node_state_saved(&self, node_state: &NodeState) {
             let mut node_state = node_state.clone();
             if let Some(time) = &mut node_state.started_at {
@@ -1346,6 +1349,38 @@ pub mod tests {
                     .await
                     .unwrap();
             assert_eq!(saved_data, node_state);
+        }
+
+        fn add_create_node_expectations(
+            &self,
+            pal: &mut MockTestPal,
+            state: NodeState,
+            vm_mock: MockTestVM,
+        ) {
+            let test_tmp_root = self.tmp_root.to_path_buf();
+            pal.expect_create_node_connection().return_once(move |_| {
+                let mut mock = MockTestNodeConnection::new();
+                mock.expect_is_closed().returning(|| false);
+                mock.expect_is_broken().returning(|| false);
+                let tmp_root = test_tmp_root.clone();
+                mock.expect_babel_client()
+                    .returning(move || Ok(test_babel_client(&tmp_root)));
+                mock.expect_mark_broken().return_once(|| ());
+                mock.expect_engine_socket_path()
+                    .return_const(Default::default());
+                mock
+            });
+            add_firewall_expectation(pal, state.clone());
+            pal.expect_create_vm().return_once(move |_, _| Ok(vm_mock));
+        }
+
+        fn add_plugin_update_expectations(&self, vm_mock: &mut MockTestVM) {
+            let plugin_path = self.default_plugin_path.clone();
+            vm_mock
+                .expect_plugin_path()
+                .once()
+                .returning(move || plugin_path.clone());
+            vm_mock.expect_node_env().once().returning(Default::default);
         }
     }
 
@@ -2104,7 +2139,7 @@ pub mod tests {
         test_env.assert_node_state_saved(&node.state).await;
 
         assert_eq!(
-            "BV internal error: failed to apply firewall config",
+            "BV internal error: 'failed to apply firewall config'",
             node.update(ConfigUpdate {
                 config_id: "new-cfg_id".to_string(),
                 new_display_name: None,
@@ -2124,12 +2159,27 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn test_upgrade_node_rejected() -> Result<()> {
+    async fn test_upgrade_node() -> Result<()> {
         let test_env = TestEnv::new().await?;
         let mut pal = test_env.default_pal();
         let config = default_config(test_env.tmp_root.clone());
         let mut node_state = default_node_state();
-
+        node_state.assigned_cpus = vec![4];
+        node_state.expected_status = VmStatus::Stopped;
+        let mut new_state = node_state.clone();
+        new_state.image.id = "new-image-id".to_string();
+        new_state.image.uri = "new.uri".to_string();
+        new_state.image.version = "3.2.1".to_string();
+        new_state.vm_config.vcpu_count = 5;
+        new_state.vm_config.mem_size_mb = 4096;
+        new_state.vm_config.disk_size_gb = 3;
+        new_state.assigned_cpus = vec![3, 2];
+        new_state.firewall.rules.pop();
+        new_state
+            .properties
+            .insert("new-key".to_string(), "new_value".to_string());
+        let mut vm_mock = MockTestVM::new();
+        test_env.add_plugin_update_expectations(&mut vm_mock);
         let test_tmp_root = test_env.tmp_root.to_path_buf();
         pal.expect_create_node_connection().return_once(move |_| {
             let mut mock = MockTestNodeConnection::new();
@@ -2144,17 +2194,236 @@ pub mod tests {
             mock
         });
         add_firewall_expectation(&mut pal, node_state.clone());
+
+        // not enough cpu cores
+        vm_mock
+            .expect_state()
+            .times(2)
+            .returning(|| VmState::SHUTOFF);
+
+        // vm failure
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock
+            .expect_upgrade()
+            .once()
+            .returning(|_| bail!("vm upgrade failed"));
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock
+            .expect_rollback()
+            .once()
+            .returning(|| bail!("vm rollback failed"));
+
+        // plugin failure
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock.expect_upgrade().once().returning(|_| Ok(()));
+        vm_mock
+            .expect_plugin_path()
+            .once()
+            .returning(move || PathBuf::from("new/invalid/path"));
+        vm_mock.expect_node_env().once().returning(Default::default);
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock.expect_rollback().once().returning(|| Ok(()));
+        vm_mock
+            .expect_plugin_path()
+            .once()
+            .returning(move || PathBuf::from("old/invalid/path"));
+        vm_mock.expect_node_env().once().returning(Default::default);
+
+        // firewall failure
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock.expect_upgrade().once().returning(|_| Ok(()));
+        test_env.add_plugin_update_expectations(&mut vm_mock);
+        pal.expect_apply_firewall_config()
+            .once()
+            .returning(|_| bail!("firewall failure"));
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock.expect_rollback().once().returning(|| Ok(()));
+        test_env.add_plugin_update_expectations(&mut vm_mock);
+        pal.expect_apply_firewall_config()
+            .once()
+            .returning(|_| bail!("firewall rollback failure"));
+
+        // successful upgrade and finalize
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock.expect_upgrade().once().returning(|_| Ok(()));
         let plugin_path = test_env.default_plugin_path.clone();
-        pal.expect_create_vm().return_once(move |_, _| {
-            let mut mock = MockTestVM::new();
-            let plugin_path = plugin_path.clone();
-            mock.expect_plugin_path()
-                .once()
-                .returning(move || plugin_path.clone());
-            mock.expect_node_env().returning(Default::default);
-            mock.expect_state().once().returning(|| VmState::RUNNING);
-            Ok(mock)
+        vm_mock
+            .expect_plugin_path()
+            .once()
+            .returning(move || plugin_path.clone());
+        vm_mock.expect_node_env().returning(|| NodeEnv {
+            node_name: "some_new_name".to_string(),
+            ..Default::default()
         });
+        add_firewall_expectation(&mut pal, new_state.clone());
+        vm_mock.expect_drop_backup().once().returning(|| Ok(()));
+
+        pal.expect_create_vm().return_once(move |_, _| Ok(vm_mock));
+        let mut node = Node::create(
+            Arc::new(pal),
+            config,
+            node_state.clone(),
+            test_env.tx.clone(),
+            default_cpu_registry(),
+        )
+        .await?;
+        assert_eq!(VmStatus::Stopped, node.expected_status());
+
+        assert_eq!(
+            "node upgrade failed with: 'not enough cpu cores'; but then successfully rolled back",
+            node.upgrade(new_state.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        new_state.vm_config.vcpu_count = 2;
+        node.state.upgrade_state.active = false;
+        assert_eq!(
+            "node upgrade failed with: 'vm upgrade failed'; and then rollback failed with: 'vm rollback failed'; node ended in failed state",
+            node.upgrade(new_state.clone()).await.unwrap_err().to_string()
+        );
+        node.state.expected_status = VmStatus::Stopped;
+        node.state.upgrade_state.active = false;
+        assert_eq!(
+            "node upgrade failed with: 'Rhai syntax error: Cannot open script file 'new/invalid/path': No such file or directory (os error 2)'; and then rollback failed with: 'Rhai syntax error: Cannot open script file 'old/invalid/path': No such file or directory (os error 2)'; node ended in failed state",
+            node.upgrade(new_state.clone()).await.unwrap_err().to_string()
+        );
+        node.state.expected_status = VmStatus::Stopped;
+        node.state.upgrade_state.active = false;
+        assert_eq!(
+            "node upgrade failed with: 'BV internal error: 'firewall failure': firewall failure'; and then rollback failed with: 'BV internal error: 'firewall rollback failure': firewall rollback failure'; node ended in failed state",
+            node.upgrade(new_state.clone()).await.unwrap_err().to_string()
+        );
+
+        node.state.expected_status = VmStatus::Stopped;
+        node.state.upgrade_state.active = false;
+        node.upgrade(new_state.clone()).await.unwrap();
+        let mut state_backup: StateBackup = node_state.into();
+        state_backup.initialized = true;
+        new_state.upgrade_state = UpgradeState {
+            active: false,
+            state_backup: Some(state_backup),
+            need_rollback: None,
+            steps: vec![
+                UpgradeStep::CpuAssignment(CpuAssignmentUpdate::AcquiredCpus(1)),
+                UpgradeStep::Vm,
+                UpgradeStep::Plugin,
+                UpgradeStep::Firewall,
+            ],
+        };
+        new_state.initialized = false;
+        assert_eq!(new_state, node.state);
+        assert_eq!("some_new_name", node.node_env.node_name);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_upgrade_running_node() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let mut pal = test_env.default_pal();
+        let config = default_config(test_env.tmp_root.clone());
+        let mut node_state = default_node_state();
+        node_state.expected_status = VmStatus::Running;
+        let mut new_state = node_state.clone();
+        new_state.image.id = "new-image-id".to_string();
+        let mut vm_mock = MockTestVM::new();
+        test_env.add_plugin_update_expectations(&mut vm_mock);
+        let test_tmp_root = test_env.tmp_root.to_path_buf();
+        pal.expect_create_node_connection().return_once(move |_| {
+            let mut mock = MockTestNodeConnection::new();
+            mock.expect_is_closed().returning(|| false);
+            mock.expect_is_broken().returning(|| false);
+            let tmp_root = test_tmp_root.clone();
+            mock.expect_babel_client()
+                .returning(move || Ok(test_babel_client(&tmp_root)));
+            mock.expect_mark_broken().return_once(|| ());
+            mock.expect_engine_socket_path()
+                .return_const(Default::default());
+            mock
+        });
+        add_firewall_expectation(&mut pal, node_state.clone());
+
+        // failed to stop before upgrade
+        vm_mock
+            .expect_state()
+            .times(2)
+            .returning(|| VmState::RUNNING);
+
+        // successfuly upgrade running
+        vm_mock.expect_state().once().returning(|| VmState::RUNNING);
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock.expect_upgrade().once().returning(|_| Ok(()));
+        test_env.add_plugin_update_expectations(&mut vm_mock);
+        add_firewall_expectation(&mut pal, new_state.clone());
+        vm_mock.expect_state().once().returning(|| VmState::RUNNING);
+        vm_mock.expect_state().once().returning(|| VmState::RUNNING);
+        vm_mock.expect_rollback().once().returning(|| Ok(()));
+        test_env.add_plugin_update_expectations(&mut vm_mock);
+        pal.expect_apply_firewall_config()
+            .once()
+            .returning(|_| Ok(()));
+        vm_mock.expect_state().once().returning(|| VmState::RUNNING);
+
+        pal.expect_create_vm().return_once(move |_, _| Ok(vm_mock));
+        let mut node = Node::create(
+            Arc::new(pal),
+            config,
+            node_state,
+            test_env.tx.clone(),
+            default_cpu_registry(),
+        )
+        .await?;
+        assert_eq!(VmStatus::Running, node.expected_status());
+
+        let mut babel_mock = MockTestBabelService::new();
+        babel_mock
+            .expect_get_jobs()
+            .once()
+            .returning(|_| Ok(Response::new(HashMap::default())));
+        babel_mock
+            .expect_get_babel_shutdown_timeout()
+            .once()
+            .returning(|_| Ok(Response::new(Duration::from_millis(1))));
+        babel_mock
+            .expect_shutdown_babel()
+            .withf(|req| !req.get_ref())
+            .times(4)
+            .returning(|_| Err(Status::internal("can't stop babel")));
+
+        babel_mock
+            .expect_get_jobs()
+            .once()
+            .returning(|_| Ok(Response::new(HashMap::default())));
+        let server = test_env.start_server(babel_mock).await;
+
+        assert!(node.upgrade(new_state.clone()).await.unwrap_err().to_string().starts_with("BV internal error: 'Failed to gracefully shutdown babel and background jobs: status: Internal, message: \"can't stop babel\""));
+        assert!(node.state.restarting);
+
+        node.state.expected_status = VmStatus::Running;
+        assert_eq!(
+            "node upgrade failed with: 'can't start node which is not stopped properly'; and then rollback failed with: 'can't start node which is not stopped properly'; node ended in failed state",
+            node.upgrade(new_state.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
+        server.assert().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_upgrade_rejected() -> Result<()> {
+        let test_env = TestEnv::new().await?;
+        let mut pal = test_env.default_pal();
+        let config = default_config(test_env.tmp_root.clone());
+        let node_state = default_node_state();
+        let mut vm_mock = MockTestVM::new();
+        test_env.add_plugin_update_expectations(&mut vm_mock);
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock.expect_state().once().returning(|| VmState::RUNNING);
+        test_env.add_create_node_expectations(&mut pal, node_state.clone(), vm_mock);
 
         let mut node = Node::create(
             Arc::new(pal),
@@ -2167,7 +2436,7 @@ pub mod tests {
         assert_eq!(VmStatus::Running, node.expected_status());
 
         let mut babel_mock = MockTestBabelService::new();
-        // failed to gracefully shutdown babel
+        // failed to gracefully shutdown babel - upgrade blocking job
         babel_mock.expect_get_jobs().once().returning(|_| {
             Ok(Response::new(HashMap::from_iter([(
                 "upgrade_blocking_job_name".to_string(),
@@ -2180,13 +2449,17 @@ pub mod tests {
                 },
             )])))
         });
-
-        node_state.image.uri = "new.uri".to_string();
         let server = test_env.start_server(babel_mock).await;
 
-        assert_eq!("image.uri", node.state.image.uri);
         assert_eq!(
-            "Can't proceed while 'upgrade_blocking' job is running. Try again after 3600 seconds.",
+            "BV internal error: 'can't upgrade node in Failed state'",
+            node.upgrade(node_state.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "can't proceed while 'upgrade_blocking' job is running. Try again after 3600 seconds.",
             node.upgrade(node_state).await.unwrap_err().to_string()
         );
 

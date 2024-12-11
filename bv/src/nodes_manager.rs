@@ -205,13 +205,13 @@ where
         let id = desired_state.id;
         let mut node_ids = self.node_ids.write().await;
         if let Some(cache) = self.node_state_cache.read().await.get(&id) {
-            warn!("Node with id `{id}` exists");
+            warn!("node with id `{id}` exists");
             return Ok(cache.clone());
         }
 
         if node_ids.contains_key(&desired_state.name) {
             command_failed!(Error::Internal(anyhow!(
-                "Node with name `{}` exists",
+                "node with name `{}` exists",
                 desired_state.name
             )));
         }
@@ -228,7 +228,7 @@ where
             };
             if node_ip == desired_state.ip {
                 command_failed!(Error::Internal(anyhow!(
-                    "Node with ip address `{}` exists",
+                    "node with ip address `{}` exists",
                     desired_state.ip
                 )));
             }
@@ -268,7 +268,7 @@ where
         let MaybeNode::Node(node_lock) = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?
         else {
             command_failed!(Error::Internal(anyhow!(
-                "Cannot upgrade broken node `{id}`"
+                "cannot upgrade broken node `{id}`"
             )));
         };
 
@@ -281,7 +281,7 @@ where
 
             if desired_state.image.store_id != node.image.store_id {
                 command_failed!(Error::Internal(anyhow!(
-                    "Cannot upgrade node to version that uses different data set: `{}`",
+                    "cannot upgrade node to version that uses different data set: `{}`",
                     desired_state.image.store_id
                 )));
             }
@@ -306,7 +306,7 @@ where
             let nodes_lock = self.nodes.read().await;
             let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?;
             let MaybeNode::Node(node_lock) = maybe_node else {
-                command_failed!(Error::Internal(anyhow!("Cannot delete broken node `{id}`")));
+                command_failed!(Error::Internal(anyhow!("cannot delete broken node `{id}`")));
             };
             let mut node = node_lock.write().await;
             node.delete().await?;
@@ -327,7 +327,7 @@ where
         let nodes_lock = self.nodes.read().await;
         let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?;
         let MaybeNode::Node(node_lock) = maybe_node else {
-            command_failed!(Error::Internal(anyhow!("Cannot start broken node `{id}`")));
+            command_failed!(Error::Internal(anyhow!("cannot start broken node `{id}`")));
         };
         let mut node = node_lock.write().await;
         if reload_plugin {
@@ -347,7 +347,7 @@ where
         let nodes_lock = self.nodes.read().await;
         let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?;
         let MaybeNode::Node(node_lock) = maybe_node else {
-            command_failed!(Error::Internal(anyhow!("Cannot stop broken node `{id}`")));
+            command_failed!(Error::Internal(anyhow!("cannot stop broken node `{id}`")));
         };
         let mut node = node_lock.write().await;
         if VmStatus::Stopped != node.expected_status() || force {
@@ -362,7 +362,7 @@ where
         let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?;
         let MaybeNode::Node(node_lock) = maybe_node else {
             command_failed!(Error::Internal(anyhow!(
-                "Cannot restart broken node `{id}`"
+                "cannot restart broken node `{id}`"
             )));
         };
 
@@ -379,7 +379,7 @@ where
         let nodes_lock = self.nodes.read().await;
         let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?;
         let MaybeNode::Node(node_lock) = maybe_node else {
-            command_failed!(Error::Internal(anyhow!("Cannot update broken node `{id}`")));
+            command_failed!(Error::Internal(anyhow!("cannot update broken node `{id}`")));
         };
         let mut node = node_lock.write().await;
         node.update(config_update).await?;
@@ -594,19 +594,19 @@ where
 
         if state.vm_config.disk_size_gb > available.disk_size_gb {
             command_failed!(Error::Internal(anyhow!(
-                "Not enough disk space to allocate for the node: required={}, available={}",
+                "not enough disk space to allocate for the node: required={}, available={}",
                 state.vm_config.disk_size_gb,
                 available.disk_size_gb
             )));
         }
         if state.vm_config.mem_size_mb > available.mem_size_mb {
             command_failed!(Error::Internal(anyhow!(
-                "Not enough memory to allocate for the node"
+                "not enough memory to allocate for the node"
             )));
         }
         if state.vm_config.vcpu_count > available.vcpu_count {
             command_failed!(Error::Internal(anyhow!(
-                "Not enough vcpu to allocate for the node"
+                "not enough vcpu to allocate for the node"
             )));
         }
         Ok(())
@@ -720,7 +720,7 @@ where
 fn check_firewall_rules(rules: &[firewall::Rule]) -> commands::Result<()> {
     if rules.len() > MAX_SUPPORTED_RULES {
         command_failed!(Error::Internal(anyhow!(
-            "Can't configure more than {MAX_SUPPORTED_RULES} rules!"
+            "can't configure more than {MAX_SUPPORTED_RULES} rules!"
         )));
     }
     crate::firewall::check_rules(rules)?;
@@ -734,6 +734,7 @@ fn name_not_found(name: &str) -> eyre::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node_state::{CpuAssignmentUpdate, StateBackup, UpgradeState, UpgradeStep};
     use crate::scheduler::Task;
     use crate::{node::tests::*, node_context, pal, pal::VmState, services::api::pb};
     use assert_fs::TempDir;
@@ -920,7 +921,7 @@ mod tests {
         nodes.create(second_node_state.clone()).await?;
         nodes.create(second_node_state.clone()).await?;
         assert_eq!(
-            "BV internal error: failed to check available resources",
+            "BV internal error: 'failed to check available resources'",
             nodes
                 .create(failed_node_state.clone())
                 .await
@@ -928,7 +929,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "BV internal error: Not enough memory to allocate for the node",
+            "BV internal error: 'not enough memory to allocate for the node'",
             nodes
                 .create(failed_node_state.clone())
                 .await
@@ -936,7 +937,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "BV internal error: failed to create vm",
+            "BV internal error: 'failed to create vm'",
             nodes
                 .create(failed_node_state.clone())
                 .await
@@ -947,7 +948,7 @@ mod tests {
         let mut duplicated_node_state = first_node_state.clone();
         duplicated_node_state.id = Uuid::new_v4();
         assert_eq!(
-            "BV internal error: Node with name `first node name` exists",
+            "BV internal error: 'node with name `first node name` exists'",
             nodes
                 .create(duplicated_node_state)
                 .await
@@ -955,7 +956,7 @@ mod tests {
                 .to_string()
         );
         assert_eq!(
-            "BV internal error: Node with ip address `192.168.0.7` exists",
+            "BV internal error: 'node with ip address `192.168.0.7` exists'",
             nodes
                 .create(build_node_state("node name", "192.168.0.7", "192.168.0.1"))
                 .await
@@ -975,7 +976,7 @@ mod tests {
         let mut too_many_rules_state = build_node_state("node name", "192.168.0.9", "192.168.0.1");
         too_many_rules_state.firewall.rules = rules;
         assert_eq!(
-            "BV internal error: Can't configure more than 128 rules!",
+            "BV internal error: 'can't configure more than 128 rules!'",
             nodes
                 .create(too_many_rules_state)
                 .await
@@ -999,7 +1000,7 @@ mod tests {
         );
 
         assert_eq!(
-            "BV internal error: delete VM failed",
+            "BV internal error: 'delete VM failed'",
             nodes
                 .delete(first_node_state.id)
                 .await
@@ -1107,7 +1108,7 @@ mod tests {
         assert_eq!(node_state.id, nodes.node_id_for_name("node name").await?);
         assert_eq!(VmStatus::Failed, nodes.status(invalid_node_state.id).await?);
         assert_eq!(
-            "BV internal error: Cannot stop broken node `4931bafa-92d9-4521-9fc6-a77eee047531`",
+            "BV internal error: 'cannot stop broken node `4931bafa-92d9-4521-9fc6-a77eee047531`'",
             nodes
                 .stop(invalid_node_state.id, true)
                 .await
@@ -1202,6 +1203,24 @@ mod tests {
         let nodes = NodesManager::load(pal, config).await?;
 
         nodes.create(node_state.clone()).await?;
+        let not_found_id = uuid::Uuid::new_v4();
+        let mut not_found_state = new_state.clone();
+        not_found_state.id = not_found_id;
+        assert_eq!(
+            "node not found",
+            nodes
+                .upgrade(not_found_state)
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        let mut broken_node = node_state.clone();
+        broken_node.id = Uuid::new_v4();
+        nodes
+            .nodes
+            .write()
+            .await
+            .insert(broken_node.id, MaybeNode::BrokenNode(broken_node.clone()));
         assert_eq!(node_state, nodes.node_state_cache(node_state.id).await?);
         {
             let mut nodes_list = nodes.nodes.write().await;
@@ -1213,27 +1232,57 @@ mod tests {
             assert!(node.babel_engine.has_capability("info"));
         }
         assert_eq!(
-            "BV internal error: failed to get available resources",
+            format!(
+                "BV internal error: 'cannot upgrade broken node `{}`'",
+                broken_node.id
+            ),
+            nodes.upgrade(broken_node).await.unwrap_err().to_string()
+        );
+        let mut new_archive_node_state = new_state.clone();
+        new_archive_node_state.image.store_id = "different_store_id".to_string();
+        assert_eq!(
+            "BV internal error: 'cannot upgrade node to version that uses different data set: `different_store_id`'",
+            nodes
+                .upgrade(new_archive_node_state)
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+        assert_eq!(
+            "BV internal error: 'failed to get available resources'",
             nodes
                 .upgrade(new_state.clone())
                 .await
                 .unwrap_err()
                 .to_string()
         );
-        nodes.upgrade(new_state.clone()).await?;
-        let not_found_id = Uuid::new_v4();
-        let mut not_found_state = new_state.clone();
-        not_found_state.id = not_found_id;
+        let mut cpu_devourer_node_state = new_state.clone();
+        cpu_devourer_node_state.image.id = "another-id".to_string();
+        cpu_devourer_node_state.vm_config.vcpu_count = 2048;
         assert_eq!(
-            "Node not found",
+            "BV internal error: 'not enough vcpu to allocate for the node'",
             nodes
-                .upgrade(not_found_state)
+                .upgrade(cpu_devourer_node_state.clone())
                 .await
                 .unwrap_err()
                 .to_string()
         );
-        let mut updated_state = nodes.node_state_cache(new_state.id).await?;
-        updated_state.upgrade_state = Default::default();
+
+        nodes.upgrade(new_state.clone()).await?;
+        let updated_state = nodes.node_state_cache(new_state.id).await?;
+        let mut state_backup: StateBackup = node_state.clone().into();
+        state_backup.initialized = true;
+        new_state.upgrade_state = UpgradeState {
+            active: false,
+            state_backup: Some(state_backup),
+            need_rollback: None,
+            steps: vec![
+                UpgradeStep::CpuAssignment(CpuAssignmentUpdate::AcquiredCpus(1)),
+                UpgradeStep::Vm,
+                UpgradeStep::Plugin,
+                UpgradeStep::Firewall,
+            ],
+        };
         assert_eq!(new_state, updated_state);
         {
             let mut nodes_list = nodes.nodes.write().await;
@@ -1244,29 +1293,6 @@ mod tests {
             assert!(!node.state.initialized);
             assert!(!node.babel_engine.has_capability("info"));
         }
-
-        new_state.image.id = "another-id".to_string();
-        let mut cpu_devourer_node_state = new_state.clone();
-        cpu_devourer_node_state.vm_config.vcpu_count = 2048;
-        assert_eq!(
-            "BV internal error: Not enough vcpu to allocate for the node",
-            nodes
-                .upgrade(cpu_devourer_node_state.clone())
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-        let mut new_archive_node_state = new_state.clone();
-        new_archive_node_state.image.store_id = "different_store_id".to_string();
-        assert_eq!(
-            "BV internal error: Cannot upgrade node to version that uses different data set: `different_store_id`",
-            nodes
-                .upgrade(new_archive_node_state)
-                .await
-                .unwrap_err()
-                .to_string()
-        );
-
         Ok(())
     }
 

@@ -265,7 +265,7 @@ impl<'a> CommandsService<'a> {
                         Error::NodeUpgradeRollback(_) => {
                             pb::CommandExitCode::NodeUpgradeRollback.into()
                         }
-                        Error::NodeUpgradeFailure(_) => {
+                        Error::NodeUpgradeFailure(_, _) => {
                             pb::CommandExitCode::NodeUpgradeFailure.into()
                         }
                     }),
