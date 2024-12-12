@@ -362,31 +362,8 @@ where
                 API_UPGRADE_COUNTER.increment(1);
                 API_UPGRADE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
-            Command::Update(pb::NodeUpdate {
-                new_display_name,
-                new_firewall,
-                new_org_id,
-                new_org_name,
-                new_values,
-                ..
-            }) => {
-                let firewall_config = if let Some(firewall_config) = new_firewall {
-                    Some(firewall_config.try_into()?)
-                } else {
-                    None
-                };
-                nodes_manager
-                    .update(
-                        node_id,
-                        new_display_name,
-                        firewall_config,
-                        new_org_id,
-                        new_org_name,
-                        HashMap::from_iter(
-                            new_values.into_iter().map(|prop| (prop.key, prop.value)),
-                        ),
-                    )
-                    .await?;
+            Command::Update(update) => {
+                nodes_manager.update(node_id, update.try_into()?).await?;
                 API_UPDATE_COUNTER.increment(1);
                 API_UPDATE_TIME_MS_COUNTER.increment(now.elapsed().as_millis() as u64);
             }
@@ -510,6 +487,28 @@ impl From<common::ProtocolVersionKey> for ProtocolImageKey {
             protocol_key: key.protocol_key,
             variant_key: key.variant_key,
         }
+    }
+}
+
+impl TryFrom<pb::NodeUpdate> for node_state::ConfigUpdate {
+    type Error = eyre::Error;
+    fn try_from(value: pb::NodeUpdate) -> Result<Self, Self::Error> {
+        Ok(Self {
+            config_id: value.config_id,
+            new_org_id: value.new_org_id,
+            new_org_name: value.new_org_name,
+            new_display_name: value.new_display_name,
+            new_values: HashMap::from_iter(
+                value
+                    .new_values
+                    .into_iter()
+                    .map(|prop| (prop.key, prop.value)),
+            ),
+            new_firewall: value
+                .new_firewall
+                .map(|firewall| firewall.try_into())
+                .transpose()?,
+        })
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::node_state::StateBackup;
+use crate::node_state::{ConfigUpdate, StateBackup};
 use crate::{
     babel_engine,
     babel_engine::NodeInfo,
@@ -7,11 +7,8 @@ use crate::{
     command_failed, commands,
     commands::into_internal,
     cpu_registry::CpuRegistry,
-    firewall,
     node_context::NodeContext,
-    node_state::{
-        CpuAssignmentUpdate, NodeProperties, NodeState, UpgradeState, UpgradeStep, VmStatus,
-    },
+    node_state::{CpuAssignmentUpdate, NodeState, UpgradeState, UpgradeStep, VmStatus},
     pal::{self, NodeConnection, NodeFirewallConfig, Pal, RecoverBackoff, VirtualMachine},
     scheduler,
 };
@@ -430,27 +427,21 @@ impl<P: Pal + Debug> Node<P> {
         self.context.delete().await
     }
 
-    pub async fn update(
-        &mut self,
-        new_name: Option<String>,
-        firewall_config: Option<firewall::Config>,
-        new_org_id: Option<String>,
-        new_org_name: Option<String>,
-        new_properties: NodeProperties,
-    ) -> commands::Result<()> {
-        if let Some(display_name) = new_name {
+    pub async fn update(&mut self, config_update: ConfigUpdate) -> commands::Result<()> {
+        self.state.image.config_id = config_update.config_id;
+        if let Some(display_name) = config_update.new_display_name {
             self.state.display_name = display_name;
         }
-        if let Some(org_id) = new_org_id {
+        if let Some(org_id) = config_update.new_org_id {
             self.state.org_id = org_id;
         }
-        if let Some(org_name) = new_org_name {
+        if let Some(org_name) = config_update.new_org_name {
             self.state.org_name = org_name;
         }
-        for (k, v) in new_properties {
+        for (k, v) in config_update.new_values {
             self.state.properties.insert(k, v);
         }
-        if let Some(config) = firewall_config {
+        if let Some(config) = config_update.new_firewall {
             self.state.firewall = config;
             let res = self
                 .pal
@@ -890,7 +881,7 @@ pub mod tests {
     use crate::node_state::{NodeImage, ProtocolImageKey, VmConfig};
     use crate::{
         bv_config::Config,
-        node_context,
+        firewall, node_context,
         node_context::build_nodes_dir,
         nodes_manager,
         pal::{
@@ -2070,7 +2061,7 @@ pub mod tests {
             ips: vec![],
             ports: vec![],
         });
-        let updated_rules = updated_config.config.clone();
+        let updated_firewall = updated_config.config.clone();
         pal.expect_apply_firewall_config()
             .with(predicate::eq(updated_config))
             .once()
@@ -2090,18 +2081,19 @@ pub mod tests {
         assert_eq!(VmStatus::Running, node.expected_status());
 
         assert_eq!(node.state.firewall, node_state.firewall);
-        node.update(
-            Some("new name".to_string()),
-            Some(updated_rules.clone()),
-            Some("new org_id".to_string()),
-            Some("org name".to_string()),
-            HashMap::from_iter([
+        node.update(ConfigUpdate {
+            config_id: "new-cfg_id".to_string(),
+            new_display_name: Some("new name".to_string()),
+            new_firewall: Some(updated_firewall.clone()),
+            new_org_id: Some("new org_id".to_string()),
+            new_org_name: Some("org name".to_string()),
+            new_values: HashMap::from_iter([
                 ("new_key1".to_string(), "new value ".to_string()),
                 ("new_key2".to_string(), "new value 2".to_string()),
             ]),
-        )
+        })
         .await?;
-        assert_eq!(node.state.firewall, updated_rules);
+        assert_eq!(node.state.firewall, updated_firewall);
         assert_eq!(node.state.display_name, "new name".to_string());
         assert_eq!(node.state.org_id, "new org_id".to_string());
         assert_eq!(node.state.org_name, "org name".to_string());
@@ -2113,16 +2105,17 @@ pub mod tests {
 
         assert_eq!(
             "BV internal error: failed to apply firewall config",
-            node.update(
-                None,
-                Some(firewall::Config::default()),
-                Some("failed_org_id".to_string()),
-                None,
-                Default::default(),
-            )
-            .await
-            .unwrap_err()
-            .to_string()
+            node.update(ConfigUpdate {
+                config_id: "new-cfg_id".to_string(),
+                new_display_name: None,
+                new_firewall: Some(firewall::Config::default()),
+                new_org_id: Some("failed_org_id".to_string()),
+                new_org_name: None,
+                new_values: Default::default(),
+            },)
+                .await
+                .unwrap_err()
+                .to_string()
         );
         assert_eq!(0, node.state.firewall.rules.len());
         test_env.assert_node_state_saved(&node.state).await;

@@ -151,6 +151,16 @@ pub struct VmConfig {
     pub ramdisks: Vec<RamdiskConfiguration>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct ConfigUpdate {
+    pub config_id: String,
+    pub new_org_id: Option<String>,
+    pub new_org_name: Option<String>,
+    pub new_display_name: Option<String>,
+    pub new_values: NodeProperties,
+    pub new_firewall: Option<firewall::Config>,
+}
+
 impl NodeState {
     pub async fn load(path: &Path) -> Result<Self> {
         info!("Reading node state file: {}", path.display());

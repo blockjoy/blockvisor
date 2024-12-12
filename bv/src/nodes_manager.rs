@@ -7,7 +7,7 @@ use crate::{
     node::Node,
     node_context::{build_nodes_dir, NODES_DIR},
     node_metrics,
-    node_state::{NodeProperties, NodeState, VmConfig, VmStatus, NODE_STATE_FILENAME},
+    node_state::{ConfigUpdate, NodeState, VmConfig, VmStatus, NODE_STATE_FILENAME},
     pal::Pal,
     scheduler,
     scheduler::{Action, Scheduled, Scheduler},
@@ -372,16 +372,8 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn update(
-        &self,
-        id: Uuid,
-        new_name: Option<String>,
-        firewall_config: Option<firewall::Config>,
-        new_org_id: Option<String>,
-        new_org_name: Option<String>,
-        new_properties: NodeProperties,
-    ) -> commands::Result<()> {
-        if let Some(config) = firewall_config.as_ref() {
+    pub async fn update(&self, id: Uuid, config_update: ConfigUpdate) -> commands::Result<()> {
+        if let Some(config) = config_update.new_firewall.as_ref() {
             check_firewall_rules(&config.rules)?;
         }
         let nodes_lock = self.nodes.read().await;
@@ -390,14 +382,12 @@ where
             command_failed!(Error::Internal(anyhow!("Cannot update broken node `{id}`")));
         };
         let mut node = node_lock.write().await;
-        node.update(
-            new_name,
-            firewall_config,
-            new_org_id,
-            new_org_name,
-            new_properties,
-        )
-        .await
+        node.update(config_update).await?;
+        self.node_state_cache
+            .write()
+            .await
+            .insert(id, node.state.clone());
+        Ok(())
     }
 
     #[instrument(skip(self))]
