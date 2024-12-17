@@ -621,7 +621,7 @@ where
             .properties
             .clone()
             .into_iter()
-            .map(|(key, value)| common::ImagePropertyValue { key, value })
+            .map(|(key, value)| pb::NewImagePropertyValue { key, value })
             .collect::<Vec<_>>();
         let config = self.config.read().await;
         let image_id = self

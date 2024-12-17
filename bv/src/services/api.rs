@@ -490,6 +490,14 @@ impl From<common::ProtocolVersionKey> for ProtocolImageKey {
     }
 }
 
+fn to_node_properties(values: Vec<common::PropertyValueConfig>) -> HashMap<String, String> {
+    HashMap::from_iter(
+        values
+            .into_iter()
+            .map(|prop| (prop.key_group.unwrap_or(prop.key), prop.value)),
+    )
+}
+
 impl TryFrom<pb::NodeUpdate> for node_state::ConfigUpdate {
     type Error = eyre::Error;
     fn try_from(value: pb::NodeUpdate) -> Result<Self, Self::Error> {
@@ -498,12 +506,7 @@ impl TryFrom<pb::NodeUpdate> for node_state::ConfigUpdate {
             new_org_id: value.new_org_id,
             new_org_name: value.new_org_name,
             new_display_name: value.new_display_name,
-            new_values: HashMap::from_iter(
-                value
-                    .new_values
-                    .into_iter()
-                    .map(|prop| (prop.key, prop.value)),
-            ),
+            new_values: to_node_properties(value.new_values),
             new_firewall: value
                 .new_firewall
                 .map(|firewall| firewall.try_into())
@@ -525,11 +528,7 @@ impl TryFrom<pb::Node> for NodeState {
             store_id: image_config.store_id,
             uri: image_config.image_uri,
         };
-        let properties = image_config
-            .values
-            .into_iter()
-            .map(|p| (p.key, p.value))
-            .collect();
+        let properties = to_node_properties(image_config.values);
         let firewall = config
             .firewall
             .map(|config| config.try_into())
