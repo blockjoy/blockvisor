@@ -9,7 +9,7 @@ use crate::{
     pal::Pal,
     services,
     services::api::{self, common, pb},
-    {get_bv_status, set_bv_status, utils, ServiceStatus}, {node_metrics, BV_VAR_PATH},
+    {get_bv_status, set_bv_status, ServiceStatus}, {node_metrics, BV_VAR_PATH},
 };
 use babel_api::engine::JobsInfo;
 use babel_api::metadata::Requirements;
@@ -18,8 +18,7 @@ use eyre::{anyhow, Context};
 use petname::Petnames;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::str::FromStr;
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, net, str::FromStr, sync::Arc};
 use tonic::{Request, Response, Status};
 use tracing::{info, instrument};
 use uuid::Uuid;
@@ -590,8 +589,8 @@ where
                 NodeConfig {
                     name: name.clone(),
                     image: req.image.clone(),
-                    ip: ip.clone(),
-                    gateway: gateway.clone(),
+                    ip: ip.to_string(),
+                    gateway: gateway.to_string(),
                     properties,
                     network: req.network.clone(),
                     rules: vec![],
@@ -605,8 +604,8 @@ where
             name,
             image: req.image,
             network: req.network,
-            ip,
-            gateway,
+            ip: ip.to_string(),
+            gateway: gateway.to_string(),
             dev_mode: true,
             status: NodeStatus::Stopped,
             uptime: None,
@@ -682,48 +681,37 @@ where
     }
 
     /// Try to auto-discover ip and gateway for the node.
+
     async fn discover_ip_and_gateway(
         &self,
         req: &NodeCreateRequest,
         id: Uuid,
-    ) -> eyre::Result<(String, String)> {
-        let net = utils::discover_net_params(&self.config.read().await.iface)
-            .await
-            .unwrap_or_default();
+    ) -> eyre::Result<(net::IpAddr, net::IpAddr)> {
+        let config = self.config.read().await;
         let gateway = match &req.gateway {
-            None => {
-                let gateway = net
-                    .gateway
-                    .clone()
-                    .ok_or(anyhow!("can't auto discover gateway - provide it manually",))?;
-                info!("Auto-discovered gateway `{gateway} for node '{id}'");
-                gateway
-            }
-            Some(gateway) => gateway.clone(),
+            None => config.net_conf.gateway_ip,
+            Some(gateway) => net::IpAddr::from_str(gateway)
+                .with_context(|| format!("invalid gateway `{gateway}`"))?,
         };
         let ip = match &req.ip {
             None => {
                 let mut used_ips = vec![];
-                used_ips.push(gateway.clone());
-                if let Some(host_ip) = &net.ip {
-                    used_ips.push(host_ip.clone());
-                }
                 for (_, node) in self.nodes_manager.nodes_list().await.iter() {
-                    used_ips.push(
-                        match node {
-                            MaybeNode::Node(node) => node.read().await.state.network_interface.ip,
-                            MaybeNode::BrokenNode(state) => state.network_interface.ip,
-                        }
-                        .to_string(),
-                    );
+                    used_ips.push(match node {
+                        MaybeNode::Node(node) => node.read().await.state.network_interface.ip,
+                        MaybeNode::BrokenNode(state) => state.network_interface.ip,
+                    });
                 }
-                let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {
-                    anyhow!("failed to auto assign ip - provide it manually : {err:#}")
-                })?;
+                let ip = *config
+                    .net_conf
+                    .available_ips
+                    .iter()
+                    .find(|ip| !used_ips.contains(ip))
+                    .ok_or(anyhow!("failed to auto assign ip - provide it manually"))?;
                 info!("Auto-assigned ip `{ip}` for node '{id}'");
                 ip
             }
-            Some(ip) => ip.clone(),
+            Some(ip) => net::IpAddr::from_str(ip).with_context(|| format!("invalid ip `{ip}`"))?,
         };
         Ok((ip, gateway))
     }
