@@ -1,5 +1,6 @@
 use eyre::Result;
 use std::ffi::OsString;
+use std::fmt::Display;
 use std::{ffi::OsStr, io::BufRead};
 use thiserror::Error;
 use tokio::process::Command;
@@ -21,7 +22,7 @@ pub enum CmdError {
 
 /// Runs the specified command and returns error on failure.
 /// **IMPORTANT**: Whenever you use new CLI tool in BV,
-/// remember to add it to requirements check in `installer::check_cli_dependencies()`.   
+/// remember to add it to requirements check in `installer::check_cli_dependencies()`.
 pub async fn run_cmd<I, S>(cmd: &str, args: I) -> Result<String, CmdError>
 where
     I: IntoIterator<Item = S> + Clone,
@@ -66,9 +67,9 @@ where
 /// Requests confirmation from the user, i.e. the user must type `y` to continue.
 ///
 /// ### Params
-/// msg:    the message that is displayed to the user to request access. On display this function
+/// msg:    The message that is displayed to the user to request access. On display this function
 ///         will append ` [y/N]` to the message.
-/// dash_y: if this flag is true, requesting user input is skippend and `true` is immediately
+/// dash_y: If this flag is true, requesting user input is skipped and `true` is immediately
 ///         returned.
 pub fn ask_confirm(msg: &str, dash_y: bool) -> Result<bool> {
     if dash_y {
@@ -78,4 +79,23 @@ pub fn ask_confirm(msg: &str, dash_y: bool) -> Result<bool> {
     let mut input = String::new();
     std::io::stdin().lock().read_line(&mut input)?;
     Ok(input.trim().to_lowercase() == "y")
+}
+
+/// Requests value from the user, i.e. the user must type in value or press `Return` to accept default value.
+///
+/// ### Params
+/// msg:    The message that is displayed to the user to request access. On display this function
+///         will append ` [default_value]` to the message.
+/// default_value: The default value.
+/// dash_y: If this flag is true, requesting user input is skipped and `None` is immediately
+///         returned.
+pub fn ask_value(msg: &str, default_value: &impl Display, dash_y: bool) -> Result<Option<String>> {
+    if dash_y {
+        return Ok(None);
+    }
+    println!("{msg} [{default_value}]:");
+    let mut input = String::new();
+    std::io::stdin().lock().read_line(&mut input)?;
+    let value = input.trim().to_string();
+    Ok(if value.is_empty() { None } else { Some(value) })
 }
