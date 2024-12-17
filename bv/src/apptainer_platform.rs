@@ -71,8 +71,11 @@ impl ApptainerPlatform {
             let route = routes
                 .pop()
                 .ok_or(anyhow!("can't find {iface} ip in routing table"))?;
-            let cidr = Ipv4Cidr::from_str(&route.dst)
-                .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
+            let dst = route
+                .dst
+                .ok_or(anyhow!("missing 'dst' for dev interface"))?;
+            let cidr = Ipv4Cidr::from_str(&dst)
+                .with_context(|| format!("cannot parse '{dst}' as cidr"))?;
 
             Ok(Self {
                 base: linux_platform::LinuxPlatform::new().await?,

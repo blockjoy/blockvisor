@@ -165,9 +165,9 @@ pub fn with_jitter(base: Duration) -> Duration {
 /// Struct to capture output of linux `ip --json route` command
 #[derive(Deserialize, Serialize, Debug)]
 pub struct IpRoute {
-    pub dst: String,
+    pub dst: Option<String>,
     pub gateway: Option<String>,
-    pub dev: String,
+    pub dev: Option<String>,
     pub prefsrc: Option<String>,
     pub protocol: Option<String>,
 }
@@ -201,8 +201,8 @@ pub fn next_available_ip(net_params: &NetParams, used: &[String]) -> Result<Stri
 }
 
 pub fn is_dev_ip(route: &IpRoute, dev: &str) -> bool {
-    route.dev == dev
-        && route.dst != "default"
+    route.dev.as_deref() == Some(dev)
+        && route.dst.as_ref().is_some_and(|v| v != "default")
         && route.prefsrc.is_some()
         && route.protocol.as_deref() == Some("kernel")
 }
@@ -210,16 +210,22 @@ pub fn is_dev_ip(route: &IpRoute, dev: &str) -> bool {
 fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Result<NetParams> {
     let mut routes: Vec<IpRoute> = serde_json::from_str(routes_json_str)?;
     let mut params = NetParams::default();
-    if let Some(route) = routes.iter().find(|route| route.dst == "default") {
+    if let Some(route) = routes
+        .iter()
+        .find(|route| route.dst.as_ref().is_some_and(|v| v == "default"))
+    {
         params.gateway.clone_from(&route.gateway);
     }
     routes.retain(|route| is_dev_ip(route, ifa_name));
     if let Some(route) = routes.pop() {
         // if multiple IPs, let user decide
         if routes.is_empty() {
+            let dst = route
+                .dst
+                .ok_or(anyhow!("missing 'dst' for dev interface"))?;
             // IP range available for VMs
-            let cidr = Ipv4Cidr::from_str(&route.dst)
-                .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
+            let cidr = Ipv4Cidr::from_str(&dst)
+                .with_context(|| format!("cannot parse '{dst}' as cidr"))?;
             let mut ips = cidr.iter();
             if cidr.get_bits() <= 30 {
                 // For routing mask values <= 30, first and last IPs are
