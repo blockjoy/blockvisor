@@ -10,13 +10,13 @@ use crate::{
 };
 use babel_api::{engine::NodeEnv, rhai_plugin_linter, utils::RamdiskConfiguration};
 use bv_utils::cmd::run_cmd;
-use eyre::{anyhow, bail};
+use eyre::{anyhow, bail, Context};
 use petname::Petnames;
 use std::{
     ffi::OsStr,
+    net,
     {
         collections::HashMap,
-        net::IpAddr,
         path::{Path, PathBuf},
         str::FromStr,
         time::Duration,
@@ -142,12 +142,13 @@ pub async fn process_image_command(
                 Default::default()
             };
             let nodes = bv_client.get_nodes(()).await?.into_inner();
+            let id = Uuid::new_v4();
             let (ip, gateway) =
-                discover_ip_and_gateway(&bv_config.iface, ip, gateway, &nodes).await?;
+                discover_ip_and_gateway(&bv_config, ip, gateway, &nodes, id).await?;
 
             let node = bv_client
                 .create_dev_node(NodeState {
-                    id: Uuid::new_v4(),
+                    id,
                     name: Petnames::default().generate_one(3, "-"),
                     protocol_id: "dev-node-protocol-id".to_string(),
                     image_key: ProtocolImageKey {
@@ -383,42 +384,32 @@ pub async fn load_bv_config(bv_root: &Path) -> eyre::Result<bv_config::Config> {
 }
 
 async fn discover_ip_and_gateway(
-    iface: &str,
+    config: &bv_config::Config,
     ip: Option<String>,
     gateway: Option<String>,
     nodes: &[NodeDisplayInfo],
-) -> eyre::Result<(IpAddr, IpAddr)> {
-    let net = utils::discover_net_params(iface).await.unwrap_or_default();
-    let gateway = match gateway {
-        None => {
-            let gateway = net
-                .gateway
-                .clone()
-                .ok_or(anyhow!("can't auto discover gateway - provide it manually",))?;
-            info!("Auto-discovered gateway `{gateway}");
-            gateway
-        }
-        Some(gateway) => gateway,
+    id: Uuid,
+) -> eyre::Result<(net::IpAddr, net::IpAddr)> {
+    let gateway = match &gateway {
+        None => config.net_conf.gateway_ip,
+        Some(gateway) => net::IpAddr::from_str(gateway)
+            .with_context(|| format!("invalid gateway `{gateway}`"))?,
     };
-    let ip = match ip {
+    let ip = match &ip {
         None => {
-            let mut used_ips = vec![];
-            used_ips.push(gateway.clone());
-            if let Some(host_ip) = &net.ip {
-                used_ips.push(host_ip.clone());
-            }
-            for node in nodes {
-                used_ips.push(node.state.ip.to_string());
-            }
-            let ip = utils::next_available_ip(&net, &used_ips).map_err(|err| {
-                anyhow!("failed to auto assign ip - provide it manually : {err:#}")
-            })?;
-            info!("Auto-assigned ip `{ip}`");
+            let used_ips = nodes.iter().map(|node| node.state.ip).collect::<Vec<_>>();
+            let ip = *config
+                .net_conf
+                .available_ips
+                .iter()
+                .find(|ip| !used_ips.contains(ip))
+                .ok_or(anyhow!("failed to auto assign ip - provide it manually"))?;
+            info!("Auto-assigned ip `{ip}` for node '{id}'");
             ip
         }
-        Some(ip) => ip,
+        Some(ip) => net::IpAddr::from_str(ip).with_context(|| format!("invalid ip `{ip}`"))?,
     };
-    Ok((IpAddr::from_str(&ip)?, IpAddr::from_str(&gateway)?))
+    Ok((ip, gateway))
 }
 
 fn pick_variant(variants: Vec<Variant>, variant_key: Option<String>) -> eyre::Result<Variant> {

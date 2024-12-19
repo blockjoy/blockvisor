@@ -63,7 +63,7 @@ properties:
         name: Variant A
         impact: null
       - value: variant-b
-        name: Variant C
+        name: Variant B
         impact: null
       - value: variant-c
         name: Variant C

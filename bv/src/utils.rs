@@ -1,13 +1,10 @@
 use bv_utils::{cmd::run_cmd, with_retry};
-use cidr_utils::cidr::Ipv4Cidr;
-use eyre::{anyhow, bail, Context, Result};
+use eyre::{bail, Context, Result};
 use rand::Rng;
 use semver::Version;
-use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     ffi::OsStr,
-    net::Ipv4Addr,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -162,85 +159,6 @@ pub fn with_jitter(base: Duration) -> Duration {
     base + jitter
 }
 
-/// Struct to capture output of linux `ip --json route` command
-#[derive(Deserialize, Serialize, Debug)]
-pub struct IpRoute {
-    pub dst: String,
-    pub gateway: Option<String>,
-    pub dev: String,
-    pub prefsrc: Option<String>,
-    pub protocol: Option<String>,
-}
-
-#[derive(Default, Debug, PartialEq)]
-pub struct NetParams {
-    pub ip: Option<String>,
-    pub gateway: Option<String>,
-    pub ip_from: Option<String>,
-    pub ip_to: Option<String>,
-}
-
-pub fn next_available_ip(net_params: &NetParams, used: &[String]) -> Result<String> {
-    let range = ipnet::Ipv4AddrRange::new(
-        net_params
-            .ip_from
-            .as_ref()
-            .ok_or(anyhow!("missing ip_from"))?
-            .parse()?,
-        net_params
-            .ip_to
-            .as_ref()
-            .ok_or(anyhow!("missing ip_to"))?
-            .parse()?,
-    );
-    range
-        .into_iter()
-        .find(|ip| !used.contains(&ip.to_string()))
-        .map(|ip| ip.to_string())
-        .ok_or(anyhow!("no available ip in range {:?}", range))
-}
-
-pub fn is_dev_ip(route: &IpRoute, dev: &str) -> bool {
-    route.dev == dev
-        && route.dst != "default"
-        && route.prefsrc.is_some()
-        && route.protocol.as_deref() == Some("kernel")
-}
-
-fn parse_net_params_from_str(ifa_name: &str, routes_json_str: &str) -> Result<NetParams> {
-    let mut routes: Vec<IpRoute> = serde_json::from_str(routes_json_str)?;
-    let mut params = NetParams::default();
-    if let Some(route) = routes.iter().find(|route| route.dst == "default") {
-        params.gateway.clone_from(&route.gateway);
-    }
-    routes.retain(|route| is_dev_ip(route, ifa_name));
-    if let Some(route) = routes.pop() {
-        // if multiple IPs, let user decide
-        if routes.is_empty() {
-            // IP range available for VMs
-            let cidr = Ipv4Cidr::from_str(&route.dst)
-                .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
-            let mut ips = cidr.iter();
-            if cidr.get_bits() <= 30 {
-                // For routing mask values <= 30, first and last IPs are
-                // base and broadcast addresses and are unusable.
-                ips.next();
-                ips.next_back();
-            }
-            params.ip_from = ips.next().map(|u| Ipv4Addr::from(u).to_string());
-            params.ip_to = ips.next_back().map(|u| Ipv4Addr::from(u).to_string());
-            // Host IP address
-            params.ip = route.prefsrc;
-        }
-    }
-    Ok(params)
-}
-
-pub async fn discover_net_params(ifa_name: &str) -> Result<NetParams> {
-    let routes = run_cmd("ip", ["--json", "route"]).await?;
-    parse_net_params_from_str(ifa_name, &routes)
-}
-
 pub fn render_template(template: &str, destination: &Path, params: &[(&str, &str)]) -> Result<()> {
     let mut context = tera::Context::new();
     for (key, value) in params {
@@ -308,34 +226,5 @@ pub mod tests {
                 "3.4.0_bad_underscore.10",
             ]
         );
-    }
-
-    #[test]
-    fn test_parse_net_params_from_str() {
-        let json = r#"[
-            {
-               "dev" : "bvbr0",
-               "dst" : "default",
-               "flags" : [],
-               "gateway" : "192.69.220.81",
-               "protocol" : "static"
-            },
-            {
-               "dev" : "bvbr0",
-               "dst" : "192.69.220.80/28",
-               "flags" : [],
-               "prefsrc" : "192.69.220.82",
-               "protocol" : "kernel",
-               "scope" : "link"
-            }
-         ]
-         "#;
-        let expected = NetParams {
-            ip: Some("192.69.220.82".to_string()),
-            gateway: Some("192.69.220.81".to_string()),
-            ip_from: Some("192.69.220.81".to_string()),
-            ip_to: Some("192.69.220.94".to_string()),
-        };
-        assert_eq!(parse_net_params_from_str("bvbr0", json).unwrap(), expected);
     }
 }

@@ -1,8 +1,9 @@
-use crate::api_config::ApiConfig;
-use crate::services::AuthToken;
-use eyre::{Context, Result};
+use crate::{api_config::ApiConfig, services::AuthToken};
+use bv_utils::cmd::run_cmd;
+use cidr_utils::cidr::IpCidr;
+use eyre::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{net::IpAddr, path::Path, str::FromStr};
 use sysinfo::{System, SystemExt};
 use tokio::fs;
 use tracing::debug;
@@ -111,6 +112,8 @@ pub struct Config {
     /// Network interface name
     #[serde(default = "default_iface")]
     pub iface: String,
+    #[serde(default)]
+    pub net_conf: NetConf,
     /// Host's cluster id
     pub cluster_id: Option<String>,
     /// Cluster gossip listen port
@@ -128,8 +131,12 @@ impl Config {
         let config = fs::read_to_string(&path)
             .await
             .with_context(|| format!("failed to read host config: {}", path.display()))?;
-        let config = serde_json::from_str(&config)
+        let mut config: Config = serde_json::from_str(&config)
             .with_context(|| format!("failed to parse host config: {}", path.display()))?;
+        if config.net_conf.host_ip.is_unspecified() {
+            config.net_conf = NetConf::new(&config.iface).await?;
+        }
+        config.save(bv_root).await?;
         Ok(config)
     }
 
@@ -142,5 +149,227 @@ impl Config {
         let config = serde_json::to_string(&self)?;
         fs::write(path, config).await?;
         Ok(())
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+pub struct NetConf {
+    pub gateway_ip: IpAddr,
+    pub host_ip: IpAddr,
+    pub prefix: u8,
+    pub available_ips: Vec<IpAddr>,
+}
+
+impl Default for NetConf {
+    fn default() -> Self {
+        Self {
+            gateway_ip: IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+            host_ip: IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+            prefix: 32,
+            available_ips: vec![],
+        }
+    }
+}
+
+impl NetConf {
+    pub async fn new(ifa_name: &str) -> Result<Self> {
+        Self::from_json(&run_cmd("ip", ["--json", "route"]).await?, ifa_name)
+    }
+
+    fn from_json(json: &str, ifa_name: &str) -> Result<Self> {
+        let routes = serde_json::from_str::<Vec<IpRoute>>(json)?;
+        let gateway_str = routes
+            .iter()
+            .find(|route| route.dst.as_ref().is_some_and(|v| v == "default"))
+            .ok_or(anyhow!("default route not found"))?
+            .gateway
+            .as_ref()
+            .ok_or(anyhow!("default route 'gateway' not found"))?;
+        let gateway = IpAddr::from_str(gateway_str)
+            .with_context(|| format!("failed to parse gateway ip '{gateway_str}'"))?;
+        for route in &routes {
+            if is_dev_ip(route, ifa_name) {
+                if let Some(dst) = &route.dst {
+                    let cidr = IpCidr::from_str(dst)
+                        .with_context(|| format!("cannot parse '{dst}' as cidr"))?;
+                    if cidr.contains(gateway) {
+                        let perfsrc = route
+                            .prefsrc
+                            .as_ref()
+                            .ok_or(anyhow!("'prefsrc' not found for host network"))?;
+                        let host_ip = IpAddr::from_str(perfsrc).with_context(|| {
+                            format!("cannot parse host network perfsrc '{perfsrc}'")
+                        })?;
+                        let prefix = get_bits(&cidr);
+                        let mut ips = cidr.iter();
+                        if prefix <= 30 {
+                            // For routing mask values <= 30, first and last IPs are
+                            // base and broadcast addresses and are unusable.
+                            ips.next();
+                            ips.next_back();
+                        }
+                        return Ok(NetConf {
+                            gateway_ip: gateway,
+                            host_ip,
+                            prefix,
+                            available_ips: if let (Some(ip_from), Some(ip_to)) =
+                                (ips.next(), ips.next_back())
+                            {
+                                let mut ips = ips_from_range(ip_from, ip_to)?;
+                                ips.retain(|ip| *ip != host_ip && *ip != gateway);
+                                ips
+                            } else {
+                                bail!("Failed to resolve ip range")
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        bail!("failed to discover network config");
+    }
+
+    pub fn override_host_ip(&mut self, value: &str) -> Result<()> {
+        self.host_ip =
+            IpAddr::from_str(value).with_context(|| format!("invalid host ip '{value}'"))?;
+        Ok(())
+    }
+
+    pub fn override_gateway_ip(&mut self, value: &str) -> Result<()> {
+        self.gateway_ip =
+            IpAddr::from_str(value).with_context(|| format!("invalid gateway ip '{value}'"))?;
+        Ok(())
+    }
+
+    pub fn override_ips(&mut self, value: &str) -> Result<()> {
+        self.available_ips.clear();
+        for item in value.split(",") {
+            if item.contains("/") {
+                let cidr = IpCidr::from_str(item)
+                    .with_context(|| format!("cannot parse '{item}' as cidr"))?;
+                let prefix = get_bits(&cidr);
+                let mut ips = cidr.iter();
+                if prefix <= 30 {
+                    // For routing mask values <= 30, first and last IPs are
+                    // base and broadcast addresses and are unusable.
+                    ips.next();
+                    ips.next_back();
+                }
+                self.available_ips.append(&mut ips.collect::<Vec<_>>());
+            } else if item.contains("-") {
+                let mut split = item.split("-");
+                let ip_from = split
+                    .next()
+                    .ok_or(anyhow!("missing from"))
+                    .and_then(|ip| IpAddr::from_str(ip).map_err(|err| anyhow!("{err:#}")))
+                    .with_context(|| format!("invalid ip range '{item}'"))?;
+                let ip_to = split
+                    .next()
+                    .ok_or(anyhow!("missing to"))
+                    .and_then(|ip| IpAddr::from_str(ip).map_err(|err| anyhow!("{err:#}")))
+                    .with_context(|| format!("invalid ip range '{item}'"))?;
+                if split.next().is_some() {
+                    bail!("invalid ip range '{item}'")
+                }
+                self.available_ips
+                    .append(&mut ips_from_range(ip_from, ip_to)?);
+            } else {
+                self.available_ips.push(
+                    IpAddr::from_str(item)
+                        .with_context(|| format!("invalid ip provided '{item}'"))?,
+                );
+            }
+        }
+        self.available_ips
+            .retain(|ip| *ip != self.host_ip && *ip != self.gateway_ip);
+        Ok(())
+    }
+}
+
+fn ips_from_range(ip_from: IpAddr, ip_to: IpAddr) -> Result<Vec<IpAddr>> {
+    Ok(match (ip_from, ip_to) {
+        (IpAddr::V4(ip_from), IpAddr::V4(ip_to)) => Ok(ipnet::IpAddrRange::from(
+            ipnet::Ipv4AddrRange::new(ip_from, ip_to),
+        )),
+        (IpAddr::V6(ip_from), IpAddr::V6(ip_to)) => Ok(ipnet::IpAddrRange::from(
+            ipnet::Ipv6AddrRange::new(ip_from, ip_to),
+        )),
+        _ => Err(anyhow!("invalid ip range: ({ip_from}, {ip_to}")),
+    }?
+    .collect())
+}
+
+/// Struct to capture output of linux `ip --json route` command
+#[derive(Deserialize, Serialize, Debug)]
+struct IpRoute {
+    pub dst: Option<String>,
+    pub gateway: Option<String>,
+    pub dev: Option<String>,
+    pub prefsrc: Option<String>,
+    pub protocol: Option<String>,
+}
+
+fn is_dev_ip(route: &IpRoute, dev: &str) -> bool {
+    route.dev.as_deref() == Some(dev)
+        && route
+            .dst
+            .as_ref()
+            .is_some_and(|v| v != "default" && IpCidr::is_ip_cidr(v))
+        && route.prefsrc.is_some()
+        && route.protocol.as_deref() == Some("kernel")
+}
+
+fn get_bits(cidr: &IpCidr) -> u8 {
+    match cidr {
+        IpCidr::V4(cidr) => cidr.get_bits(),
+        IpCidr::V6(cidr) => cidr.get_bits(),
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn test_net_conf_from_json() {
+        let json = r#"[
+            {
+               "dev" : "bvbr0",
+               "dst" : "default",
+               "flags" : [],
+               "gateway" : "192.69.220.81",
+               "protocol" : "static"
+            },
+            {
+               "dev" : "bvbr0",
+               "dst" : "192.69.220.80/28",
+               "flags" : [],
+               "prefsrc" : "192.69.220.82",
+               "protocol" : "kernel",
+               "scope" : "link"
+            }
+         ]
+         "#;
+        let expected = NetConf {
+            gateway_ip: IpAddr::from(Ipv4Addr::from_str("192.69.220.81").unwrap()),
+            host_ip: IpAddr::from(Ipv4Addr::from_str("192.69.220.82").unwrap()),
+            prefix: 28,
+            available_ips: vec![
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.83").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.84").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.85").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.86").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.87").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.88").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.89").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.90").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.91").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.92").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.93").unwrap()),
+                IpAddr::from(Ipv4Addr::from_str("192.69.220.94").unwrap()),
+            ],
+        };
+        assert_eq!(expected, NetConf::from_json(json, "bvbr0").unwrap());
     }
 }

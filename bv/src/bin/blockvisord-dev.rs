@@ -21,11 +21,7 @@ async fn main() -> Result<()> {
     set_bv_status(ServiceStatus::Ok).await;
 
     let config = bv_config::Config::load(&bv_root()).await?;
-    let pal = blockvisord::apptainer_platform::ApptainerPlatform::new(
-        &config.iface,
-        config.apptainer.clone(),
-    )
-    .await?;
+    let pal = blockvisord::apptainer_platform::ApptainerPlatform::new(&config).await?;
     run_server(config, pal).await?;
     Ok(())
 }

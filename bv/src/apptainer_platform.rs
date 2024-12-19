@@ -1,5 +1,3 @@
-use crate::apptainer_machine::ApptainerMachine;
-use crate::pal::VirtualMachine;
 use crate::{
     apptainer_machine, bv_config,
     bv_config::{ApptainerConfig, SharedConfig},
@@ -9,21 +7,18 @@ use crate::{
     node_context,
     node_state::NodeState,
     nodes_manager::NodesDataCache,
-    pal::{self, AvailableResources, NodeConnection, NodeFirewallConfig, Pal},
+    pal::{self, AvailableResources, NodeConnection, NodeFirewallConfig, Pal, VirtualMachine},
     services, ufw_wrapper,
-    utils::is_dev_ip,
 };
 use async_trait::async_trait;
-use bv_utils::{cmd::run_cmd, with_retry};
-use cidr_utils::cidr::Ipv4Cidr;
-use eyre::{anyhow, bail, Context, Result};
+use bv_utils::with_retry;
+use eyre::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
     net::IpAddr,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    str::FromStr,
 };
 use tracing::{debug, error};
 use uuid::Uuid;
@@ -35,7 +30,7 @@ const BABEL_SOCKET_NAME: &str = "babel.socket";
 pub struct ApptainerPlatform {
     base: linux_platform::LinuxPlatform,
     bridge_ip: IpAddr,
-    mask_bits: u8,
+    prefix: u8,
     config: ApptainerConfig,
 }
 
@@ -57,50 +52,32 @@ impl ApptainerPlatform {
     pub async fn default() -> Result<Self> {
         Ok(Self {
             base: linux_platform::LinuxPlatform::new().await?,
-            bridge_ip: IpAddr::from_str("127.0.0.1")?,
-            mask_bits: 28,
+            bridge_ip: IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+            prefix: 0,
             config: Default::default(),
         })
     }
 
-    pub async fn new(iface: &str, config: ApptainerConfig) -> Result<Self> {
-        if !config.host_network {
-            let routes = run_cmd("ip", ["--json", "route"]).await?;
-            let mut routes: Vec<crate::utils::IpRoute> = serde_json::from_str(&routes)?;
-            routes.retain(|route| is_dev_ip(route, iface));
-            let route = routes
-                .pop()
-                .ok_or(anyhow!("can't find {iface} ip in routing table"))?;
-            let cidr = Ipv4Cidr::from_str(&route.dst)
-                .with_context(|| format!("cannot parse {} as cidr", route.dst))?;
-
-            Ok(Self {
-                base: linux_platform::LinuxPlatform::new().await?,
-                bridge_ip: IpAddr::from_str(&route.prefsrc.unwrap())?, // can safely unwrap here
-                mask_bits: cidr.get_bits(),
-                config,
-            })
-        } else {
-            Ok(Self {
-                base: linux_platform::LinuxPlatform::new().await?,
-                bridge_ip: IpAddr::from_str("127.0.0.1")?,
-                mask_bits: 28,
-                config,
-            })
-        }
+    pub async fn new(config: &bv_config::Config) -> Result<Self> {
+        Ok(Self {
+            base: linux_platform::LinuxPlatform::new().await?,
+            bridge_ip: config.net_conf.host_ip,
+            prefix: config.net_conf.prefix,
+            config: config.apptainer.clone(),
+        })
     }
 
     async fn new_vm(
         &self,
         bv_context: &BvContext,
         node_state: &NodeState,
-    ) -> Result<ApptainerMachine> {
+    ) -> Result<apptainer_machine::ApptainerMachine> {
         // LEGACY node support - remove once all nodes upgraded
         if node_state.image.uri.starts_with("legacy://") {
             apptainer_machine::new_legacy(
                 &self.bv_root,
                 self.bridge_ip,
-                self.mask_bits,
+                self.prefix,
                 bv_context,
                 node_state,
                 self.babel_path.clone(),
@@ -115,7 +92,7 @@ impl ApptainerPlatform {
             apptainer_machine::new(
                 &self.bv_root,
                 self.bridge_ip,
-                self.mask_bits,
+                self.prefix,
                 bv_context,
                 node_state,
                 self.babel_path.clone(),

@@ -26,7 +26,6 @@ fn test_bvup_unknown_provision_token() {
     let provision_token = "NOT_FOUND";
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
     let url = "http://localhost:8080";
-    let mqtt = "mqtt://localhost:1883";
 
     // make sure blockvisord is not running
     test_env::bv_run(&["stop"], "", None);
@@ -34,10 +33,10 @@ fn test_bvup_unknown_provision_token() {
     cmd.args([provision_token, "--skip-download"])
         .args(["--ifa", ifa])
         .args(["--api", url])
-        .args(["--mqtt", mqtt])
-        .args(["--ip-gateway", "216.18.214.193"])
-        .args(["--ip-range-from", "216.18.214.195"])
-        .args(["--ip-range-to", "216.18.214.206"])
+        .args(["--gateway-ip", "216.18.214.193"])
+        .args(["--host-ip", "216.18.214.194"])
+        .args(["--use-host-network"])
+        .args(["--region", "EU1"])
         .args(["--yes"])
         .env("BV_ROOT", tmp_dir.as_os_str())
         .assert()
@@ -132,14 +131,12 @@ async fn test_bv_service_e2e() {
 
     println!("bvup");
     let url = "http://localhost:8080";
-    let mqtt = "mqtt://localhost:1883";
     Command::cargo_bin("bvup")
         .unwrap()
-        .args(["--ip-range-from", "10.0.2.32", "--ip-range-to", "10.0.2.33"]) // this region will be auto-created in API
+        .args(["--available-ips", "10.0.2.32,10.0.2.33"]) // this region will be auto-created in API
         .args([&provision_token, "--skip-download"])
         .args(["--region", "EU1"]) // this region will be auto-created in API
         .args(["--api", url])
-        .args(["--mqtt", mqtt])
         .args(["--yes", "--use-host-network", "--private"])
         .assert()
         .success()
