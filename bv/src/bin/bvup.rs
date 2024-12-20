@@ -68,10 +68,6 @@ pub struct CmdArgs {
     #[clap(long = "skip-download")]
     pub skip_download: bool,
 
-    /// Make host private - visible only for your organisation.
-    #[clap(long = "private")]
-    pub private: bool,
-
     /// Use host network directly
     #[clap(long)]
     use_host_network: bool,

@@ -45,7 +45,6 @@ fn test_bvup_unknown_provision_token() {
     let provision_token = "NOT_FOUND";
     let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
     let url = "http://localhost:8080";
-    let mqtt = "mqtt://localhost:1883";
 
     // make sure blockvisord is not running
     test_env::bv_run(&["stop"], "", None);
@@ -83,9 +82,7 @@ async fn test_bvup() {
 
     tokio::task::spawn_blocking(move || {
         let tmp_dir = TempDir::new().unwrap();
-        let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
         let url = "http://localhost:8082";
-        let mqtt = "mqtt://localhost:1883";
         let provision_token = "AWESOME";
         let config_path = format!("{}/etc/blockvisor.json", tmp_dir.to_string_lossy());
 
@@ -105,7 +102,7 @@ async fn test_bvup() {
             .args(["--available-ips", "10.0.2.32,10.0.2.33"]) // this region will be auto-created in API
             .args(["--gateway-ip", "216.18.214.193"])
             .args(["--host-ip", "216.18.214.194"])
-            .args([&provision_token, "--skip-download"])
+            .args([provision_token, "--skip-download"])
             .args(["--region", "EU1"]) // this region will be auto-created in API
             .args(["--api", url])
             .args(["--yes", "--use-host-network"])
@@ -200,7 +197,6 @@ async fn test_bv_service_e2e() {
 
     println!("bvup");
     let url = "http://localhost:8080";
-    let mqtt = "mqtt://localhost:1883";
 
     Command::cargo_bin("bvup")
         .unwrap()
