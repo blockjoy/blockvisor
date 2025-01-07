@@ -514,6 +514,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         job_name: String,
         job_config: JobConfig,
     ) -> std::result::Result<(), Error> {
+        if job_name.is_empty() {
+            bail!("empty job name is not allowed")
+        }
         let babel_client = self.node_connection.babel_client().await?;
         if let JobType::Download { .. } = &job_config.job_type {
             if !services::archive::has_protocol_archive(
