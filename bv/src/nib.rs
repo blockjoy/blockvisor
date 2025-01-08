@@ -37,45 +37,51 @@ pub async fn process_image_command(
 ) -> eyre::Result<()> {
     match command {
         ImageCommand::GenerateMapping => {
-            let mut dir = tokio::fs::read_dir(std::env::current_dir()?).await?;
             let mut mapping: HashMap<String, (String, ProtocolImageKey)> = Default::default();
-            while let Some(entry) = dir.next_entry().await? {
-                let path = entry.path().join("babel.yaml");
-                if path.exists() {
-                    if let Ok(image) =
-                        serde_yaml::from_str::<nib_meta::Image>(&fs::read_to_string(path).await?)
-                    {
-                        let protocol_key = image.protocol_key;
-                        for variant in image.variants {
-                            let variant_key = variant.key;
-                            for pointer in variant.archive_pointers {
-                                let nib_meta::StorePointer::StoreId(store_id) = pointer.pointer
-                                else {
-                                    continue;
-                                };
-                                let Some(legacy_store_id) = pointer.legacy_store_id else {
-                                    continue;
-                                };
-                                if let Some((
-                                    _,
-                                    ProtocolImageKey {
-                                        protocol_key: first_protocol_key,
-                                        variant_key: first_variant_key,
-                                    },
-                                )) = mapping.get(&legacy_store_id)
-                                {
-                                    bail!("legacy_store_id '{legacy_store_id}' defined twice: first for {first_protocol_key}/{first_variant_key}, then for {protocol_key}/{variant_key}");
-                                }
-                                mapping.insert(
-                                    legacy_store_id,
-                                    (
-                                        store_id,
+            for entry in walkdir::WalkDir::new(std::env::current_dir()?) {
+                let entry = entry?;
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                if let Some(file_name) = path.file_name() {
+                    let file_name = file_name.to_string_lossy();
+                    if file_name.starts_with("babel") && file_name.ends_with("yaml") {
+                        if let Ok(image) = serde_yaml::from_str::<nib_meta::Image>(
+                            &fs::read_to_string(path).await?,
+                        ) {
+                            let protocol_key = image.protocol_key;
+                            for variant in image.variants {
+                                let variant_key = variant.key;
+                                for pointer in variant.archive_pointers {
+                                    let nib_meta::StorePointer::StoreId(store_id) = pointer.pointer
+                                    else {
+                                        continue;
+                                    };
+                                    let Some(legacy_store_id) = pointer.legacy_store_id else {
+                                        continue;
+                                    };
+                                    if let Some((
+                                        _,
                                         ProtocolImageKey {
-                                            protocol_key: protocol_key.clone(),
-                                            variant_key: variant_key.clone(),
+                                            protocol_key: first_protocol_key,
+                                            variant_key: first_variant_key,
                                         },
-                                    ),
-                                );
+                                    )) = mapping.get(&legacy_store_id)
+                                    {
+                                        bail!("legacy_store_id '{legacy_store_id}' defined twice: first for {first_protocol_key}/{first_variant_key}, then for {protocol_key}/{variant_key}");
+                                    }
+                                    mapping.insert(
+                                        legacy_store_id,
+                                        (
+                                            store_id,
+                                            ProtocolImageKey {
+                                                protocol_key: protocol_key.clone(),
+                                                variant_key: variant_key.clone(),
+                                            },
+                                        ),
+                                    );
+                                }
                             }
                         }
                     }
