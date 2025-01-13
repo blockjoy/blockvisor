@@ -237,6 +237,24 @@ async fn main() -> Result<()> {
             )?;
         }
 
+        let mut client = pb::host_service_client::HostServiceClient::connect(
+            Endpoint::from_shared(blockjoy_api_url.clone())?
+                .connect_timeout(DEFAULT_API_CONNECT_TIMEOUT)
+                .timeout(DEFAULT_API_REQUEST_TIMEOUT),
+        )
+        .await?;
+
+        let region = client
+            .get_region(pb::HostServiceGetRegionRequest {
+                region: Some(pb::host_service_get_region_request::Region::RegionKey(
+                    region.clone(),
+                )),
+            })
+            .await?
+            .into_inner()
+            .region
+            .ok_or(anyhow!("region '{region}' not found"))?;
+
         let create = pb::HostServiceCreateHostRequest {
             provision_token: cmd_args.provision_token.unwrap(),
             is_private: cmd_args.private,
@@ -250,7 +268,7 @@ async fn main() -> Result<()> {
             os_version: host_info.os_version,
             ip_address: net_conf.host_ip.to_string(),
             ip_gateway: net_conf.gateway_ip.to_string(),
-            region_id: region,
+            region_id: region.region_id,
             schedule_type: common::ScheduleType::Automatic.into(),
             ips: net_conf
                 .available_ips
@@ -263,13 +281,6 @@ async fn main() -> Result<()> {
                 }],
             }),
         };
-
-        let mut client = pb::host_service_client::HostServiceClient::connect(
-            Endpoint::from_shared(blockjoy_api_url.clone())?
-                .connect_timeout(DEFAULT_API_CONNECT_TIMEOUT)
-                .timeout(DEFAULT_API_REQUEST_TIMEOUT),
-        )
-        .await?;
 
         let host = client.create_host(create).await?.into_inner();
 

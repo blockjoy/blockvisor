@@ -36,7 +36,7 @@ fn test_bvup_unknown_provision_token() {
         .args(["--gateway-ip", "216.18.214.193"])
         .args(["--host-ip", "216.18.214.194"])
         .args(["--use-host-network"])
-        .args(["--region", "EU1"])
+        .args(["--region", "eu-1"])
         .args(["--yes"])
         .env("BV_ROOT", tmp_dir.as_os_str())
         .assert()
@@ -105,6 +105,20 @@ async fn test_bv_service_e2e() {
         .await
         .unwrap()
         .into_inner();
+
+    let mut client = pb::host_service_client::HostServiceClient::with_interceptor(
+        channel.clone(),
+        services::AuthToken(auth_token.clone()),
+    );
+    client
+        .create_region(pb::HostServiceCreateRegionRequest {
+            region_key: "eu-1".to_string(),
+            display_name: "Europe".to_string(),
+            sku_code: Some("SKU_EU".to_string()),
+        })
+        .await
+        .unwrap();
+
     let provision_token = response.token;
     println!("host provision token: {provision_token}");
 
@@ -135,7 +149,7 @@ async fn test_bv_service_e2e() {
         .unwrap()
         .args(["--available-ips", "10.0.2.32,10.0.2.33"]) // this region will be auto-created in API
         .args([&provision_token, "--skip-download"])
-        .args(["--region", "EU1"]) // this region will be auto-created in API
+        .args(["--region", "eu-1"]) // this region will be auto-created in API
         .args(["--api", url])
         .args(["--yes", "--use-host-network", "--private"])
         .assert()
