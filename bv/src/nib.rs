@@ -1,3 +1,4 @@
+use crate::nib_meta::{ArchivePointer, FirewallConfig, ImageProperty, RamdiskConfig, Visibility};
 use crate::{
     apptainer_machine::{PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
     bv_config, firewall,
@@ -12,6 +13,7 @@ use babel_api::{engine::NodeEnv, rhai_plugin_linter, utils::RamdiskConfiguration
 use bv_utils::cmd::run_cmd;
 use eyre::{anyhow, bail, ensure, Context};
 use petname::Petnames;
+use serde::Serialize;
 use std::{
     ffi::OsStr,
     net,
@@ -47,7 +49,7 @@ pub async fn process_image_command(
                 if let Some(file_name) = path.file_name() {
                     let file_name = file_name.to_string_lossy();
                     if file_name.starts_with("babel") && file_name.ends_with("yaml") {
-                        if let Ok(image) = serde_yaml::from_str::<nib_meta::Image>(
+                        if let Ok(image) = serde_yaml_ng::from_str::<nib_meta::Image>(
                             &fs::read_to_string(path).await?,
                         ) {
                             let protocol_key = image.protocol_key;
@@ -122,7 +124,7 @@ pub async fn process_image_command(
         }
         ImageCommand::ContainerUri { path } => {
             let local_image: nib_meta::Image =
-                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
+                serde_yaml_ng::from_str(&fs::read_to_string(path).await?)?;
             println!("{}", local_image.container_uri);
         }
         ImageCommand::Play {
@@ -138,13 +140,13 @@ pub async fn process_image_command(
                 Endpoint::from_shared(bv_url)?.connect_timeout(BV_CONNECT_TIMEOUT),
             )
             .await?;
-            let local_image: nib_meta::Image =
-                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
-
-            let variant = pick_variant(local_image.variants, variant)?;
+            let image: nib_meta::Image = serde_yaml_ng::from_str(&fs::read_to_string(path).await?)?;
+            let variant = pick_variant(image.variants.clone(), variant)?;
+            let vm_config = VmConfig::build_from(&variant);
+            let image_variant = ImageVariant::build(&image, variant);
 
             let properties = if let Some(props) = props {
-                serde_yaml::from_str(&props)?
+                serde_yaml_ng::from_str(&props)?
             } else {
                 Default::default()
             };
@@ -159,27 +161,27 @@ pub async fn process_image_command(
                     name: Petnames::default().generate_one(3, "-"),
                     protocol_id: "dev-node-protocol-id".to_string(),
                     image_key: ProtocolImageKey {
-                        protocol_key: local_image.protocol_key,
-                        variant_key: variant.key.clone(),
+                        protocol_key: image_variant.protocol_key,
+                        variant_key: image_variant.variant_key,
                     },
                     dev_mode: true,
                     ip,
                     gateway,
                     properties,
-                    firewall: local_image.firewall_config.into(),
+                    firewall: image_variant.firewall_config.into(),
                     display_name: "".to_string(),
                     org_id: "dev-node-org-id".to_string(),
                     org_name: "dev node org name".to_string(),
                     protocol_name: "dev node protocol name".to_string(),
                     dns_name: "dev.node.dns.name".to_string(),
-                    vm_config: variant.into(),
+                    vm_config,
                     image: NodeImage {
                         id: "00000000-0000-0000-0000-000000000000".to_string(),
-                        version: local_image.version,
+                        version: image_variant.version,
                         config_id: "00000000-0000-0000-0000-000000000000".to_string(),
                         archive_id: "00000000-0000-0000-0000-000000000000".to_string(),
                         store_key: "dev-node-store-id".to_string(),
-                        uri: local_image.container_uri,
+                        uri: image_variant.container_uri,
                     },
                     assigned_cpus: vec![],
                     expected_status: VmStatus::Stopped,
@@ -215,22 +217,22 @@ pub async fn process_image_command(
                     Uuid::parse_str(&id)?
                 }
             };
-            let local_image: nib_meta::Image =
-                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
+            let image: nib_meta::Image = serde_yaml_ng::from_str(&fs::read_to_string(path).await?)?;
             let mut node = bv_client.get_node(id).await?.into_inner().state;
-            node.firewall = local_image.firewall_config.into();
-            let variant = local_image
+            let variant = image
                 .variants
-                .into_iter()
+                .iter()
                 .find(|variant| variant.key == node.image_key.variant_key)
                 .ok_or(anyhow!(
                     "variant {} not found in image definition",
                     node.image_key.variant_key
                 ))?;
-            node.vm_config = variant.into();
-            node.image.id = format!("dev-node-image-id-{}", local_image.version);
-            node.image.version = local_image.version;
-            node.image.uri = local_image.container_uri;
+            node.vm_config = VmConfig::build_from(variant);
+            let image_variant = ImageVariant::build(&image, variant.clone());
+            node.firewall = image_variant.firewall_config.into();
+            node.image.id = format!("dev-node-image-id-{}", image_variant.version);
+            node.image.version = image_variant.version;
+            node.image.uri = image_variant.container_uri;
             let node = bv_client.upgrade_dev_node(node).await?.into_inner();
             println!(
                 "Upgraded dev_node with ID `{}` and name `{}`\n{:#?}",
@@ -242,11 +244,12 @@ pub async fn process_image_command(
             path,
             variant,
         } => {
-            let local_image: nib_meta::Image =
-                serde_yaml::from_str(&fs::read_to_string(&path).await?)?;
-            let variant = pick_variant(local_image.variants, variant)?;
+            let image: nib_meta::Image =
+                serde_yaml_ng::from_str(&fs::read_to_string(&path).await?)?;
+            let variant = pick_variant(image.variants.clone(), variant)?;
+            let image_variant = ImageVariant::build(&image, variant.clone());
             let properties = if let Some(props) = props {
-                serde_yaml::from_str(&props)?
+                serde_yaml_ng::from_str(&props)?
             } else {
                 Default::default()
             };
@@ -259,7 +262,7 @@ pub async fn process_image_command(
                     OsStr::new("--sandbox"),
                     OsStr::new("--force"),
                     rootfs_path.as_os_str(),
-                    OsStr::new(&local_image.container_uri),
+                    OsStr::new(&image_variant.container_uri),
                 ],
             )
             .await
@@ -275,8 +278,8 @@ pub async fn process_image_command(
                 NodeEnv {
                     node_id: "node-id".to_string(),
                     node_name: "node_name".to_string(),
-                    node_version: local_image.version,
-                    node_protocol: local_image.protocol_key,
+                    node_version: image_variant.version,
+                    node_protocol: image_variant.protocol_key,
                     node_variant: variant.key,
                     node_ip: "1.2.3.4".to_string(),
                     node_gateway: "4.3.2.1".to_string(),
@@ -295,67 +298,70 @@ pub async fn process_image_command(
         }
         ImageCommand::Push { path } => {
             let mut client = services::protocol::ProtocolService::new(connector).await?;
-            let local_image: nib_meta::Image =
-                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
-            for variant in &local_image.variants {
+            let image: nib_meta::Image = serde_yaml_ng::from_str(&fs::read_to_string(path).await?)?;
+            for variant in &image.variants {
+                let image_variant = ImageVariant::build(&image, variant.clone());
                 let image_key = ProtocolImageKey {
-                    protocol_key: local_image.protocol_key.clone(),
-                    variant_key: variant.key.clone(),
+                    protocol_key: image_variant.protocol_key.clone(),
+                    variant_key: image_variant.variant_key.clone(),
                 };
 
                 ensure!(
-                    variant.sku_code.chars().all(|character| character == '-'
-                        || character.is_ascii_digit()
-                        || character.is_ascii_uppercase())
-                        && variant.sku_code.split("-").count() == 3,
+                    image_variant
+                        .sku_code
+                        .chars()
+                        .all(|character| character == '-'
+                            || character.is_ascii_digit()
+                            || character.is_ascii_uppercase())
+                        && image_variant.sku_code.split("-").count() == 3,
                     "invalud SKU format for variant '{}'",
-                    variant.key
+                    image_variant.variant_key
                 );
 
                 let protocol_version_id =
                     match client.get_protocol_version(image_key.clone()).await? {
-                        Some(remote) if remote.semantic_version == local_image.version => {
+                        Some(remote) if remote.semantic_version == image_variant.version => {
                             client
-                                .update_protocol_version(
-                                    remote.clone(),
-                                    local_image.clone(),
-                                    variant.clone(),
-                                )
+                                .update_protocol_version(remote.clone(), image_variant.clone())
                                 .await?;
                             println!(
                                 "Protocol version '{}/{}/{}' updated",
-                                local_image.protocol_key, variant.key, local_image.version
+                                image_variant.protocol_key,
+                                image_variant.variant_key,
+                                image_variant.version
                             );
                             remote.protocol_version_id
                         }
                         _ => {
                             let protocol_version_id = client
-                                .add_protocol_version(local_image.clone(), variant.clone())
+                                .add_protocol_version(image_variant.clone())
                                 .await?
                                 .protocol_version_id;
                             println!(
                                 "Protocol version '{}/{}/{}' added",
-                                local_image.protocol_key, variant.key, local_image.version
+                                image_variant.protocol_key,
+                                image_variant.variant_key,
+                                image_variant.version
                             );
                             protocol_version_id
                         }
                     };
                 match client
-                    .push_image(protocol_version_id, local_image.clone(), variant.clone())
+                    .push_image(protocol_version_id, image_variant.clone())
                     .await?
                 {
                     PushResult::Added(image) => println!(
                         "Image '{}/{}/{}/{}' added",
-                        local_image.protocol_key,
-                        variant.key,
-                        local_image.version,
+                        image_variant.protocol_key,
+                        image_variant.variant_key,
+                        image_variant.version,
                         image.build_version,
                     ),
                     PushResult::Updated(image) => println!(
                         "Image '{}/{}/{}/{}' updated",
-                        local_image.protocol_key,
-                        variant.key,
-                        local_image.version,
+                        image_variant.protocol_key,
+                        image_variant.variant_key,
+                        image_variant.version,
                         image.build_version,
                     ),
                     PushResult::NoChanges => println!("No image changes to push"),
@@ -379,7 +385,7 @@ pub async fn process_protocol_command(
         }
         ProtocolCommand::Push { path } => {
             let local_protocols: Vec<nib_meta::Protocol> =
-                serde_yaml::from_str(&fs::read_to_string(path).await?)?;
+                serde_yaml_ng::from_str(&fs::read_to_string(path).await?)?;
             for local in local_protocols {
                 let protocol_key = local.key.clone();
 
@@ -451,6 +457,49 @@ fn pick_variant(variants: Vec<Variant>, variant_key: Option<String>) -> eyre::Re
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct ImageVariant {
+    pub version: String,
+    pub container_uri: String,
+    pub protocol_key: String,
+    pub org_id: Option<String>,
+    pub description: Option<String>,
+    pub visibility: Visibility,
+    pub properties: Vec<ImageProperty>,
+    pub firewall_config: FirewallConfig,
+    pub variant_key: String,
+    pub sku_code: String,
+    pub archive_pointers: Vec<ArchivePointer>,
+    pub min_cpu: u64,
+    pub min_memory_mb: u64,
+    pub min_disk_gb: u64,
+    pub ramdisks: Vec<RamdiskConfig>,
+}
+
+impl ImageVariant {
+    fn build(image: &nib_meta::Image, variant: Variant) -> Self {
+        Self {
+            version: image.version.clone(),
+            container_uri: image.container_uri.clone(),
+            protocol_key: image.protocol_key.clone(),
+            org_id: image.org_id.clone(),
+            description: variant.description.or(image.description.clone()),
+            visibility: variant.visibility.unwrap_or(image.visibility.clone()),
+            properties: variant.properties.unwrap_or(image.properties.clone()),
+            firewall_config: variant
+                .firewall_config
+                .unwrap_or(image.firewall_config.clone()),
+            variant_key: variant.key,
+            sku_code: variant.sku_code,
+            archive_pointers: variant.archive_pointers,
+            min_cpu: variant.min_cpu,
+            min_memory_mb: variant.min_memory_mb,
+            min_disk_gb: variant.min_disk_gb,
+            ramdisks: variant.ramdisks,
+        }
+    }
+}
+
 impl From<nib_meta::Action> for firewall::Action {
     fn from(value: nib_meta::Action) -> Self {
         match value {
@@ -503,17 +552,17 @@ impl From<nib_meta::FirewallConfig> for firewall::Config {
     }
 }
 
-impl From<Variant> for VmConfig {
-    fn from(value: Variant) -> Self {
+impl VmConfig {
+    fn build_from(value: &Variant) -> Self {
         Self {
             vcpu_count: value.min_cpu as usize,
             mem_size_mb: value.min_memory_mb,
             disk_size_gb: value.min_disk_gb,
             ramdisks: value
                 .ramdisks
-                .into_iter()
+                .iter()
                 .map(|ramdisk| RamdiskConfiguration {
-                    ram_disk_mount_point: ramdisk.mount,
+                    ram_disk_mount_point: ramdisk.mount.clone(),
                     ram_disk_size_mb: ramdisk.size_mb,
                 })
                 .collect(),
@@ -523,6 +572,7 @@ impl From<Variant> for VmConfig {
 
 #[cfg(test)]
 pub mod tests {
+    use crate::nib::{pick_variant, ImageVariant};
     use crate::{nib_meta, utils};
     use assert_fs::TempDir;
     use std::fs;
@@ -545,8 +595,10 @@ pub mod tests {
         .unwrap();
 
         let image =
-            serde_yaml::from_str::<nib_meta::Image>(&fs::read_to_string(babel_path).unwrap())
+            serde_yaml_ng::from_str::<nib_meta::Image>(&fs::read_to_string(babel_path).unwrap())
                 .unwrap();
-        println!("{image:?}");
+        let image_variant =
+            ImageVariant::build(&image, pick_variant(image.variants.clone(), None).unwrap());
+        println!("{}", serde_json::to_string_pretty(&image_variant).unwrap());
     }
 }

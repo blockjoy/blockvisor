@@ -5,18 +5,134 @@ version: 0.0.1
 # To test with local image use docker-daemon://<image_tag>:latest
 container_uri: docker://blockjoy/{{protocol_key}}/{{variant_key}}/0.0.1
 
+# Name of protocol that is expected to be already populated in the API.
+# It is required to be lower-kebab-case.
+protocol_key: {{protocol_key}}
+
 # [optional] Uuid of organization to which protocol belongs to, or null if public.
 org_id: null
 
 # [optional] Brief image description.
 description: Example image description
 
-# Image visibility, allowed values: `public`, `dev`, `private`.
-visibility: private
+# Image visibility, allowed values: `public`, `development`, `private`.
+visibility: development
 
-# Name of protocol that is expected to be already populated in the API.
-# It is required to be lower-kebab-case.
-protocol_key: {{protocol_key}}
+# Default firewall configuration.
+firewall_config:
+
+  # Fallback action for inbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
+  default_in: deny
+
+  # Fallback action for outbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
+  default_out: allow
+
+  # List of firewall rules.
+  rules: &default-rules
+
+    # Unique rule key.
+    - &example-rule
+      key: example-rule
+      # [optional] Brief rule description.
+      description: null
+
+      # Allowed values: `tcp`, `udp`, `both`.
+      protocol: both
+
+      # Traffic direction for which rule applies. Allowed values: `in`, `out`.
+      direction: in
+
+      # Action applied on packet that match rule. Allowed values: `deny`, `allow`, `reject`.
+      action: allow
+
+      # List of IPs for which rule apply.
+      ips:
+
+        # IP(s) compliant with CIDR notation.
+        - ip: 1.2.3.4/30
+
+          # [optional] Brief ip description.
+          name: authorize client ip
+
+      # List of ports for which rule apply.
+      ports:
+
+        # Port number.
+        - port: 12901
+
+          # [optional] Port number.
+          name: service port
+
+# List of image properties, allowed values and the way they affect required resources.
+properties:
+
+  # Unique property key. Property value will be available in a Rhai runtime via `node_params()["<key>"]` (e.g. `node_params()["arbitrary-property"]`).
+  # It is required to be lower-kebab-case.
+  - &arbitrary-text-property
+    key: arbitrary-text-property
+
+    # Property display name.
+    name: Text Property
+
+    # [optional] Brief property description.
+    description: this is some text property example
+
+    # If it can be updated after node is created, or it can be set only once on node creation.
+    dynamic_value: true
+
+    # Default property value, if not provided by user.
+    default_value: default_value
+
+    # The way it should be presented to the user.
+    ui_type: !text
+
+      # If it requires different protocol data set (affect archive_id).
+      new_archive: false
+
+      # [optional] How existence of property affect required CPU.
+      add_cpu: 1
+
+      # [optional] How existence of property affect required memory.
+      add_memory_mb: -1
+
+      # [optional] How existence of property affect required disk space.
+      add_disk_gb: 1
+
+  - &switch-property
+    key: switch-property
+    name: Switch Property
+    description: this is some switch example
+    dynamic_value: true
+    default_value: off
+    ui_type: !switch
+      on:
+        new_archive: true
+        add_cpu: 3
+        add_memory_mb: 10
+        add_disk_gb: 10
+      off: null
+
+  - &enum-property
+    key: enum-property
+    name: Enum Property
+    description: this is some enum example
+    dynamic_value: true
+    default_value: variant-a
+    ui_type: !enum
+      - &enum-variant-a
+        value: variant-a
+        name: Variant A
+        impact: null
+      - value: variant-b
+        name: Variant B
+        impact: null
+      - value: variant-c
+        name: Variant C
+        impact:
+          new_archive: true
+          add_cpu: -1
+          add_memory_mb: 1
+          add_disk_gb: 1
 
 variants:
   # The same protocol can have different implementations. This field let identify what implementation(s) has been used.
@@ -24,9 +140,11 @@ variants:
   # This value will be available in a Rhai runtime via `node_env().node_variant`.
   # It is required to be lower-kebab-case.
   - key: {{variant_key}}
+
     # The SKU code for this variant (e.g. ETHRETH-MN-F). SKU format shall be:
     # [Blockchain]-[NodeType]-[NetType]
     sku_code: TST-TN-N
+
     # List of protocol data archive pointers.
     archive_pointers:
       # Association of image variant with protocol data archive. Identify protocol data archive that will be used
@@ -71,113 +189,39 @@ variants:
         # RAM disk size.
         size_mb: 100
 
-# Default firewall configuration.
-firewall_config:
+    # [optional] Override default description with variant specific one.
+    description: Example image description
 
-  # Fallback action for inbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
-  default_in: deny
+    # [optional] Override default visibility, allowed values: `public`, `development`, `private`.
+    visibility: private
 
-  # Fallback action for outbound traffic used when packet doesn't match any rule. Allowed values: `deny`, `allow`, `reject`.
-  default_out: allow
+    # [optional] Override default firewall configuration.
+    firewall_config:
+      default_in: deny
+      default_out: allow
+      rules:
+        - *example-rule # use yaml anchors to reuse some default value
+        - key: additional-rule
+          protocol: tcp
+          direction: in
+          action: allow
+          ports:
+            - port: 12345
 
-  # List of firewall rules.
-  rules:
-
-    # Unique rule key.
-    - key: example-rule
-      # [optional] Brief rule description.
-      description: null
-
-      # Allowed values: `tcp`, `udp`, `both`.
-      protocol: both
-
-      # Traffic direction for which rule applies. Allowed values: `in`, `out`.
-      direction: in
-
-      # Action applied on packet that match rule. Allowed values: `deny`, `allow`, `reject`.
-      action: allow
-
-      # List of IPs for which rule apply.
-      ips:
-
-        # IP(s) compliant with CIDR notation.
-        - ip: 1.2.3.4/30
-
-          # [optional] Brief ip description.
-          name: authorize client ip
-
-      # List of ports for which rule apply.
-      ports:
-
-        # Port number.
-        - port: 12901
-
-          # [optional] Port number.
-          name: service port
-
-# List of image properties, allowed values and the way they affect required resources.
-properties:
-
-  # Unique property key. Property value will be available in a Rhai runtime via `node_params()["<key>"]` (e.g. `node_params()["arbitrary-property"]`).
-  # It is required to be lower-kebab-case.
-  - key: arbitrary-text-property
-
-    # Property display name.
-    name: Text Property
-
-    # [optional] Brief property description.
-    description: this is some text property example
-
-    # If it can be updated after node is created, or it can be set only once on node creation.
-    dynamic_value: true
-
-    # Default property value, if not provided by user.
-    default_value: default_value
-
-    # The way it should be presented to the user.
-    ui_type: !text
-
-      # If it requires different protocol data set (affect archive_id).
-      new_archive: false
-
-      # [optional] How existence of property affect required CPU.
-      add_cpu: 1
-
-      # [optional] How existence of property affect required memory.
-      add_memory_mb: -1
-
-      # [optional] How existence of property affect required disk space.
-      add_disk_gb: 1
-
-  - key: switch-property
-    name: Switch Property
-    description: this is some switch example
-    dynamic_value: true
-    default_value: off
-    ui_type: !switch
-      on:
-        new_archive: true
-        add_cpu: 3
-        add_memory_mb: 10
-        add_disk_gb: 10
-      off: null
-
-  - key: enum-property
-    name: Enum Property
-    description: this is some enum example
-    dynamic_value: true
-    default_value: variant-a
-    ui_type: !enum
-      - value: variant-a
-        name: Variant A
-        impact: null
-      - value: variant-b
-        name: Variant B
-        impact: null
-      - value: variant-c
-        name: Variant C
-        impact:
-          new_archive: true
-          add_cpu: -1
-          add_memory_mb: 1
-          add_disk_gb: 1
+    # [optional] Override default properties.
+    properties:
+      - *arbitrary-text-property
+      - *switch-property
+      - key: custom-enum-property
+        name: Custom Enum Property
+        description: this is some variant specific enum example
+        dynamic_value: true
+        default_value: variant-x
+        ui_type: !enum
+          - value: variant-x
+            name: Variant X
+            impact: null
+          - value: variant-y
+            name: Variant Y
+            impact: null
+          - *enum-variant-a

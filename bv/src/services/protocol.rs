@@ -1,6 +1,6 @@
 use crate::nib_meta::StorePointer;
 use crate::{
-    api_with_retry,
+    api_with_retry, nib,
     nib_meta::{self, UiType},
     node_state::ProtocolImageKey,
     services::{
@@ -198,20 +198,19 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     pub async fn update_protocol_version(
         &mut self,
         remote: pb::ProtocolVersion,
-        image: nib_meta::Image,
-        variant: nib_meta::Variant,
+        image: nib::ImageVariant,
     ) -> Result<()> {
         let mut client = self.connect_protocol_service().await?;
         let visibility: common::Visibility = image.visibility.into();
         if remote.visibility() != visibility
             || remote.description != image.description
-            || remote.sku_code != variant.sku_code
+            || remote.sku_code != image.sku_code
         {
             let req = pb::ProtocolServiceUpdateVersionRequest {
                 protocol_version_id: remote.protocol_version_id,
                 visibility: Some(visibility.into()),
                 description: image.description,
-                sku_code: Some(variant.sku_code),
+                sku_code: Some(image.sku_code),
             };
             api_with_retry!(client, client.update_version(req.clone()))?;
         }
@@ -220,18 +219,17 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
 
     pub async fn add_protocol_version(
         &mut self,
-        image: nib_meta::Image,
-        variant: nib_meta::Variant,
+        image: nib::ImageVariant,
     ) -> Result<pb::ProtocolVersion> {
         let mut client = self.connect_protocol_service().await?;
         let req = pb::ProtocolServiceAddVersionRequest {
             org_id: image.org_id,
             version_key: Some(common::ProtocolVersionKey {
                 protocol_key: image.protocol_key,
-                variant_key: variant.key,
+                variant_key: image.variant_key,
             }),
             semantic_version: image.version,
-            sku_code: variant.sku_code,
+            sku_code: image.sku_code,
             description: image.description,
         };
 
@@ -253,8 +251,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
     pub async fn push_image(
         &mut self,
         protocol_version_id: String,
-        image: nib_meta::Image,
-        variant: nib_meta::Variant,
+        image: nib::ImageVariant,
     ) -> Result<PushResult<pb::Image>> {
         let mut client = self.connect_image_service().await?;
         let mut firewall: common::FirewallConfig = image.firewall_config.into();
@@ -265,16 +262,16 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             description: image.description,
             properties: add_properties(image.properties),
             firewall: Some(firewall),
-            min_cpu_cores: variant.min_cpu,
-            min_memory_bytes: variant.min_memory_mb * 1_000_000,
-            min_disk_bytes: variant.min_disk_gb * 1_000_000_000,
+            min_cpu_cores: image.min_cpu,
+            min_memory_bytes: image.min_memory_mb * 1_000_000,
+            min_disk_bytes: image.min_disk_gb * 1_000_000_000,
             image_uri: image.container_uri,
-            ramdisks: variant
+            ramdisks: image
                 .ramdisks
                 .into_iter()
                 .map(|ramdisk| ramdisk.into())
                 .collect(),
-            archive_pointers: variant
+            archive_pointers: image
                 .archive_pointers
                 .into_iter()
                 .map(|pointer| pointer.into())
@@ -284,7 +281,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
             .get_image(
                 ProtocolImageKey {
                     protocol_key: image.protocol_key,
-                    variant_key: variant.key,
+                    variant_key: image.variant_key,
                 },
                 Some(image.version.clone()),
                 None,

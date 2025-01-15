@@ -25,6 +25,12 @@ pub struct Variant {
     pub min_disk_gb: u64,
     #[serde(default)]
     pub ramdisks: Vec<RamdiskConfig>,
+
+    // overrides
+    pub description: Option<String>,
+    pub visibility: Option<Visibility>,
+    pub properties: Option<Vec<ImageProperty>>,
+    pub firewall_config: Option<FirewallConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -48,10 +54,10 @@ pub struct Image {
     /// Set by image provider, shall follow semver.
     pub version: String,
     pub container_uri: String,
+    pub protocol_key: String,
     pub org_id: Option<String>,
     pub description: Option<String>,
     pub visibility: Visibility,
-    pub protocol_key: String,
     pub variants: Vec<Variant>,
     pub properties: Vec<ImageProperty>,
     pub firewall_config: FirewallConfig,
@@ -77,7 +83,9 @@ pub struct FirewallRule {
     pub protocol: NetProtocol,
     pub direction: Direction,
     pub action: Action,
+    #[serde(default)]
     pub ips: Vec<IpName>,
+    #[serde(default)]
     pub ports: Vec<PortName>,
 }
 
