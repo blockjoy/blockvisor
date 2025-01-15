@@ -252,6 +252,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
         &mut self,
         protocol_version_id: String,
         image: nib::ImageVariant,
+        min_babel_version: String,
     ) -> Result<PushResult<pb::Image>> {
         let mut client = self.connect_image_service().await?;
         let mut firewall: common::FirewallConfig = image.firewall_config.into();
@@ -276,6 +277,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
                 .into_iter()
                 .map(|pointer| pointer.into())
                 .collect(),
+            min_babel_version,
         };
         if let Some(mut remote) = self
             .get_image(

@@ -287,7 +287,12 @@ pub async fn process_image_command(
             println!("Plugin linter: {res:?}");
             res?;
         }
-        ImageCommand::Push { path } => {
+        ImageCommand::Push {
+            min_babel_version,
+            path,
+        } => {
+            let min_babel_version =
+                min_babel_version.unwrap_or(env!("CARGO_PKG_VERSION").to_string());
             let mut client = services::protocol::ProtocolService::new(connector).await?;
             let image: nib_meta::Image = serde_yaml_ng::from_str(&fs::read_to_string(path).await?)?;
             for variant in &image.variants {
@@ -338,7 +343,11 @@ pub async fn process_image_command(
                         }
                     };
                 match client
-                    .push_image(protocol_version_id, image_variant.clone())
+                    .push_image(
+                        protocol_version_id,
+                        image_variant.clone(),
+                        min_babel_version.clone(),
+                    )
                     .await?
                 {
                     PushResult::Added(image) => println!(

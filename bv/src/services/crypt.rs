@@ -31,7 +31,12 @@ async fn connect_crypt_service(
     .with_context(|| "cannot connect to crypt service")
 }
 
-pub async fn put_key(config: &SharedConfig, node_id: Uuid, name: &str, value: &[u8]) -> Result<()> {
+pub async fn put_secret(
+    config: &SharedConfig,
+    node_id: Uuid,
+    name: &str,
+    value: &[u8],
+) -> Result<()> {
     info!("Putting node {node_id} secret {name}");
     let mut client = connect_crypt_service(config).await?;
     api_with_retry!(
@@ -49,7 +54,11 @@ pub async fn put_key(config: &SharedConfig, node_id: Uuid, name: &str, value: &[
     Ok(())
 }
 
-pub async fn get_key(config: &SharedConfig, node_id: Uuid, name: &str) -> Result<Option<Vec<u8>>> {
+pub async fn get_secret(
+    config: &SharedConfig,
+    node_id: Uuid,
+    name: &str,
+) -> Result<Option<Vec<u8>>> {
     info!("Getting node {node_id} secret {name}");
     let mut client = connect_crypt_service(config).await?;
     Ok(

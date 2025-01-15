@@ -448,7 +448,8 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             }
             EngineRequest::GetSecret { name, response_tx } => {
                 let _ = response_tx.send(
-                    services::crypt::get_key(&self.api_config, self.node_info.node_id, &name).await,
+                    services::crypt::get_secret(&self.api_config, self.node_info.node_id, &name)
+                        .await,
                 );
             }
             EngineRequest::PutSecret {
@@ -457,7 +458,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 response_tx,
             } => {
                 let _ = response_tx.send(
-                    services::crypt::put_key(
+                    services::crypt::put_secret(
                         &self.api_config,
                         self.node_info.node_id,
                         &name,

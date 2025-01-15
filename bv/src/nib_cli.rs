@@ -112,6 +112,10 @@ pub enum ImageCommand {
 
     /// Push image to the API.
     Push {
+        /// Minimum Babel version required by the image to run.
+        /// Current version if not provided.
+        #[clap(long)]
+        min_babel_version: Option<String>,
         /// Image definition file path.
         #[clap(long, default_value = "babel.yaml")]
         path: PathBuf,
