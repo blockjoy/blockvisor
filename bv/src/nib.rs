@@ -144,12 +144,7 @@ pub async fn process_image_command(
             let variant = pick_variant(image.variants.clone(), variant)?;
             let vm_config = VmConfig::build_from(&variant);
             let image_variant = ImageVariant::build(&image, variant);
-
-            let properties = if let Some(props) = props {
-                serde_yaml_ng::from_str(&props)?
-            } else {
-                Default::default()
-            };
+            let properties = build_properties(&image_variant.properties, props)?;
             let nodes = bv_client.get_nodes(()).await?.into_inner();
             let id = Uuid::new_v4();
             let (ip, gateway) =
@@ -248,11 +243,7 @@ pub async fn process_image_command(
                 serde_yaml_ng::from_str(&fs::read_to_string(&path).await?)?;
             let variant = pick_variant(image.variants.clone(), variant)?;
             let image_variant = ImageVariant::build(&image, variant.clone());
-            let properties = if let Some(props) = props {
-                serde_yaml_ng::from_str(&props)?
-            } else {
-                Default::default()
-            };
+            let properties = build_properties(&image_variant.properties, props)?;
             let tmp_dir = tempdir::TempDir::new("nib_check")?;
             let rootfs_path = tmp_dir.path();
             run_cmd(
@@ -455,6 +446,22 @@ fn pick_variant(variants: Vec<Variant>, variant_key: Option<String>) -> eyre::Re
             bail!("no image variant defined");
         }
     }
+}
+
+fn build_properties(
+    image_properties: &[ImageProperty],
+    overrides: Option<String>,
+) -> eyre::Result<HashMap<String, String>> {
+    let mut properties: HashMap<_, _> = image_properties
+        .iter()
+        .map(|property| (property.key.clone(), property.default_value.clone()))
+        .collect();
+    if let Some(props) = overrides {
+        for (key, value) in serde_yaml_ng::from_str::<HashMap<_, _>>(&props)? {
+            properties.insert(key, value);
+        }
+    }
+    Ok(properties)
 }
 
 #[derive(Clone, Debug, Serialize)]
