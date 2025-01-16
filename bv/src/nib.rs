@@ -96,7 +96,6 @@ pub async fn process_image_command(
             let params = [
                 ("protocol_key", protocol.as_str()),
                 ("variant_key", variant.as_str()),
-                ("babel_version", env!("CARGO_PKG_VERSION")),
             ];
             let image_path = std::env::current_dir()?.join(format!("{}_{}", protocol, variant));
             fs::create_dir_all(&image_path).await?;
@@ -177,6 +176,7 @@ pub async fn process_image_command(
                         archive_id: "00000000-0000-0000-0000-000000000000".to_string(),
                         store_key: "dev-node-store-id".to_string(),
                         uri: image_variant.container_uri,
+                        min_babel_version: env!("CARGO_PKG_VERSION").to_string(),
                     },
                     assigned_cpus: vec![],
                     expected_status: VmStatus::Stopped,
@@ -601,7 +601,6 @@ pub mod tests {
         let params = [
             ("protocol_key", "test_protocol"),
             ("variant_key", "test_variant"),
-            ("babel_version", env!("CARGO_PKG_VERSION")),
         ];
         utils::render_template(
             include_str!("../data/babel.yaml.template"),

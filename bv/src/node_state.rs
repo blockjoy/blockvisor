@@ -35,6 +35,7 @@ pub struct NodeImage {
     pub archive_id: String,
     pub store_key: String,
     pub uri: String,
+    pub min_babel_version: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -322,6 +323,7 @@ impl From<LegacyState> for NodeState {
                     "legacy://{}/{}/{}",
                     value.image.protocol, value.image.node_type, value.network,
                 ),
+                min_babel_version: env!("CARGO_PKG_VERSION").to_string(),
             },
             assigned_cpus: value.assigned_cpus,
             expected_status: value.expected_status,

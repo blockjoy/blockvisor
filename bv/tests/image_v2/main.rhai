@@ -1,6 +1,5 @@
 const API_HOST = "http://localhost:4467/";
 
-const BABEL_VERSION = "0.9.0";
 const PLUGIN_CONFIG = #{
     init: #{
         commands: [

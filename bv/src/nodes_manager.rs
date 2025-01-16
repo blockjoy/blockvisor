@@ -202,6 +202,7 @@ where
 
     #[instrument(skip(self))]
     pub async fn create(&self, desired_state: NodeState) -> commands::Result<NodeState> {
+        check_babel_version(&desired_state.image.min_babel_version)?;
         let id = desired_state.id;
         let mut node_ids = self.node_ids.write().await;
         if let Some(cache) = self.node_state_cache.read().await.get(&id) {
@@ -263,6 +264,7 @@ where
         &self,
         desired_state: NodeState,
     ) -> commands::Result<(NodeState, VmStatus)> {
+        check_babel_version(&desired_state.image.min_babel_version)?;
         let id = desired_state.id;
         let nodes_lock = self.nodes.read().await;
         let MaybeNode::Node(node_lock) = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?
@@ -717,6 +719,21 @@ where
     }
 }
 
+fn check_babel_version(min_babel_version: &str) -> commands::Result<()> {
+    let parse_err = |err| {
+        Error::Internal(anyhow!(
+            "failed to parse min_babel_version={min_babel_version}: {err:#}"
+        ))
+    };
+    let current_version = env!("CARGO_PKG_VERSION");
+    let min_babel_version = semver::Version::parse(min_babel_version).map_err(parse_err)?;
+    let version = semver::Version::parse(current_version).map_err(parse_err)?;
+    if version < min_babel_version {
+        command_failed!(Error::Internal(anyhow!("image require never version of babel '{min_babel_version}' while current is '{current_version}' - upgrade bv first")));
+    }
+    Ok(())
+}
+
 fn check_firewall_rules(rules: &[firewall::Rule]) -> commands::Result<()> {
     if rules.len() > MAX_SUPPORTED_RULES {
         command_failed!(Error::Internal(anyhow!(
@@ -916,6 +933,20 @@ mod tests {
 
         let nodes = NodesManager::load(pal, config).await?;
         assert!(nodes.nodes_list().await.is_empty());
+
+        let mut not_supported_state = first_node_state.clone();
+        not_supported_state.image.min_babel_version = "777.77.7".to_string();
+        assert_eq!(
+            format!(
+                "BV internal error: 'image require never version of babel '777.77.7' while current is '{}' - upgrade bv first'",
+                env!("CARGO_PKG_VERSION")
+            ),
+            nodes
+                .create(not_supported_state)
+                .await
+                .unwrap_err()
+                .to_string()
+        );
 
         nodes.create(first_node_state.clone()).await?;
         nodes.create(second_node_state.clone()).await?;
@@ -1203,6 +1234,20 @@ mod tests {
         let nodes = NodesManager::load(pal, config).await?;
 
         nodes.create(node_state.clone()).await?;
+        let mut not_supported_state = new_state.clone();
+        not_supported_state.image.min_babel_version = "777.77.7".to_string();
+        assert_eq!(
+            format!(
+                "BV internal error: 'image require never version of babel '777.77.7' while current is '{}' - upgrade bv first'",
+                env!("CARGO_PKG_VERSION")
+            ),
+            nodes
+                .upgrade(not_supported_state)
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+
         let not_found_id = uuid::Uuid::new_v4();
         let mut not_found_state = new_state.clone();
         not_found_state.id = not_found_id;

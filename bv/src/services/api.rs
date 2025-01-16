@@ -527,6 +527,7 @@ impl TryFrom<pb::Node> for NodeState {
             archive_id: image_config.archive_id,
             store_key: image_config.store_key,
             uri: image_config.image_uri,
+            min_babel_version: image_config.min_babel_version,
         };
         let properties = to_node_properties(image_config.values);
         let firewall = config

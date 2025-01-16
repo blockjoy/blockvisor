@@ -19,7 +19,6 @@ const A_DIR = node_env().protocol_data_path + "/A";
 const B_DIR = node_env().protocol_data_path + "/B";
 const NET =  global::NETS[node_env().node_variant];
 
-const BABEL_VERSION = "0.9.0";
 const BASE_CONFIG = base::BASE_CONFIG;
 const PLUGIN_CONFIG = #{
     /// [optional] List of configuration files to be rendered from template with provided params.

@@ -88,9 +88,6 @@ to recognise the node, but the purpose may vary per protocol.
   <br> BV provide default implementation if [PLUGIN_CONFIG](#plugin_config) constant is defined.
   Default implementation stop all services, start upload job according to config, and then start services again.
 
-Beside above functions there should be `BABEL_VERSION` constant defined, defining minimum version of babel, required
-by this script. E.g: `const BABEL_VERSION = "0.55.0";`.
-
 See [example](examples/polygon_functions.rhai) of functions implemented for Polygon.
 
 ### Functions that MAY be implemented by Plugin

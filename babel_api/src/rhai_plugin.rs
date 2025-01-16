@@ -25,7 +25,6 @@ pub const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
 const INIT_FN_NAME: &str = "init";
 const PROTOCOL_STATUS_FN_NAME: &str = "protocol_status";
 const BASE_CONFIG_CONST_NAME: &str = "BASE_CONFIG";
-const BABEL_VERSION_CONST_NAME: &str = "BABEL_VERSION";
 
 #[derive(Debug)]
 pub struct RhaiPlugin<E> {
@@ -74,30 +73,6 @@ fn new_rhai_engine() -> rhai::Engine {
     let mut engine = rhai::Engine::new();
     engine.set_max_expr_depths(64, 32);
     engine
-}
-
-fn find_const_in_ast<T: for<'a> Deserialize<'a>>(ast: &AST, name: &str) -> Result<T> {
-    let mut vars = ast.iter_literal_variables(true, true);
-    if let Some((_, _, dynamic)) = vars.find(|(v, _, _)| *v == name) {
-        let value: T = from_dynamic(&dynamic)
-            .with_context(|| format!("Invalid Rhai script - failed to deserialize {name}"))?;
-        Ok(value)
-    } else {
-        Err(anyhow!("Invalid Rhai script - missing {name} constant"))
-    }
-}
-
-fn check_babel_version(ast: &AST) -> Result<()> {
-    if let Ok(min_babel_version) = find_const_in_ast::<String>(ast, BABEL_VERSION_CONST_NAME) {
-        let min_babel_version = semver::Version::parse(&min_babel_version)?;
-        let version = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
-        if version < min_babel_version {
-            bail!(
-                "Required minimum babel version is `{min_babel_version}`, running is `{version}`"
-            );
-        }
-    }
-    Ok(())
 }
 
 impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
@@ -159,7 +134,6 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         rhai_engine: rhai::Engine,
         plugin_path: Option<PathBuf>,
     ) -> Result<Self> {
-        check_babel_version(&ast)?;
         let mut plugin = RhaiPlugin {
             bare: BarePlugin {
                 plugin_path,
@@ -1410,21 +1384,6 @@ mod tests {
         assert_eq!(
             r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data|file content|psecret"#,
             plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_babel_version() -> Result<()> {
-        let script = r#"const BABEL_VERSION = "777.777.777";"#;
-        assert_eq!(
-            format!(
-                "Required minimum babel version is `777.777.777`, running is `{}`",
-                env!("CARGO_PKG_VERSION")
-            ),
-            RhaiPlugin::from_str(script, MockBabelEngine::new())
-                .unwrap_err()
-                .to_string()
         );
         Ok(())
     }

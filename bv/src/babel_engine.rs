@@ -1154,6 +1154,7 @@ mod tests {
                         archive_id: "".to_string(),
                         store_key: "".to_string(),
                         uri: "".to_string(),
+                        min_babel_version: "".to_string(),
                     },
                     properties: HashMap::from_iter([(
                         "some_key".to_string(),
