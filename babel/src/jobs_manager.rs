@@ -193,7 +193,9 @@ async fn load_jobs(
                 match config {
                     Ok(config) => {
                         let job_dir = jobs_context.jobs_dir.join(&name);
-                        fs::create_dir(&job_dir).await?;
+                        if !job_dir.exists() {
+                            fs::create_dir(&job_dir).await?;
+                        }
                         let legacy_status_path = jobs_context
                             .jobs_dir
                             .join("status")
@@ -825,6 +827,12 @@ async fn migrate_job(name: &str, job: &mut Job, jobs_dir: &Path) -> Result<()> {
         if job.progress_path.exists() {
             fs::copy(&job.progress_path, &progress_path).await?;
         }
+        fs::remove_file(&job.config_path).await.with_context(|| {
+            format!(
+                "failed to remove '{}' after it was migrated",
+                job.config_path.display()
+            )
+        })?;
         job.config_path = config_path;
         job.status_path = status_path;
         job.progress_path = progress_path;
