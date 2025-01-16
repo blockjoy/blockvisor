@@ -67,7 +67,6 @@ jobs:
           if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
           git submodule update --init
           docker build -t api -f ./docker/Dockerfile ./
-          docker build -t vault-init -f ./docker/vault/Dockerfile ./docker/vault/
 
       - name: Pull images
         run: >

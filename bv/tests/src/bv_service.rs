@@ -297,12 +297,13 @@ async fn test_bv_service_e2e() {
         }
     }
 
-    println!("check crypt service");
-    test_env::bv_run(
-        &["node", "run", "secret_check", &second_node_id],
-        "ok",
-        None,
-    );
+    // TODO Uncomment when crypt service is back
+    // println!("check crypt service");
+    // test_env::bv_run(
+    //     &["node", "run", "secret_check", &second_node_id],
+    //     "ok",
+    //     None,
+    // );
 
     println!("check file system access");
     test_env::bv_run(

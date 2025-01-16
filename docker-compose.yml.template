@@ -39,14 +39,6 @@ services:
     cap_add:
       - IPC_LOCK
 
-  vault-init:
-    image: vault-init:latest
-    pull_policy: never
-    environment:
-      VAULT_ADDR: "http://vault:8200"
-    cap_add:
-      - IPC_LOCK
-
   api:
     image: api:latest
     pull_policy: never

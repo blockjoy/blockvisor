@@ -97,7 +97,7 @@ fn secret_check(param) {
             return if secret == "secret-value" {"ok"} else {"got unexpected secret: secret"}
         }
     }
-    throw "first get_secret should fail"
+    throw "first get_secret should fail with 'not found'"
 }
 
 fn file_access_check(param) {
