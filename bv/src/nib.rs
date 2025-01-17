@@ -310,8 +310,9 @@ pub async fn process_image_command(
                             || character.is_ascii_digit()
                             || character.is_ascii_uppercase())
                         && image_variant.sku_code.split("-").count() == 3,
-                    "invalud SKU format for variant '{}'",
-                    image_variant.variant_key
+                    "Invalid SKU format for variant '{}': '{}' (Should be formatted as 3 sections of uppercased ascii alphanumeric characters split by `-`, e.g.: `ETH-ERG-SF`)",
+                    image_variant.variant_key,
+                    image_variant.sku_code
                 );
 
                 let protocol_version_id =
