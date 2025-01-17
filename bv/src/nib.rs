@@ -1,4 +1,5 @@
 use crate::nib_meta::{ArchivePointer, FirewallConfig, ImageProperty, RamdiskConfig, Visibility};
+use crate::utils::verify_variant_sku;
 use crate::{
     apptainer_machine::{PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
     bv_config, firewall,
@@ -11,7 +12,7 @@ use crate::{
 };
 use babel_api::{engine::NodeEnv, rhai_plugin_linter, utils::RamdiskConfiguration};
 use bv_utils::cmd::run_cmd;
-use eyre::{anyhow, bail, ensure, Context};
+use eyre::{anyhow, bail, Context};
 use petname::Petnames;
 use serde::Serialize;
 use std::{
@@ -243,6 +244,7 @@ pub async fn process_image_command(
                 serde_yaml_ng::from_str(&fs::read_to_string(&path).await?)?;
             let variant = pick_variant(image.variants.clone(), variant)?;
             let image_variant = ImageVariant::build(&image, variant.clone());
+            verify_variant_sku(&image_variant)?;
             let properties = build_properties(&image_variant.properties, props)?;
             let tmp_dir = tempdir::TempDir::new("nib_check")?;
             let rootfs_path = tmp_dir.path();
@@ -295,25 +297,17 @@ pub async fn process_image_command(
                 min_babel_version.unwrap_or(env!("CARGO_PKG_VERSION").to_string());
             let mut client = services::protocol::ProtocolService::new(connector).await?;
             let image: nib_meta::Image = serde_yaml_ng::from_str(&fs::read_to_string(path).await?)?;
-            for variant in &image.variants {
-                let image_variant = ImageVariant::build(&image, variant.clone());
+            let image_variants: Vec<_> = image
+                .variants
+                .iter()
+                .map(|variant| ImageVariant::build(&image, variant.clone()))
+                .map(|image_variant| verify_variant_sku(&image_variant).map(|_| image_variant))
+                .collect::<eyre::Result<_>>()?;
+            for image_variant in image_variants {
                 let image_key = ProtocolImageKey {
                     protocol_key: image_variant.protocol_key.clone(),
                     variant_key: image_variant.variant_key.clone(),
                 };
-
-                ensure!(
-                    image_variant
-                        .sku_code
-                        .chars()
-                        .all(|character| character == '-'
-                            || character.is_ascii_digit()
-                            || character.is_ascii_uppercase())
-                        && image_variant.sku_code.split("-").count() == 3,
-                    "Invalid SKU format for variant '{}': '{}' (Should be formatted as 3 sections of uppercased ascii alphanumeric characters split by `-`, e.g.: `ETH-ERG-SF`)",
-                    image_variant.variant_key,
-                    image_variant.sku_code
-                );
 
                 let protocol_version_id =
                     match client.get_protocol_version(image_key.clone()).await? {
