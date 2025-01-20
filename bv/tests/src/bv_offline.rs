@@ -84,14 +84,11 @@ async fn test_bv_cmd_node_start_and_stop_all() -> Result<()> {
         test_env.sh_inside(node_id, "cat /blockjoy/test").trim()
     );
     assert_eq!(
-        "memory.limit = 1000000000\ncpu.cpus",
+        "memory.limit = 1000000000",
         fs::read_to_string(node_dir.join("cgroups.toml"))
             .await
             .unwrap()
             .trim()
-            .rsplit_once(" = ")
-            .unwrap()
-            .0
     );
     let pid = fs::read_to_string(node_dir.join("apptainer.pid"))
         .await

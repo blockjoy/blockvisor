@@ -201,7 +201,7 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn create(&self, desired_state: NodeState) -> commands::Result<NodeState> {
+    pub async fn create(&self, mut desired_state: NodeState) -> commands::Result<NodeState> {
         check_babel_version(&desired_state.image.min_babel_version)?;
         let id = desired_state.id;
         let mut node_ids = self.node_ids.write().await;
@@ -220,6 +220,8 @@ where
         check_firewall_rules(&desired_state.firewall.rules)?;
         if !desired_state.dev_mode {
             self.check_node_requirements(&desired_state, None).await?;
+        } else {
+            desired_state.vm_config.vcpu_count = 0;
         }
 
         for n in self.nodes.read().await.values() {
@@ -262,7 +264,7 @@ where
     #[instrument(skip(self))]
     pub async fn upgrade(
         &self,
-        desired_state: NodeState,
+        mut desired_state: NodeState,
     ) -> commands::Result<(NodeState, VmStatus)> {
         check_babel_version(&desired_state.image.min_babel_version)?;
         let id = desired_state.id;
@@ -290,6 +292,8 @@ where
             if !node.dev_mode {
                 self.check_node_requirements(&desired_state, Some(&node.vm_config))
                     .await?;
+            } else {
+                desired_state.vm_config.vcpu_count = 0;
             }
 
             let mut node = node_lock.write().await;

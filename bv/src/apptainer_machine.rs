@@ -246,7 +246,7 @@ impl ApptainerMachine {
                     self.config.vm.mem_size_mb * 1_000_000,
                 )
             }
-            if self.apptainer_config.cpu_limit {
+            if self.apptainer_config.cpu_limit && !self.config.cpus.is_empty() {
                 content += &format!(
                     "cpu.cpus = \"{}\"\n",
                     self.config
