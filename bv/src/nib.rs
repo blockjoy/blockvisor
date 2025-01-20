@@ -1,18 +1,19 @@
-use crate::nib_meta::{ArchivePointer, FirewallConfig, ImageProperty, RamdiskConfig, Visibility};
-use crate::utils::verify_variant_sku;
 use crate::{
-    apptainer_machine::{PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
+    apptainer_machine::{self, PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
     bv_config, firewall,
-    internal_server::{self, NodeDisplayInfo},
+    internal_server::{self, service_client::ServiceClient, NodeDisplayInfo},
     nib_cli::{ImageCommand, ProtocolCommand},
-    nib_meta::{self, Variant},
-    node_state::{NodeImage, NodeState, ProtocolImageKey, VmConfig, VmStatus},
+    nib_meta::{
+        self, ArchivePointer, FirewallConfig, ImageProperty, RamdiskConfig, Variant, Visibility,
+    },
+    node_context,
+    node_state::{NodeImage, NodeProperties, NodeState, ProtocolImageKey, VmConfig, VmStatus},
     services::{self, protocol::PushResult, ApiServiceConnector},
     utils,
 };
 use babel_api::{engine::NodeEnv, rhai_plugin_linter, utils::RamdiskConfiguration};
 use bv_utils::cmd::run_cmd;
-use eyre::{anyhow, bail, Context};
+use eyre::{anyhow, bail, ensure, Context};
 use petname::Petnames;
 use serde::Serialize;
 use std::{
@@ -26,7 +27,8 @@ use std::{
     },
 };
 use tokio::fs;
-use tonic::transport::Endpoint;
+use tokio::time::sleep;
+use tonic::transport::{Channel, Endpoint};
 use tracing::info;
 use uuid::Uuid;
 
@@ -134,64 +136,17 @@ pub async fn process_image_command(
             path,
             variant,
         } => {
-            let bv_config = load_bv_config(bv_root).await?;
-            let bv_url = format!("http://localhost:{}", bv_config.blockvisor_port);
-            let mut bv_client = internal_server::service_client::ServiceClient::connect(
-                Endpoint::from_shared(bv_url)?.connect_timeout(BV_CONNECT_TIMEOUT),
-            )
-            .await?;
             let image: nib_meta::Image = serde_yaml_ng::from_str(&fs::read_to_string(path).await?)?;
             let variant = pick_variant(image.variants.clone(), variant)?;
-            let vm_config = VmConfig::build_from(&variant);
             let image_variant = ImageVariant::build(&image, variant);
             let properties = build_properties(&image_variant.properties, props)?;
-            let nodes = bv_client.get_nodes(()).await?.into_inner();
-            let id = Uuid::new_v4();
-            let (ip, gateway) =
-                discover_ip_and_gateway(&bv_config, ip, gateway, &nodes, id).await?;
 
-            let node = bv_client
-                .create_dev_node(NodeState {
-                    id,
-                    name: Petnames::default().generate_one(3, "-"),
-                    protocol_id: "dev-node-protocol-id".to_string(),
-                    image_key: ProtocolImageKey {
-                        protocol_key: image_variant.protocol_key,
-                        variant_key: image_variant.variant_key,
-                    },
-                    dev_mode: true,
-                    ip,
-                    gateway,
-                    properties,
-                    firewall: image_variant.firewall_config.into(),
-                    display_name: "".to_string(),
-                    org_id: "dev-node-org-id".to_string(),
-                    org_name: "dev node org name".to_string(),
-                    protocol_name: "dev node protocol name".to_string(),
-                    dns_name: "dev.node.dns.name".to_string(),
-                    vm_config,
-                    image: NodeImage {
-                        id: "00000000-0000-0000-0000-000000000000".to_string(),
-                        version: image_variant.version,
-                        config_id: "00000000-0000-0000-0000-000000000000".to_string(),
-                        archive_id: "00000000-0000-0000-0000-000000000000".to_string(),
-                        store_key: "dev-node-store-id".to_string(),
-                        uri: image_variant.container_uri,
-                        min_babel_version: env!("CARGO_PKG_VERSION").to_string(),
-                    },
-                    assigned_cpus: vec![],
-                    expected_status: VmStatus::Stopped,
-                    started_at: None,
-                    initialized: false,
-                    restarting: false,
-                    upgrade_state: Default::default(),
-                    apptainer_config: None,
-                })
+            let node_info = DevNode::create(bv_root, ip, gateway, image_variant, properties)
                 .await?
-                .into_inner();
+                .node_info;
             println!(
                 "Created new dev_node with ID `{}` and name `{}`\n{:#?}",
-                node.state.id, node.state.name, node.state
+                node_info.state.id, node_info.state.name, node_info.state
             );
         }
         ImageCommand::Upgrade { path, id_or_name } => {
@@ -223,8 +178,8 @@ pub async fn process_image_command(
                     "variant {} not found in image definition",
                     node.image_key.variant_key
                 ))?;
-            node.vm_config = VmConfig::build_from(variant);
             let image_variant = ImageVariant::build(&image, variant.clone());
+            node.vm_config = VmConfig::build_from(&image_variant);
             node.firewall = image_variant.firewall_config.into();
             node.image.id = format!("dev-node-image-id-{}", image_variant.version);
             node.image.version = image_variant.version;
@@ -236,36 +191,66 @@ pub async fn process_image_command(
             );
         }
         ImageCommand::Check {
+            ip,
+            gateway,
             props,
             path,
             variant,
+            lint,
+            cleanup,
+            start_timeout,
+            jobs_wait,
         } => {
             let image: nib_meta::Image =
                 serde_yaml_ng::from_str(&fs::read_to_string(&path).await?)?;
             let variant = pick_variant(image.variants.clone(), variant)?;
             let image_variant = ImageVariant::build(&image, variant.clone());
-            verify_variant_sku(&image_variant)?;
+            utils::verify_variant_sku(&image_variant)?;
             let properties = build_properties(&image_variant.properties, props)?;
             let tmp_dir = tempdir::TempDir::new("nib_check")?;
-            let rootfs_path = tmp_dir.path();
-            run_cmd(
-                "apptainer",
-                [
-                    OsStr::new("build"),
-                    OsStr::new("--sandbox"),
-                    OsStr::new("--force"),
-                    rootfs_path.as_os_str(),
-                    OsStr::new(&image_variant.container_uri),
-                ],
-            )
-            .await
-            .map_err(|err| {
-                anyhow!(
-                    "failed to build sandbox for '{}' in `{}`: {err:#}",
-                    path.display(),
-                    rootfs_path.display(),
+            let (rootfs_path, dev_node) = if lint {
+                let rootfs_path = tmp_dir.path();
+                run_cmd(
+                    "apptainer",
+                    [
+                        OsStr::new("build"),
+                        OsStr::new("--sandbox"),
+                        OsStr::new("--force"),
+                        rootfs_path.as_os_str(),
+                        OsStr::new(&image_variant.container_uri),
+                    ],
                 )
-            })?;
+                .await
+                .map_err(|err| {
+                    anyhow!(
+                        "failed to build sandbox for '{}' in `{}`: {err:#}",
+                        path.display(),
+                        rootfs_path.display(),
+                    )
+                })?;
+                (rootfs_path.to_path_buf(), None)
+            } else {
+                let dev_node = DevNode::create(
+                    bv_root,
+                    ip,
+                    gateway,
+                    image_variant.clone(),
+                    properties.clone(),
+                )
+                .await?;
+                println!(
+                    "Created '{}' dev_node with ID `{}`",
+                    dev_node.node_info.state.name, dev_node.node_info.state.id
+                );
+                (
+                    apptainer_machine::build_rootfs_dir(&node_context::build_node_dir(
+                        bv_root,
+                        dev_node.node_info.state.id,
+                    )),
+                    Some(dev_node),
+                )
+            };
+
             let res = rhai_plugin_linter::check(
                 rootfs_path.join(PLUGIN_PATH).join(PLUGIN_MAIN_FILENAME),
                 NodeEnv {
@@ -288,6 +273,21 @@ pub async fn process_image_command(
             );
             println!("Plugin linter: {res:?}");
             res?;
+            if let Some(mut dev_node) = dev_node {
+                dev_node.start().await?;
+                println!("Node started");
+                dev_node
+                    .wait_for_running(Duration::from_secs(start_timeout))
+                    .await?;
+                println!("Node is running");
+                sleep(Duration::from_secs(jobs_wait)).await;
+                dev_node.check_jobs_and_protocol().await?;
+                println!("Node jobs are fine");
+                if cleanup {
+                    dev_node.delete().await?;
+                    println!("Node deleted");
+                }
+            }
         }
         ImageCommand::Push {
             min_babel_version,
@@ -301,7 +301,9 @@ pub async fn process_image_command(
                 .variants
                 .iter()
                 .map(|variant| ImageVariant::build(&image, variant.clone()))
-                .map(|image_variant| verify_variant_sku(&image_variant).map(|_| image_variant))
+                .map(|image_variant| {
+                    utils::verify_variant_sku(&image_variant).map(|_| image_variant)
+                })
                 .collect::<eyre::Result<_>>()?;
             for image_variant in image_variants {
                 let image_key = ProtocolImageKey {
@@ -511,6 +513,136 @@ impl ImageVariant {
     }
 }
 
+struct DevNode {
+    node_info: NodeDisplayInfo,
+    bv_client: ServiceClient<Channel>,
+}
+
+impl DevNode {
+    async fn create(
+        bv_root: &Path,
+        ip: Option<String>,
+        gateway: Option<String>,
+        image_variant: ImageVariant,
+        properties: NodeProperties,
+    ) -> eyre::Result<Self> {
+        let bv_config = load_bv_config(bv_root).await?;
+        let bv_url = format!("http://localhost:{}", bv_config.blockvisor_port);
+        let mut bv_client = internal_server::service_client::ServiceClient::connect(
+            Endpoint::from_shared(bv_url)?.connect_timeout(BV_CONNECT_TIMEOUT),
+        )
+        .await?;
+        let nodes = bv_client.get_nodes(()).await?.into_inner();
+        let id = Uuid::new_v4();
+        let (ip, gateway) = discover_ip_and_gateway(&bv_config, ip, gateway, &nodes, id).await?;
+        let vm_config = VmConfig::build_from(&image_variant);
+
+        let node_info = bv_client
+            .create_dev_node(NodeState {
+                id,
+                name: Petnames::default().generate_one(3, "-"),
+                protocol_id: "dev-node-protocol-id".to_string(),
+                image_key: ProtocolImageKey {
+                    protocol_key: image_variant.protocol_key,
+                    variant_key: image_variant.variant_key,
+                },
+                dev_mode: true,
+                ip,
+                gateway,
+                properties,
+                firewall: image_variant.firewall_config.into(),
+                display_name: "".to_string(),
+                org_id: "dev-node-org-id".to_string(),
+                org_name: "dev node org name".to_string(),
+                protocol_name: "dev node protocol name".to_string(),
+                dns_name: "dev.node.dns.name".to_string(),
+                vm_config,
+                image: NodeImage {
+                    id: "00000000-0000-0000-0000-000000000000".to_string(),
+                    version: image_variant.version,
+                    config_id: "00000000-0000-0000-0000-000000000000".to_string(),
+                    archive_id: "00000000-0000-0000-0000-000000000000".to_string(),
+                    store_key: "dev-node-store-id".to_string(),
+                    uri: image_variant.container_uri,
+                    min_babel_version: env!("CARGO_PKG_VERSION").to_string(),
+                },
+                assigned_cpus: vec![],
+                expected_status: VmStatus::Stopped,
+                started_at: None,
+                initialized: false,
+                restarting: false,
+                upgrade_state: Default::default(),
+                apptainer_config: None,
+            })
+            .await?
+            .into_inner();
+        Ok(Self {
+            node_info,
+            bv_client,
+        })
+    }
+
+    async fn start(&mut self) -> eyre::Result<()> {
+        self.bv_client.start_node(self.node_info.state.id).await?;
+        Ok(())
+    }
+
+    async fn wait_for_running(&mut self, timeout: Duration) -> eyre::Result<()> {
+        let start = std::time::Instant::now();
+        while VmStatus::Running
+            != self
+                .bv_client
+                .get_node_status(self.node_info.state.id)
+                .await?
+                .into_inner()
+        {
+            if start.elapsed() < timeout {
+                sleep(Duration::from_secs(1)).await;
+            } else {
+                panic!("Node is not in Running state after {}s", timeout.as_secs())
+            }
+        }
+        Ok(())
+    }
+    async fn check_jobs_and_protocol(&mut self) -> eyre::Result<()> {
+        let metrics = self
+            .bv_client
+            .get_node_metrics(self.node_info.state.id)
+            .await?
+            .into_inner();
+        for (name, info) in metrics.jobs {
+            if let babel_api::engine::JobStatus::Finished {
+                exit_code: Some(exit_code),
+                ..
+            } = info.status
+            {
+                ensure!(
+                    exit_code == 0,
+                    "job '{name}' finished with {exit_code} exit code"
+                );
+            }
+            ensure!(
+                info.restart_count == 0,
+                "job '{name}' has been restarted {} times",
+                info.restart_count
+            );
+        }
+        let Some(protocol_status) = metrics.protocol_status else {
+            bail!("No protocol status")
+        };
+        ensure!(
+            protocol_status.health != babel_api::plugin::NodeHealth::Unhealthy,
+            "Unhealthy protocol status"
+        );
+        Ok(())
+    }
+
+    async fn delete(&mut self) -> eyre::Result<()> {
+        self.bv_client.delete_node(self.node_info.state.id).await?;
+        Ok(())
+    }
+}
+
 impl From<nib_meta::Action> for firewall::Action {
     fn from(value: nib_meta::Action) -> Self {
         match value {
@@ -564,7 +696,7 @@ impl From<nib_meta::FirewallConfig> for firewall::Config {
 }
 
 impl VmConfig {
-    fn build_from(value: &Variant) -> Self {
+    fn build_from(value: &ImageVariant) -> Self {
         Self {
             vcpu_count: value.min_cpu as usize,
             mem_size_mb: value.min_memory_mb,

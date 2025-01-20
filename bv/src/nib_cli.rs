@@ -97,6 +97,14 @@ pub enum ImageCommand {
 
     /// Run sanity checks on given image and embedded plugin.
     Check {
+        /// Node IP Address
+        #[clap(long)]
+        ip: Option<String>,
+
+        /// Gateway IP Address
+        #[clap(long)]
+        gateway: Option<String>,
+
         /// The properties that are passed to the node in form of JSON string.
         #[clap(long)]
         props: Option<String>,
@@ -108,6 +116,22 @@ pub enum ImageCommand {
         /// Image definition file path.
         #[clap(long, default_value = "babel.yaml")]
         path: PathBuf,
+
+        /// Run Rhai linter only. Don't create and run test node.
+        #[clap(long)]
+        lint: bool,
+
+        /// Delete test node if all checks pass.
+        #[clap(long)]
+        cleanup: bool,
+
+        /// Node start timeout in seconds - maximum time to wait for 'Running' node.
+        #[clap(long, default_value = "30")]
+        start_timeout: u64,
+
+        /// Time to wait (in seconds) before jobs status check.
+        #[clap(long, default_value = "5")]
+        jobs_wait: u64,
     },
 
     /// Push image to the API.

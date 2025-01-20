@@ -195,6 +195,7 @@ async fn test_bv_service_e2e() {
         &[
             "image",
             "check",
+            "--cleanup",
             "--props",
             r#"{"arbitrary-text-property":"testing value"}"#,
             "--path",
