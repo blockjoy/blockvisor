@@ -518,7 +518,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
             self.start_default_services()?;
         }
         let mut services_needs = self.run_actions(config.init, vec![])?;
-        if !self.babel_engine.is_download_completed()? {
+        if !self.babel_engine.node_env().dev_mode && !self.babel_engine.is_download_completed()? {
             if self.babel_engine.has_protocol_archive()? {
                 self.create_and_start_job(
                     DOWNLOAD_JOB_NAME,
