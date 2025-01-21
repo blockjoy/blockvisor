@@ -1,3 +1,4 @@
+use crate::nib_cli::Checks;
 use crate::{
     apptainer_machine::{self, PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
     bv_config, firewall,
@@ -196,10 +197,11 @@ pub async fn process_image_command(
             props,
             path,
             variant,
-            lint,
-            cleanup,
+            lint_only,
             start_timeout,
             jobs_wait,
+            cleanup,
+            checks,
         } => {
             let image: nib_meta::Image =
                 serde_yaml_ng::from_str(&fs::read_to_string(&path).await?)?;
@@ -208,7 +210,7 @@ pub async fn process_image_command(
             utils::verify_variant_sku(&image_variant)?;
             let properties = build_properties(&image_variant.properties, props)?;
             let tmp_dir = tempdir::TempDir::new("nib_check")?;
-            let (rootfs_path, dev_node) = if lint {
+            let (rootfs_path, dev_node) = if lint_only {
                 let rootfs_path = tmp_dir.path();
                 run_cmd(
                     "apptainer",
@@ -281,7 +283,11 @@ pub async fn process_image_command(
                     .await?;
                 println!("Node is running");
                 sleep(Duration::from_secs(jobs_wait)).await;
-                dev_node.check_jobs_and_protocol().await?;
+                dev_node
+                    .check_jobs_and_protocol(
+                        checks.unwrap_or(vec![Checks::JobsStatus, Checks::JobsRestarts]),
+                    )
+                    .await?;
                 println!("Node jobs are fine");
                 if cleanup {
                     dev_node.delete().await?;
@@ -604,36 +610,42 @@ impl DevNode {
         }
         Ok(())
     }
-    async fn check_jobs_and_protocol(&mut self) -> eyre::Result<()> {
+    async fn check_jobs_and_protocol(&mut self, checks: Vec<Checks>) -> eyre::Result<()> {
         let metrics = self
             .bv_client
             .get_node_metrics(self.node_info.state.id)
             .await?
             .into_inner();
         for (name, info) in metrics.jobs {
-            if let babel_api::engine::JobStatus::Finished {
-                exit_code: Some(exit_code),
-                ..
-            } = info.status
-            {
+            if checks.contains(&Checks::JobsStatus) {
+                if let babel_api::engine::JobStatus::Finished {
+                    exit_code: Some(exit_code),
+                    ..
+                } = info.status
+                {
+                    ensure!(
+                        exit_code == 0,
+                        "job '{name}' finished with {exit_code} exit code"
+                    );
+                }
+            }
+            if checks.contains(&Checks::JobsRestarts) {
                 ensure!(
-                    exit_code == 0,
-                    "job '{name}' finished with {exit_code} exit code"
+                    info.restart_count == 0,
+                    "job '{name}' has been restarted {} times",
+                    info.restart_count
                 );
             }
+        }
+        if checks.contains(&Checks::ProtocolStatus) {
+            let Some(protocol_status) = metrics.protocol_status else {
+                bail!("No protocol status")
+            };
             ensure!(
-                info.restart_count == 0,
-                "job '{name}' has been restarted {} times",
-                info.restart_count
+                protocol_status.health != babel_api::plugin::NodeHealth::Unhealthy,
+                "Unhealthy protocol status"
             );
         }
-        let Some(protocol_status) = metrics.protocol_status else {
-            bail!("No protocol status")
-        };
-        ensure!(
-            protocol_status.health != babel_api::plugin::NodeHealth::Unhealthy,
-            "Unhealthy protocol status"
-        );
         Ok(())
     }
 

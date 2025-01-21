@@ -119,11 +119,7 @@ pub enum ImageCommand {
 
         /// Run Rhai linter only. Don't create and run test node.
         #[clap(long)]
-        lint: bool,
-
-        /// Delete test node if all checks pass.
-        #[clap(long)]
-        cleanup: bool,
+        lint_only: bool,
 
         /// Node start timeout in seconds - maximum time to wait for 'Running' node.
         #[clap(long, default_value = "30")]
@@ -132,6 +128,15 @@ pub enum ImageCommand {
         /// Time to wait (in seconds) before jobs status check.
         #[clap(long, default_value = "5")]
         jobs_wait: u64,
+
+        /// Delete test node if all checks pass.
+        #[clap(long)]
+        cleanup: bool,
+
+        /// List of check to be run against testing node.
+        ///
+        /// [default: jobs-status jobs-restarts]
+        checks: Option<Vec<Checks>>,
     },
 
     /// Push image to the API.
@@ -144,6 +149,16 @@ pub enum ImageCommand {
         #[clap(long, default_value = "babel.yaml")]
         path: PathBuf,
     },
+}
+
+#[derive(ValueEnum, PartialEq, Eq, Clone)]
+pub enum Checks {
+    /// Check protocol_status if it's not `Unhealthy`.
+    ProtocolStatus,
+    /// Check jobs status if it's not finished with non-zero exit code.
+    JobsStatus,
+    /// Check jobs restarts count if it's equal to 0.
+    JobsRestarts,
 }
 
 #[derive(Subcommand)]

@@ -79,7 +79,7 @@ To create fist node image:
 1. Build docker image `docker build -t variant-key .`
 2. Update image metadata in `babel.yaml` file.
 In particular, set `container_uri` to `docker-daemon://variant-key:latest`
-3. Run some basic sanity checks on the image `nib image check`. Use `--lint` option to limit checks to Rhai script only,
+3. Run some basic sanity checks on the image `nib image check`. Use `--lint-only` option to limit checks to Rhai script only,
 otherwise `nib image check` will create dev node, and run also runtime checks. See `nib image check --help` for more details.
 4. Use `nib image play --props '{"property_key":"some property value"}'` to create dev node.
 
@@ -136,7 +136,7 @@ Hence, editing `*.rhai` files from image dir won't affect created node.
 __NOTE 1__: All of Rhai functions can be immediately tested, just after file is saved (including `init()` function).
 Use `bv node run <METHOD>` to run specific Rhai function from script.
 
-__NOTE 2__: Use `nib image check --lint` for quick `babel.rhai` script smoke tests and other sanity checks.
+__NOTE 2__: Use `nib image check --lint-only` for quick `babel.rhai` script smoke tests and other sanity checks.
 
 __NOTE 3__: Experimenting with `init()` function may result in some unwanted jobs running.
 Use `bv n job` CLI to stop or cleanup unwanted jobs.
