@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 pub mod cmd;
+pub mod lock_file;
 pub mod logging;
 pub mod rpc;
 pub mod run_flag;

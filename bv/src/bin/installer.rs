@@ -1,9 +1,8 @@
 use async_trait::async_trait;
-use blockvisord::installer;
-use blockvisord::installer::Installer;
+use blockvisord::installer::{self, Installer, INSTALL_PATH};
 use blockvisord::linux_platform::bv_root;
 use bv_utils::{cmd::run_cmd, logging::setup_logging, timer::SysTimer};
-use eyre::Result;
+use eyre::{Context, Result};
 use tracing::error;
 
 struct SystemCtl;
@@ -40,7 +39,10 @@ impl installer::BvService for SystemCtl {
 async fn main() -> Result<()> {
     setup_logging();
 
-    let installer = Installer::new(SysTimer, SystemCtl, &bv_root()).await?;
+    let bv_root = bv_root();
+    let _lock_file = bv_utils::lock_file::LockFile::lock(&bv_root.join(INSTALL_PATH), ".lock")
+        .with_context(|| "another BV installer instance is already running")?;
+    let installer = Installer::new(SysTimer, SystemCtl, &bv_root).await?;
     if let Err(err) = installer.run().await {
         error!("{err:#}");
         Err(err)

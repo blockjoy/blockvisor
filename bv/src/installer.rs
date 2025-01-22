@@ -4,6 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use bv_utils::{timer::Timer, with_retry};
+use eyre::ContextCompat;
 use eyre::{anyhow, bail, ensure, Context, Error, Result};
 use std::{
     io::Write,
@@ -151,16 +152,20 @@ impl<T: Timer, S: BvService> Installer<T, S> {
                 current_exe_path.display()
             )
         })?;
-        let bin_dir = bin_path
-            .parent()
-            .expect("invalid parent dir for file: {current_exe_path}");
+        let bin_dir = bin_path.parent().with_context(|| {
+            format!(
+                "invalid parent dir for file: {}",
+                current_exe_path.display()
+            )
+        })?;
         if self.paths.this_version != bin_dir {
             info!(
                 "move BV files from {} to install path {}",
                 bin_dir.to_string_lossy(),
                 self.paths.this_version.to_string_lossy()
             );
-            fs::create_dir_all(&self.paths.install_path).expect("failed to create install path");
+            fs::create_dir_all(&self.paths.install_path)
+                .with_context(|| "failed to create install path")?;
             fs_extra::dir::move_dir(
                 bin_dir,
                 &self.paths.this_version,
