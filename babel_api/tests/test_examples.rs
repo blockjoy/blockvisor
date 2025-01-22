@@ -271,7 +271,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 wait_for: None,
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(32),
-                log_timestamp: Some(false),
+                log_timestamp: Some(true),
             }),
         )
         .times(2)
@@ -339,7 +339,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 wait_for: None,
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(64),
-                log_timestamp: Some(false),
+                log_timestamp: Some(true),
             }),
         )
         .once()
@@ -393,7 +393,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 wait_for: Some(vec![]),
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(256),
-                log_timestamp: Some(false),
+                log_timestamp: Some(true),
             }),
         )
         .times(2)
@@ -564,7 +564,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 wait_for: Some(vec!["post_upload_job".to_string()]),
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(256),
-                log_timestamp: Some(false),
+                log_timestamp: Some(true),
             }),
         )
         .once()

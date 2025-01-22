@@ -27,9 +27,9 @@ fn init() {
         /// If not set default to 128.
         log_buffer_capacity_mb: 256,
 
-         /// [optional] Prepend timestamp to each log, or not.
-         /// If not set default to true.
-         log_timestamp: false,
+        /// [optional] Prepend timestamp to each log, or not.
+        /// If not set default to false.
+        log_timestamp: true,
     };
     create_job("job_name_A", job_config_A);
 

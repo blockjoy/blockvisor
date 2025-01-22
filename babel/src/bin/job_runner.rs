@@ -99,7 +99,7 @@ async fn run_job(
                         .shutdown_signal
                         .unwrap_or(DEFAULT_JOB_SHUTDOWN_SIGNAL),
                     log_buffer,
-                    log_timestamp: job_config.log_timestamp.unwrap_or(true),
+                    log_timestamp: job_config.log_timestamp.unwrap_or(false),
                     run_as: job_config.run_as,
                 }
                 .run(run, &job_name, &jobs::JOBS_DIR),

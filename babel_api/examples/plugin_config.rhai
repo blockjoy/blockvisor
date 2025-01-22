@@ -67,8 +67,8 @@ const PLUGIN_CONFIG = #{
                 /// If not set default to 128.
                 log_buffer_capacity_mb: 32,
                 /// [optional] Prepend timestamp to each log, or not.
-                /// If not set default to true.
-                log_timestamp: false,
+                /// If not set default to false.
+                log_timestamp: true,
             }
         ]
     },
@@ -113,8 +113,8 @@ const PLUGIN_CONFIG = #{
             /// If not set default to 128.
             log_buffer_capacity_mb: 256,
             /// [optional] Prepend timestamp to each log, or not.
-            /// If not set default to true.
-            log_timestamp: false,
+            /// If not set default to false.
+            log_timestamp: true,
         },
         #{
             name: "protocol_service_b",
@@ -160,8 +160,8 @@ const PLUGIN_CONFIG = #{
         /// If not set default to 128.
         log_buffer_capacity_mb: 64,
         /// [optional] Prepend timestamp to each log, or not.
-        /// If not set default to true.
-        log_timestamp: false,
+        /// If not set default to false.
+        log_timestamp: true,
     },
     /// [optional] Post-download sh jobs, to be started after download.
     post_download: [
