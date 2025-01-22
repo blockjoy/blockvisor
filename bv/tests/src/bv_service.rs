@@ -123,8 +123,8 @@ async fn test_bv_service_e2e() {
     println!("host provision token: {provision_token}");
 
     let mut client = pb::api_key_service_client::ApiKeyServiceClient::with_interceptor(
-        channel,
-        services::AuthToken(auth_token),
+        channel.clone(),
+        services::AuthToken(auth_token.clone()),
     );
     let response = client
         .create(pb::ApiKeyServiceCreateRequest {
@@ -270,6 +270,25 @@ async fn test_bv_service_e2e() {
         }
     }
 
+    let mut client = pb::node_service_client::NodeServiceClient::with_interceptor(
+        channel.clone(),
+        services::AuthToken(auth_token.clone()),
+    );
+    client
+        .update_config(pb::NodeServiceUpdateConfigRequest {
+            node_id: first_node_id.clone(),
+            auto_upgrade: Some(false),
+            new_org_id: None,
+            new_display_name: None,
+            new_note: None,
+            new_values: vec![],
+            new_firewall: None,
+            update_tags: None,
+            cost: None,
+        })
+        .await
+        .unwrap();
+
     println!("push test image v2");
     test_env::nib_run(
         &[
@@ -285,10 +304,7 @@ async fn test_bv_service_e2e() {
         None,
     );
 
-    println!("trigger second node upgrade");
-    bv_run(&["node", "upgrade", &second_node_id]);
-
-    println!("wait for second node to be upgraded");
+    println!("wait for second node to be auto upgraded");
     let start = std::time::Instant::now();
     while node_version(&second_node_id).await != "0.0.2" {
         if start.elapsed() < Duration::from_secs(300) {
