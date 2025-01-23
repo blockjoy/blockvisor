@@ -1,7 +1,7 @@
 use crate::{bv_config::SharedConfig, pal, services, services::api::common};
 use async_trait::async_trait;
 use eyre::{anyhow, bail, Result};
-use metrics::{register_counter, Counter};
+use metrics::{counter, Counter};
 use prost::Message;
 use reqwest::Url;
 use rumqttc::{
@@ -12,14 +12,13 @@ use rumqttc::{
     },
     Transport,
 };
-use rustls::ClientConfig;
 use std::time::Duration;
 use tracing::{debug, info};
 
 lazy_static::lazy_static! {
-    pub static ref MQTT_POLL_COUNTER: Counter = register_counter!("mqtt.connection.poll");
-    pub static ref MQTT_NOTIFY_COUNTER: Counter = register_counter!("mqtt.connection.notification");
-    pub static ref MQTT_ERROR_COUNTER: Counter = register_counter!("mqtt.connection.error");
+    pub static ref MQTT_POLL_COUNTER: Counter = counter!("mqtt.connection.poll");
+    pub static ref MQTT_NOTIFY_COUNTER: Counter = counter!("mqtt.connection.notification");
+    pub static ref MQTT_ERROR_COUNTER: Counter = counter!("mqtt.connection.error");
 }
 
 pub struct MqttConnector {
@@ -68,12 +67,12 @@ impl pal::ServiceConnector<MqttStream> for MqttConnector {
             options.set_credentials(token.0, "");
             if port == 8883 {
                 // set ssl cert options in case of tls/ssl connection
-                let mut root_certificates = rustls::RootCertStore::empty();
-                let certificates = rustls_native_certs::load_native_certs()?;
+                let mut root_certificates = rumqttc::tokio_rustls::rustls::RootCertStore::empty();
+                let certificates = rustls_native_certs::load_native_certs().certs;
                 for cert in certificates {
                     root_certificates.add(cert)?;
                 }
-                let client_config = ClientConfig::builder()
+                let client_config = rumqttc::tokio_rustls::rustls::ClientConfig::builder()
                     .with_root_certificates(root_certificates)
                     .with_no_client_auth();
 

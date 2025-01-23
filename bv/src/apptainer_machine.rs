@@ -26,7 +26,7 @@ use std::{
 };
 use sysinfo::{Pid, PidExt};
 use tokio::{fs, process::Command};
-use tracing::log::warn;
+use tracing::warn;
 use tracing::{debug, error};
 
 pub const DATA_DIR: &str = "data";

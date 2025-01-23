@@ -15,7 +15,7 @@ use crate::{
 use babel_api::{engine::NodeEnv, rhai_plugin_linter, utils::RamdiskConfiguration};
 use bv_utils::cmd::run_cmd;
 use eyre::{anyhow, bail, ensure, Context};
-use petname::Petnames;
+use petname::{Generator, Petnames};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -575,7 +575,9 @@ impl DevNode {
         let node_info = bv_client
             .create_dev_node(NodeState {
                 id,
-                name: Petnames::default().generate_one(3, "-"),
+                name: Petnames::default()
+                    .generate_one(3, "-")
+                    .ok_or(anyhow!("failed to generate node name"))?,
                 protocol_id: "dev-node-protocol-id".to_string(),
                 image_key: ProtocolImageKey {
                     protocol_key: image_variant.protocol_key,

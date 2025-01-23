@@ -19,7 +19,7 @@ use crate::{
 };
 use bv_utils::run_flag::RunFlag;
 use eyre::{Context, Result};
-use metrics::{register_counter, Counter};
+use metrics::{counter, Counter};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     fmt::Debug,
@@ -43,16 +43,16 @@ const INFO_UPDATE_INTERVAL: Duration = Duration::from_secs(30);
 const CLUSTER_UPDATES_INTERVAL: Duration = Duration::from_secs(30);
 
 lazy_static::lazy_static! {
-    pub static ref BV_HOST_METRICS_COUNTER: Counter = register_counter!("bv.periodic.host.metrics.calls");
-    pub static ref BV_HOST_METRICS_TIME_MS_COUNTER: Counter = register_counter!("bv.periodic.host.metrics.ms");
-    pub static ref BV_NODES_RECOVERY_COUNTER: Counter = register_counter!("bv.periodic.nodes.recovery.calls");
-    pub static ref BV_NODES_RECOVERY_TIME_MS_COUNTER: Counter = register_counter!("bv.periodic.nodes.recovery.ms");
-    pub static ref BV_NODES_METRICS_COUNTER: Counter = register_counter!("bv.periodic.nodes.metrics.calls");
-    pub static ref BV_NODES_METRICS_TIME_MS_COUNTER: Counter = register_counter!("bv.periodic.nodes.metrics.ms");
-    pub static ref BV_NODES_INFO_COUNTER: Counter = register_counter!("bv.periodic.nodes.info.calls");
-    pub static ref BV_NODES_INFO_TIME_MS_COUNTER: Counter = register_counter!("bv.periodic.nodes.info.ms");
-    pub static ref BV_CLUSTER_UPDATES_COUNTER: Counter = register_counter!("bv.periodic.cluster.updates.calls");
-    pub static ref BV_CLUSTER_UPDATES_TIME_MS_COUNTER: Counter = register_counter!("bv.periodic.cluster.updates.ms");
+    pub static ref BV_HOST_METRICS_COUNTER: Counter = counter!("bv.periodic.host.metrics.calls");
+    pub static ref BV_HOST_METRICS_TIME_MS_COUNTER: Counter = counter!("bv.periodic.host.metrics.ms");
+    pub static ref BV_NODES_RECOVERY_COUNTER: Counter = counter!("bv.periodic.nodes.recovery.calls");
+    pub static ref BV_NODES_RECOVERY_TIME_MS_COUNTER: Counter = counter!("bv.periodic.nodes.recovery.ms");
+    pub static ref BV_NODES_METRICS_COUNTER: Counter = counter!("bv.periodic.nodes.metrics.calls");
+    pub static ref BV_NODES_METRICS_TIME_MS_COUNTER: Counter = counter!("bv.periodic.nodes.metrics.ms");
+    pub static ref BV_NODES_INFO_COUNTER: Counter = counter!("bv.periodic.nodes.info.calls");
+    pub static ref BV_NODES_INFO_TIME_MS_COUNTER: Counter = counter!("bv.periodic.nodes.info.ms");
+    pub static ref BV_CLUSTER_UPDATES_COUNTER: Counter = counter!("bv.periodic.cluster.updates.calls");
+    pub static ref BV_CLUSTER_UPDATES_TIME_MS_COUNTER: Counter = counter!("bv.periodic.cluster.updates.ms");
 }
 
 pub struct BlockvisorD<P> {

@@ -155,9 +155,9 @@ pub fn semver_cmp(a: &str, b: &str) -> Ordering {
 ///
 /// Do not add more than original seconds / 2
 pub fn with_jitter(base: Duration) -> Duration {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let jitter_max = base.as_secs() / 2;
-    let jitter = Duration::from_secs(rng.gen_range(0..jitter_max));
+    let jitter = Duration::from_secs(rng.random_range(0..jitter_max));
     base + jitter
 }
 

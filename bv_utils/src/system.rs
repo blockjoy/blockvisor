@@ -9,7 +9,7 @@ use sysinfo::{
 };
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
-use tracing::log::debug;
+use tracing::debug;
 
 const PROCESS_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 

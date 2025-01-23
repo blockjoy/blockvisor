@@ -126,10 +126,6 @@ impl TestEnv {
         bv_run(commands, stdout_pattern, Some(&self.bv_root));
     }
 
-    pub fn try_bv_run(&self, commands: &[&str], stdout_pattern: &str) -> AssertResult {
-        try_bv_run(commands, stdout_pattern, Some(&self.bv_root))
-    }
-
     pub fn nib_run(&self, commands: &[&str], stdout_pattern: &str) {
         nib_run(commands, stdout_pattern, Some(&self.bv_root));
     }

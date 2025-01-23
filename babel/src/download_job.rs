@@ -714,9 +714,9 @@ mod tests {
         _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
     }
 
-    fn setup_test_env() -> Result<TestEnv> {
+    async fn setup_test_env() -> Result<TestEnv> {
         let tmp_dir = TempDir::new()?.to_path_buf();
-        let server = Server::new();
+        let server = Server::new_async().await;
         let dest_dir = tmp_dir.join("data");
         let meta_dir = tmp_dir.join(".meta");
         fs::create_dir_all(&meta_dir)?;
@@ -780,7 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_download_ok() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         mock.expect_get_download_metadata().once().returning(|_| {
@@ -956,7 +956,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_download_with_compression() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         mock.expect_get_download_metadata().once().returning(|_| {
@@ -1097,7 +1097,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_download_ok() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         mock.expect_get_download_metadata().once().returning(|_| {
@@ -1157,7 +1157,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_metadata() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         mock.expect_bv_error().returning(|_| Ok(Response::new(())));
@@ -1243,7 +1243,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_errors() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         mock.expect_bv_error().returning(|_| Ok(Response::new(())));
@@ -1362,7 +1362,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_restore_download_ok() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         let metadata = DownloadMetadata {
@@ -1494,7 +1494,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_not_enough_disk_space() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         mock.expect_get_download_metadata()
@@ -1529,7 +1529,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_writer_error() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         mock.expect_get_download_metadata().once().returning(|_| {
@@ -1588,7 +1588,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remnants_after_fail() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let mut mock = MockBabelEngine::new();
         let metadata = DownloadMetadata {

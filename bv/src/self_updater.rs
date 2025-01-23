@@ -374,7 +374,7 @@ mod tests {
         let bundle_id = pb::BundleIdentifier {
             version: next_version(),
         };
-        let mut server = mockito::Server::new();
+        let mut server = mockito::Server::new_async().await;
 
         // no server
         let _ = test_env
@@ -422,7 +422,7 @@ mod tests {
         let bundle_id = pb::BundleIdentifier {
             version: next_version(),
         };
-        let mut server = mockito::Server::new();
+        let mut server = mockito::Server::new_async().await;
 
         let mut bundles_mock = MockTestBundleService::new();
         let url = server.url();
@@ -468,7 +468,7 @@ mod tests {
         let _ = test_env.updater.check_for_update().await;
         assert_eq!(CURRENT_VERSION, test_env.updater.latest_installed_version);
 
-        let mut server = mockito::Server::new();
+        let mut server = mockito::Server::new_async().await;
 
         let mut bundles_mock = MockTestBundleService::new();
         let expected_bundle_id = bundle_id.clone();

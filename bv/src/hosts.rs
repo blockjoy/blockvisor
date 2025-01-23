@@ -6,7 +6,7 @@ use crate::services::api::pb;
 use crate::BV_VAR_PATH;
 use crate::{api_with_retry, services};
 use eyre::{anyhow, Context, Result};
-use metrics::{register_gauge, Gauge};
+use metrics::{gauge, Gauge};
 use serde::{Deserialize, Serialize};
 use sysinfo::{CpuExt, DiskExt, NetworkExt, NetworksExt, System, SystemExt};
 use systemstat::{saturating_sub_bytes, Platform, System as System2};
@@ -15,15 +15,15 @@ use systemstat::{saturating_sub_bytes, Platform, System as System2};
 pub const COLLECT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 lazy_static::lazy_static! {
-    pub static ref SYSTEM_HOST_USED_CPU_GAUGE: Gauge = register_gauge!("system.host.used_cpu");
-    pub static ref SYSTEM_HOST_USED_MEMORY_GAUGE: Gauge = register_gauge!("system.host.used_memory");
-    pub static ref SYSTEM_HOST_USED_DISK_GAUGE: Gauge = register_gauge!("system.host.used_disk_space");
-    pub static ref SYSTEM_HOST_LOAD_ONE_GAUGE: Gauge = register_gauge!("system.host.load_one");
-    pub static ref SYSTEM_HOST_LOAD_FIVE_GAUGE: Gauge = register_gauge!("system.host.load_five");
-    pub static ref SYSTEM_HOST_LOAD_FIFTEEN_GAUGE: Gauge = register_gauge!("system.host.load_fifteen");
-    pub static ref SYSTEM_HOST_NETWORK_RX_GAUGE: Gauge = register_gauge!("system.host.network_received");
-    pub static ref SYSTEM_HOST_NETWORK_TX_GAUGE: Gauge = register_gauge!("system.host.network_sent");
-    pub static ref SYSTEM_HOST_UPTIME_GAUGE: Gauge = register_gauge!("system.host.uptime");
+    pub static ref SYSTEM_HOST_USED_CPU_GAUGE: Gauge = gauge!("system.host.used_cpu");
+    pub static ref SYSTEM_HOST_USED_MEMORY_GAUGE: Gauge = gauge!("system.host.used_memory");
+    pub static ref SYSTEM_HOST_USED_DISK_GAUGE: Gauge = gauge!("system.host.used_disk_space");
+    pub static ref SYSTEM_HOST_LOAD_ONE_GAUGE: Gauge = gauge!("system.host.load_one");
+    pub static ref SYSTEM_HOST_LOAD_FIVE_GAUGE: Gauge = gauge!("system.host.load_five");
+    pub static ref SYSTEM_HOST_LOAD_FIFTEEN_GAUGE: Gauge = gauge!("system.host.load_fifteen");
+    pub static ref SYSTEM_HOST_NETWORK_RX_GAUGE: Gauge = gauge!("system.host.network_received");
+    pub static ref SYSTEM_HOST_NETWORK_TX_GAUGE: Gauge = gauge!("system.host.network_sent");
+    pub static ref SYSTEM_HOST_UPTIME_GAUGE: Gauge = gauge!("system.host.uptime");
 }
 
 #[derive(Debug)]

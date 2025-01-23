@@ -12,7 +12,7 @@ use crate::{
 };
 use babel_api::utils::RamdiskConfiguration;
 use eyre::{anyhow, bail, Context, Result};
-use metrics::{register_counter, Counter};
+use metrics::{counter, Counter};
 use pb::{
     archive_service_client, command_service_client, discovery_service_client, image_service_client,
     metrics_service_client, node_command::Command, node_service_client, protocol_service_client,
@@ -46,20 +46,20 @@ pub mod common {
 }
 
 lazy_static::lazy_static! {
-    pub static ref API_CREATE_COUNTER: Counter = register_counter!("api.commands.create.calls");
-    pub static ref API_CREATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.create.ms");
-    pub static ref API_DELETE_COUNTER: Counter = register_counter!("api.commands.delete.calls");
-    pub static ref API_DELETE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.delete.ms");
-    pub static ref API_START_COUNTER: Counter = register_counter!("api.commands.start.calls");
-    pub static ref API_START_TIME_MS_COUNTER: Counter = register_counter!("api.commands.start.ms");
-    pub static ref API_STOP_COUNTER: Counter = register_counter!("api.commands.stop.calls");
-    pub static ref API_STOP_TIME_MS_COUNTER: Counter = register_counter!("api.commands.stop.ms");
-    pub static ref API_RESTART_COUNTER: Counter = register_counter!("api.commands.restart.calls");
-    pub static ref API_RESTART_TIME_MS_COUNTER: Counter = register_counter!("api.commands.restart.ms");
-    pub static ref API_UPGRADE_COUNTER: Counter = register_counter!("api.commands.upgrade.calls");
-    pub static ref API_UPGRADE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.upgrade.ms");
-    pub static ref API_UPDATE_COUNTER: Counter = register_counter!("api.commands.update.calls");
-    pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = register_counter!("api.commands.update.ms");
+    pub static ref API_CREATE_COUNTER: Counter = counter!("api.commands.create.calls");
+    pub static ref API_CREATE_TIME_MS_COUNTER: Counter = counter!("api.commands.create.ms");
+    pub static ref API_DELETE_COUNTER: Counter = counter!("api.commands.delete.calls");
+    pub static ref API_DELETE_TIME_MS_COUNTER: Counter = counter!("api.commands.delete.ms");
+    pub static ref API_START_COUNTER: Counter = counter!("api.commands.start.calls");
+    pub static ref API_START_TIME_MS_COUNTER: Counter = counter!("api.commands.start.ms");
+    pub static ref API_STOP_COUNTER: Counter = counter!("api.commands.stop.calls");
+    pub static ref API_STOP_TIME_MS_COUNTER: Counter = counter!("api.commands.stop.ms");
+    pub static ref API_RESTART_COUNTER: Counter = counter!("api.commands.restart.calls");
+    pub static ref API_RESTART_TIME_MS_COUNTER: Counter = counter!("api.commands.restart.ms");
+    pub static ref API_UPGRADE_COUNTER: Counter = counter!("api.commands.upgrade.calls");
+    pub static ref API_UPGRADE_TIME_MS_COUNTER: Counter = counter!("api.commands.upgrade.ms");
+    pub static ref API_UPDATE_COUNTER: Counter = counter!("api.commands.update.calls");
+    pub static ref API_UPDATE_TIME_MS_COUNTER: Counter = counter!("api.commands.update.ms");
 }
 
 pub type ProtocolServiceClient =

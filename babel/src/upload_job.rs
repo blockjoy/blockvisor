@@ -738,11 +738,11 @@ mod tests {
         server: ServerGuard,
     }
 
-    fn setup_test_env() -> Result<TestEnv> {
+    async fn setup_test_env() -> Result<TestEnv> {
         let tmp_dir = TempDir::new()?.to_path_buf();
         let blueprint_file_path = tmp_dir.join(BLUEPRINT_FILENAME);
         dummy_sources(&tmp_dir)?;
-        let server = Server::new();
+        let server = Server::new_async().await;
         let upload_progress_path = tmp_dir.join("upload.progress");
         Ok(TestEnv {
             tmp_dir,
@@ -926,7 +926,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_upload_ok() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let expected_body = String::from_utf8([120u8; 91].to_vec())?;
         test_env
@@ -990,7 +990,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upload_with_compression() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let mut encoder = ZstdEncoder::new(5)?;
         encoder.feed([120u8; 91].to_vec())?;
@@ -1131,7 +1131,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_upload_ok() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let test_env = setup_test_env().await?;
         fs::remove_dir_all(&test_env.tmp_dir)?;
         fs::create_dir_all(&test_env.tmp_dir)?;
         File::create(test_env.tmp_dir.join("empty_file_1"))?;
@@ -1191,7 +1191,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_restore_upload_ok() -> Result<()> {
-        let mut test_env = setup_test_env()?;
+        let mut test_env = setup_test_env().await?;
 
         let expected_body = format!(
             "{}3339   bytes7 bytes",
@@ -1278,7 +1278,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_errors() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let test_env = setup_test_env().await?;
         let mut mock = MockBabelEngine::new();
         let slots = test_env.dummy_upload_slots();
         let slots_count = slots.slots.len();
@@ -1303,7 +1303,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_source_dir() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let test_env = setup_test_env().await?;
         let mut job = test_env.upload_job(1);
         job.runner.source_dir = PathBuf::from("some/invalid/source");
         assert_eq!(
@@ -1319,7 +1319,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_cleanup_after_fail() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let test_env = setup_test_env().await?;
         fs::write(&test_env.blueprint_file_path, "anything")?;
         if let JobStatus::Finished {
             exit_code: Some(-1),
@@ -1338,7 +1338,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_prepare_blueprint() -> Result<()> {
-        let test_env = setup_test_env()?;
+        let test_env = setup_test_env().await?;
         let job = test_env.upload_job(2);
         let mut blueprint = job.runner.prepare_manifest_blueprint()?;
         normalize_manifest(&mut blueprint);

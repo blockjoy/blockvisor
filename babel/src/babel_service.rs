@@ -528,7 +528,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_jrpc_json_ok() -> Result<()> {
-        let mut server = mockito::Server::new();
+        let mut server = mockito::Server::new_async().await;
 
         let mock = server
             .mock("POST", "/")
@@ -577,7 +577,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rest_json_ok() -> Result<()> {
-        let mut server = mockito::Server::new();
+        let mut server = mockito::Server::new_async().await;
 
         let mock = server
             .mock("GET", "/items")

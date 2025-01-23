@@ -5,18 +5,18 @@ version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-async-trait = "0.1.60"
+async-trait = "0.1.87"
 babel_api = { version = "*", path = "../babel_api" }
-ctrlc = { version = "3.2.4", features = ["termination"] }
-eyre = "0.6.8"
-local-ip-address = "0.5.5"
-mockall = "0.11.3"
+ctrlc = { version = "3.4.5", features = ["termination"] }
+eyre = "0.6.12"
+local-ip-address = "0.6.3"
+mockall = "0.13.1"
 sysinfo = "0.29.11"
-thiserror = "1.0.31"
-tokio = { version = "1.0", features = ["full"] }
-tracing = "0.1.37"
-tracing-journald = "0.3.0"
-tracing-subscriber = { version = "0.3.16", features = ["env-filter", "fmt", "std"], default-features = false }
+thiserror = "2.0.12"
+tokio = { version = "1.43.0", features = ["full"] }
+tracing = "0.1.41"
+tracing-journald = "0.3.1"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "std"], default-features = false }
 tonic = "0.8.3"
-tower = "0.4.13"
+tower = { version = "0.5.2", features = ["util"] }
 crc = "3.2.1"
