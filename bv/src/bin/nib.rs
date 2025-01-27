@@ -7,7 +7,7 @@ use blockvisord::{
     services::api::{common, pb},
 };
 use clap::Parser;
-use eyre::{anyhow, Result};
+use eyre::Result;
 use std::io::{BufRead, Write};
 
 #[tokio::main]
@@ -49,13 +49,28 @@ async fn main() -> Result<()> {
                         resource_type: common::ResourceType::User.into(),
                         resource_id: user_id,
                     }),
+                    permissions: vec![
+                        "protocol-admin-update-protocol".to_string(),
+                        "protocol-admin-update-version".to_string(),
+                        "protocol-admin-add-protocol".to_string(),
+                        "protocol-admin-add-version".to_string(),
+                        "protocol-view-public".to_string(),
+                        "protocol-get-protocol".to_string(),
+                        "protocol-get-latest".to_string(),
+                        "protocol-list-protocols".to_string(),
+                        "protocol-list-variants".to_string(),
+                        "protocol-list-versions".to_string(),
+                        "image-admin-get".to_string(),
+                        "image-admin-add".to_string(),
+                        "image-admin-list-archives".to_string(),
+                        "image-admin-update-archive".to_string(),
+                        "image-admin-update-image".to_string(),
+                    ],
                 })
                 .await?
                 .into_inner();
             Config {
-                token: response
-                    .api_key
-                    .ok_or(anyhow!("missing api_key in response"))?,
+                token: response.api_key,
                 blockjoy_api_url,
             }
             .save()

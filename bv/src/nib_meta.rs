@@ -18,6 +18,7 @@ pub struct Protocol {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Variant {
     pub key: String,
+    pub metadata: Option<Vec<VariantMetadata>>,
     pub sku_code: String,
     pub archive_pointers: Vec<ArchivePointer>,
     pub min_cpu: u64,
@@ -47,6 +48,13 @@ pub struct ArchivePointer {
 pub enum StorePointer {
     CombinationDisallowed,
     StoreKey(String),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VariantMetadata {
+    pub key: String,
+    pub value: String,
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

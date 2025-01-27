@@ -1,11 +1,11 @@
-use crate::nib_cli::Checks;
 use crate::{
     apptainer_machine::{self, PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
     bv_config, firewall,
     internal_server::{self, service_client::ServiceClient, NodeDisplayInfo},
-    nib_cli::{ImageCommand, ProtocolCommand},
+    nib_cli::{Checks, ImageCommand, ProtocolCommand},
     nib_meta::{
-        self, ArchivePointer, FirewallConfig, ImageProperty, RamdiskConfig, Variant, Visibility,
+        self, ArchivePointer, FirewallConfig, ImageProperty, RamdiskConfig, Variant,
+        VariantMetadata, Visibility,
     },
     node_context,
     node_state::{NodeImage, NodeProperties, NodeState, ProtocolImageKey, VmConfig, VmStatus},
@@ -35,6 +35,10 @@ use uuid::Uuid;
 
 const BV_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const BV_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+const VARIANT_METADATA_NETWORK_KEY: &str = "network";
+const VARIANT_METADATA_CLIENT_KEY: &str = "client";
+const VARIANT_METADATA_NODE_TYPE_KEY: &str = "node-type";
 
 pub async fn process_image_command(
     connector: impl ApiServiceConnector + Clone,
@@ -493,10 +497,27 @@ pub struct ImageVariant {
     pub min_memory_mb: u64,
     pub min_disk_gb: u64,
     pub ramdisks: Vec<RamdiskConfig>,
+    pub metadata: Vec<VariantMetadata>,
 }
 
 impl ImageVariant {
     fn build(image: &nib_meta::Image, variant: Variant) -> Self {
+        let mut parts = variant.key.rsplitn(3, "-");
+        let mut metadata = variant.metadata.unwrap_or_default();
+        let mut default_meta = |part: Option<&str>, key: &str| {
+            if let Some(value) = part {
+                if !metadata.iter().any(|item| item.key == key) {
+                    metadata.push(VariantMetadata {
+                        key: key.to_string(),
+                        value: value.to_string(),
+                        description: None,
+                    });
+                }
+            }
+        };
+        default_meta(parts.next(), VARIANT_METADATA_NODE_TYPE_KEY);
+        default_meta(parts.next(), VARIANT_METADATA_NETWORK_KEY);
+        default_meta(parts.next(), VARIANT_METADATA_CLIENT_KEY);
         Self {
             version: image.version.clone(),
             container_uri: image.container_uri.clone(),
@@ -515,6 +536,7 @@ impl ImageVariant {
             min_memory_mb: variant.min_memory_mb,
             min_disk_gb: variant.min_disk_gb,
             ramdisks: variant.ramdisks,
+            metadata,
         }
     }
 }

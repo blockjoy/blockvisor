@@ -141,6 +141,16 @@ variants:
   # It is required to be lower-kebab-case.
   - key: {{variant_key}}
 
+    # [optional] Additional variant metadata used to label and group variants.
+    metadata:
+      - key: network
+        value: mainnet
+        description: Main Network
+      - key: client
+        value: Reth
+      - key: node_type
+        value: Archive
+
     # The SKU code for this variant (e.g. ETHRETH-MN-F). SKU format shall be:
     # [Blockchain]-[NodeType]-[NetType]
     sku_code: TST-TN-N

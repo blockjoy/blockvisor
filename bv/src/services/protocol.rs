@@ -228,6 +228,15 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
                 protocol_key: image.protocol_key,
                 variant_key: image.variant_key,
             }),
+            metadata: image
+                .metadata
+                .into_iter()
+                .map(|meta| common::VersionMetadata {
+                    metadata_key: meta.key,
+                    value: meta.value,
+                    description: meta.description,
+                })
+                .collect(),
             semantic_version: image.version,
             sku_code: image.sku_code,
             description: image.description,

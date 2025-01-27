@@ -133,11 +133,28 @@ async fn test_bv_service_e2e() {
                 resource_type: common::ResourceType::User.into(),
                 resource_id: user_id.to_string(),
             }),
+            permissions: vec![
+                "protocol-admin-update-protocol".to_string(),
+                "protocol-admin-update-version".to_string(),
+                "protocol-admin-add-protocol".to_string(),
+                "protocol-admin-add-version".to_string(),
+                "protocol-view-public".to_string(),
+                "protocol-get-protocol".to_string(),
+                "protocol-get-latest".to_string(),
+                "protocol-list-protocols".to_string(),
+                "protocol-list-variants".to_string(),
+                "protocol-list-versions".to_string(),
+                "image-admin-get".to_string(),
+                "image-admin-add".to_string(),
+                "image-admin-list-archives".to_string(),
+                "image-admin-update-archive".to_string(),
+                "image-admin-update-image".to_string(),
+            ],
         })
         .await
         .unwrap()
         .into_inner();
-    let api_key = response.api_key.unwrap();
+    let api_key = response.api_key;
     println!("nib api_key: {api_key}");
 
     println!("stop blockvisor");

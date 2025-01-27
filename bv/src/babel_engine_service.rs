@@ -105,7 +105,7 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         let (data_version, slots, url_expires_secs) = request.into_inner();
         let slots_count = slots.len();
         debug!(
-            "getting UploadSlots from API for node {} (archive_id={}/{:?}, lots={})",
+            "getting UploadSlots from API for node {} (archive_id={}/{:?}, slots={})",
             self.node_info.node_id, self.node_info.image.archive_id, data_version, slots_count
         );
         match services::archive::get_upload_slots(
@@ -118,7 +118,7 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         .await
         .with_context(|| {
             format!(
-                "get_upload_slots for node {} (archive_id={}/{:?}, lots={})",
+                "get_upload_slots for node {} (archive_id={}/{:?}, slots={})",
                 self.node_info.node_id, self.node_info.image.archive_id, data_version, slots_count
             )
         }) {
