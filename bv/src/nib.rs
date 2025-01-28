@@ -2,7 +2,7 @@ use crate::{
     apptainer_machine::{self, PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
     bv_config, firewall,
     internal_server::{self, service_client::ServiceClient, NodeDisplayInfo},
-    nib_cli::{Checks, ImageCommand, ProtocolCommand},
+    nib_cli::{ImageCommand, NodeChecks, ProtocolCommand},
     nib_meta::{
         self, ArchivePointer, FirewallConfig, ImageProperty, RamdiskConfig, Variant,
         VariantMetadata, Visibility,
@@ -201,10 +201,10 @@ pub async fn process_image_command(
             props,
             path,
             variant,
-            lint_only,
             start_timeout,
             jobs_wait,
             cleanup,
+            force_cleanup,
             checks,
         } => {
             let image: nib_meta::Image =
@@ -213,51 +213,54 @@ pub async fn process_image_command(
             let image_variant = ImageVariant::build(&image, variant.clone());
             utils::verify_variant_sku(&image_variant)?;
             let properties = build_properties(&image_variant.properties, props)?;
+            let checks = checks.unwrap_or(vec![NodeChecks::Plugin, NodeChecks::JobsStatus]);
             let tmp_dir = tempdir::TempDir::new("nib_check")?;
-            let (rootfs_path, dev_node) = if lint_only {
-                let rootfs_path = tmp_dir.path();
-                run_cmd(
-                    "apptainer",
-                    [
-                        OsStr::new("build"),
-                        OsStr::new("--sandbox"),
-                        OsStr::new("--force"),
-                        rootfs_path.as_os_str(),
-                        OsStr::new(&image_variant.container_uri),
-                    ],
-                )
-                .await
-                .map_err(|err| {
-                    anyhow!(
-                        "failed to build sandbox for '{}' in `{}`: {err:#}",
-                        path.display(),
-                        rootfs_path.display(),
+            let (rootfs_path, dev_node) =
+                if checks.len() == 1 && checks.contains(&NodeChecks::Plugin) {
+                    let rootfs_path = tmp_dir.path();
+                    run_cmd(
+                        "apptainer",
+                        [
+                            OsStr::new("build"),
+                            OsStr::new("--sandbox"),
+                            OsStr::new("--force"),
+                            rootfs_path.as_os_str(),
+                            OsStr::new(&image_variant.container_uri),
+                        ],
                     )
-                })?;
-                (rootfs_path.to_path_buf(), None)
-            } else {
-                let dev_node = DevNode::create(
-                    bv_root,
-                    ip,
-                    gateway,
-                    image_variant.clone(),
-                    properties.clone(),
-                )
-                .await?;
-                println!(
-                    "Created '{}' dev_node with ID `{}`",
-                    dev_node.node_info.state.name, dev_node.node_info.state.id
-                );
-                (
-                    apptainer_machine::build_rootfs_dir(&node_context::build_node_dir(
+                    .await
+                    .map_err(|err| {
+                        anyhow!(
+                            "failed to build sandbox for '{}' in `{}`: {err:#}",
+                            path.display(),
+                            rootfs_path.display(),
+                        )
+                    })?;
+                    (rootfs_path.to_path_buf(), None)
+                } else {
+                    let dev_node = DevNode::create(
                         bv_root,
-                        dev_node.node_info.state.id,
-                    )),
-                    Some(dev_node),
-                )
-            };
+                        ip,
+                        gateway,
+                        image_variant.clone(),
+                        properties.clone(),
+                    )
+                    .await?;
+                    println!(
+                        "Created '{}' dev_node with ID `{}`",
+                        dev_node.node_info.state.name, dev_node.node_info.state.id
+                    );
+                    (
+                        apptainer_machine::build_rootfs_dir(&node_context::build_node_dir(
+                            bv_root,
+                            dev_node.node_info.state.id,
+                        )),
+                        Some(dev_node),
+                    )
+                };
 
-            let res = rhai_plugin_linter::check(
+            println!("Checking plugin");
+            let mut res = rhai_plugin_linter::check(
                 rootfs_path.join(PLUGIN_PATH).join(PLUGIN_MAIN_FILENAME),
                 NodeEnv {
                     node_id: "node-id".to_string(),
@@ -269,7 +272,7 @@ pub async fn process_image_command(
                     node_gateway: "4.3.2.1".to_string(),
                     dev_mode: true,
                     bv_host_id: "host-id".to_string(),
-                    bv_host_name: "nostname".to_string(),
+                    bv_host_name: "hostname".to_string(),
                     bv_api_url: "none.com".to_string(),
                     node_org_id: "org-id".to_string(),
                     data_mount_point: PathBuf::from("/blockjoy"),
@@ -277,27 +280,20 @@ pub async fn process_image_command(
                 },
                 properties,
             );
-            println!("Plugin linter: {res:?}");
-            res?;
             if let Some(mut dev_node) = dev_node {
-                dev_node.start().await?;
-                println!("Node started");
-                dev_node
-                    .wait_for_running(Duration::from_secs(start_timeout))
-                    .await?;
-                println!("Node is running");
-                sleep(Duration::from_secs(jobs_wait)).await;
-                dev_node
-                    .check_jobs_and_protocol(
-                        checks.unwrap_or(vec![Checks::JobsStatus, Checks::JobsRestarts]),
-                    )
-                    .await?;
-                println!("Node jobs are fine");
-                if cleanup {
-                    dev_node.delete().await?;
-                    println!("Node deleted");
+                if res.is_ok() {
+                    res = dev_node.run_checks(start_timeout, jobs_wait, checks).await;
+                }
+                if force_cleanup || (cleanup && res.is_ok()) {
+                    if let Err(err) = dev_node.delete().await {
+                        println!("Failed to delete test node: {err:#}");
+                    } else {
+                        println!("Node deleted");
+                    }
                 }
             }
+            res?;
+            println!("All checks passed!");
         }
         ImageCommand::Push {
             min_babel_version,
@@ -632,14 +628,28 @@ impl DevNode {
         }
         Ok(())
     }
-    async fn check_jobs_and_protocol(&mut self, checks: Vec<Checks>) -> eyre::Result<()> {
+    async fn run_checks(
+        &mut self,
+        start_timeout: u64,
+        jobs_wait: u64,
+        checks: Vec<NodeChecks>,
+    ) -> eyre::Result<()> {
+        self.start().await?;
+        println!("Node started");
+        self.wait_for_running(Duration::from_secs(start_timeout))
+            .await?;
+        println!("Node is running");
+        sleep(Duration::from_secs(jobs_wait)).await;
+
+        println!("Getting node metrics");
         let metrics = self
             .bv_client
             .get_node_metrics(self.node_info.state.id)
             .await?
             .into_inner();
         for (name, info) in metrics.jobs {
-            if checks.contains(&Checks::JobsStatus) {
+            if checks.contains(&NodeChecks::JobsStatus) {
+                println!("Checking jobs status");
                 if let babel_api::engine::JobStatus::Finished {
                     exit_code: Some(exit_code),
                     ..
@@ -651,7 +661,8 @@ impl DevNode {
                     );
                 }
             }
-            if checks.contains(&Checks::JobsRestarts) {
+            if checks.contains(&NodeChecks::JobsRestarts) {
+                println!("Checking jobs restart_count");
                 ensure!(
                     info.restart_count == 0,
                     "job '{name}' has been restarted {} times",
@@ -659,7 +670,8 @@ impl DevNode {
                 );
             }
         }
-        if checks.contains(&Checks::ProtocolStatus) {
+        if checks.contains(&NodeChecks::ProtocolStatus) {
+            println!("Checking protocol status");
             let Some(protocol_status) = metrics.protocol_status else {
                 bail!("No protocol status")
             };

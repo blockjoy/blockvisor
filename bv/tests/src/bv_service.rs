@@ -212,7 +212,7 @@ async fn test_bv_service_e2e() {
         &[
             "image",
             "check",
-            "--cleanup",
+            "--force-cleanup",
             "--props",
             r#"{"arbitrary-text-property":"testing value"}"#,
             "--path",
@@ -220,8 +220,12 @@ async fn test_bv_service_e2e() {
                 .join("image_v1")
                 .join("babel.yaml")
                 .to_string_lossy(),
+            "plugin",
+            "jobs-status",
+            "jobs-restarts",
+            "protocol-status",
         ],
-        "Plugin linter: Ok(())",
+        "All checks passed!",
         None,
     );
 

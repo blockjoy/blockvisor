@@ -144,11 +144,11 @@ variants:
     # [optional] Additional variant metadata used to label and group variants.
     metadata:
       - key: network
-        value: mainnet
+        value: Mainnet
         description: Main Network
       - key: client
-        value: Reth
-      - key: node_type
+        value: Op Geth
+      - key: node-type
         value: Archive
 
     # The SKU code for this variant (e.g. ETHRETH-MN-F). SKU format shall be:
