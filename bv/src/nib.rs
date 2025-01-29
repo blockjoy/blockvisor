@@ -101,9 +101,16 @@ pub async fn process_image_command(
             println!("{}", serde_json::to_string(&mapping)?);
         }
         ImageCommand::Create { protocol, variant } => {
+            let mut parts = variant.rsplitn(3, "-");
+            let client = parts.next().unwrap_or("Protocol Client Name");
+            let network = parts.next().unwrap_or("Network Name");
+            let node_type = parts.next().unwrap_or("Node Type");
             let params = [
                 ("protocol_key", protocol.as_str()),
                 ("variant_key", variant.as_str()),
+                ("client", client),
+                ("network", network),
+                ("node_type", node_type),
             ];
             let image_path = std::env::current_dir()?.join(format!("{}_{}", protocol, variant));
             fs::create_dir_all(&image_path).await?;
@@ -774,6 +781,9 @@ pub mod tests {
         let params = [
             ("protocol_key", "test_protocol"),
             ("variant_key", "test_variant"),
+            ("client", "test_client"),
+            ("network", "test_network"),
+            ("node_type", "test_node_type"),
         ];
         utils::render_template(
             include_str!("../data/babel.yaml.template"),

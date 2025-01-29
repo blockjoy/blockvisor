@@ -141,15 +141,26 @@ variants:
   # It is required to be lower-kebab-case.
   - key: {{variant_key}}
 
-    # [optional] Additional variant metadata used to label and group variants.
+    # [optional] Additional metadata used to tag and group variants.
+    # While it may be arbitrary list of objects, it is expected to define at least three keys: `network`, `client`, `node-type`.
+    # Those three are used by frontend, to group images.
+    # NOTE 1: It is required to increase version whenever metadata is changed.
+    # NOTE 2: If expected metadata (`network`, `client`, `node-type`) are not explicitly defined here,
+    #         Blockvisor will try to figure it out from variant `key` field, assuming following convention:
+    #         <client>-<network>-<node-type>
+    #         where <network> and <node-type> may not contain `-`, but <client> can b lower-kebab-case.
     metadata:
-      - key: network
-        value: Mainnet
-        description: Main Network
+      # Unique metadata key.
+      # It is required to be lower-kebab-case.
       - key: client
-        value: Op Geth
+        # Metadata value is a free text, that will be presented to a user.
+        value: {{client}}
+        # [optional] Additional value description.
+        description: More details on given client.
+      - key: network
+        value: {{network}}
       - key: node-type
-        value: Archive
+        value: {{node_type}}
 
     # The SKU code for this variant (e.g. ETHRETH-MN-F). SKU format shall be:
     # [Blockchain]-[NodeType]-[NetType]
