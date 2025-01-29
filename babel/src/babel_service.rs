@@ -231,6 +231,11 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             let context = tera::Context::from_serialize(params)?;
             let mut tera = tera::Tera::default();
             tera.add_template_file(template, Some("template"))?;
+            if let Some(parent) = destination.parent() {
+                if !parent.exists() {
+                    std::fs::create_dir_all(parent)?;
+                }
+            }
             let destination_file = std::fs::File::create(destination)?;
             tera.render_to("template", &context, destination_file)?;
             Ok(())
@@ -735,15 +740,6 @@ mod tests {
             .render_template(Request::new((
                 Path::new("invalid/path").to_path_buf(),
                 destination_path.clone(),
-                r#"{"param1": "value1", "param2": 2, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
-            )))
-            .await
-            .unwrap_err();
-
-        service
-            .render_template(Request::new((
-                template_path.clone(),
-                Path::new("invalid/path").to_path_buf(),
                 r#"{"param1": "value1", "param2": 2, "vParam": ["a", "bb", "ccc"]}"#.to_string(),
             )))
             .await
