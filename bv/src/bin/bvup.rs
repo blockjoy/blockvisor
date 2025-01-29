@@ -130,10 +130,6 @@ async fn main() -> Result<()> {
         if let Some(value) = cmd_args.host_ip {
             net_conf.override_host_ip(&value)?;
         }
-        if let Some(value) = cmd_args.available_ips {
-            net_conf.override_ips(&value)?;
-        }
-
         if let Some(value) = ask_value("gateway ip", &net_conf.gateway_ip, y)? {
             net_conf.override_gateway_ip(&value)?;
         }
@@ -155,7 +151,9 @@ async fn main() -> Result<()> {
                 u8::from_str(&value).with_context(|| format!("invalid subnet prefix '{value}'"))?;
         }
 
-        if net_conf.available_ips.is_empty() || cmd_args.use_host_network {
+        if let Some(value) = &cmd_args.available_ips {
+            net_conf.override_ips(value)?;
+        } else if net_conf.available_ips.is_empty() || cmd_args.use_host_network {
             net_conf.available_ips = vec![net_conf.host_ip];
         }
         if let Some(value) = ask_value(
