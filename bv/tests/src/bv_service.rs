@@ -309,21 +309,6 @@ async fn test_bv_service_e2e() {
         })
         .await
         .unwrap();
-    // TODO disable autoupgrade test until it is fixed
-    client
-        .update_config(pb::NodeServiceUpdateConfigRequest {
-            node_id: second_node_id.clone(),
-            auto_upgrade: Some(false),
-            new_org_id: None,
-            new_display_name: None,
-            new_note: None,
-            new_values: vec![],
-            new_firewall: None,
-            update_tags: None,
-            cost: None,
-        })
-        .await
-        .unwrap();
 
     println!("push test image v2");
     test_env::nib_run(
@@ -339,9 +324,6 @@ async fn test_bv_service_e2e() {
         "Image 'testing/test/0.0.2/1' added",
         None,
     );
-
-    println!("trigger second node upgrade");
-    bv_run(&["node", "upgrade", &second_node_id]);
 
     println!("wait for second node to be auto upgraded");
     let start = std::time::Instant::now();
