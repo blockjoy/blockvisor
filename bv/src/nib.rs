@@ -102,9 +102,9 @@ pub async fn process_image_command(
         }
         ImageCommand::Create { protocol, variant } => {
             let mut parts = variant.rsplitn(3, "-");
-            let client = parts.next().unwrap_or("Protocol Client Name");
-            let network = parts.next().unwrap_or("Network Name");
             let node_type = parts.next().unwrap_or("Node Type");
+            let network = parts.next().unwrap_or("Network Name");
+            let client = parts.next().unwrap_or("Protocol Client Name");
             let params = [
                 ("protocol_key", protocol.as_str()),
                 ("variant_key", variant.as_str()),
