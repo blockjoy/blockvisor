@@ -76,6 +76,10 @@ pub enum ImageCommand {
         #[clap(long)]
         props: Option<String>,
 
+        /// Node tag. May be specified multiple times.
+        #[clap(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
+
         /// Image variant key.
         #[clap(long)]
         variant: Option<String>,
@@ -132,6 +136,10 @@ pub enum ImageCommand {
         /// Always delete test node, even if all checks don't pass.
         #[clap(long)]
         force_cleanup: bool,
+
+        /// Testing node tag. May be specified multiple times.
+        #[clap(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
 
         /// List of check to be run against testing node.
         ///

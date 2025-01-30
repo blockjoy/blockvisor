@@ -89,15 +89,17 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 serde_json::from_str(&fs::read_to_string(path)?)?;
             client.fix_legacy_nodes(mapping).await?;
         }
-        NodeCommand::List { running } => {
-            let nodes = client.get_nodes(()).await?.into_inner();
-            let mut nodes = nodes
-                .iter()
-                .filter(|n| !running || n.status == VmStatus::Running)
-                .peekable();
-            if nodes.peek().is_some() {
+        NodeCommand::List { running, tags } => {
+            let mut nodes = client.get_nodes(()).await?.into_inner();
+            if running {
+                nodes.retain(|n| n.status == VmStatus::Running);
+            }
+            if !tags.is_empty() {
+                nodes.retain(|n| n.state.tags.iter().any(|tag| tags.contains(tag)));
+            }
+            if !nodes.is_empty() {
                 let mut table = vec![];
-                for node in nodes.cloned() {
+                for node in nodes {
                     table.push(PrettyTableRow {
                         id: node.state.id.to_string(),
                         name: node.state.name,
@@ -127,6 +129,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             version,
             build,
             props,
+            tags,
         } => {
             let properties = if let Some(props) = props {
                 serde_json::from_str(&props)?
@@ -143,6 +146,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     image_version: version,
                     build_version: build,
                     properties,
+                    tags,
                 })
                 .await?
                 .into_inner();
@@ -429,6 +433,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 node_info.state.vm_config.disk_size_gb
             );
             println!("Assigned CPUs:  {:?}", node_info.state.assigned_cpus);
+            println!("Tags:  {:?}", node_info.state.tags);
         }
         NodeCommand::Shell { id_or_name } => {
             let id = match Uuid::parse_str(&id_or_name) {

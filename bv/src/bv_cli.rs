@@ -76,6 +76,10 @@ pub enum NodeCommand {
         /// Display only running nodes.
         #[clap(long, short)]
         running: bool,
+
+        /// Display only nodes with the given tag(s). May be specified multiple times.
+        #[clap(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
     },
 
     /// Create node.
@@ -93,6 +97,10 @@ pub enum NodeCommand {
         /// The properties that are passed to the node in form of JSON string.
         #[clap(long)]
         props: Option<String>,
+
+        /// Node tag. May be specified multiple times.
+        #[clap(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
     },
 
     /// Start node.

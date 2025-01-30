@@ -74,6 +74,8 @@ pub struct NodeState {
     pub org_name: String,
     pub protocol_name: String,
     pub dns_name: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
 
     // upgradeable
     pub vm_config: VmConfig,
@@ -108,6 +110,7 @@ pub struct StateBackup {
     pub org_name: String,
     pub protocol_name: String,
     pub dns_name: String,
+    pub tags: Vec<String>,
     pub vm_config: VmConfig,
     pub image: NodeImage,
     pub initialized: bool,
@@ -203,6 +206,7 @@ impl StateBackup {
         mem::swap(&mut self.org_name, &mut node_state.org_name);
         mem::swap(&mut self.org_id, &mut node_state.org_id);
         mem::swap(&mut self.display_name, &mut node_state.display_name);
+        mem::swap(&mut self.tags, &mut node_state.tags);
         mem::swap(&mut self.dns_name, &mut node_state.dns_name);
         mem::swap(&mut self.initialized, &mut node_state.initialized);
     }
@@ -229,6 +233,7 @@ impl From<NodeState> for StateBackup {
             org_name: value.org_name,
             protocol_name: value.protocol_name,
             dns_name: value.dns_name,
+            tags: value.tags,
             vm_config: value.vm_config,
             image: value.image,
             initialized: false,
@@ -304,6 +309,7 @@ impl From<LegacyState> for NodeState {
             org_name: value.org_id,
             protocol_name: value.image.protocol.clone(),
             dns_name: value.name,
+            tags: vec![],
             vm_config: VmConfig {
                 vcpu_count: value.requirements.vcpu_count,
                 mem_size_mb: value.requirements.mem_size_mb,

@@ -573,6 +573,10 @@ impl TryFrom<pb::Node> for NodeState {
             restarting: false,
             upgrade_state: Default::default(),
             apptainer_config: None,
+            tags: node
+                .tags
+                .map(|tags| tags.tags.into_iter().map(|tag| tag.name).collect())
+                .unwrap_or_default(),
         })
     }
 }

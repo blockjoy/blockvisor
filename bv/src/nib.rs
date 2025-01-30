@@ -143,6 +143,7 @@ pub async fn process_image_command(
             ip,
             gateway,
             props,
+            tags,
             path,
             variant,
         } => {
@@ -151,7 +152,7 @@ pub async fn process_image_command(
             let image_variant = ImageVariant::build(&image, variant);
             let properties = build_properties(&image_variant.properties, props)?;
 
-            let node_info = DevNode::create(bv_root, ip, gateway, image_variant, properties)
+            let node_info = DevNode::create(bv_root, ip, gateway, image_variant, properties, tags)
                 .await?
                 .node_info;
             println!(
@@ -210,6 +211,7 @@ pub async fn process_image_command(
             jobs_wait,
             cleanup,
             force_cleanup,
+            tags,
             checks,
         } => {
             let image: nib_meta::Image =
@@ -249,6 +251,7 @@ pub async fn process_image_command(
                         gateway,
                         image_variant.clone(),
                         properties.clone(),
+                        tags,
                     )
                     .await?;
                     println!(
@@ -555,6 +558,7 @@ impl DevNode {
         gateway: Option<String>,
         image_variant: ImageVariant,
         properties: NodeProperties,
+        tags: Vec<String>,
     ) -> eyre::Result<Self> {
         let bv_config = load_bv_config(bv_root).await?;
         let bv_url = format!("http://localhost:{}", bv_config.blockvisor_port);
@@ -586,6 +590,7 @@ impl DevNode {
                 org_name: "dev node org name".to_string(),
                 protocol_name: "dev node protocol name".to_string(),
                 dns_name: "dev.node.dns.name".to_string(),
+                tags,
                 vm_config,
                 image: NodeImage {
                     id: "00000000-0000-0000-0000-000000000000".to_string(),

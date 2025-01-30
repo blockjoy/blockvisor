@@ -36,6 +36,7 @@ pub struct CreateNodeRequest {
     pub image_version: Option<String>,
     pub build_version: Option<u64>,
     pub properties: NodeProperties,
+    pub tags: Vec<String>,
 }
 
 #[tonic_rpc::tonic_rpc(bincode)]
@@ -643,7 +644,17 @@ where
                 new_values: properties,
                 image_id,
                 add_rules: vec![],
-                tags: None,
+                tags: if req.tags.is_empty() {
+                    None
+                } else {
+                    Some(common::Tags {
+                        tags: req
+                            .tags
+                            .into_iter()
+                            .map(|tag| common::Tag { name: tag })
+                            .collect(),
+                    })
+                },
                 launcher: Some(common::NodeLauncher {
                     launch: Some(common::node_launcher::Launch::ByHost(common::ByHost {
                         host_counts: vec![common::HostCount {

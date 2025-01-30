@@ -1279,6 +1279,7 @@ pub mod tests {
             apptainer_config: None,
             display_name: "node display name".to_string(),
             upgrade_state: Default::default(),
+            tags: vec![],
         }
     }
 
