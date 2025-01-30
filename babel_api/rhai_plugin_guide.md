@@ -107,6 +107,32 @@ fn some_custom_function(arg) {
 }
 ```
 
+### Default implementations
+
+#### Default `init`
+
+If no `init` function is defined, but only `PLUGIN_CONFIG`, then `default_init` is used which does following:
+- render config files form `BASE_CONFIG`
+- render config files from `PLUGIN_CONFIG`
+- start default services(from `BASE_CONFIG`)
+- run `init` commands
+- start `init` jobs
+- start `download` job (if download is not completed yet and not `dev_node`)
+- if data archive is not available and `alternative_download` is defined then start it
+- start services
+- schedule tasks defined in `PLUGIN_CONFIG`
+
+#### Default `upload`
+
+If no `upload` function is defined, but only `PLUGIN_CONFIG`, then `default_upload` is used which does following:
+- stop services that `use_protocol_data`
+- run `pre_upload` commands
+- start `pre_upload` jobs
+- start `upload` job
+- run `post_upload` commands
+- start `post_upload` jobs
+- start previously stopped services
+
 ## Engine Interface
 
 To make implementation of Babel Plugin interface possible, BV provides following functions to Rhai script.
