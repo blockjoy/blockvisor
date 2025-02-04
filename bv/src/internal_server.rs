@@ -116,6 +116,9 @@ where
                         state: node.state.clone(),
                         status: VmStatus::Busy,
                     });
+                    self.nodes_manager
+                        .update_node_state_cache(node.state.clone())
+                        .await;
                     node.save_state().await.map_err(|err| {
                         Status::internal(format!("failed to save node state: {err:#}"))
                     })?;

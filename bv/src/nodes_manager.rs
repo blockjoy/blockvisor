@@ -634,6 +634,13 @@ where
         Ok(cache)
     }
 
+    pub async fn update_node_state_cache(&self, node_state: NodeState) {
+        self.node_state_cache
+            .write()
+            .await
+            .insert(node_state.id, node_state);
+    }
+
     pub async fn nodes_data_cache(&self) -> NodesDataCache {
         self.node_state_cache
             .read()
