@@ -559,6 +559,7 @@ impl pal::VirtualMachine for ApptainerMachine {
         // LEGACY node support - remove once all nodes upgraded
         if self.config.image_uri.starts_with("legacy://") {
             self.umount_all().await?;
+            self.vm_id = node_state.id.to_string();
         }
         let desired_protocol_data_path = PathBuf::from_str(PROTOCOL_DATA_PATH)?;
         if self.config.node_env.protocol_data_path != desired_protocol_data_path {
@@ -614,6 +615,9 @@ impl pal::VirtualMachine for ApptainerMachine {
                 )
                 .await
                 .inspect_err(|err| error!("legacy node rollback failed: {err:#}"))?;
+            }
+            if backup.image_uri.starts_with("legacy://") {
+                self.vm_id = self.vm_name.clone();
             }
         }
         Ok(())
