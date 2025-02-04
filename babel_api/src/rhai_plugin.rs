@@ -561,7 +561,9 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         for service in &config.services {
             self.babel_engine.stop_job(&service.name)?;
         }
-        self.babel_engine.jo
+        if self.babel_engine.get_jobs()?.contains_key(UPLOAD_JOB_NAME) {
+            self.babel_engine.cleanup_job(UPLOAD_JOB_NAME)?;
+        }
         let pre_upload_jobs = self.run_actions(config.pre_upload, vec![])?;
         self.create_and_start_job(
             UPLOAD_JOB_NAME,
@@ -928,6 +930,7 @@ mod tests {
             fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
             fn start_job(&self, job_name: &str) -> Result<()>;
             fn stop_job(&self, job_name: &str) -> Result<()>;
+            fn cleanup_job(&self, job_name: &str) -> Result<()>;
             fn job_info(&self, job_name: &str) -> Result<engine::JobInfo>;
             fn get_jobs(&self) -> Result<engine::JobsInfo>;
             fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
@@ -1603,6 +1606,23 @@ mod tests {
             )
             .once()
             .returning(|_, _| Ok(()));
+        babel.expect_get_jobs().once().returning(|| {
+            Ok(HashMap::from_iter([(
+                UPLOAD_JOB_NAME.to_string(),
+                JobInfo {
+                    status: JobStatus::Stopped,
+                    progress: None,
+                    restart_count: 0,
+                    logs: vec![],
+                    upgrade_blocking: true,
+                },
+            )]))
+        });
+        babel
+            .expect_cleanup_job()
+            .with(predicate::eq(UPLOAD_JOB_NAME))
+            .once()
+            .returning(|_| Ok(()));
         babel
             .expect_start_job()
             .with(predicate::eq("pre_upload_job"))

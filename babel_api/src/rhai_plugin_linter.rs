@@ -59,6 +59,10 @@ impl Engine for LinterEngine {
         Ok(())
     }
 
+    fn cleanup_job(&self, _job_name: &str) -> eyre::Result<()> {
+        Ok(())
+    }
+
     fn job_info(&self, _job_name: &str) -> eyre::Result<JobInfo> {
         Ok(JobInfo {
             status: JobStatus::Pending {

@@ -456,6 +456,10 @@ fn test_plugin_config() -> eyre::Result<()> {
         .returning(|_| Ok(()));
 
     babel
+        .expect_get_jobs()
+        .once()
+        .returning(|| Ok(HashMap::default()));
+    babel
         .expect_create_job()
         .with(
             predicate::eq("pre_upload_job"),

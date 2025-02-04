@@ -384,6 +384,12 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
+            EngineRequest::CleanupJob {
+                job_name,
+                response_tx,
+            } => {
+                let _ = response_tx.send(self.handle_cleanup_job(job_name).await);
+            }
             EngineRequest::JobInfo {
                 job_name,
                 response_tx,
@@ -545,6 +551,13 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             .map_err(|err| self.handle_connection_errors(err))
             .map(|v| v.into_inner())
     }
+
+    async fn handle_cleanup_job(&mut self, job_name: String) -> std::result::Result<(), Error> {
+        let babel_client = self.node_connection.babel_client().await?;
+        with_retry!(babel_client.cleanup_job(job_name.clone()))
+            .map_err(|err| self.handle_connection_errors(err))
+            .map(|v| v.into_inner())
+    }
 }
 
 async fn stream_into_bytes(stream: Result<Streaming<Binary>>) -> Result<Vec<u8>> {
@@ -603,6 +616,10 @@ enum EngineRequest {
         response_tx: ResponseTx<Result<()>>,
     },
     StopJob {
+        job_name: String,
+        response_tx: ResponseTx<Result<()>>,
+    },
+    CleanupJob {
         job_name: String,
         response_tx: ResponseTx<Result<()>>,
     },
@@ -685,6 +702,15 @@ impl babel_api::engine::Engine for Engine {
     fn stop_job(&self, job_name: &str) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx.blocking_send(EngineRequest::StopJob {
+            job_name: job_name.to_string(),
+            response_tx,
+        })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn cleanup_job(&self, job_name: &str) -> Result<()> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx.blocking_send(EngineRequest::CleanupJob {
             job_name: job_name.to_string(),
             response_tx,
         })?;

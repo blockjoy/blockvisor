@@ -13,6 +13,7 @@ mock! {
         fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
         fn start_job(&self, job_name: &str) -> Result<()>;
         fn stop_job(&self, job_name: &str) -> Result<()>;
+        fn cleanup_job(&self, job_name: &str) -> Result<()>;
         fn job_info(&self, job_name: &str) -> Result<JobInfo>;
         fn get_jobs(&self) -> Result<JobsInfo>;
         fn run_jrpc(&self, req: JrpcRequest, timeout: Option<Duration>) -> Result<HttpResponse>;
