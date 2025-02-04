@@ -64,7 +64,7 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: us-east-1
-      STORAGE_URL: https://${AWS_ACCOUNT_ID}.r2.cloudflarestorage.com
+      STORAGE_URL: ${AWS_ACCOUNT_URL}
       BUNDLE_BUCKET: bundle-ci
       ARCHIVE_BUCKET: archive-ci
       DIR_CHAINS_PREFIX: chains

@@ -9,7 +9,7 @@ The service that runs on the host systems and is responsible for provisioning an
 2. Run `cargo release --execute $(git-conventional-commits version)` 
 3. CI `publish` workflow will then build a bundle and create a new GH release
 4. Bundle is automatically deployed on DEV environment. When bundle is tested and ready to promote
-on PROD environment, use `make promote-prod` (requires `AWS_ACCOUNT_ID, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION` env variable set). 
+on PROD environment, use `make promote-prod` (requires `AWS_ACCOUNT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION` env variable set). 
 
 ## Host Setup
 

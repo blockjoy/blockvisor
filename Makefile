@@ -67,12 +67,12 @@ new-release:
 
 promote-staging:
 	BV_VERSION=$$(cargo metadata --format-version=1 --no-deps | jq -caM '.packages[] | select(.name == "blockvisord") | .version' | tr -d '"'); \
-	aws --endpoint-url https://$${AWS_ACCOUNT_ID}.r2.cloudflarestorage.com/ s3 cp \
+	aws --endpoint-url $${AWS_ACCOUNT_URL} s3 cp \
                 s3://bundle-dev/$${BV_VERSION}/bvd-bundle.tgz \
                 s3://bundle-staging/$${BV_VERSION}/bvd-bundle.tgz
 
 promote-prod:
 	BV_VERSION=$$(cargo metadata --format-version=1 --no-deps | jq -caM '.packages[] | select(.name == "blockvisord") | .version' | tr -d '"'); \
-	aws --endpoint-url https://$${AWS_ACCOUNT_ID}.r2.cloudflarestorage.com/ s3 cp \
+	aws --endpoint-url $${AWS_ACCOUNT_URL} s3 cp \
                 s3://bundle-staging/$${BV_VERSION}/bvd-bundle.tgz \
                 s3://bundle-prod/$${BV_VERSION}/bvd-bundle.tgz
