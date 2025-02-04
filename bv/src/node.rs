@@ -1135,7 +1135,7 @@ pub mod tests {
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
-            async fn is_download_completed(
+            async fn is_protocol_data_locked(
                 &self,
                 request: Request<()>,
             ) -> Result<Response<bool>, Status>;
@@ -1881,7 +1881,7 @@ pub mod tests {
             .returning(|_| Err(Status::internal("error on init")));
         babel_mock
             .expect_run_sh()
-            .times(2)
+            .once()
             .in_sequence(&mut seq)
             .returning(|_| {
                 Ok(Response::new(ShResponse {
@@ -1891,7 +1891,7 @@ pub mod tests {
                 }))
             });
         babel_mock
-            .expect_is_download_completed()
+            .expect_is_protocol_data_locked()
             .returning(|_| Ok(Response::new(true)));
         babel_mock
             .expect_start_job()

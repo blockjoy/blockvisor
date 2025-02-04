@@ -39,7 +39,7 @@ mock! {
             function_param: &str,
         ) -> Result<()>;
         fn delete_task(&self, task_name: &str) -> Result<()>;
-        fn is_download_completed(&self) -> Result<bool>;
+        fn is_protocol_data_locked(&self) -> Result<bool>;
         fn has_protocol_archive(&self) -> Result<bool>;
         fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
         fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()>;

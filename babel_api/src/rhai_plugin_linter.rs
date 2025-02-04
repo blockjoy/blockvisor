@@ -165,7 +165,7 @@ impl Engine for LinterEngine {
         Ok(())
     }
 
-    fn is_download_completed(&self) -> eyre::Result<bool> {
+    fn is_protocol_data_locked(&self) -> eyre::Result<bool> {
         Ok(false)
     }
 

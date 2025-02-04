@@ -435,9 +435,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     .send(scheduler::Action::Delete(task))
                     .await;
             }
-            EngineRequest::IsDownloadCompleted { response_tx } => {
+            EngineRequest::IsProtocolDataCompleted { response_tx } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
-                    Ok(babel_client) => with_retry!(babel_client.is_download_completed(()))
+                    Ok(babel_client) => with_retry!(babel_client.is_protocol_data_locked(()))
                         .map_err(|err| self.handle_connection_errors(err))
                         .map(|v| v.into_inner()),
                     Err(err) => Err(err),
@@ -653,7 +653,7 @@ enum EngineRequest {
     },
     AddTask(scheduler::Scheduled),
     DeleteTask(String),
-    IsDownloadCompleted {
+    IsProtocolDataCompleted {
         response_tx: ResponseTx<Result<bool>>,
     },
     HasProtocolArchive {
@@ -837,10 +837,10 @@ impl babel_api::engine::Engine for Engine {
             .blocking_send(EngineRequest::DeleteTask(task_name.to_string()))?)
     }
 
-    fn is_download_completed(&self) -> Result<bool> {
+    fn is_protocol_data_locked(&self) -> Result<bool> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         self.tx
-            .blocking_send(EngineRequest::IsDownloadCompleted { response_tx })?;
+            .blocking_send(EngineRequest::IsProtocolDataCompleted { response_tx })?;
         response_rx.blocking_recv()?
     }
 
@@ -987,7 +987,7 @@ mod tests {
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
-            async fn is_download_completed(
+            async fn is_protocol_data_locked(
                 &self,
                 request: Request<()>,
             ) -> Result<Response<bool>, Status>;
@@ -1066,6 +1066,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 },
             )?;
             self.engine.start_job(name)?;

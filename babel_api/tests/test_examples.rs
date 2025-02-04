@@ -272,6 +272,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(32),
                 log_timestamp: Some(true),
+                protocol_data_lock: None,
             }),
         )
         .times(2)
@@ -282,7 +283,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         .times(2)
         .returning(|_| Ok(()));
     babel
-        .expect_is_download_completed()
+        .expect_is_protocol_data_locked()
         .times(2)
         .returning(|| Ok(false));
     babel
@@ -315,6 +316,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
+                protocol_data_lock: None,
             }),
         )
         .once()
@@ -340,6 +342,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(64),
                 log_timestamp: Some(true),
+                protocol_data_lock: None,
             }),
         )
         .once()
@@ -364,6 +367,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
+                protocol_data_lock: Some(true),
             }),
         )
         .times(2)
@@ -394,6 +398,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(256),
                 log_timestamp: Some(true),
+                protocol_data_lock: Some(true),
             }),
         )
         .times(2)
@@ -424,6 +429,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
+                protocol_data_lock: Some(true),
             }),
         )
         .times(2)
@@ -473,6 +479,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
+                protocol_data_lock: None,
             }),
         )
         .once()
@@ -513,6 +520,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
+                protocol_data_lock: None,
             }),
         )
         .once()
@@ -539,6 +547,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
+                protocol_data_lock: None,
             }),
         )
         .once()
@@ -569,6 +578,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: Some("some_user".to_string()),
                 log_buffer_capacity_mb: Some(256),
                 log_timestamp: Some(true),
+                protocol_data_lock: Some(true),
             }),
         )
         .once()
@@ -599,6 +609,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 run_as: None,
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
+                protocol_data_lock: Some(true),
             }),
         )
         .once()

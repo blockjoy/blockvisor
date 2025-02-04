@@ -33,6 +33,7 @@ macro_rules! with_selective_retry {
     }};
 }
 
+pub const PROTOCOL_DATA_LOCK_FILENAME: &str = ".protocol_data.lock";
 pub const JOBS_MONITOR_UDS_PATH: &str = "/var/lib/babel/jobs_monitor.socket";
 const POST_SETUP_SCRIPT: &str = "/var/lib/babel/post_setup.sh";
 
@@ -62,4 +63,8 @@ pub async fn is_babel_config_applied<P: pal::BabelPal>(
     pal.is_ram_disks_set(config.ramdisks.clone())
         .await
         .with_context(|| "failed to add check disks")
+}
+
+pub fn is_protocol_data_locked(data_mount_point: &Path) -> bool {
+    data_mount_point.join(PROTOCOL_DATA_LOCK_FILENAME).exists()
 }

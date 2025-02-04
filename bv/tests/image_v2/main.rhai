@@ -4,7 +4,6 @@ const PLUGIN_CONFIG = #{
     init: #{
         commands: [
             `echo 'noop for testing'`,
-            `mkdir -p /blockjoy/.babel_jobs/ && touch /blockjoy/.babel_jobs/download.completed`,
         ],
         jobs: [
             #{
@@ -22,6 +21,7 @@ const PLUGIN_CONFIG = #{
                 backoff_base_ms: 10000,
             },
             shutdown_signal: "SIGINT",
+            use_protocol_data: false,
         },
     ],
     upload: #{

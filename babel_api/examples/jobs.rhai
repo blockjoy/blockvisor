@@ -30,6 +30,11 @@ fn init() {
         /// [optional] Prepend timestamp to each log, or not.
         /// If not set default to false.
         log_timestamp: true,
+
+        /// [optional] Indicate if job should 'lock' protocol data.
+        /// Lock prevents re-initialization of the data after job is started.
+        /// If not set default to false.
+        protocol_data_lock: true,
     };
     create_job("job_name_A", job_config_A);
 

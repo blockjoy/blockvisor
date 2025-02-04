@@ -1,6 +1,6 @@
 use crate::{
-    apply_babel_config, download_job::is_download_completed, jobs::ARCHIVE_JOBS_META_DIR,
-    jobs_manager::JobsManagerClient, load_config, pal::BabelPal, utils,
+    apply_babel_config, is_protocol_data_locked, jobs_manager::JobsManagerClient, load_config,
+    pal::BabelPal, utils,
 };
 use async_trait::async_trait;
 use babel_api::{
@@ -277,15 +277,15 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         ))))
     }
 
-    async fn is_download_completed(&self, _request: Request<()>) -> Result<Response<bool>, Status> {
+    async fn is_protocol_data_locked(
+        &self,
+        _request: Request<()>,
+    ) -> Result<Response<bool>, Status> {
         let babel_config = load_config(&self.babel_cfg_path)
             .await
             .map_err(|err| Status::internal(format!("failed to read babel config: {err:#}")))?;
-        Ok(Response::new(is_download_completed(
-            babel_config
-                .node_env
-                .data_mount_point
-                .join(ARCHIVE_JOBS_META_DIR),
+        Ok(Response::new(is_protocol_data_locked(
+            &babel_config.node_env.data_mount_point,
         )))
     }
 }

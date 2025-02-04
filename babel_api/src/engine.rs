@@ -76,8 +76,8 @@ pub trait Engine {
     /// Delete previously scheduled task.
     fn delete_task(&self, task_name: &str) -> Result<()>;
 
-    /// Checks if protocol data has been already downloaded.
-    fn is_download_completed(&self) -> Result<bool>;
+    /// Checks if protocol data has been already locked.
+    fn is_protocol_data_locked(&self) -> Result<bool>;
     /// Checks if protocol archive is available.
     fn has_protocol_archive(&self) -> Result<bool>;
     /// Get plugin secret from remote encrypted storage
@@ -338,6 +338,10 @@ pub struct JobConfig {
     pub log_buffer_capacity_mb: Option<usize>,
     /// Prepend timestamp to each log, or not.
     pub log_timestamp: Option<bool>,
+    /// Indicate if job should 'lock' protocol data.
+    /// Lock prevents re-initialization of the data after job is started.
+    /// Default to `false`.
+    pub protocol_data_lock: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

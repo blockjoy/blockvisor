@@ -39,7 +39,6 @@ use tracing::error;
 // if downloading single part (about 100Mb) takes more than 10min, it mean that something
 // is not ok
 const DOWNLOAD_SINGLE_PART_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-const COMPLETED_FILENAME: &str = "download.completed";
 const CHUNKS_FILENAME: &str = "download.chunks";
 const PARTS_FILENAME: &str = "download.parts";
 const METADATA_FILENAME: &str = "download.metadata";
@@ -76,10 +75,6 @@ pub fn cleanup_job(meta_dir: &Path, destination_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn is_download_completed(archive_jobs_meta_dir: PathBuf) -> bool {
-    archive_jobs_meta_dir.join(COMPLETED_FILENAME).exists()
-}
-
 pub fn remove_remnants(chunks: Vec<Chunk>, destination_dir: &Path) -> Result<()> {
     for chunk in chunks {
         for destination in &chunk.destinations {
@@ -103,11 +98,6 @@ pub struct Downloader<C> {
 #[async_trait]
 impl<C: BabelEngineConnector + Clone + Send + Sync + 'static> Runner for Downloader<C> {
     async fn run(&mut self, mut run: RunFlag) -> Result<()> {
-        let completed_path = self.config.archive_jobs_meta_dir.join(COMPLETED_FILENAME);
-        if completed_path.exists() {
-            // download job shall be idempotent, to avoid downloading everything again after upgrade
-            return Ok(());
-        }
         let (metadata, downloaded_chunks) = self.get_metadata().await?;
         self.config.compression = metadata.compression;
         self.check_disk_space(&metadata, &downloaded_chunks)?;
@@ -154,7 +144,6 @@ impl<C: BabelEngineConnector + Clone + Send + Sync + 'static> Runner for Downloa
         if !run.load() {
             bail!("download interrupted");
         }
-        File::create(completed_path)?;
         Ok(())
     }
 }
@@ -720,7 +709,6 @@ mod tests {
         meta_dir: PathBuf,
         chunks_path: PathBuf,
         metadata_path: PathBuf,
-        completed_path: PathBuf,
         download_progress_path: PathBuf,
         server: ServerGuard,
         _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
@@ -734,7 +722,6 @@ mod tests {
         fs::create_dir_all(&meta_dir)?;
         let chunks_path = meta_dir.join(CHUNKS_FILENAME);
         let metadata_path = meta_dir.join(METADATA_FILENAME);
-        let completed_path = meta_dir.join(COMPLETED_FILENAME);
         let download_progress_path = tmp_dir.join("download.progress");
         Ok(TestEnv {
             tmp_dir,
@@ -743,7 +730,6 @@ mod tests {
             server,
             chunks_path,
             metadata_path,
-            completed_path,
             download_progress_path,
             _async_panic_checker: Default::default(),
         })
@@ -949,7 +935,6 @@ mod tests {
         );
         assert!(test_env.chunks_path.exists());
         assert!(test_env.metadata_path.exists());
-        assert!(test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
 
         // idempotency
@@ -1104,7 +1089,6 @@ mod tests {
         assert_eq!(0, test_env.dest_dir.join("empty.file").metadata()?.len());
         assert!(test_env.chunks_path.exists());
         assert!(test_env.metadata_path.exists());
-        assert!(test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
         server.assert().await;
         Ok(())
@@ -1165,7 +1149,6 @@ mod tests {
         assert_eq!(0, test_env.dest_dir.join("empty_2.file").metadata()?.len());
         assert!(test_env.chunks_path.exists());
         assert!(test_env.metadata_path.exists());
-        assert!(test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
         server.assert().await;
         Ok(())
@@ -1253,7 +1236,6 @@ mod tests {
                 .await
         );
         assert!(test_env.metadata_path.exists());
-        assert!(!test_env.completed_path.exists());
         server.assert().await;
         Ok(())
     }
@@ -1373,7 +1355,6 @@ mod tests {
                 .await
         );
         assert!(test_env.metadata_path.exists());
-        assert!(!test_env.completed_path.exists());
         server.assert().await;
         Ok(())
     }
@@ -1505,7 +1486,6 @@ mod tests {
 
         assert!(test_env.chunks_path.exists());
         assert!(test_env.metadata_path.exists());
-        assert!(test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
         server.assert().await;
         Ok(())
@@ -1786,7 +1766,6 @@ mod tests {
             load_job_data::<DownloadMetadata>(&test_env.metadata_path).unwrap(),
             metadata
         );
-        assert!(!test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
         let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
         assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);
@@ -1808,7 +1787,6 @@ mod tests {
             load_job_data::<DownloadMetadata>(&test_env.metadata_path).unwrap(),
             another_meta
         );
-        assert!(!test_env.completed_path.exists());
         assert!(test_env.download_progress_path.exists());
         let progress = fs::read_to_string(&test_env.download_progress_path).unwrap();
         assert_eq!(&progress, r#"{"total":2,"current":1,"message":"chunks"}"#);

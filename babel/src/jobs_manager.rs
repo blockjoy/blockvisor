@@ -21,8 +21,7 @@ use bv_utils::{
 };
 use eyre::{bail, Context, ContextCompat, Report, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::ffi::OsStr;
-use std::{collections::HashMap, path::Path, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, ffi::OsStr, path::Path, path::PathBuf, sync::Arc, time::Duration};
 use sysinfo::{Pid, PidExt, Process, System, SystemExt};
 use tokio::{
     fs, select,
@@ -750,7 +749,7 @@ impl<C: BabelEngineConnector> Manager<C> {
         match status {
             JobStatus::Finished { .. } | JobStatus::Stopped => {
                 info!("job '{name}' finished with {status:?}");
-                job.state = JobState::Inactive(status)
+                job.state = JobState::Inactive(status);
             }
             _ => {
                 job.register_restart();
@@ -987,6 +986,7 @@ mod tests {
             run_as: None,
             log_buffer_capacity_mb: None,
             log_timestamp: None,
+            protocol_data_lock: None,
         }
     }
 
@@ -1103,6 +1103,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 },
             )
             .await
@@ -1379,6 +1380,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 },
             )
             .await?;
@@ -1407,6 +1409,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 },
             )
             .await?;
@@ -1502,6 +1505,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 },
             )
             .await?;
@@ -1584,6 +1588,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 },
             )
             .await?;

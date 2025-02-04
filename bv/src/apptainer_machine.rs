@@ -150,14 +150,13 @@ pub async fn new_legacy(
     let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
     let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
     let data_dir = node_dir.join(DATA_DIR);
-    // make sure download won't run for migrated nodes after upgrade
-    let babel_jobs = data_dir.join(".babel_jobs");
-    if !babel_jobs.exists() {
-        fs::create_dir_all(&babel_jobs).await?;
+    // make sure that migrated nodes has locked protocol data
+    if !data_dir.exists() {
+        fs::create_dir_all(&data_dir).await?;
     }
-    let download_completed = babel_jobs.join("download.completed");
-    if !download_completed.exists() {
-        fs::File::create(download_completed).await?;
+    let data_lock = data_dir.join(".protocol_data.lock");
+    if !data_lock.exists() {
+        fs::File::create(data_lock).await?;
     }
     // migrate plugin script
     let mut script = fs::read_to_string(node_dir.join("babel.rhai"))

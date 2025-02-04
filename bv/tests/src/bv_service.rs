@@ -402,7 +402,7 @@ fn check_upload_and_download(node_id: &str) {
     println!("cleanup previous download if any");
     sh_inside(
         node_id,
-        "rm -rf /blockjoy/.babel_jobs; rm -rf /blockjoy/protocol_data/*",
+        "rm -rf /blockjoy/.protocol_data.lock; rm -rf /blockjoy/.babel_jobs; rm -rf /blockjoy/protocol_data/*",
     );
     println!("create dummy protocol data");
     sh_inside(node_id,"mkdir -p /blockjoy/protocol_data/sub /blockjoy/protocol_data/some_subdir && touch /blockjoy/protocol_data/.gitignore /blockjoy/protocol_data/some_subdir/something_to_ignore.txt /blockjoy/protocol_data/empty_file");

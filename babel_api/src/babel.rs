@@ -74,8 +74,8 @@ pub trait Babel {
     #[server_streaming]
     fn file_read(path: PathBuf) -> Binary;
 
-    /// Checks if protocol data has been already downloaded.
-    fn is_download_completed() -> bool;
+    /// Checks if protocol data has been already locked.
+    fn is_protocol_data_locked() -> bool;
 }
 
 #[tonic_rpc::tonic_rpc(bincode)]

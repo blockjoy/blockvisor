@@ -518,7 +518,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
             self.start_default_services()?;
         }
         let mut services_needs = self.run_actions(config.init, vec![])?;
-        if !self.babel_engine.node_env().dev_mode && !self.babel_engine.is_download_completed()? {
+        if !self.babel_engine.node_env().dev_mode && !self.babel_engine.is_protocol_data_locked()? {
             if self.babel_engine.has_protocol_archive()? {
                 self.create_and_start_job(
                     DOWNLOAD_JOB_NAME,
@@ -956,7 +956,7 @@ mod tests {
                 function_param: &str,
             ) -> Result<()>;
             fn delete_task(&self, task_name: &str) -> Result<()>;
-            fn is_download_completed(&self) -> Result<bool>;
+            fn is_protocol_data_locked(&self) -> Result<bool>;
             fn has_protocol_archive(&self) -> Result<bool>;
             fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
             fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()>;
@@ -1159,6 +1159,7 @@ mod tests {
                     run_as: Some("some_user".to_string()),
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1183,6 +1184,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1567,6 +1569,7 @@ mod tests {
                         name: "post_upload_job",
                         run_sh: `echo post_upload_job`,
                         needs: ["some"],
+                        protocol_data_lock: true,
                     }
                 ],
             };
@@ -1602,6 +1605,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 })),
             )
             .once()
@@ -1658,6 +1662,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: Some(true),
                 })),
             )
             .once()
@@ -1852,6 +1857,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 })),
             )
             .once()
@@ -1862,7 +1868,7 @@ mod tests {
             .once()
             .returning(|_| Ok(()));
         babel
-            .expect_is_download_completed()
+            .expect_is_protocol_data_locked()
             .once()
             .returning(|| Ok(false));
         babel
@@ -1905,6 +1911,7 @@ mod tests {
                     run_as: None,
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
+                    protocol_data_lock: None,
                 })),
             )
             .once()

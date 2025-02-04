@@ -74,7 +74,8 @@ used during debugging issues, not printed by default
 - `/var/lib/babel/node_env`
 - `/var/lib/babel/post_setup.sh`
 - `/var/lib/babel/plugin/*.rhai` node specific Babel plugin files
-- `/blockjoy/.babel_jobs/` archive jobs (e.g. download) metadata dir, in particular `download.completed` file
+- `/blockjoy/.babel_jobs/` archive jobs (e.g. download) metadata dir
+- `/blockjoy/.protocol_data.lock` protocol data lock file created whenever first service using that data is started 
 - `/blockjoy/protocol_data/` directory where protocol data are downloaded (uploaded from)
 
 ### Bundle

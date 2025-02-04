@@ -160,6 +160,10 @@ const PLUGIN_CONFIG = #{
         #{
             name: "post_download_job",
             run_sh: `echo restoreDB`,
+            /// [optional] Indicate if job should 'lock' protocol data.
+            /// Lock prevents re-initialization of the data after job is started.
+            /// If not set default to false.
+            protocol_data_lock: true,
         }
     ],
     /// [optional] Pre-upload action.
