@@ -20,6 +20,9 @@ pub trait Engine {
     fn start_job(&self, job_name: &str) -> Result<()>;
     /// Stop background job with given unique name if running.
     fn stop_job(&self, job_name: &str) -> Result<()>;
+    /// Cleanup background job with given unique name - remove any intermediate files,
+    /// so next time it will start from scratch.
+    fn cleanup_job(&self, job_name: &str) -> Result<()>;
     /// Get background job info by unique name.
     fn job_info(&self, job_name: &str) -> Result<JobInfo>;
     /// Get background jobs info.

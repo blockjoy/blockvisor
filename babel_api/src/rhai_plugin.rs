@@ -561,6 +561,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         for service in &config.services {
             self.babel_engine.stop_job(&service.name)?;
         }
+        self.babel_engine.jo
         let pre_upload_jobs = self.run_actions(config.pre_upload, vec![])?;
         self.create_and_start_job(
             UPLOAD_JOB_NAME,
