@@ -499,7 +499,12 @@ impl ChunkUploader {
                 let resp = resp?;
                 ensure!(
                     resp.status().is_success(),
-                    anyhow!("server responded with {}", resp.status())
+                    anyhow!(
+                        "server responded with {}|{:?}|{}",
+                        resp.status().clone(),
+                        resp.headers().clone(),
+                        resp.text().await.unwrap_or_default()
+                    )
                 );
             } else {
                 bail!("upload interrupted");
@@ -1262,17 +1267,16 @@ mod tests {
             .returning(move |_| Ok(Response::new(slots.clone())));
         let server = test_env.start_server(mock).await;
 
-        assert_eq!(
-            JobStatus::Finished {
-                exit_code: Some(-1),
-                message: "job 'name' failed with: chunk 'KeyC' upload failed: server responded with 501 Not Implemented"
-                    .to_string()
-            },
-            test_env
-                .upload_job(slots_count)
-                .run(RunFlag::default(), "name", &test_env.tmp_dir)
-                .await
-        );
+        if let JobStatus::Finished { exit_code, message } = test_env
+            .upload_job(slots_count)
+            .run(RunFlag::default(), "name", &test_env.tmp_dir)
+            .await
+        {
+            assert_eq!(exit_code, Some(-1));
+            assert_eq!(message.split_once("|").unwrap().0, "job 'name' failed with: chunk 'KeyC' upload failed: server responded with 501 Not Implemented");
+        } else {
+            bail!("not Finished upload job")
+        }
         server.assert().await;
         Ok(())
     }
