@@ -431,14 +431,22 @@ impl ChunkUploader {
         }
     }
 
-    async fn run(self, run: RunFlag, client: BabelEngineClient) -> Result<Chunk> {
+    async fn run(mut self, mut run: RunFlag, mut client: BabelEngineClient) -> Result<Chunk> {
         let key = self.chunk.key.clone();
-        self.upload_chunk(run, client)
-            .await
-            .with_context(|| format!("chunk '{key}' upload failed"))
+        with_retry!(
+            self.upload_chunk(&mut run, &mut client),
+            self.config.max_retries,
+            self.config.backoff_base_ms
+        )
+        .with_context(|| format!("chunk '{key}' upload failed"))?;
+        Ok(self.chunk)
     }
 
-    async fn upload_chunk(mut self, mut run: RunFlag, client: BabelEngineClient) -> Result<Chunk> {
+    async fn upload_chunk(
+        &mut self,
+        run: &mut RunFlag,
+        client: &mut BabelEngineClient,
+    ) -> Result<()> {
         self.chunk.size = self
             .chunk
             .destinations
@@ -513,7 +521,7 @@ impl ChunkUploader {
         }
         self.chunk.checksum = checksum_rx.borrow().clone();
         self.chunk.url = None;
-        Ok(self.chunk)
+        Ok(())
     }
 }
 
@@ -558,7 +566,7 @@ struct DestinationsReader<E> {
 
 impl<E: Coder> DestinationsReader<E> {
     async fn new(
-        mut client: BabelEngineClient,
+        client: &mut BabelEngineClient,
         mut iter: Vec<FileLocation>,
         config: TransferConfig,
         encoder: E,
