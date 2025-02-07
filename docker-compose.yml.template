@@ -82,6 +82,11 @@ services:
       CF_DNS_BASE: n0des.xyz
       CF_TTL: 300
       CF_TOKEN: ${CF_TOKEN}
+      CLOUDFLARE_CERT_KEY: sneaky-fake-cert
+      # grafana
+      GRAFANA_PROMETHEUS_KEY: no-fire-for-you
+      GRAFANA_BASIC_AUTH_KEY: thats-soooo-basic
+      GRAFANA_LOKI_KEY: grafana-no-loki
       # logs
       LOG_ENVIRONMENT: dev
       OPENTELEMETRY_ENDPOINT: http://api:8080

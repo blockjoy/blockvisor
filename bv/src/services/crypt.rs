@@ -34,10 +34,10 @@ async fn connect_crypt_service(
 pub async fn put_secret(
     config: &SharedConfig,
     node_id: Uuid,
-    name: &str,
+    key: &str,
     value: &[u8],
 ) -> Result<()> {
-    info!("Putting node {node_id} secret {name}");
+    info!("Putting node {node_id} secret {key}");
     let mut client = connect_crypt_service(config).await?;
     api_with_retry!(
         client,
@@ -46,7 +46,7 @@ pub async fn put_secret(
                 resource_type: common::ResourceType::Node.into(),
                 resource_id: node_id.to_string()
             }),
-            key: name.to_string(),
+            key: key.to_string(),
             value: value.to_vec(),
         })
     )
