@@ -27,6 +27,10 @@ bundle-base: build-release
 	cp target/x86_64-unknown-linux-musl/release/babel /tmp/bundle/babel/bin
 	cp target/x86_64-unknown-linux-musl/release/babel_job_runner /tmp/bundle/babel/bin
 	cp target/x86_64-unknown-linux-musl/release/bvup /tmp/bvup
+	mkdir /tmp/bundle/docs
+	cp babel_api/rhai_plugin_guide.md /tmp/bundle/docs
+	cp -r babel_api/examples /tmp/bundle/docs
+	(cd /tmp/bundle/docs && ../blockvisor/bin/nib image create example-proto xmpl-testnet-test)
 	mkdir /tmp/bundle/sh_complete
 	cp target/x86_64-unknown-linux-musl/release/sh_complete/_bv /tmp/bundle/sh_complete/
 	cp target/x86_64-unknown-linux-musl/release/sh_complete/bv.bash /tmp/bundle/sh_complete/
