@@ -174,7 +174,7 @@ impl Engine for LinterEngine {
     }
 
     fn get_secret(&self, _name: &str) -> eyre::Result<Option<Vec<u8>>> {
-        Ok(Default::default())
+        Ok(Some("secret value".as_bytes().to_vec()))
     }
 
     fn put_secret(&self, _name: &str, _value: Vec<u8>) -> eyre::Result<()> {
