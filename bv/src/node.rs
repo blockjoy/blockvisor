@@ -1869,6 +1869,16 @@ pub mod tests {
             })
             .times(3)
             .returning(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "echo ok")
+            .returning(|_| {
+                Ok(Response::new(ShResponse {
+                    exit_code: 0,
+                    stdout: "ok".to_string(),
+                    stderr: "".to_string(),
+                }))
+            });
         let mut seq = Sequence::new();
         babel_mock
             .expect_run_sh()

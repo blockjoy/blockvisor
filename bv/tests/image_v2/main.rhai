@@ -1,4 +1,5 @@
 const API_HOST = "http://localhost:4467/";
+const TEST_CMD = run_sh("echo ok").unwrap();
 
 const PLUGIN_CONFIG = #{
     init: #{

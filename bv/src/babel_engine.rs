@@ -156,9 +156,14 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(())
     }
 
-    pub async fn reevaluate_plugin_config(&mut self) -> Result<()> {
-        self.on_plugin(move |mut plugin| plugin.evaluate_plugin_config())
-            .await
+    pub async fn evaluate_plugin_config(&mut self) -> Result<()> {
+        self.capabilities = self
+            .on_plugin(move |plugin| {
+                plugin.evaluate_plugin_config()?;
+                Ok(plugin.capabilities())
+            })
+            .await?;
+        Ok(())
     }
 
     pub fn update_node_info(&mut self, node_image: NodeImage, properties: NodeProperties) {
@@ -205,9 +210,11 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
     }
 
     pub async fn init(&mut self) -> Result<()> {
-        self.on_plugin(move |mut plugin| plugin.init()).await?;
         self.capabilities = self
-            .on_plugin(move |plugin| Ok(plugin.capabilities()))
+            .on_plugin(move |plugin| {
+                plugin.init()?;
+                Ok(plugin.capabilities())
+            })
             .await?;
         Ok(())
     }
@@ -291,22 +298,24 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
 
     /// Clone plugin, move it to separate thread and call given function `f` on it.
     /// In parallel, it runs `node_request_handler` until function on plugin is done.
-    async fn on_plugin<T: Send + 'static, F: FnOnce(P) -> Result<T> + Send + 'static>(
+    async fn on_plugin<T: Send + 'static, F: FnOnce(&mut P) -> Result<T> + Send + 'static>(
         &mut self,
         f: F,
     ) -> Result<T> {
-        let plugin = self.plugin.clone();
+        let mut plugin = self.plugin.clone();
         let mut run = RunFlag::default();
         let handler_run = run.clone();
         let (resp, _) = tokio::join!(
             tokio::task::spawn_blocking(move || {
-                let res = f(plugin);
+                let res = f(&mut plugin);
                 run.stop();
-                res
+                (plugin, res)
             }),
             self.engine_request_handler(handler_run)
         );
-        resp?.with_context(|| format!("node_id={}", self.node_info.node_id))
+        let (plugin, result) = resp?;
+        self.plugin = plugin;
+        result.with_context(|| format!("node_id={}", self.node_info.node_id))
     }
 
     /// Listen for `NodeRequest`'s, handle them and send results back to plugin.

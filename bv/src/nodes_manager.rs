@@ -343,9 +343,10 @@ where
                 .map_err(into_internal)?;
         }
         if VmStatus::Running != node.expected_status() {
+            let was_initialised = node.state.initialized;
             node.start().await?;
-            if reload_plugin {
-                node.babel_engine.reevaluate_plugin_config().await?;
+            if reload_plugin && !was_initialised {
+                node.babel_engine.evaluate_plugin_config().await?;
             }
         }
         Ok(())
@@ -569,8 +570,9 @@ where
                 .await
                 .map_err(|err| BabelError::Internal { err })?;
             if node.expected_status() == VmStatus::Running {
+                // reevaluate plugin config if node is already started
                 node.babel_engine
-                    .reevaluate_plugin_config()
+                    .evaluate_plugin_config()
                     .await
                     .map_err(|err| BabelError::Internal { err })?;
             }

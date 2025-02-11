@@ -10,7 +10,7 @@ pub trait Plugin {
     /// Init method is called by engine on node start.
     fn init(&mut self) -> Result<()>;
 
-    /// Method is called by engine on plugin reload.
+    /// Method enforce `PLUGIN_CONFIG` evaluation. It may be called by engine on plugin reload.
     fn evaluate_plugin_config(&mut self) -> Result<()>;
 
     /// Upload protocol data to remote storage.
