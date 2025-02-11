@@ -273,6 +273,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: Some(32),
                 log_timestamp: Some(true),
                 protocol_data_lock: None,
+                one_time: Some(true),
             }),
         )
         .times(2)
@@ -317,6 +318,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
                 protocol_data_lock: None,
+                one_time: None,
             }),
         )
         .once()
@@ -343,6 +345,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: Some(64),
                 log_timestamp: Some(true),
                 protocol_data_lock: None,
+                one_time: None,
             }),
         )
         .once()
@@ -368,6 +371,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
                 protocol_data_lock: Some(true),
+                one_time: None,
             }),
         )
         .times(2)
@@ -399,6 +403,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: Some(256),
                 log_timestamp: Some(true),
                 protocol_data_lock: Some(true),
+                one_time: None,
             }),
         )
         .times(2)
@@ -430,6 +435,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
                 protocol_data_lock: Some(true),
+                one_time: None,
             }),
         )
         .times(2)
@@ -480,6 +486,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
                 protocol_data_lock: None,
+                one_time: None,
             }),
         )
         .once()
@@ -521,6 +528,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
                 protocol_data_lock: None,
+                one_time: None,
             }),
         )
         .once()
@@ -548,6 +556,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
                 protocol_data_lock: None,
+                one_time: None,
             }),
         )
         .once()
@@ -579,6 +588,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: Some(256),
                 log_timestamp: Some(true),
                 protocol_data_lock: Some(true),
+                one_time: None,
             }),
         )
         .once()
@@ -610,6 +620,7 @@ fn test_plugin_config() -> eyre::Result<()> {
                 log_buffer_capacity_mb: None,
                 log_timestamp: None,
                 protocol_data_lock: Some(true),
+                one_time: None,
             }),
         )
         .once()

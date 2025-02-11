@@ -1101,6 +1101,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 },
             )?;
             self.engine.start_job(name)?;

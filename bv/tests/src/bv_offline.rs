@@ -134,24 +134,42 @@ async fn test_bv_cmd_jobs() -> Result<()> {
     test_env.bv_run(&["node", "job", vm_id, "start", "init_job"], "");
 
     println!("wait for init_job finished");
-    let start = std::time::Instant::now();
-    while let Err(err) = test_env.try_bv_run(
-        &["node", "job", vm_id, "info", "init_job"],
-        "status:           Finished with exit code 0",
-    ) {
-        if start.elapsed() < Duration::from_secs(120) {
-            std::thread::sleep(Duration::from_secs(1));
-        } else {
-            panic!("timeout expired: {err:#}")
-        }
-    }
+    test_env
+        .wait_for_job_status(
+            vm_id,
+            "init_job",
+            "Finished with exit code 0",
+            Duration::from_secs(120),
+        )
+        .await;
 
+    let node_dir = build_node_dir(&test_env.bv_root, Uuid::parse_str(vm_id)?);
     assert!(fs::read_to_string(
-        build_rootfs_dir(&build_node_dir(&test_env.bv_root, Uuid::parse_str(vm_id)?))
-            .join("var/lib/babel/jobs/init_job/logs"),
+        build_rootfs_dir(&node_dir).join("var/lib/babel/jobs/init_job/logs"),
     )
     .await?
     .contains("dummy_init"));
+
+    println!("start job that lock protocol data");
+    let data_mount_point = node_dir.join(blockvisord::apptainer_machine::DATA_DIR);
+    fs::remove_file(data_mount_point.join(".protocol_data.lock")).await?;
+    assert!(!babel_api::utils::is_protocol_data_locked(
+        &data_mount_point
+    ));
+    test_env.bv_run(
+        &["node", "run", "start_custom_job", "--param", r#"{"name":"data_lock","config":{"job_type":{"run_sh":"echo X"},"restart": "never","protocol_data_lock":true}}"#, vm_id],
+        "custom job data_lock started",
+    );
+    test_env
+        .wait_for_job_status(
+            vm_id,
+            "data_lock",
+            "Finished with exit code 0",
+            Duration::from_secs(10),
+        )
+        .await;
+    assert!(babel_api::utils::is_protocol_data_locked(&data_mount_point));
+
     Ok(())
 }
 
@@ -182,6 +200,9 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     println!("check node");
     test_env.bv_run(&["node", "info", vm_id], "In consensus:   false");
 
+    println!("check file system access");
+    test_env.bv_run(&["node", "run", "file_access_check", vm_id], "ok");
+
     println!("list running node before service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");
 
@@ -197,6 +218,23 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
 
     println!("list running node after service restart");
     test_env.bv_run(&["node", "status", vm_id], "Running");
+
+    println!("start one-time job");
+    test_env.bv_run(
+        &["node", "run", "start_custom_job", "--param", r#"{"name":"one_time","config":{"job_type":{"run_sh":"touch /blockjoy/first_run"},"restart": "never","one_time":true}}"#, vm_id],
+        "custom job one_time started",
+    );
+    test_env
+        .wait_for_job_status(
+            vm_id,
+            "one_time",
+            "Finished with exit code 0",
+            Duration::from_secs(10),
+        )
+        .await;
+    let data_mount_point = build_node_dir(&test_env.bv_root, Uuid::parse_str(vm_id)?)
+        .join(blockvisord::apptainer_machine::DATA_DIR);
+    assert!(data_mount_point.join("first_run").exists());
 
     println!("upgrade running node");
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -215,6 +253,23 @@ async fn test_bv_cmd_node_lifecycle() -> Result<()> {
     test_env
         .wait_for_job_status(vm_id, "echo2", "Running", Duration::from_secs(5))
         .await;
+
+    println!("start one-time job again");
+    test_env.bv_run(
+        &["node", "run", "start_custom_job", "--param", r#"{"name":"one_time","config":{"job_type":{"run_sh":"touch /blockjoy/second_run"},"restart": "never","one_time":true}}"#, vm_id],
+        "custom job one_time started",
+    );
+    test_env
+        .wait_for_job_status(
+            vm_id,
+            "one_time",
+            "Finished with exit code 0",
+            Duration::from_secs(10),
+        )
+        .await;
+    let data_mount_point = build_node_dir(&test_env.bv_root, Uuid::parse_str(vm_id)?)
+        .join(blockvisord::apptainer_machine::DATA_DIR);
+    assert!(!data_mount_point.join("second_run").exists());
 
     println!("delete started node");
     test_env.bv_run(&["node", "delete", "--yes", vm_id], "Deleted node");

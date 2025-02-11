@@ -4,7 +4,7 @@ const TEST_CMD = run_sh("echo ok").unwrap();
 const PLUGIN_CONFIG = #{
     init: #{
         commands: [
-            `echo 'noop for testing'`,
+            `touch /blockjoy/.protocol_data.lock`,
         ],
         jobs: [
             #{
@@ -118,6 +118,12 @@ fn sh_inside(param) {
         throw res.stderr;
     }
     res.stdout
+}
+
+fn start_custom_job(arg) {
+    let job = parse_json(arg);
+    start_job(job.name, job.config);
+    "custom job " + job.name + " started"
 }
 
 fn start_progress_job(name) {

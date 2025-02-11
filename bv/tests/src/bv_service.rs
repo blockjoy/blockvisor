@@ -278,18 +278,14 @@ async fn test_bv_service_e2e() {
     test_env::wait_for_node_status(&second_node_id, "Running", Duration::from_secs(300), None)
         .await;
 
-    let start = std::time::Instant::now();
-    while let Err(err) = test_env::try_bv_run(
-        &["node", "job", &second_node_id, "info", "init_job"],
-        "status:           Finished with exit code 0",
+    test_env::wait_for_job_status(
+        &second_node_id,
+        "init_job",
+        "Finished with exit code 0",
+        Duration::from_secs(10),
         None,
-    ) {
-        if start.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_secs(1));
-        } else {
-            panic!("timeout expired: {err:#}")
-        }
-    }
+    )
+    .await;
 
     let mut client = pb::node_service_client::NodeServiceClient::with_interceptor(
         channel.clone(),
@@ -342,14 +338,7 @@ async fn test_bv_service_e2e() {
         None,
     );
 
-    println!("check file system access");
-    test_env::bv_run(
-        &["node", "run", "file_access_check", &first_node_id],
-        "ok",
-        None,
-    );
-
-    check_upload_and_download(&first_node_id);
+    check_upload_and_download(&first_node_id).await;
 
     assert_eq!("0.0.1", node_version(&first_node_id).await);
 
@@ -397,7 +386,7 @@ fn parse_out_node_id(std_out: String) -> String {
         .to_string()
 }
 
-fn check_upload_and_download(node_id: &str) {
+async fn check_upload_and_download(node_id: &str) {
     println!("cleanup previous download if any");
     sh_inside(
         node_id,
@@ -416,23 +405,18 @@ fn check_upload_and_download(node_id: &str) {
     test_env::bv_run(&["node", "run", "upload", node_id], "", None);
 
     println!("wait for upload finished");
-    let start = std::time::Instant::now();
-    while let Err(err) = test_env::try_bv_run(
-        &["node", "job", node_id, "info", "upload"],
-        "status:           Finished with exit code 0\nprogress:         100.00% (9/9 chunks)\nrestart_count:    0\nupgrade_blocking: true\nlogs:             <empty>",
+    test_env::wait_for_job_status(
+        node_id,
+        "upload",
+        "Finished with exit code 0\nprogress:         100.00% (9/9 chunks)\nrestart_count:    0\nupgrade_blocking: true\nlogs:             <empty>",
+        Duration::from_secs(120),
         None,
-    ) {
-        if start.elapsed() < Duration::from_secs(120) {
-            std::thread::sleep(Duration::from_secs(1));
-        } else {
-            panic!("timeout expired: {err:#}")
-        }
-    }
+    ).await;
 
     println!("cleanup protocol data");
     sh_inside(
         node_id,
-        "rm -rf /blockjoy/protocol_data/* /blockjoy/protocol_data/.gitignore",
+        "rm -rf /blockjoy/protocol_data/* /blockjoy/protocol_data/.gitignore /blockjoy/.protocol_data.lock",
     );
 
     println!("start download job");
@@ -443,18 +427,13 @@ fn check_upload_and_download(node_id: &str) {
     );
 
     println!("wait for download finished");
-    let start = std::time::Instant::now();
-    while let Err(err) = test_env::try_bv_run(
-        &["node", "job", node_id, "info", "download"],
-        "status:           Finished with exit code 0\nprogress:         100.00% (9/9 chunks)\nrestart_count:    0\nupgrade_blocking: true\nlogs:             <empty>",
+    test_env::wait_for_job_status(
+        node_id,
+        "download",
+        "Finished with exit code 0\nprogress:         100.00% (9/9 chunks)\nrestart_count:    0\nupgrade_blocking: true\nlogs:             <empty>",
+        Duration::from_secs(120),
         None,
-    ) {
-        if start.elapsed() < Duration::from_secs(120) {
-            std::thread::sleep(Duration::from_secs(1));
-        } else {
-            panic!("timeout expired: {err:#}")
-        }
-    }
+    ).await;
 
     println!("check download progress");
     test_env::bv_run(

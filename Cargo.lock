@@ -259,6 +259,7 @@ dependencies = [
  "crc",
  "eyre",
  "file-rotate",
+ "fs_extra",
  "futures",
  "futures-util",
  "lazy_static",

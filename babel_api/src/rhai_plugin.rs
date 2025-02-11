@@ -1160,6 +1160,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1185,6 +1186,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 }),
             )
             .return_once(|_, _| Ok(()));
@@ -1606,6 +1608,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 })),
             )
             .once()
@@ -1663,6 +1666,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: Some(true),
+                    one_time: None,
                 })),
             )
             .once()
@@ -1728,6 +1732,7 @@ mod tests {
                         #{
                             name: "init_job",
                             run_sh: `echo init_job`,
+                            one_time: true
                         }
                     ]
                 },
@@ -1858,6 +1863,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: Some(true),
                 })),
             )
             .once()
@@ -1912,6 +1918,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 })),
             )
             .once()

@@ -69,6 +69,10 @@ const PLUGIN_CONFIG = #{
                 /// [optional] Prepend timestamp to each log, or not.
                 /// If not set default to false.
                 log_timestamp: true,
+                /// [optional] Indicate if job should run only once.
+                /// One-time jobs never run again, even after node upgrade.
+                /// If not set default to false.
+                one_time: true,
             }
         ]
     },

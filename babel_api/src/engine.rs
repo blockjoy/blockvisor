@@ -342,6 +342,9 @@ pub struct JobConfig {
     /// Lock prevents re-initialization of the data after job is started.
     /// Default to `false`.
     pub protocol_data_lock: Option<bool>,
+    /// Indicate if job should run only once.
+    /// One-time jobs never run again, even after node upgrade.
+    pub one_time: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

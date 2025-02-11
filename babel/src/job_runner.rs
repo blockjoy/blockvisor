@@ -1,3 +1,8 @@
+use crate::download_job::Downloader;
+use crate::jobs::PERSISTENT_JOBS_META_DIR;
+use crate::log_buffer::LogBuffer;
+use crate::run_sh_job::RunShJob;
+use crate::upload_job::Uploader;
 use crate::{
     chroot_platform, jobs,
     pal::BabelEngineConnector,
@@ -5,16 +10,21 @@ use crate::{
     JOBS_MONITOR_UDS_PATH,
 };
 use async_trait::async_trait;
+use babel_api::engine::{JobType, DEFAULT_JOB_SHUTDOWN_SIGNAL, DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS};
+use babel_api::utils::BabelConfig;
 use babel_api::{
     babel::jobs_monitor_client::JobsMonitorClient,
     engine::{Compression, JobStatus, RestartConfig, RestartPolicy},
 };
 use bv_utils::{rpc::RPC_REQUEST_TIMEOUT, run_flag::RunFlag, timer::AsyncTimer, with_retry};
+use std::io::Write;
 use std::{
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
+use tokio::join;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
@@ -22,6 +32,13 @@ const MAX_OPENED_FILES: u64 = 1024;
 const MAX_BUFFER_SIZE: usize = 128 * 1024 * 1024;
 const MAX_RETRIES: u32 = 5;
 const BACKOFF_BASE_MS: u64 = 500;
+
+/// Logs are forwarded asap to log server, so we don't need big buffer, only to buffer logs during some
+/// temporary log server unavailability (e.g. while updating).
+const DEFAULT_LOG_BUFFER_CAPACITY_MB: usize = 128;
+const DEFAULT_MAX_DOWNLOAD_CONNECTIONS: usize = 3;
+const DEFAULT_MAX_UPLOAD_CONNECTIONS: usize = 3;
+const DEFAULT_MAX_RUNNERS: usize = 8;
 
 pub type ConnectionPool = Arc<Semaphore>;
 
@@ -38,6 +55,174 @@ pub trait JobRunner {
 #[async_trait]
 pub trait Runner {
     async fn run(&mut self, run: RunFlag) -> eyre::Result<()>;
+}
+
+pub async fn run_job(
+    mut run: RunFlag,
+    job_name: String,
+    jobs_dir: &Path,
+    babel_config: BabelConfig,
+    connector: impl BabelEngineConnector + Copy + Send + Sync + 'static,
+) -> eyre::Result<()> {
+    let job_dir = jobs_dir.join(&job_name);
+    let job_config = jobs::load_config(&job_dir)?;
+
+    if job_config.one_time == Some(true)
+        && jobs::restore_job(&babel_config.node_env.data_mount_point, &job_name, &job_dir)?
+    {
+        return Ok(());
+    }
+    if job_config.protocol_data_lock == Some(true) {
+        babel_api::utils::lock_protocol_data(&babel_config.node_env.data_mount_point)?;
+    }
+    match job_config.job_type {
+        JobType::RunSh(body) => {
+            let log_buffer = LogBuffer::default();
+            let log_handler = tokio::spawn(run_log_handler(
+                run.clone(),
+                log_buffer.subscribe(),
+                job_dir.join(jobs::LOGS_FILENAME),
+                job_config
+                    .log_buffer_capacity_mb
+                    .unwrap_or(DEFAULT_LOG_BUFFER_CAPACITY_MB),
+            ));
+            let _ = join!(
+                RunShJob {
+                    timer: bv_utils::timer::SysTimer,
+                    sh_body: body,
+                    restart_policy: job_config.restart,
+                    shutdown_timeout: Duration::from_secs(
+                        job_config
+                            .shutdown_timeout_secs
+                            .unwrap_or(DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS)
+                    ),
+                    shutdown_signal: job_config
+                        .shutdown_signal
+                        .unwrap_or(DEFAULT_JOB_SHUTDOWN_SIGNAL),
+                    log_buffer,
+                    log_timestamp: job_config.log_timestamp.unwrap_or(false),
+                    run_as: job_config.run_as,
+                }
+                .run(run, &job_name, &jobs::JOBS_DIR),
+                log_handler
+            );
+        }
+        JobType::Download {
+            max_connections,
+            max_runners,
+        } => {
+            if babel_api::utils::is_protocol_data_locked(&babel_config.node_env.data_mount_point) {
+                save_job_status(
+                    &JobStatus::Finished {
+                        exit_code: Some(0),
+                        message: format!("job '{job_name}' finished"),
+                    },
+                    &job_name,
+                    &jobs::JOBS_DIR,
+                )
+                .await;
+            } else {
+                ArchiveJobRunner::new(
+                    bv_utils::timer::SysTimer,
+                    job_config.restart,
+                    Downloader::new(
+                        connector,
+                        babel_config.node_env.protocol_data_path,
+                        build_transfer_config(
+                            babel_config
+                                .node_env
+                                .data_mount_point
+                                .join(PERSISTENT_JOBS_META_DIR),
+                            job_dir.join(jobs::PROGRESS_FILENAME),
+                            None,
+                            max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
+                            max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
+                        )?,
+                    ),
+                )
+                .run(run, &job_name, &jobs::JOBS_DIR)
+                .await;
+            }
+        }
+        JobType::Upload {
+            exclude,
+            compression,
+            max_connections,
+            max_runners,
+            number_of_chunks,
+            url_expires_secs,
+            data_version,
+        } => {
+            ArchiveJobRunner::new(
+                bv_utils::timer::SysTimer,
+                job_config.restart,
+                Uploader::new(
+                    connector,
+                    babel_config.node_env.protocol_data_path,
+                    exclude.unwrap_or_default(),
+                    number_of_chunks,
+                    url_expires_secs,
+                    data_version,
+                    build_transfer_config(
+                        babel_config
+                            .node_env
+                            .data_mount_point
+                            .join(PERSISTENT_JOBS_META_DIR),
+                        job_dir.join(jobs::PROGRESS_FILENAME),
+                        compression,
+                        max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
+                        max_runners.unwrap_or(DEFAULT_MAX_RUNNERS),
+                    )?,
+                )?,
+            )
+            .run(run, &job_name, &jobs::JOBS_DIR)
+            .await;
+        }
+    }
+    if job_config.one_time == Some(true) {
+        jobs::backup_job(&babel_config.node_env.data_mount_point, &job_name, &job_dir)?;
+    }
+
+    Ok(())
+}
+
+fn build_transfer_config(
+    archive_jobs_meta_dir: PathBuf,
+    progress_file_path: PathBuf,
+    compression: Option<Compression>,
+    max_connections: usize,
+    max_runners: usize,
+) -> eyre::Result<TransferConfig> {
+    if !archive_jobs_meta_dir.exists() {
+        fs::create_dir_all(&archive_jobs_meta_dir)?;
+    }
+    TransferConfig::new(
+        archive_jobs_meta_dir,
+        progress_file_path,
+        compression,
+        max_connections,
+        max_runners,
+    )
+}
+
+async fn run_log_handler(
+    mut log_run: RunFlag,
+    mut log_rx: tokio::sync::broadcast::Receiver<String>,
+    path: PathBuf,
+    capacity: usize,
+) {
+    let mut log_file = file_rotate::FileRotate::new(
+        path,
+        file_rotate::suffix::AppendCount::new(2),
+        file_rotate::ContentLimit::Bytes(capacity * 1_000_000),
+        file_rotate::compression::Compression::OnRotate(0),
+        None,
+    );
+    while log_run.load() {
+        if let Some(Ok(log)) = log_run.select(log_rx.recv()).await {
+            let _ = log_file.write_all(log.as_bytes());
+        }
+    }
 }
 
 #[async_trait]

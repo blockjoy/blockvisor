@@ -987,6 +987,7 @@ mod tests {
             log_buffer_capacity_mb: None,
             log_timestamp: None,
             protocol_data_lock: None,
+            one_time: None,
         }
     }
 
@@ -1104,6 +1105,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 },
             )
             .await
@@ -1381,6 +1383,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 },
             )
             .await?;
@@ -1410,6 +1413,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 },
             )
             .await?;
@@ -1506,6 +1510,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 },
             )
             .await?;
@@ -1589,6 +1594,7 @@ mod tests {
                     log_buffer_capacity_mb: None,
                     log_timestamp: None,
                     protocol_data_lock: None,
+                    one_time: None,
                 },
             )
             .await?;

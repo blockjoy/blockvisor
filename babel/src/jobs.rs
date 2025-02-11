@@ -4,11 +4,10 @@ use bv_utils::run_flag::RunFlag;
 use chrono::{DateTime, Local};
 use eyre::{Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
-use std::fs::File;
-use std::io::{BufRead, Write};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::{BufRead, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -24,7 +23,7 @@ pub const CONFIG_FILENAME: &str = "config.json";
 pub const STATUS_FILENAME: &str = "status.json";
 pub const PROGRESS_FILENAME: &str = "progress.json";
 pub const LOGS_FILENAME: &str = "logs";
-pub const ARCHIVE_JOBS_META_DIR: &str = ".babel_jobs";
+pub const PERSISTENT_JOBS_META_DIR: &str = ".babel_jobs";
 pub const LOG_EXPIRE_DAYS: i64 = 1;
 pub const MAX_JOB_LOGS: usize = 1024;
 pub const MAX_LOG_ENTRY_LEN: usize = 1024;
@@ -130,7 +129,7 @@ impl Job {
     }
 
     pub fn cleanup(&self, node_env: &NodeEnv) -> Result<()> {
-        let archive_jobs_dir = node_env.data_mount_point.join(ARCHIVE_JOBS_META_DIR);
+        let archive_jobs_dir = node_env.data_mount_point.join(PERSISTENT_JOBS_META_DIR);
         match &self.config.job_type {
             JobType::Download { .. } => {
                 download_job::cleanup_job(&archive_jobs_dir, &node_env.protocol_data_path)?
@@ -201,7 +200,7 @@ pub fn save_status_file(status: &JobStatus, path: &Path) -> Result<()> {
 pub fn load_chunks(path: &Path) -> Result<Vec<Chunk>> {
     let mut chunks = vec![];
     if path.exists() {
-        let file = File::open(path)?;
+        let file = fs::File::open(path)?;
         for line in std::io::BufReader::new(file).lines() {
             chunks.push(serde_json::from_str::<Chunk>(&line?)?);
         }
@@ -230,4 +229,40 @@ impl RunnersState {
             self.run.stop();
         }
     }
+}
+
+pub fn restore_job(data_mount_point: &Path, name: &str, job_dir: &Path) -> Result<bool> {
+    let job_backup = data_mount_point.join(PERSISTENT_JOBS_META_DIR).join(name);
+    let backup_exists = job_backup.exists();
+    if !backup_exists {
+        fs::create_dir_all(&job_backup)?;
+        save_status(
+            &JobStatus::Finished {
+                exit_code: None,
+                message: "one-time job started, but not finished".to_string(),
+            },
+            &job_backup,
+        )?;
+    }
+    fs_extra::dir::copy(
+        job_backup,
+        job_dir,
+        &fs_extra::dir::CopyOptions::default()
+            .copy_inside(true)
+            .content_only(true)
+            .overwrite(true),
+    )?;
+    Ok(backup_exists)
+}
+
+pub fn backup_job(data_mount_point: &Path, name: &str, job_dir: &Path) -> Result<()> {
+    fs_extra::dir::copy(
+        job_dir,
+        data_mount_point.join(PERSISTENT_JOBS_META_DIR).join(name),
+        &fs_extra::dir::CopyOptions::default()
+            .copy_inside(true)
+            .content_only(true)
+            .overwrite(true),
+    )?;
+    Ok(())
 }

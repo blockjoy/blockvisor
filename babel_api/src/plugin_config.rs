@@ -197,6 +197,9 @@ pub struct Job {
     /// Indicate if job should 'lock' protocol data.
     /// Lock prevents re-initialization of the data after job is started.
     pub protocol_data_lock: Option<bool>,
+    /// Indicate if job should run only once.
+    /// One-time jobs never run again, even after node upgrade.
+    pub one_time: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -303,6 +306,7 @@ pub fn build_job_config(job: Job) -> JobConfig {
         log_buffer_capacity_mb: job.log_buffer_capacity_mb,
         log_timestamp: job.log_timestamp,
         protocol_data_lock: job.protocol_data_lock,
+        one_time: job.one_time,
     }
 }
 
@@ -329,6 +333,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
             log_buffer_capacity_mb: None,
             log_timestamp: None,
             protocol_data_lock: None,
+            one_time: None,
         }
     } else {
         JobConfig {
@@ -345,6 +350,7 @@ pub fn build_download_job_config(download: Option<Download>, init_jobs: Vec<Stri
             log_buffer_capacity_mb: None,
             log_timestamp: None,
             protocol_data_lock: None,
+            one_time: None,
         }
     }
 }
@@ -368,6 +374,7 @@ pub fn build_alternative_download_job_config(
         log_buffer_capacity_mb: alternative_download.log_buffer_capacity_mb,
         log_timestamp: alternative_download.log_timestamp,
         protocol_data_lock: None,
+        one_time: None,
     }
 }
 
@@ -399,6 +406,7 @@ pub fn build_service_job_config(
         log_buffer_capacity_mb: service.log_buffer_capacity_mb,
         log_timestamp: service.log_timestamp,
         protocol_data_lock: Some(service.use_protocol_data),
+        one_time: None,
     }
 }
 
@@ -435,6 +443,7 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
             log_buffer_capacity_mb: None,
             log_timestamp: None,
             protocol_data_lock: None,
+            one_time: None,
         }
     } else {
         JobConfig {
@@ -456,6 +465,7 @@ pub fn build_upload_job_config(value: Option<Upload>, pre_upload_jobs: Vec<Strin
             log_buffer_capacity_mb: None,
             log_timestamp: None,
             protocol_data_lock: None,
+            one_time: None,
         }
     }
 }
