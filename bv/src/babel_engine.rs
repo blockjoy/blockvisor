@@ -852,36 +852,52 @@ impl babel_api::engine::Engine for Engine {
     }
 
     fn is_protocol_data_locked(&self) -> Result<bool> {
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx
-            .blocking_send(EngineRequest::IsProtocolDataLocked { response_tx })?;
-        response_rx.blocking_recv()?
+        if !self.node_env.dev_mode {
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            self.tx
+                .blocking_send(EngineRequest::IsProtocolDataLocked { response_tx })?;
+            response_rx.blocking_recv()?
+        } else {
+            Ok(true)
+        }
     }
 
     fn has_protocol_archive(&self) -> Result<bool> {
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx
-            .blocking_send(EngineRequest::HasProtocolArchive { response_tx })?;
-        response_rx.blocking_recv()?
+        if !self.node_env.dev_mode {
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            self.tx
+                .blocking_send(EngineRequest::HasProtocolArchive { response_tx })?;
+            response_rx.blocking_recv()?
+        } else {
+            Ok(false)
+        }
     }
 
     fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>> {
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(EngineRequest::GetSecret {
-            response_tx,
-            name: name.to_owned(),
-        })?;
-        response_rx.blocking_recv()?
+        if !self.node_env.dev_mode {
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            self.tx.blocking_send(EngineRequest::GetSecret {
+                response_tx,
+                name: name.to_owned(),
+            })?;
+            response_rx.blocking_recv()?
+        } else {
+            Ok(Some("dev secret".as_bytes().to_vec()))
+        }
     }
 
     fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()> {
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        self.tx.blocking_send(EngineRequest::PutSecret {
-            response_tx,
-            name: name.to_owned(),
-            value,
-        })?;
-        response_rx.blocking_recv()?
+        if !self.node_env.dev_mode {
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            self.tx.blocking_send(EngineRequest::PutSecret {
+                response_tx,
+                name: name.to_owned(),
+                value,
+            })?;
+            response_rx.blocking_recv()?
+        } else {
+            Ok(())
+        }
     }
 
     fn file_read(&self, path: &Path) -> Result<Vec<u8>> {
