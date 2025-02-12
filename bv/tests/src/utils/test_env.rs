@@ -2,6 +2,7 @@ use assert_cmd::{assert::AssertResult, Command};
 use async_trait::async_trait;
 
 use blockvisord::api_config::ApiConfig;
+use blockvisord::apptainer_machine::NetConf;
 use blockvisord::{
     apptainer_machine,
     apptainer_platform::BareNodeConnection,
@@ -363,8 +364,11 @@ impl Pal for DummyPlatform {
     ) -> Result<Self::VirtualMachine> {
         let vm = apptainer_machine::new(
             &self.bv_root,
-            IpAddr::from_str("216.18.214.90")?,
-            24,
+            NetConf {
+                gateway: IpAddr::from_str("216.18.214.89")?,
+                bridge: IpAddr::from_str("216.18.214.90")?,
+                mask_bits: 24,
+            },
             bv_context,
             node_state,
             self.babel_path.clone(),
@@ -387,8 +391,11 @@ impl Pal for DummyPlatform {
     ) -> Result<Self::VirtualMachine> {
         let mut vm = apptainer_machine::new(
             &self.bv_root,
-            IpAddr::from_str("216.18.214.90")?,
-            24,
+            NetConf {
+                gateway: IpAddr::from_str("216.18.214.89")?,
+                bridge: IpAddr::from_str("216.18.214.90")?,
+                mask_bits: 24,
+            },
             bv_context,
             node_state,
             self.babel_path.clone(),

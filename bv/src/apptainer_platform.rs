@@ -1,3 +1,4 @@
+use crate::apptainer_machine::NetConf;
 use crate::{
     apptainer_machine, bv_config,
     bv_config::{ApptainerConfig, SharedConfig},
@@ -29,8 +30,7 @@ const BABEL_SOCKET_NAME: &str = "babel.socket";
 #[derive(Debug)]
 pub struct ApptainerPlatform {
     base: linux_platform::LinuxPlatform,
-    bridge_ip: IpAddr,
-    prefix: u8,
+    net_conf: NetConf,
     config: ApptainerConfig,
 }
 
@@ -52,8 +52,11 @@ impl ApptainerPlatform {
     pub async fn default() -> Result<Self> {
         Ok(Self {
             base: linux_platform::LinuxPlatform::new().await?,
-            bridge_ip: IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
-            prefix: 0,
+            net_conf: NetConf {
+                gateway: IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+                bridge: IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+                mask_bits: 0,
+            },
             config: Default::default(),
         })
     }
@@ -61,8 +64,11 @@ impl ApptainerPlatform {
     pub async fn new(config: &bv_config::Config) -> Result<Self> {
         Ok(Self {
             base: linux_platform::LinuxPlatform::new().await?,
-            bridge_ip: config.net_conf.host_ip,
-            prefix: config.net_conf.prefix,
+            net_conf: NetConf {
+                gateway: config.net_conf.gateway_ip,
+                bridge: config.net_conf.host_ip,
+                mask_bits: config.net_conf.prefix,
+            },
             config: config.apptainer.clone(),
         })
     }
@@ -76,8 +82,7 @@ impl ApptainerPlatform {
         if node_state.image.uri.starts_with("legacy://") {
             apptainer_machine::new_legacy(
                 &self.bv_root,
-                self.bridge_ip,
-                self.prefix,
+                self.net_conf.clone(),
                 bv_context,
                 node_state,
                 self.babel_path.clone(),
@@ -91,8 +96,7 @@ impl ApptainerPlatform {
         } else {
             apptainer_machine::new(
                 &self.bv_root,
-                self.bridge_ip,
-                self.prefix,
+                self.net_conf.clone(),
                 bv_context,
                 node_state,
                 self.babel_path.clone(),

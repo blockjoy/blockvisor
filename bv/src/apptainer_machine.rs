@@ -1,6 +1,6 @@
-use crate::bv_context::BvContext;
 use crate::{
     bv_config::ApptainerConfig,
+    bv_context::BvContext,
     node_context, node_env,
     node_env::NODE_ENV_FILE_PATH,
     node_state::{NodeState, VmConfig},
@@ -64,14 +64,20 @@ pub struct ApptainerMachine {
     vm_id: String,
     vm_name: String,
     ip: IpAddr,
-    mask_bits: u8,
-    gateway: IpAddr,
+    net_conf: NetConf,
 
     apptainer_config: ApptainerConfig,
 
     config: Config,
     backup_chroot_dir: PathBuf,
     config_backup: Option<Config>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NetConf {
+    pub mask_bits: u8,
+    pub gateway: IpAddr,
+    pub bridge: IpAddr,
 }
 
 #[derive(Debug, Clone)]
@@ -84,8 +90,7 @@ struct Config {
 
 pub async fn new(
     bv_root: &Path,
-    gateway: IpAddr,
-    mask_bits: u8,
+    net_conf: NetConf,
     bv_context: &BvContext,
     node_state: &NodeState,
     babel_path: PathBuf,
@@ -118,8 +123,7 @@ pub async fn new(
         vm_id: node_state.id.to_string(),
         vm_name: node_state.name.clone(),
         ip: node_state.ip,
-        mask_bits,
-        gateway,
+        net_conf,
 
         apptainer_config: config,
 
@@ -141,8 +145,7 @@ pub async fn new(
 // LEGACY node support - remove once all nodes upgraded
 pub async fn new_legacy(
     bv_root: &Path,
-    gateway: IpAddr,
-    mask_bits: u8,
+    net_conf: NetConf,
     bv_context: &BvContext,
     node_state: &NodeState,
     babel_path: PathBuf,
@@ -199,8 +202,7 @@ pub async fn new_legacy(
         vm_id: node_state.name.clone(), // set vm_id to vm_name, to keep container id backward compatibility
         vm_name: node_state.name.clone(),
         ip: node_state.ip,
-        mask_bits,
-        gateway,
+        net_conf,
         apptainer_config: config,
         config: Config {
             image_uri: node_state.image.uri.clone(),
@@ -347,7 +349,10 @@ impl ApptainerMachine {
             let cgroups_path = self.cgroups_path.to_string_lossy();
             let apptainer_pid_path = self.apptainer_pid_path.to_string_lossy();
             let data_path = format!("{}:{}", self.data_dir.display(), DATA_DRIVE_MOUNT_POINT);
-            let net = format!("IP={}/{};GATEWAY={}", self.ip, self.mask_bits, self.gateway);
+            let net = format!(
+                "IP={}/{};GATEWAY={}",
+                self.ip, self.net_conf.mask_bits, self.net_conf.bridge
+            );
             let mut args = vec![
                 "instance",
                 "run",
@@ -384,6 +389,27 @@ impl ApptainerMachine {
             args.push(&self.vm_id);
             run_cmd(APPTAINER_BIN_NAME, args).await?;
             self.load_apptainer_pid().await?;
+            // force ARP table update
+            if let Err(err) = run_cmd(
+                APPTAINER_BIN_NAME,
+                [
+                    "exec",
+                    &format!("instance://{}", self.vm_id),
+                    "ping",
+                    "-c",
+                    "6",
+                    "-i",
+                    "0.5",
+                    &self.net_conf.gateway.to_string(),
+                ],
+            )
+            .await
+            {
+                warn!(
+                    "ARP table update for node '{}' failed: {err:#}",
+                    self.vm_name
+                );
+            }
         }
         Ok(())
     }
