@@ -229,14 +229,18 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
             let params: serde_json::Value = serde_json::from_str(&params)?;
             let context = tera::Context::from_serialize(params)?;
             let mut tera = tera::Tera::default();
-            tera.add_template_file(template, Some("template"))?;
+            let template_name = destination
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or("template".to_string());
+            tera.add_template_file(template, Some(&template_name))?;
             if let Some(parent) = destination.parent() {
                 if !parent.exists() {
                     std::fs::create_dir_all(parent)?;
                 }
             }
             let destination_file = std::fs::File::create(destination)?;
-            tera.render_to("template", &context, destination_file)?;
+            tera.render_to(&template_name, &context, destination_file)?;
             Ok(())
         };
         render().map_err(|err| {
