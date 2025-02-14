@@ -1,8 +1,10 @@
 use crate::engine::NodeEnv;
+use eyre::Context;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 const PROTOCOL_DATA_LOCK_FILENAME: &str = ".protocol_data.lock";
@@ -38,14 +40,25 @@ pub struct RamdiskConfiguration {
     pub ram_disk_size_mb: u64,
 }
 
-pub fn is_protocol_data_locked(data_mount_point: &Path) -> bool {
-    data_mount_point.join(PROTOCOL_DATA_LOCK_FILENAME).exists()
+pub fn protocol_data_stamp(data_mount_point: &Path) -> eyre::Result<Option<SystemTime>> {
+    let data_lock = data_mount_point.join(PROTOCOL_DATA_LOCK_FILENAME);
+    if data_lock.exists() {
+        Ok(Some(
+            fs::File::open(data_lock)
+                .and_then(|file| file.metadata().and_then(|meta| meta.modified()))
+                .with_context(|| "failed to check .protocol_data.lock timestamp")?,
+        ))
+    } else {
+        Ok(None)
+    }
 }
 
-pub fn lock_protocol_data(data_mount_point: &Path) -> eyre::Result<()> {
+pub fn touch_protocol_data(data_mount_point: &Path) -> eyre::Result<()> {
     let data_lock = data_mount_point.join(PROTOCOL_DATA_LOCK_FILENAME);
     if !data_lock.exists() {
         fs::File::create(data_lock)?;
+    } else {
+        fs::File::open(data_lock)?.set_modified(SystemTime::now())?;
     }
     Ok(())
 }

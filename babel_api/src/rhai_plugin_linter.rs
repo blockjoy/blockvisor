@@ -9,9 +9,11 @@ use crate::{
     rhai_plugin::RhaiPlugin,
 };
 use eyre::bail;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime},
+};
 use tracing::Level;
 
 pub fn check(
@@ -165,8 +167,8 @@ impl Engine for LinterEngine {
         Ok(())
     }
 
-    fn is_protocol_data_locked(&self) -> eyre::Result<bool> {
-        Ok(false)
+    fn protocol_data_stamp(&self) -> eyre::Result<Option<SystemTime>> {
+        Ok(None)
     }
 
     fn has_protocol_archive(&self) -> eyre::Result<bool> {

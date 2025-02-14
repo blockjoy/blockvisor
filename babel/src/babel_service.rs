@@ -4,15 +4,23 @@ use crate::{
 use async_trait::async_trait;
 use babel_api::{
     engine::{HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, RestRequest, ShResponse},
-    utils::{is_protocol_data_locked, BabelConfig},
+    utils::{protocol_data_stamp, BabelConfig},
 };
 use eyre::{anyhow, ContextCompat, Result};
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::RequestBuilder;
+use reqwest::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    RequestBuilder,
+};
 use serde_json::json;
-use std::{ops::Deref, path::PathBuf, sync::Arc, time::Duration};
-use std::{pin::Pin, str::FromStr};
+use std::{
+    ops::Deref,
+    path::PathBuf,
+    pin::Pin,
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 use tokio::{
     fs,
     sync::{broadcast, oneshot, RwLock},
@@ -280,16 +288,18 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         ))))
     }
 
-    async fn is_protocol_data_locked(
+    async fn protocol_data_stamp(
         &self,
         _request: Request<()>,
-    ) -> Result<Response<bool>, Status> {
+    ) -> Result<Response<Option<SystemTime>>, Status> {
         let babel_config = load_config(&self.babel_cfg_path)
             .await
             .map_err(|err| Status::internal(format!("failed to read babel config: {err:#}")))?;
-        Ok(Response::new(is_protocol_data_locked(
-            &babel_config.node_env.data_mount_point,
-        )))
+        Ok(Response::new(
+            protocol_data_stamp(&babel_config.node_env.data_mount_point).map_err(|err| {
+                Status::internal(format!("failed to get protocol data stamp: {err:#}"))
+            })?,
+        ))
     }
 }
 

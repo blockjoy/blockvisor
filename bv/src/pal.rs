@@ -179,6 +179,8 @@ pub trait VirtualMachine {
     fn update_node_env(&mut self, node_state: &NodeState);
     /// Get plugin path.
     fn plugin_path(&self) -> PathBuf;
+    /// Get path to data directory.
+    fn data_dir(&self) -> PathBuf;
 }
 
 pub trait RecoverBackoff {

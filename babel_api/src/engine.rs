@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     fmt,
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tracing::Level;
 use url::Url;
@@ -76,8 +76,8 @@ pub trait Engine {
     /// Delete previously scheduled task.
     fn delete_task(&self, task_name: &str) -> Result<()>;
 
-    /// Checks if protocol data has been already locked.
-    fn is_protocol_data_locked(&self) -> Result<bool>;
+    /// Get protocol data timestamp, or none if not touched yet.
+    fn protocol_data_stamp(&self) -> Result<Option<SystemTime>>;
     /// Checks if protocol archive is available.
     fn has_protocol_archive(&self) -> Result<bool>;
     /// Get plugin secret from remote encrypted storage

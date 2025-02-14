@@ -342,16 +342,7 @@ impl<P: Pal + Debug> Node<P> {
         with_retry!(babel_client.setup_babel(babel_config.clone()))?;
 
         if !self.state.initialized {
-            if self.state.upgrade_state.active
-                && self.state.upgrade_state.insert_step(UpgradeStep::ReInit)
-            {
-                self.save_state().await?;
-            }
-            if let Err(err) = self.babel_engine.init().await {
-                // mark as permanently failed - non-recoverable
-                self.save_expected_status(VmStatus::Failed).await?;
-                return Err(err);
-            }
+            self.babel_engine.init().await?;
             self.state.initialized = true;
         }
         self.state.started_at = Some(Utc::now());
@@ -474,6 +465,7 @@ impl<P: Pal + Debug> Node<P> {
             )));
         }
 
+        let data_dir = self.machine.data_dir();
         if !self.state.upgrade_state.active {
             self.state.upgrade_state = UpgradeState::default();
             if status == VmStatus::Running {
@@ -493,6 +485,7 @@ impl<P: Pal + Debug> Node<P> {
                 self.stop(false).await?;
             }
             self.state.upgrade_state.active = true;
+            self.state.upgrade_state.data_stamp = babel_api::utils::protocol_data_stamp(&data_dir)?;
             let mut state_backup: StateBackup = desired_state.into();
             state_backup.swap_state(&mut self.state);
             self.state.upgrade_state.state_backup = Some(state_backup);
@@ -503,11 +496,8 @@ impl<P: Pal + Debug> Node<P> {
             self.rollback(err.clone()).await
         } else if let Err(err) = self.try_upgrade().await {
             let error_str = format!("{err:#}");
-            if self
-                .state
-                .upgrade_state
-                .steps
-                .contains(&UpgradeStep::ReInit)
+            if self.state.upgrade_state.data_stamp
+                != babel_api::utils::protocol_data_stamp(&data_dir)?
             {
                 command_failed!(commands::Error::NodeUpgradeFailure(error_str, anyhow!("can't rollback node upgrade if 'init' was already started - protocol data could be changed")))
             }
@@ -902,6 +892,7 @@ pub mod tests {
     use core::pin::Pin;
     use mockall::*;
     use std::collections::HashMap;
+    use std::time::SystemTime;
     use std::{
         net::IpAddr,
         path::{Path, PathBuf},
@@ -1022,6 +1013,7 @@ pub mod tests {
             fn node_env(&self) -> NodeEnv;
             fn update_node_env(&mut self, node_state: &NodeState);
             fn plugin_path(&self) -> PathBuf;
+            fn data_dir(&self) -> PathBuf;
         }
     }
 
@@ -1131,10 +1123,10 @@ pub mod tests {
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
-            async fn is_protocol_data_locked(
+            async fn protocol_data_stamp(
                 &self,
                 request: Request<()>,
-            ) -> Result<Response<bool>, Status>;
+            ) -> Result<Response<Option<SystemTime>>, Status>;
             async fn file_write(
                 &self,
                 request: Request<Streaming<babel_api::utils::Binary>>,
@@ -1897,8 +1889,8 @@ pub mod tests {
                 }))
             });
         babel_mock
-            .expect_is_protocol_data_locked()
-            .returning(|_| Ok(Response::new(true)));
+            .expect_protocol_data_stamp()
+            .returning(|_| Ok(Response::new(Some(SystemTime::now()))));
         babel_mock
             .expect_start_job()
             .returning(|_| Ok(Response::new(())));
@@ -1913,7 +1905,7 @@ pub mod tests {
         node.state.initialized = false;
         let start_err = format!("{:#}", node.start().await.unwrap_err());
         assert!(start_err.starts_with(r#"node_id=4931bafa-92d9-4521-9fc6-a77eee047530: status: Internal, message: "error on init""#));
-        assert_eq!(VmStatus::Failed, node.state.expected_status);
+        assert_eq!(VmStatus::Running, node.state.expected_status);
         assert!(!node.state.initialized);
         assert_eq!(None, node.state.started_at);
 
@@ -2187,6 +2179,10 @@ pub mod tests {
             .properties
             .insert("new-key".to_string(), "new_value".to_string());
         let mut vm_mock = MockTestVM::new();
+        let data_dir = test_env.tmp_root.clone();
+        vm_mock
+            .expect_data_dir()
+            .returning(move || data_dir.clone());
         test_env.add_plugin_update_expectations(&mut vm_mock);
         let test_tmp_root = test_env.tmp_root.to_path_buf();
         pal.expect_create_node_connection().return_once(move |_| {
@@ -2318,6 +2314,7 @@ pub mod tests {
                 UpgradeStep::Plugin,
                 UpgradeStep::Firewall,
             ],
+            data_stamp: None,
         };
         new_state.initialized = false;
         assert_eq!(new_state, node.state);
@@ -2336,21 +2333,29 @@ pub mod tests {
         let mut new_state = node_state.clone();
         new_state.image.id = "new-image-id".to_string();
         let mut vm_mock = MockTestVM::new();
+        let data_dir = test_env.tmp_root.clone();
+        vm_mock
+            .expect_data_dir()
+            .returning(move || data_dir.clone());
         test_env.add_plugin_update_expectations(&mut vm_mock);
-        let test_tmp_root = test_env.tmp_root.to_path_buf();
-        pal.expect_create_node_connection().return_once(move |_| {
-            let mut mock = MockTestNodeConnection::new();
-            mock.expect_is_closed().returning(|| false);
-            mock.expect_is_broken().returning(|| false);
-            let tmp_root = test_tmp_root.clone();
-            mock.expect_babel_client()
-                .returning(move || Ok(test_babel_client(&tmp_root)));
-            mock.expect_mark_broken().return_once(|| ());
-            mock.expect_engine_socket_path()
-                .return_const(Default::default());
-            mock
-        });
+
         add_firewall_expectation(&mut pal, node_state.clone());
+        let test_tmp_root = test_env.tmp_root.to_path_buf();
+        pal.expect_create_node_connection()
+            .once()
+            .returning(move |_| {
+                let mut mock = MockTestNodeConnection::new();
+                mock.expect_is_closed().returning(|| false);
+                mock.expect_is_broken().returning(|| false);
+                let tmp_root = test_tmp_root.clone();
+                mock.expect_babel_client()
+                    .returning(move || Ok(test_babel_client(&tmp_root)));
+                mock.expect_mark_broken().return_once(|| ());
+                mock.expect_engine_socket_path()
+                    .return_const(Default::default());
+                mock.expect_setup().returning(|| Ok(()));
+                mock
+            });
 
         // failed to stop before upgrade
         vm_mock
@@ -2358,7 +2363,7 @@ pub mod tests {
             .times(2)
             .returning(|| VmState::RUNNING);
 
-        // successfuly upgrade running
+        // can't start node which is not stopped properly
         vm_mock.expect_state().once().returning(|| VmState::RUNNING);
         vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
         vm_mock.expect_upgrade().once().returning(|_| Ok(()));
@@ -2371,6 +2376,15 @@ pub mod tests {
         pal.expect_apply_firewall_config()
             .once()
             .returning(|_| Ok(()));
+        vm_mock.expect_state().once().returning(|| VmState::RUNNING);
+
+        // init failed, but data changed
+        vm_mock.expect_state().once().returning(|| VmState::RUNNING);
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
+        vm_mock.expect_upgrade().once().returning(|_| Ok(()));
+        test_env.add_plugin_update_expectations(&mut vm_mock);
+        add_firewall_expectation(&mut pal, new_state.clone());
+        vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
         vm_mock.expect_state().once().returning(|| VmState::RUNNING);
 
         pal.expect_create_vm().return_once(move |_, _| Ok(vm_mock));
@@ -2398,11 +2412,31 @@ pub mod tests {
             .withf(|req| !req.get_ref())
             .times(4)
             .returning(|_| Err(Status::internal("can't stop babel")));
-
         babel_mock
             .expect_get_jobs()
             .once()
             .returning(|_| Ok(Response::new(HashMap::default())));
+
+        babel_mock
+            .expect_check_job_runner()
+            .once()
+            .returning(|_| Ok(Response::new(BinaryStatus::Ok)));
+        babel_mock
+            .expect_setup_babel()
+            .once()
+            .returning(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_get_jobs()
+            .once()
+            .returning(|_| Ok(Response::new(HashMap::default())));
+        let data_dir = test_env.tmp_root.clone();
+        babel_mock.expect_run_sh().once().returning(move |_| {
+            babel_api::utils::touch_protocol_data(&data_dir).unwrap();
+            Err(Status::internal("can't run init command"))
+        });
+        fs::write(&test_env.tmp_root.join("job_runner"), "dummy job_runner")
+            .await
+            .unwrap();
         let server = test_env.start_server(babel_mock).await;
 
         assert!(node.upgrade(new_state.clone()).await.unwrap_err().to_string().starts_with("BV internal error: 'Failed to gracefully shutdown babel and background jobs: status: Internal, message: \"can't stop babel\""));
@@ -2415,6 +2449,17 @@ pub mod tests {
                 .await
                 .unwrap_err()
                 .to_string()
+        );
+
+        node.state.expected_status = VmStatus::Running;
+        let error_message = node
+            .upgrade(new_state.clone())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error_message.contains("can't run init command"));
+        assert!(
+            error_message.ends_with("and then rollback failed with: 'can't rollback node upgrade if 'init' was already started - protocol data could be changed'; node ended in failed state")
         );
 
         server.assert().await;
@@ -2431,6 +2476,10 @@ pub mod tests {
         test_env.add_plugin_update_expectations(&mut vm_mock);
         vm_mock.expect_state().once().returning(|| VmState::SHUTOFF);
         vm_mock.expect_state().once().returning(|| VmState::RUNNING);
+        let data_dir = test_env.tmp_root.clone();
+        vm_mock
+            .expect_data_dir()
+            .returning(move || data_dir.clone());
         test_env.add_create_node_expectations(&mut pal, node_state.clone(), vm_mock);
 
         let mut node = Node::create(

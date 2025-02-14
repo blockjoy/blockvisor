@@ -50,7 +50,9 @@ See [example](examples/base.rhai) with comments for more details.
 
 Functions listed below are required by BV to work properly.
 
-- `init` - Main entrypoint where everything starts. Function called only once, when node is started first time.
+- `init` - Main entrypoint where everything starts. Normally this function is called only once, when node is started first time
+  and after node upgrade. It may also be called more than once if it fails and node needs recovery.
+  <br>NOTE: For actions that are required to be run once and only once, use jobs with `one-time` flag set to `true`,
   <br>It is the place where protocol services running in background should be described as so called `jobs`.
   Also, any other one-off operations can be done here (e.g. initializing stuff, or downloading protocol data archives).
   <br>See [Engine Interface](#engine-interface) and [Background Jobs](#background-jobs) chapter for more details on how to start jobs.

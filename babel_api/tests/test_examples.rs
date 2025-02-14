@@ -284,9 +284,9 @@ fn test_plugin_config() -> eyre::Result<()> {
         .times(2)
         .returning(|_| Ok(()));
     babel
-        .expect_is_protocol_data_locked()
+        .expect_protocol_data_stamp()
         .times(2)
-        .returning(|| Ok(false));
+        .returning(|| Ok(None));
     babel
         .expect_has_protocol_archive()
         .once()
@@ -467,10 +467,6 @@ fn test_plugin_config() -> eyre::Result<()> {
         .once()
         .returning(|_| Ok(()));
 
-    babel
-        .expect_get_jobs()
-        .once()
-        .returning(|| Ok(HashMap::default()));
     babel
         .expect_create_job()
         .with(

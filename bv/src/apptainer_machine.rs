@@ -105,8 +105,8 @@ pub async fn new(
     if !data_dir.exists() {
         fs::create_dir_all(&data_dir).await?;
     }
-    if node_state.initialized && !babel_api::utils::is_protocol_data_locked(&data_dir) {
-        babel_api::utils::lock_protocol_data(&data_dir)?;
+    if node_state.initialized && babel_api::utils::protocol_data_stamp(&data_dir)?.is_none() {
+        babel_api::utils::touch_protocol_data(&data_dir)?;
     }
 
     Ok(ApptainerMachine {
@@ -161,8 +161,8 @@ pub async fn new_legacy(
     if !data_dir.exists() {
         fs::create_dir_all(&data_dir).await?;
     }
-    if node_state.initialized && !babel_api::utils::is_protocol_data_locked(&data_dir) {
-        babel_api::utils::lock_protocol_data(&data_dir)?;
+    if node_state.initialized && babel_api::utils::protocol_data_stamp(&data_dir)?.is_none() {
+        babel_api::utils::touch_protocol_data(&data_dir)?;
     }
     // migrate plugin script
     let mut script = fs::read_to_string(node_dir.join("babel.rhai"))
@@ -681,5 +681,9 @@ impl pal::VirtualMachine for ApptainerMachine {
 
     fn plugin_path(&self) -> PathBuf {
         self.chroot_dir.join(PLUGIN_PATH).join(PLUGIN_MAIN_FILENAME)
+    }
+
+    fn data_dir(&self) -> PathBuf {
+        self.node_dir.join(DATA_DIR)
     }
 }

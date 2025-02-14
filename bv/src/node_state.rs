@@ -5,7 +5,7 @@ use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, fmt::Debug, mem, net::IpAddr, path::Path};
+use std::{collections::HashMap, fmt, fmt::Debug, mem, net::IpAddr, path::Path, time::SystemTime};
 use tokio::fs;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -99,6 +99,7 @@ pub struct UpgradeState {
     pub state_backup: Option<StateBackup>,
     pub need_rollback: Option<String>,
     pub steps: Vec<UpgradeStep>,
+    pub data_stamp: Option<SystemTime>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -125,7 +126,6 @@ pub enum UpgradeStep {
     Plugin,
     Firewall,
     Restart,
-    ReInit,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]

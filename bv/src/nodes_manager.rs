@@ -1223,6 +1223,10 @@ mod tests {
         truncated.truncate(truncated.len() - 30); // truncate info function
         fs::write(&updated_plugin_path, truncated).await.unwrap();
         vm_mock
+            .expect_data_dir()
+            .once()
+            .returning(move || test_env.tmp_root.clone());
+        vm_mock
             .expect_plugin_path()
             .once()
             .returning(move || updated_plugin_path.clone());
@@ -1353,6 +1357,7 @@ mod tests {
                 UpgradeStep::Plugin,
                 UpgradeStep::Firewall,
             ],
+            data_stamp: None,
         };
         assert_eq!(new_state, updated_state);
         {

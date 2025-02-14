@@ -152,10 +152,7 @@ async fn test_bv_cmd_jobs() -> Result<()> {
 
     println!("start job that lock protocol data");
     let data_mount_point = node_dir.join(blockvisord::apptainer_machine::DATA_DIR);
-    fs::remove_file(data_mount_point.join(".protocol_data.lock")).await?;
-    assert!(!babel_api::utils::is_protocol_data_locked(
-        &data_mount_point
-    ));
+    let data_stamp = babel_api::utils::protocol_data_stamp(&data_mount_point)?;
     test_env.bv_run(
         &["node", "run", "start_custom_job", "--param", r#"{"name":"data_lock","config":{"job_type":{"run_sh":"echo X"},"restart": "never","use_protocol_data":true}}"#, vm_id],
         "custom job data_lock started",
@@ -168,7 +165,10 @@ async fn test_bv_cmd_jobs() -> Result<()> {
             Duration::from_secs(10),
         )
         .await;
-    assert!(babel_api::utils::is_protocol_data_locked(&data_mount_point));
+    assert_ne!(
+        data_stamp,
+        babel_api::utils::protocol_data_stamp(&data_mount_point)?
+    );
 
     Ok(())
 }

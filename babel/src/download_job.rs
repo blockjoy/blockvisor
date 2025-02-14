@@ -754,6 +754,7 @@ mod tests {
                         max_buffer_size: 150,
                         max_retries: 0,
                         backoff_base_ms: 1,
+                        data_mount_point: self.tmp_dir.clone(),
                         archive_jobs_meta_dir: self.meta_dir.clone(),
                         progress_file_path: self.download_progress_path.clone(),
                         compression: None,

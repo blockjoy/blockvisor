@@ -73,7 +73,7 @@ pub async fn run_job(
         return Ok(());
     }
     if job_config.use_protocol_data == Some(true) {
-        babel_api::utils::lock_protocol_data(&babel_config.node_env.data_mount_point)?;
+        babel_api::utils::touch_protocol_data(&babel_config.node_env.data_mount_point)?;
     }
     match job_config.job_type {
         JobType::RunSh(body) => {
@@ -111,7 +111,9 @@ pub async fn run_job(
             max_connections,
             max_runners,
         } => {
-            if babel_api::utils::is_protocol_data_locked(&babel_config.node_env.data_mount_point) {
+            if babel_api::utils::protocol_data_stamp(&babel_config.node_env.data_mount_point)?
+                .is_some()
+            {
                 save_job_status(
                     &JobStatus::Finished {
                         exit_code: Some(0),
@@ -129,10 +131,7 @@ pub async fn run_job(
                         connector,
                         babel_config.node_env.protocol_data_path,
                         build_transfer_config(
-                            babel_config
-                                .node_env
-                                .data_mount_point
-                                .join(PERSISTENT_JOBS_META_DIR),
+                            babel_config.node_env.data_mount_point.clone(),
                             job_dir.join(jobs::PROGRESS_FILENAME),
                             None,
                             max_connections.unwrap_or(DEFAULT_MAX_DOWNLOAD_CONNECTIONS),
@@ -164,10 +163,7 @@ pub async fn run_job(
                     url_expires_secs,
                     data_version,
                     build_transfer_config(
-                        babel_config
-                            .node_env
-                            .data_mount_point
-                            .join(PERSISTENT_JOBS_META_DIR),
+                        babel_config.node_env.data_mount_point.clone(),
                         job_dir.join(jobs::PROGRESS_FILENAME),
                         compression,
                         max_connections.unwrap_or(DEFAULT_MAX_UPLOAD_CONNECTIONS),
@@ -187,22 +183,29 @@ pub async fn run_job(
 }
 
 fn build_transfer_config(
-    archive_jobs_meta_dir: PathBuf,
+    data_mount_point: PathBuf,
     progress_file_path: PathBuf,
     compression: Option<Compression>,
     max_connections: usize,
     max_runners: usize,
 ) -> eyre::Result<TransferConfig> {
+    let archive_jobs_meta_dir = data_mount_point.join(PERSISTENT_JOBS_META_DIR);
     if !archive_jobs_meta_dir.exists() {
         fs::create_dir_all(&archive_jobs_meta_dir)?;
     }
-    TransferConfig::new(
+    let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
+    Ok(TransferConfig {
+        max_opened_files,
+        max_runners,
+        max_connections,
+        max_buffer_size: MAX_BUFFER_SIZE,
+        max_retries: MAX_RETRIES,
+        backoff_base_ms: BACKOFF_BASE_MS,
+        data_mount_point,
         archive_jobs_meta_dir,
         progress_file_path,
         compression,
-        max_connections,
-        max_runners,
-    )
+    })
 }
 
 async fn run_log_handler(
@@ -300,32 +303,10 @@ pub struct TransferConfig {
     pub max_buffer_size: usize,
     pub max_retries: u32,
     pub backoff_base_ms: u64,
+    pub data_mount_point: PathBuf,
     pub archive_jobs_meta_dir: PathBuf,
     pub progress_file_path: PathBuf,
     pub compression: Option<Compression>,
-}
-
-impl TransferConfig {
-    pub fn new(
-        archive_jobs_meta_dir: PathBuf,
-        progress_file_path: PathBuf,
-        compression: Option<Compression>,
-        max_connections: usize,
-        max_runners: usize,
-    ) -> eyre::Result<Self> {
-        let max_opened_files = usize::try_from(rlimit::increase_nofile_limit(MAX_OPENED_FILES)?)?;
-        Ok(Self {
-            max_opened_files,
-            max_runners,
-            max_connections,
-            max_buffer_size: MAX_BUFFER_SIZE,
-            max_retries: MAX_RETRIES,
-            backoff_base_ms: BACKOFF_BASE_MS,
-            archive_jobs_meta_dir,
-            progress_file_path,
-            compression,
-        })
-    }
 }
 
 pub struct JobBackoff<T> {

@@ -495,7 +495,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
             self.start_default_services()?;
         }
         let mut services_needs = self.run_actions(config.init, vec![])?;
-        if !self.babel_engine.is_protocol_data_locked()? {
+        if self.babel_engine.protocol_data_stamp()?.is_none() {
             if self.babel_engine.has_protocol_archive()? {
                 self.create_and_start_job(
                     DOWNLOAD_JOB_NAME,
@@ -543,9 +543,6 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         config.services.retain(|service| service.use_protocol_data);
         for service in &config.services {
             self.babel_engine.stop_job(&service.name)?;
-        }
-        if self.babel_engine.get_jobs()?.contains_key(UPLOAD_JOB_NAME) {
-            self.babel_engine.cleanup_job(UPLOAD_JOB_NAME)?;
         }
         let pre_upload_jobs = self.run_actions(config.pre_upload, vec![])?;
         self.create_and_start_job(
@@ -929,6 +926,7 @@ mod tests {
     use mockall::*;
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::time::SystemTime;
 
     mock! {
         #[derive(Debug)]
@@ -964,7 +962,7 @@ mod tests {
                 function_param: &str,
             ) -> Result<()>;
             fn delete_task(&self, task_name: &str) -> Result<()>;
-            fn is_protocol_data_locked(&self) -> Result<bool>;
+            fn protocol_data_stamp(&self) -> Result<Option<SystemTime>>;
             fn has_protocol_archive(&self) -> Result<bool>;
             fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>>;
             fn put_secret(&self, name: &str, value: Vec<u8>) -> Result<()>;
@@ -1621,23 +1619,6 @@ mod tests {
             )
             .once()
             .returning(|_, _| Ok(()));
-        babel.expect_get_jobs().once().returning(|| {
-            Ok(HashMap::from_iter([(
-                UPLOAD_JOB_NAME.to_string(),
-                JobInfo {
-                    status: JobStatus::Stopped,
-                    progress: None,
-                    restart_count: 0,
-                    logs: vec![],
-                    upgrade_blocking: true,
-                },
-            )]))
-        });
-        babel
-            .expect_cleanup_job()
-            .with(predicate::eq(UPLOAD_JOB_NAME))
-            .once()
-            .returning(|_| Ok(()));
         babel
             .expect_start_job()
             .with(predicate::eq("pre_upload_job"))
@@ -1882,9 +1863,9 @@ mod tests {
             .once()
             .returning(|_| Ok(()));
         babel
-            .expect_is_protocol_data_locked()
+            .expect_protocol_data_stamp()
             .once()
-            .returning(|| Ok(false));
+            .returning(|| Ok(None));
         babel
             .expect_has_protocol_archive()
             .once()

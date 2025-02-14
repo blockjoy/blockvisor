@@ -1,12 +1,14 @@
-use crate::utils::BabelConfig;
 use crate::{
     engine::{
         Chunk, DownloadManifest, DownloadMetadata, HttpResponse, JobConfig, JobInfo, JobsInfo,
         JrpcRequest, RestRequest, ShResponse, UploadSlots,
     },
-    utils::{Binary, BinaryStatus},
+    utils::{BabelConfig, Binary, BinaryStatus},
 };
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    time::{Duration, SystemTime},
+};
 
 #[tonic_rpc::tonic_rpc(bincode)]
 pub trait Babel {
@@ -74,8 +76,8 @@ pub trait Babel {
     #[server_streaming]
     fn file_read(path: PathBuf) -> Binary;
 
-    /// Checks if protocol data has been already locked.
-    fn is_protocol_data_locked() -> bool;
+    /// Get protocol data timestamp, or none if not touched yet.
+    fn protocol_data_stamp() -> Option<SystemTime>;
 }
 
 #[tonic_rpc::tonic_rpc(bincode)]

@@ -18,17 +18,17 @@ use crate::{
     scheduler::Task,
     services,
 };
-use babel_api::engine::NodeEnv;
-use babel_api::utils::Binary;
 use babel_api::{
     engine::{
-        HttpResponse, JobConfig, JobInfo, JobType, JobsInfo, JrpcRequest, RestRequest, ShResponse,
+        HttpResponse, JobConfig, JobInfo, JobType, JobsInfo, JrpcRequest, NodeEnv, RestRequest,
+        ShResponse,
     },
     plugin::{Plugin, ProtocolStatus},
+    utils::Binary,
 };
-use bv_utils::system::bytes_into_bin;
 use bv_utils::{
     rpc::with_timeout,
+    system::bytes_into_bin,
     {run_flag::RunFlag, with_retry},
 };
 use eyre::{bail, Error, Result, WrapErr};
@@ -38,7 +38,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     str::FromStr,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
@@ -449,9 +449,9 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     .send(scheduler::Action::Delete(task))
                     .await;
             }
-            EngineRequest::IsProtocolDataLocked { response_tx } => {
+            EngineRequest::ProtocolDataStamp { response_tx } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
-                    Ok(babel_client) => with_retry!(babel_client.is_protocol_data_locked(()))
+                    Ok(babel_client) => with_retry!(babel_client.protocol_data_stamp(()))
                         .map_err(|err| self.handle_connection_errors(err))
                         .map(|v| v.into_inner()),
                     Err(err) => Err(err),
@@ -667,8 +667,8 @@ enum EngineRequest {
     },
     AddTask(scheduler::Scheduled),
     DeleteTask(String),
-    IsProtocolDataLocked {
-        response_tx: ResponseTx<Result<bool>>,
+    ProtocolDataStamp {
+        response_tx: ResponseTx<Result<Option<SystemTime>>>,
     },
     HasProtocolArchive {
         response_tx: ResponseTx<Result<bool>>,
@@ -851,14 +851,14 @@ impl babel_api::engine::Engine for Engine {
             .blocking_send(EngineRequest::DeleteTask(task_name.to_string()))?)
     }
 
-    fn is_protocol_data_locked(&self) -> Result<bool> {
+    fn protocol_data_stamp(&self) -> Result<Option<SystemTime>> {
         if !self.node_env.dev_mode {
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             self.tx
-                .blocking_send(EngineRequest::IsProtocolDataLocked { response_tx })?;
+                .blocking_send(EngineRequest::ProtocolDataStamp { response_tx })?;
             response_rx.blocking_recv()?
         } else {
-            Ok(true)
+            Ok(Some(SystemTime::UNIX_EPOCH))
         }
     }
 
@@ -1017,10 +1017,10 @@ mod tests {
                 &self,
                 request: Request<(PathBuf, PathBuf, String)>,
             ) -> Result<Response<()>, Status>;
-            async fn is_protocol_data_locked(
+            async fn protocol_data_stamp(
                 &self,
                 request: Request<()>,
-            ) -> Result<Response<bool>, Status>;
+            ) -> Result<Response<Option<SystemTime>>, Status>;
             async fn file_write(
                 &self,
                 request: Request<Streaming<babel_api::utils::Binary>>,

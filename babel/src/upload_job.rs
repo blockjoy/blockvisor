@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use babel_api::engine::{
     Checksum, Chunk, Compression, DownloadManifest, FileLocation, JobProgress, Slot, UploadSlots,
 };
+use babel_api::utils;
 use bv_utils::{
     rpc::{with_timeout, RPC_REQUEST_TIMEOUT},
     {run_flag::RunFlag, with_retry},
@@ -29,7 +30,7 @@ use std::{
     os::unix::fs::FileExt,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use thiserror::Error;
 use tokio::{sync::Semaphore, task::JoinError};
@@ -94,6 +95,7 @@ pub struct Uploader<C> {
 struct Blueprint {
     manifest: DownloadManifest,
     data_version: u64,
+    data_stamp: Option<SystemTime>,
 }
 
 #[async_trait]
@@ -101,27 +103,34 @@ impl<C: BabelEngineConnector + Send> Runner for Uploader<C> {
     async fn run(&mut self, mut run: RunFlag) -> Result<()> {
         let blueprint_path = self.config.archive_jobs_meta_dir.join(BLUEPRINT_FILENAME);
         let chunks_path = self.config.archive_jobs_meta_dir.join(CHUNKS_FILENAME);
-        let (mut blueprint, uploaded) =
-            if let Ok(blueprint) = load_job_data::<Blueprint>(&blueprint_path) {
-                (blueprint, load_chunks(&chunks_path)?)
+        let blueprint = load_job_data::<Blueprint>(&blueprint_path).and_then(|blueprint| {
+            if blueprint.data_stamp == utils::protocol_data_stamp(&self.config.data_mount_point)? {
+                Ok(blueprint)
             } else {
-                let manifest = self.prepare_manifest_blueprint()?;
-                let slots = fetch_slots(
-                    self.connector.connect(),
-                    &manifest.chunks,
-                    self.config.max_runners,
-                    self.data_version,
-                    self.url_expires_secs,
-                )
-                .await?;
-                let mut blueprint = Blueprint {
-                    manifest,
-                    data_version: slots.data_version,
-                };
-                save_job_data(&blueprint_path, &blueprint)?;
-                assign_slots(&mut blueprint.manifest.chunks, slots.slots);
-                (blueprint, Default::default())
+                bail!("protocol_data stamp doesn't match, need to start upload from scratch")
+            }
+        });
+        let (mut blueprint, uploaded) = if let Ok(blueprint) = blueprint {
+            (blueprint, load_chunks(&chunks_path)?)
+        } else {
+            let manifest = self.prepare_manifest_blueprint()?;
+            let slots = fetch_slots(
+                self.connector.connect(),
+                &manifest.chunks,
+                self.config.max_runners,
+                self.data_version,
+                self.url_expires_secs,
+            )
+            .await?;
+            let mut blueprint = Blueprint {
+                manifest,
+                data_version: slots.data_version,
+                data_stamp: utils::protocol_data_stamp(&self.config.data_mount_point)?,
             };
+            save_job_data(&blueprint_path, &blueprint)?;
+            assign_slots(&mut blueprint.manifest.chunks, slots.slots);
+            (blueprint, Default::default())
+        };
         let mark_uploaded = |chunks: &mut Vec<Chunk>, chunk: Chunk| {
             let Some(blueprint) = chunks.iter_mut().find(|item| item.index == chunk.index) else {
                 bail!("internal error - finished upload of chunk that doesn't exists in manifest");
@@ -777,6 +786,7 @@ mod tests {
                         max_buffer_size: 50,
                         max_retries: 0,
                         backoff_base_ms: 1,
+                        data_mount_point: self.tmp_dir.clone(),
                         archive_jobs_meta_dir: self.tmp_dir.clone(),
                         progress_file_path: self.upload_progress_path.clone(),
                         compression: None,
@@ -1220,6 +1230,7 @@ mod tests {
             &Blueprint {
                 manifest: blueprint.clone(),
                 data_version: 0,
+                data_stamp: None,
             },
         )?;
         let chunks_path = job
