@@ -33,12 +33,10 @@ use bv_utils::{
 };
 use eyre::{bail, Error, Result, WrapErr};
 use std::{
-    collections::HashMap,
-    fmt::Debug,
+    collections::{hash_map::Entry, HashMap},
     fs,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
 use tokio::sync::mpsc;
@@ -76,6 +74,7 @@ pub struct BabelEngine<N, P> {
     engine_tx: mpsc::Sender<EngineRequest>,
     server: Option<BabelEngineServer>,
     scheduler_tx: mpsc::Sender<scheduler::Action>,
+    secrets_cache: HashMap<String, Vec<u8>>,
 
     capabilities: Vec<String>,
 }
@@ -97,7 +96,6 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             params: node_info.properties.clone(),
             node_env: node_env.clone(),
             plugin_data_path: plugin_data_path.clone(),
-            secrets_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         let plugin = plugin_builder(engine)?;
         let mut babel_engine = Self {
@@ -110,6 +108,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             engine_tx,
             server: None,
             scheduler_tx,
+            secrets_cache: HashMap::new(),
             capabilities: Default::default(),
         };
         babel_engine.capabilities = babel_engine
@@ -150,7 +149,6 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             params: self.node_info.properties.clone(),
             node_env,
             plugin_data_path: self.plugin_data_path.clone(),
-            secrets_cache: Arc::new(Mutex::new(HashMap::new())),
         };
         self.plugin = plugin_builder(engine)?;
         self.capabilities = self
@@ -470,10 +468,24 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                 );
             }
             EngineRequest::GetSecret { name, response_tx } => {
-                let _ = response_tx.send(
-                    services::crypt::get_secret(&self.api_config, self.node_info.node_id, &name)
-                        .await,
-                );
+                let entry = self.secrets_cache.entry(name.clone());
+                match entry {
+                    Entry::Occupied(cached_value) => {
+                        let _ = response_tx.send(Ok(Some(cached_value.get().clone())));
+                    }
+                    Entry::Vacant(vacant) => {
+                        let secret = services::crypt::get_secret(
+                            &self.api_config,
+                            self.node_info.node_id,
+                            &name,
+                        )
+                        .await;
+                        if let Ok(Some(secret)) = &secret {
+                            vacant.insert(secret.clone());
+                        }
+                        let _ = response_tx.send(secret);
+                    }
+                }
             }
             EngineRequest::PutSecret {
                 name,
@@ -617,7 +629,6 @@ pub struct Engine {
     params: NodeProperties,
     node_env: NodeEnv,
     plugin_data_path: PathBuf,
-    secrets_cache: Arc<Mutex<HashMap<String, Vec<u8>>>>,
 }
 
 type ResponseTx<T> = tokio::sync::oneshot::Sender<T>;
@@ -879,31 +890,12 @@ impl babel_api::engine::Engine for Engine {
 
     fn get_secret(&self, name: &str) -> Result<Option<Vec<u8>>> {
         if !self.node_env.dev_mode {
-            let mut secrets = self
-                .secrets_cache
-                .lock()
-                .map_err(|_| eyre::eyre!("Failed to lock secrets cache"))?;
-            let entry = secrets.entry(name.to_string());
-            match entry {
-                std::collections::hash_map::Entry::Occupied(occupied) => {
-                    Ok(Some(occupied.get().to_owned()))
-                }
-                std::collections::hash_map::Entry::Vacant(vacant) => {
-                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-                    self.tx.blocking_send(EngineRequest::GetSecret {
-                        response_tx,
-                        name: name.to_owned(),
-                    })?;
-                    let value = response_rx.blocking_recv()??;
-                    match value {
-                        Some(value) => {
-                            vacant.insert(value.clone());
-                            Ok(Some(value))
-                        }
-                        None => Ok(None),
-                    }
-                }
-            }
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            self.tx.blocking_send(EngineRequest::GetSecret {
+                response_tx,
+                name: name.to_owned(),
+            })?;
+            response_rx.blocking_recv()?
         } else {
             Ok(Some("dev-secret".as_bytes().to_vec()))
         }
