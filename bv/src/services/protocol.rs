@@ -287,6 +287,7 @@ impl<C: ApiServiceConnector + Clone> ProtocolService<C> {
                 .map(|pointer| pointer.into())
                 .collect(),
             min_babel_version,
+            dns_scheme: Some("https://".to_string()),
         };
         if let Some(mut remote) = self
             .get_image(
