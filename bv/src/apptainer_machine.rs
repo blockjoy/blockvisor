@@ -399,7 +399,7 @@ impl ApptainerMachine {
                     "-c",
                     "6",
                     "-i",
-                    "0.5",
+                    "0.25",
                     &self.net_conf.gateway.to_string(),
                 ],
             )
