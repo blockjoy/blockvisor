@@ -1,6 +1,6 @@
 use crate::engine::JobStatus;
 use crate::plugin::Plugin;
-use crate::rhai_plugin::PLUGIN_CONFIG_CONST_NAME;
+use crate::rhai_plugin::PLUGIN_CONFIG_FN_NAME;
 use crate::{
     engine::{
         Engine, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, NodeEnv, RestRequest,
@@ -32,7 +32,7 @@ pub fn check(
     rhai_plugin.init()?;
     if rhai_plugin.bare.plugin_config.is_none() {
         warnings.push(format!(
-            "Deprecated API used: missing {PLUGIN_CONFIG_CONST_NAME}"
+            "Deprecated API used: missing {PLUGIN_CONFIG_FN_NAME}"
         ));
     }
     // TODO define more checks

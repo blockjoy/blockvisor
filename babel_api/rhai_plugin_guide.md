@@ -11,8 +11,8 @@ See [The Rhai Book](https://rhai.rs/book) for more details on Rhai language itse
 
 ### Core of All Babel Plugins
 
-1. `const PLUGIN_CONFIG` - The easiest way to describe node initialization and background services. Define this constant
-as described in [PLUGIN_CONFIG](#plugin_config) chapter, to use default implementation for `init()` and `upload()` functions.
+1. `fn plugin_config()` - The easiest way to describe node initialization and background services is to define this function
+as described in [plugin_config](#plugin_config) chapter, to use default implementation for `init()` and `upload()` functions.
 2. Dynamic node configuration is accessible via `node_params()` function. This can and should be used in order
 to change the behavior of the script according to the node configuration.
 3. While protocol data are typically huge, BV provides built-in facility for efficient uploading and downloading
@@ -25,9 +25,9 @@ To add some specific protocol support Babel Plugin must tell BV how to use proto
 to properly setup and maintain protocol node. This chapter describe interface that needs to be implemented by script
 for this purpose.
 
-### PLUGIN_CONFIG
+### plugin_config
 
-`PLUGIN_CONFIG` constant is a convenient way to specify following things:
+`plugin_config` function is a convenient way to specify following things:
  - node initialization process
  - download job configuration
  - alternative download command
@@ -38,10 +38,10 @@ for this purpose.
 
 See [example](examples/plugin_config.rhai) with comments for more details.
 
-### BASE_CONFIG
+### base_config
 
-`BASE_CONFIG` constant is a convenient way to define configuration files and services that are shared between multiple plugins.
-Config files defined in `BASE_CONFIG` are rendered before anything else in `init()` function. Services defined in `BASE_CONFIG`
+`base_config` function is a convenient way to define configuration files and services that are shared between multiple plugins.
+Config files defined in `base_config` are rendered before anything else in `init()` function. Services defined in `base_config()`
 are started right after config files are rendered, and are not stopped with other protocol services e.g. during data upload.
 
 See [example](examples/base.rhai) with comments for more details.
@@ -56,7 +56,7 @@ Functions listed below are required by BV to work properly.
   <br>It is the place where protocol services running in background should be described as so called `jobs`.
   Also, any other one-off operations can be done here (e.g. initializing stuff, or downloading protocol data archives).
   <br>See [Engine Interface](#engine-interface) and [Background Jobs](#background-jobs) chapter for more details on how to start jobs.
-  <br> BV provide default implementation if [PLUGIN_CONFIG](#plugin_config) constant is defined.
+  <br> BV provide default implementation if [plugin_config](#plugin_config) function is defined.
   Default implementation run all init commands and start init jobs according to config,
   then try to start build-in download job, if fail then fallback to alternative download (if provided),
   finally starts configured services.
@@ -87,7 +87,7 @@ to recognise the node, but the purpose may vary per protocol.
   <br>**Example**: _chilly-peach-kangaroo_
 - `consensus()` - Returns `bool` whether this node is in consensus or not.
 - `upload()` - Upload protocol data snapshot to cloud storage, so it can be quickly reused by newly created nodes.
-  <br> BV provide default implementation if [PLUGIN_CONFIG](#plugin_config) constant is defined.
+  <br> BV provide default implementation if [plugin_config](#plugin_config) function is defined.
   Default implementation stop all services, start upload job according to config, and then start services again.
 
 See [example](examples/polygon_functions.rhai) of functions implemented for Polygon.
@@ -113,10 +113,10 @@ fn some_custom_function(arg) {
 
 #### Default `init`
 
-If no `init` function is defined, but only `PLUGIN_CONFIG`, then `default_init` is used which does following:
-- render config files form `BASE_CONFIG`
-- render config files from `PLUGIN_CONFIG`
-- start default services(from `BASE_CONFIG`)
+If no `init` function is defined, but only `plugin_config`, then `default_init` is used which does following:
+- render config files form `base_config`
+- render config files from `plugin_config`
+- start default services(from `base_config`)
 - run `init` commands
 - start `init` jobs
 - start `download` job (if download is not completed yet and not `dev_node`)
@@ -124,11 +124,11 @@ If no `init` function is defined, but only `PLUGIN_CONFIG`, then `default_init` 
 - start `post_download` jobs
 - if neither `download` nor `alternative_download` is provided, start `cold_init` job
 - start services
-- schedule tasks defined in `PLUGIN_CONFIG`
+- schedule tasks defined in `plugin_config`
 
 #### Default `upload`
 
-If no `upload` function is defined, but only `PLUGIN_CONFIG`, then `default_upload` is used which does following:
+If no `upload` function is defined, but only `plugin_config`, then `default_upload` is used which does following:
 - stop services that `use_protocol_data`
 - run `pre_upload` commands
 - start `pre_upload` jobs
@@ -309,13 +309,13 @@ upload job config options.
 
 To trigger upload, simply call `bv node run upload`.
 
-Define [PLUGIN_CONFIG](#plugin_config) constant to use default implementation for `upload`.
+Define [plugin_config](#plugin_config) function to use default implementation for `upload`.
 
 ### Downloading Data Archives
 
 Once protocol data archive is available on remote object storage, it can be used to speedup new nodes setup.
 
-To use default implementation define [PLUGIN_CONFIG](#plugin_config) constant. Otherwise
+To use default implementation define [plugin_config](#plugin_config) function. Otherwise
 see [example](examples/custom_download_upload.rhai) of custom `init()` function.
 
 Typically, download job is started in `init()` before other protocol services are started. This is achieved by job

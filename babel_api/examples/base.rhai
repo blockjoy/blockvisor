@@ -1,4 +1,4 @@
-export const BASE_CONFIG = #{
+fn base_config() {#{
     /// [optional] List of configuration files to be rendered from template with provided params.
     /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
     config_files: [
@@ -57,4 +57,4 @@ export const BASE_CONFIG = #{
              run_sh: `proxy`,
          }
     ],
-};
+}}

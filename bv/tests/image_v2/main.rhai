@@ -1,7 +1,7 @@
 const API_HOST = "http://localhost:4467/";
 const TEST_CMD = run_sh("echo ok").unwrap();
 
-const PLUGIN_CONFIG = #{
+fn plugin_config() {#{
     init: #{
         commands: [
             `touch /blockjoy/.protocol_data.lock`,
@@ -43,7 +43,7 @@ const PLUGIN_CONFIG = #{
             max_retries: 1,
         },
     },
-};
+}}
 
 fn protocol_status() {
     #{state: "broadcasting", health: "healthy"}

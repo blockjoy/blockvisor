@@ -17,6 +17,7 @@ use rhai::{
     serde::{from_dynamic, to_dynamic},
     Dynamic, FnPtr, Map, AST,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -24,9 +25,11 @@ use std::{path::Path, sync::Arc, time::Duration};
 use tracing::Level;
 
 pub const PLUGIN_CONFIG_CONST_NAME: &str = "PLUGIN_CONFIG";
+pub const PLUGIN_CONFIG_FN_NAME: &str = "plugin_config";
 const INIT_FN_NAME: &str = "init";
 const PROTOCOL_STATUS_FN_NAME: &str = "protocol_status";
 const BASE_CONFIG_CONST_NAME: &str = "BASE_CONFIG";
+const BASE_CONFIG_FN_NAME: &str = "base_config";
 
 #[derive(Debug)]
 pub struct RhaiPlugin<E> {
@@ -378,6 +381,34 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         );
         scope
     }
+
+    fn get_config<T: DeserializeOwned>(
+        &mut self,
+        scope: &rhai::Scope<'_>,
+        config_fn_name: &str,
+        config_const_name: &str,
+    ) -> Result<Option<T>> {
+        let dynamic = if self
+            .bare
+            .ast
+            .iter_functions()
+            .any(|meta| meta.name == config_fn_name && meta.params.is_empty())
+        {
+            Some(self.call_fn::<_, Dynamic>(config_fn_name, ())?)
+        } else {
+            None
+        };
+        // LEGACY node support - remove once all nodes upgraded
+        let dynamic = dynamic.as_ref().or(scope.get(config_const_name));
+        if let Some(dynamic) = dynamic {
+            let value: T = from_dynamic(dynamic).with_context(|| {
+                format!("Invalid Rhai script - failed to deserialize {config_fn_name}")
+            })?;
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
@@ -485,7 +516,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
 
     fn default_init(&self) -> Result<()> {
         let Some(config) = self.plugin_config.clone() else {
-            bail!("Missing {PLUGIN_CONFIG_CONST_NAME} constant")
+            bail!("Missing {PLUGIN_CONFIG_FN_NAME} function")
         };
         if let Some(base_config) = &self.base_config {
             self.render_configs_files(base_config.config_files.clone())?;
@@ -537,7 +568,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
 
     fn default_upload(&self) -> Result<()> {
         let Some(mut config) = self.plugin_config.clone() else {
-            bail!("Missing {PLUGIN_CONFIG_CONST_NAME} constant")
+            bail!("Missing {PLUGIN_CONFIG_FN_NAME} function")
         };
 
         config.services.retain(|service| service.use_protocol_data);
@@ -601,23 +632,18 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
         let mut scope = self.build_scope();
         self.rhai_engine
             .run_ast_with_scope(&mut scope, &self.bare.ast)?;
-        if let Some(dynamic) = scope.get(BASE_CONFIG_CONST_NAME) {
-            let value: BaseConfig = from_dynamic(dynamic).with_context(|| {
-                format!("Invalid Rhai script - failed to deserialize {BASE_CONFIG_CONST_NAME}")
-            })?;
-            self.bare.base_config = Some(value);
-        }
-        if let Some(dynamic) = scope.get(PLUGIN_CONFIG_CONST_NAME) {
-            let value: PluginConfig = from_dynamic(dynamic).with_context(|| {
-                format!("Invalid Rhai script - failed to deserialize {PLUGIN_CONFIG_CONST_NAME}")
-            })?;
-            value.validate(
+
+        self.bare.base_config =
+            self.get_config(&scope, BASE_CONFIG_FN_NAME, BASE_CONFIG_CONST_NAME)?;
+        self.bare.plugin_config =
+            self.get_config(&scope, PLUGIN_CONFIG_FN_NAME, PLUGIN_CONFIG_CONST_NAME)?;
+        if let Some(plugin_config) = &self.bare.plugin_config {
+            plugin_config.validate(
                 self.bare
                     .base_config
                     .as_ref()
                     .and_then(|config| config.services.as_ref()),
             )?;
-            self.bare.plugin_config = Some(value);
         }
         Ok(())
     }
@@ -976,10 +1002,10 @@ mod tests {
         let script = r#"
         fn function_A(any_param) {
         }
-        
+
         fn function_b(more, params) {
         }
-        
+
         fn functionC() {
             // no params
         }
@@ -1011,11 +1037,11 @@ mod tests {
         fn height() {
             77
         }
-        
+
         fn block_age() {
             18
         }
-        
+
         fn name() {
             "block name"
         }
@@ -1405,7 +1431,7 @@ mod tests {
     #[test]
     fn test_protocol_status() -> Result<()> {
         let script = r#"
-            const PLUGIN_CONFIG = #{
+            fn plugin_config() {#{
                 services: [
                     #{
                         name: "protocol_service_a",
@@ -1416,7 +1442,7 @@ mod tests {
                         run_sh: `echo B`,
                     }
                 ],
-            };
+            }}
 
             fn init() {}
 
@@ -1547,7 +1573,7 @@ mod tests {
     #[test]
     fn test_default_upload() -> Result<()> {
         let script = r#"
-            const PLUGIN_CONFIG = #{
+            fn plugin_config() {#{
                 services: [
                     #{
                         name: "protocol_service",
@@ -1580,7 +1606,7 @@ mod tests {
                         use_protocol_data: true,
                     }
                 ],
-            };
+            }}
             fn init() {}
             "#;
         let mut babel = MockBabelEngine::new();
@@ -1703,7 +1729,7 @@ mod tests {
     #[test]
     fn test_default_init() -> Result<()> {
         let script = r#"
-            const PLUGIN_CONFIG = #{
+            fn plugin_config() {#{
                 config_files: [
                     #{
                         template: "/var/lib/babel/templates/config.template",
@@ -1755,8 +1781,8 @@ mod tests {
                     }
                 ],
                 disable_default_services: false,
-            };
-            const BASE_CONFIG = #{
+            }}
+            fn base_config() {#{
               config_files: [
                   #{
                       template: "/var/lib/babel/templates/base_config.template",
@@ -1772,7 +1798,7 @@ mod tests {
                       run_sh: `nginx with params`,
                   },
               ]
-            }
+            }}
             "#;
         let mut babel = MockBabelEngine::new();
         babel.expect_node_env().returning(|| NodeEnv {

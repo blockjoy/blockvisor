@@ -19,8 +19,8 @@ const A_DIR = node_env().protocol_data_path + "/A";
 const B_DIR = node_env().protocol_data_path + "/B";
 const NET =  global::NETS[node_env().node_variant];
 
-const BASE_CONFIG = base::BASE_CONFIG;
-const PLUGIN_CONFIG = #{
+fn base_config() {base::base_config()}
+fn plugin_config() {#{
     /// [optional] List of configuration files to be rendered from template with provided params.
     /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
     config_files: [
@@ -289,7 +289,7 @@ const PLUGIN_CONFIG = #{
     /// [optional] Set to true, to disable all default services.
     /// Default to false.
     disable_default_services: true,
-};
+}}
 
 /// Returns protocol application status.
 /// SHALL be implemented

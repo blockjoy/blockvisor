@@ -345,7 +345,7 @@ where
         if VmStatus::Running != node.expected_status() {
             let was_initialised = node.state.initialized;
             node.start().await?;
-            if reload_plugin && !was_initialised {
+            if reload_plugin && was_initialised {
                 node.babel_engine.evaluate_plugin_config().await?;
             }
         }
