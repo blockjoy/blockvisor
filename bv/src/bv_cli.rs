@@ -215,6 +215,12 @@ pub enum NodeCommand {
         /// The id or name of the node.
         id_or_name: String,
     },
+
+    /// Force node plugin reload from file.
+    PluginReload {
+        /// The id or name of the node.
+        id_or_name: String,
+    },
 }
 
 #[derive(Subcommand)]

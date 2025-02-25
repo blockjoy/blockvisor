@@ -635,6 +635,10 @@ mod tests {
                 &self,
                 request: tonic::Request<(Uuid, String, String)>,
             ) -> Result<tonic::Response<String>, tonic::Status>;
+            async fn reload_plugin(
+                &self,
+                request: tonic::Request<Uuid>
+            ) -> Result<tonic::Response<()>, tonic::Status>;
             async fn get_node_metrics(
                 &self,
                 request: tonic::Request<Uuid>,

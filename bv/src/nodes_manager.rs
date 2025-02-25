@@ -587,6 +587,33 @@ where
         }
     }
 
+    #[instrument(skip(self))]
+    pub async fn reload_plugin(&self, id: Uuid) -> eyre::Result<(), BabelError> {
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock
+            .get(&id)
+            .ok_or_else(|| Error::NodeNotFound)
+            .map_err(|err| BabelError::Internal { err: err.into() })?;
+        let MaybeNode::Node(node_lock) = maybe_node else {
+            return Err(BabelError::Internal {
+                err: anyhow!("Cannot reload plugin for broken node {id}"),
+            });
+        };
+        let mut node = node_lock.write().await;
+
+        node.reload_plugin()
+            .await
+            .map_err(|err| BabelError::Internal { err })?;
+        if node.expected_status() == VmStatus::Running {
+            // reevaluate plugin config if node is already started
+            node.babel_engine
+                .evaluate_plugin_config()
+                .await
+                .map_err(|err| BabelError::Internal { err })?;
+        }
+        Ok(())
+    }
+
     /// Check if we have enough resources on the host to create/upgrade the node
     ///
     /// Optional tolerance parameter is useful if we want to allow some overbooking.

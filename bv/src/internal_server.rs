@@ -66,6 +66,7 @@ trait Service {
     fn get_node_id_for_name(name: String) -> String;
     fn list_capabilities(id: Uuid) -> Vec<String>;
     fn run(id: Uuid, method: String, param: String) -> String;
+    fn reload_plugin(id: Uuid);
     fn get_node_metrics(id: Uuid) -> node_metrics::Metric;
     fn get_cluster_status() -> String; // TODO: update with proper struct
 }
@@ -508,7 +509,7 @@ where
         let (id, method, param) = request.into_inner();
         let value = self
             .nodes_manager
-            .call_method(id, &method, &param, true)
+            .call_method(id, &method, &param, self.is_dev_node(id).await?)
             .await
             .map_err(|e| match e {
                 nodes_manager::BabelError::MethodNotFound => {
@@ -518,6 +519,18 @@ where
                 nodes_manager::BabelError::Plugin { err } => Status::unknown(format!("{err:#}")),
             })?;
         Ok(Response::new(value))
+    }
+
+    /// Reload babel plugin for given node.
+    #[instrument(skip(self), ret(Debug))]
+    async fn reload_plugin(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
+        status_check().await?;
+        let id = request.into_inner();
+        self.nodes_manager
+            .reload_plugin(id)
+            .await
+            .map_err(|e| Status::unknown(format!("{e:#}")))?;
+        Ok(Response::new(()))
     }
 
     #[instrument(skip(self), ret(Debug))]
