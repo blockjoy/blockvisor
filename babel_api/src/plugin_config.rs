@@ -16,6 +16,8 @@ pub const STARTING_STATE_NAME: &str = "starting";
 pub struct PluginConfig {
     /// List of configuration files to be rendered from template with provided params.
     pub config_files: Option<Vec<ConfigFile>>,
+    /// List of auxiliary services that doesn't need init steps and doesn't use protocol data.
+    pub aux_services: Option<Vec<AuxService>>,
     /// Node init actions.
     pub init: Option<Actions>,
     /// Download configuration.
@@ -38,14 +40,10 @@ pub struct PluginConfig {
     pub post_upload: Option<Vec<Job>>,
     /// List of tasks to be scheduled on init.
     pub scheduled: Option<Vec<Task>>,
-    /// Set to true, to disable all default services.
-    /// Default to false.
-    #[serde(default)]
-    pub disable_default_services: bool,
 }
 
 impl PluginConfig {
-    pub fn validate(&self, default_services: Option<&Vec<DefaultService>>) -> eyre::Result<()> {
+    pub fn validate(&self) -> eyre::Result<()> {
         // Scheduled tasks name uniqueness
         if let Some(scheduled) = &self.scheduled {
             let mut unique = HashSet::new();
@@ -58,12 +56,12 @@ impl PluginConfig {
         let mut unique = HashSet::new();
         unique.insert(UPLOAD_JOB_NAME);
         unique.insert(DOWNLOAD_JOB_NAME);
-        if let Some(default_services) = default_services {
+        if let Some(aux_services) = &self.aux_services {
             ensure!(
-                default_services
+                aux_services
                     .iter()
                     .all(|service| unique.insert(&service.name)),
-                "Default services names are not unique"
+                "Auxiliary services names are not unique"
             );
         }
         if let Some(init) = &self.init {
@@ -101,14 +99,6 @@ impl PluginConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BaseConfig {
-    /// List of configuration files to be rendered from template with provided params.
-    pub config_files: Option<Vec<ConfigFile>>,
-    /// List of default services to be run in background.
-    pub services: Option<Vec<DefaultService>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConfigFile {
     /// It assumes that file pointed by `template` argument exists.
     pub template: PathBuf,
@@ -119,9 +109,9 @@ pub struct ConfigFile {
     pub params: Dynamic,
 }
 
-/// Definition of default service that should be run on all nodes (if supported by image).
+/// Definition of auxiliary service that doesn't need init steps and doesn't use protocol data.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DefaultService {
+pub struct AuxService {
     /// Name of service. This will be used as Job name, so make sure it is unique enough,
     /// to not collide with other jobs.
     pub name: String,

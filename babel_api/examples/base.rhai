@@ -1,7 +1,5 @@
-fn base_config() {#{
-    /// [optional] List of configuration files to be rendered from template with provided params.
-    /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
-    config_files: [
+fn config_files() {
+    [
         #{
             /// It assumes that file pointed by `template` argument exists.
             template: "/var/lib/babel/templates/config.template",
@@ -12,12 +10,14 @@ fn base_config() {#{
                 node_name: node_env().node_name
             },
         },
-    ],
-    /// [optional] List of default services to be run in background.
-    services: [
+    ]
+}
+
+fn aux_services() {
+    [
          #{
              /// Unique service job name.
-             name: "default_service_a",
+             name: "aux_service_a",
              /// Sh script body. It shall be blocking (foreground) process.
              run_sh: `monitoring_agent`,
              /// [optional] Job restart config.
@@ -52,9 +52,5 @@ fn base_config() {#{
              /// If not set default to false.
              log_timestamp: true,
          },
-         #{
-             name: "default_service_b",
-             run_sh: `proxy`,
-         }
-    ],
-}}
+    ]
+}

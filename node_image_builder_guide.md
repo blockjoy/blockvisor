@@ -103,9 +103,10 @@ type of node and customer needs
 Finally, having knowledge gained in previous steps, go back to `Dockerfile` and update it with all necessary steps
 to prepare sufficient node rootfs.
 
-__NOTE__: It is strongly recommended to put all common definition info some base docker image and then
+__NOTE__: It is strongly recommended to put all common definition into some base docker image and then
 reuse it in node specific `Dockerfile`s. Base docker images may also contain common babel plugin code
-e.g. with `BASE_CONFIG` definition.
+e.g. common auxiliary services definition.
+See [Base Example](babel_api/examples/base.rhai) for more details.
 
 __HINT 1__: You can check what blockvisor is doing on the host by running `journalctl -u blockvisor -fn 50`.
 
@@ -145,15 +146,15 @@ Use `bv n job` CLI to stop or cleanup unwanted jobs.
 Go to [Rhai Plugin Scripting Guide](babel_api/rhai_plugin_guide.md) for further details
 on how to properly implement Babel Plugin in Rhai language.
 
-#### Define Default Services as needed
+#### Define Auxiliary Services as needed
 
-You can define additional services that will be automatically started on all nodes of given kind in via `BASE_CONFIG`
-constant in Rhai script. See [Services Example](babel_api/examples/base.rhai) for more details.
+You can define auxiliary services that will be automatically started on nodes via `aux_services` field
+in `plugin_config`. It is the place to define protocol unrelated services like monitoring agent or proxy servers.
 
-It is the place to define protocol unrelated services like monitoring agent or proxy servers.
-
-Hence, it is strongly recommended to put `BASE_CONFIG` definition in a rhai file that will be included
+Hence, it is strongly recommended to put `aux_services` definition in a rhai file that will be included
 in some base container image. Then it can be imported and used by node specific `main.rhai` scripts.
+
+See [Plugin Config Example](babel_api/examples/plugin_config.rhai) for more details.
 
 __NOTE__: Use `nib image check` to quickly check if node can be created, started and jobs doesn't crash.
 

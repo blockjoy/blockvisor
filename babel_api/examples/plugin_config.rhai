@@ -19,11 +19,10 @@ const A_DIR = node_env().protocol_data_path + "/A";
 const B_DIR = node_env().protocol_data_path + "/B";
 const NET =  global::NETS[node_env().node_variant];
 
-fn base_config() {base::base_config()}
 fn plugin_config() {#{
     /// [optional] List of configuration files to be rendered from template with provided params.
     /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
-    config_files: [
+    config_files: base::config_files() + [
         #{
             /// It assumes that file pointed by `template` argument exists.
             template: "/var/lib/babel/templates/config.template",
@@ -35,6 +34,8 @@ fn plugin_config() {#{
             },
         },
     ],
+    /// [optional] List of auxiliary services that doesn't need init steps and doesn't use protocol data.
+    aux_services: base::aux_services(),
     /// Node init actions.
     init: #{
         /// List of sh commands to be executed first.
@@ -286,9 +287,6 @@ fn plugin_config() {#{
             param: "param_value",
         }
     ],
-    /// [optional] Set to true, to disable all default services.
-    /// Default to false.
-    disable_default_services: true,
 }}
 
 /// Returns protocol application status.

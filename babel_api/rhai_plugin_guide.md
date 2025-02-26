@@ -29,6 +29,7 @@ for this purpose.
 
 `plugin_config` function is a convenient way to specify following things:
  - node initialization process
+ - auxiliary services to run in background (e.g. for monitoring)
  - download job configuration
  - alternative download command
  - post-download actions
@@ -37,14 +38,6 @@ for this purpose.
  - upload job configuration
 
 See [example](examples/plugin_config.rhai) with comments for more details.
-
-### base_config
-
-`base_config` function is a convenient way to define configuration files and services that are shared between multiple plugins.
-Config files defined in `base_config` are rendered before anything else in `init()` function. Services defined in `base_config()`
-are started right after config files are rendered, and are not stopped with other protocol services e.g. during data upload.
-
-See [example](examples/base.rhai) with comments for more details.
 
 ### Functions that SHALL be implemented by Plugin
 
@@ -114,9 +107,8 @@ fn some_custom_function(arg) {
 #### Default `init`
 
 If no `init` function is defined, but only `plugin_config`, then `default_init` is used which does following:
-- render config files form `base_config`
 - render config files from `plugin_config`
-- start default services(from `base_config`)
+- start auxiliary services from `plugin_config`
 - run `init` commands
 - start `init` jobs
 - start `download` job (if download is not completed yet and not `dev_node`)

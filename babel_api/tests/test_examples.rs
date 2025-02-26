@@ -259,6 +259,35 @@ fn test_plugin_config() -> eyre::Result<()> {
     babel
         .expect_create_job()
         .with(
+            predicate::eq("aux_service_a"),
+            predicate::eq(JobConfig {
+                job_type: babel_api::engine::JobType::RunSh("monitoring_agent".to_string()),
+                restart: babel_api::engine::RestartPolicy::Always(RestartConfig {
+                    backoff_timeout_ms: 60000,
+                    backoff_base_ms: 1000,
+                    max_retries: Some(13),
+                }),
+                shutdown_timeout_secs: Some(120),
+                shutdown_signal: Some(babel_api::engine::PosixSignal::SIGINT),
+                needs: None,
+                wait_for: None,
+                run_as: Some("some_user".to_string()),
+                log_buffer_capacity_mb: Some(256),
+                log_timestamp: Some(true),
+                use_protocol_data: Some(false),
+                one_time: None,
+            }),
+        )
+        .times(2)
+        .returning(|_, _| Ok(()));
+    babel
+        .expect_start_job()
+        .with(predicate::eq("aux_service_a"))
+        .times(2)
+        .returning(|_| Ok(()));
+    babel
+        .expect_create_job()
+        .with(
             predicate::eq("init_job"),
             predicate::eq(JobConfig {
                 job_type: babel_api::engine::JobType::RunSh(

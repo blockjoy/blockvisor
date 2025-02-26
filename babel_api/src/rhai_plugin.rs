@@ -1,13 +1,12 @@
-use crate::plugin::NodeHealth;
 use crate::plugin_config::{
-    COLD_INIT_JOB_NAME, DOWNLOADING_STATE_NAME, STARTING_STATE_NAME, UPLOADING_STATE_NAME,
+    AuxService, COLD_INIT_JOB_NAME, DOWNLOADING_STATE_NAME, STARTING_STATE_NAME,
+    UPLOADING_STATE_NAME,
 };
 use crate::{
     engine::{Engine, HttpResponse, JobConfig, JobStatus, JrpcRequest, RestRequest, ShResponse},
-    plugin::{Plugin, ProtocolStatus},
+    plugin::{NodeHealth, Plugin, ProtocolStatus},
     plugin_config::{
-        self, Actions, BaseConfig, ConfigFile, Job, PluginConfig, Service, DOWNLOAD_JOB_NAME,
-        UPLOAD_JOB_NAME,
+        self, Actions, ConfigFile, Job, PluginConfig, Service, DOWNLOAD_JOB_NAME, UPLOAD_JOB_NAME,
     },
 };
 use eyre::{anyhow, bail, Context, Error, Report, Result};
@@ -59,7 +58,6 @@ pub(crate) struct BarePlugin<E> {
     pub(crate) babel_engine: Arc<E>,
     pub(crate) ast: AST,
     pub(crate) plugin_config: Option<PluginConfig>,
-    pub(crate) base_config: Option<BaseConfig>,
 }
 
 impl<E: Engine + Sync + Send + 'static> Clone for BarePlugin<E> {
@@ -69,7 +67,6 @@ impl<E: Engine + Sync + Send + 'static> Clone for BarePlugin<E> {
             babel_engine: self.babel_engine.clone(),
             ast: self.ast.clone(),
             plugin_config: self.plugin_config.clone(),
-            base_config: self.base_config.clone(),
         }
     }
 }
@@ -120,7 +117,6 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
                 babel_engine,
                 ast,
                 plugin_config: None,
-                base_config: None,
             },
             rhai_engine,
         };
@@ -383,7 +379,7 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
     }
 
     fn get_config<T: DeserializeOwned>(
-        &mut self,
+        &self,
         scope: &rhai::Scope<'_>,
         config_fn_name: &str,
         config_const_name: &str,
@@ -398,8 +394,9 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         } else {
             None
         };
-        // LEGACY node support - remove once all nodes upgraded
+        // LEGACY left for backward compatibility - remove once all nodes upgraded
         let dynamic = dynamic.as_ref().or(scope.get(config_const_name));
+
         if let Some(dynamic) = dynamic {
             let value: T = from_dynamic(dynamic).with_context(|| {
                 format!("Invalid Rhai script - failed to deserialize {config_fn_name}")
@@ -462,12 +459,8 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         Ok(())
     }
 
-    fn start_default_services(&self) -> Result<()> {
-        if let Some(services) = self
-            .base_config
-            .as_ref()
-            .and_then(|config| config.services.clone())
-        {
+    fn start_aux_services(&self, services: Option<Vec<AuxService>>) -> Result<()> {
+        if let Some(services) = services {
             for service in services {
                 self.create_and_start_job(
                     &service.name.clone(),
@@ -518,13 +511,8 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         let Some(config) = self.plugin_config.clone() else {
             bail!("Missing {PLUGIN_CONFIG_FN_NAME} function")
         };
-        if let Some(base_config) = &self.base_config {
-            self.render_configs_files(base_config.config_files.clone())?;
-        }
         self.render_configs_files(config.config_files)?;
-        if !config.disable_default_services {
-            self.start_default_services()?;
-        }
+        self.start_aux_services(config.aux_services)?;
         let mut services_needs = self.run_actions(config.init, vec![])?;
         if self.babel_engine.protocol_data_stamp()?.is_none() {
             if self.babel_engine.has_protocol_archive()? {
@@ -632,18 +620,34 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
         let mut scope = self.build_scope();
         self.rhai_engine
             .run_ast_with_scope(&mut scope, &self.bare.ast)?;
-
-        self.bare.base_config =
-            self.get_config(&scope, BASE_CONFIG_FN_NAME, BASE_CONFIG_CONST_NAME)?;
         self.bare.plugin_config =
             self.get_config(&scope, PLUGIN_CONFIG_FN_NAME, PLUGIN_CONFIG_CONST_NAME)?;
-        if let Some(plugin_config) = &self.bare.plugin_config {
-            plugin_config.validate(
-                self.bare
-                    .base_config
-                    .as_ref()
-                    .and_then(|config| config.services.as_ref()),
-            )?;
+
+        // LEGACY left for backward compatibility - remove once all nodes upgraded
+        #[derive(Clone, Debug, Serialize, Deserialize)]
+        pub struct BaseConfig {
+            pub config_files: Option<Vec<ConfigFile>>,
+            pub services: Option<Vec<AuxService>>,
+        }
+        let base_config =
+            self.get_config::<BaseConfig>(&scope, BASE_CONFIG_FN_NAME, BASE_CONFIG_CONST_NAME)?;
+
+        if let Some(plugin_config) = &mut self.bare.plugin_config {
+            if let Some(base_config) = base_config {
+                plugin_config.config_files =
+                    match (plugin_config.config_files.take(), base_config.config_files) {
+                        (Some(mut a), Some(mut b)) => {
+                            a.append(&mut b);
+                            Some(a)
+                        }
+                        (Some(a), None) => Some(a),
+                        (None, Some(b)) => Some(b),
+                        (None, None) => None,
+                    };
+                plugin_config.aux_services = base_config.services;
+            }
+
+            plugin_config.validate()?;
         }
         Ok(())
     }
@@ -1420,10 +1424,12 @@ mod tests {
             .with(predicate::eq("secret_key"))
             .return_once(|_| Ok(Some("psecret".as_bytes().to_vec())));
 
-        let plugin = RhaiPlugin::from_str(script, babel)?;
+        let plugin = RhaiPlugin::from_str(script, babel).unwrap();
         assert_eq!(
             r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data|file content|psecret"#,
-            plugin.call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)?
+            plugin
+                .call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)
+                .unwrap()
         );
         Ok(())
     }
@@ -1738,6 +1744,19 @@ mod tests {
                             node_name: node_env().node_name
                         },
                     },
+                    #{
+                        template: "/var/lib/babel/templates/base_config.template",
+                        destination: "/etc/default_service.config",
+                        params: #{
+                            node_id: node_env().node_id
+                        },
+                    },
+                ],
+                aux_services: [
+                    #{
+                        name: "nginx",
+                        run_sh: `nginx with params`,
+                    },
                 ],
                 init: #{
                     commands: [
@@ -1780,24 +1799,6 @@ mod tests {
                         param: "param_value",
                     }
                 ],
-                disable_default_services: false,
-            }}
-            fn base_config() {#{
-              config_files: [
-                  #{
-                      template: "/var/lib/babel/templates/base_config.template",
-                      destination: "/etc/default_service.config",
-                      params: #{
-                          node_id: node_env().node_id
-                      },
-                  },
-              ],
-              services: [
-                  #{
-                      name: "nginx",
-                      run_sh: `nginx with params`,
-                  },
-              ]
             }}
             "#;
         let mut babel = MockBabelEngine::new();
