@@ -1,3 +1,4 @@
+use crate::plugin_config::PluginConfig;
 use eyre::{anyhow, ensure, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -61,6 +62,12 @@ pub trait Engine {
 
     /// Load plugin data from persistent storage.
     fn load_data(&self) -> Result<String>;
+
+    /// Save plugin config to persistent storage.
+    fn save_config(&self, value: &PluginConfig) -> Result<()>;
+
+    /// Load plugin config from persistent storage.
+    fn load_config(&self) -> Result<PluginConfig>;
 
     /// Handle logs from plugin.
     fn log(&self, level: Level, message: &str);

@@ -472,7 +472,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             cmd.arg(format!("instance://{id}"));
             cmd.spawn()?.wait().await?;
         }
-        NodeCommand::PluginReload { id_or_name } => {
+        NodeCommand::ReloadPlugin { id_or_name } => {
             let id = match Uuid::parse_str(&id_or_name) {
                 Ok(id) => id,
                 Err(_) => {

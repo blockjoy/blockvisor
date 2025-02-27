@@ -217,7 +217,7 @@ pub enum NodeCommand {
     },
 
     /// Force node plugin reload from file.
-    PluginReload {
+    ReloadPlugin {
         /// The id or name of the node.
         id_or_name: String,
     },

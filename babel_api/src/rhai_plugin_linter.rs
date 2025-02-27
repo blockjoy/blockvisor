@@ -1,12 +1,11 @@
-use crate::engine::JobStatus;
-use crate::plugin::Plugin;
-use crate::rhai_plugin::PLUGIN_CONFIG_FN_NAME;
 use crate::{
     engine::{
-        Engine, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, NodeEnv, RestRequest,
-        ShResponse,
+        Engine, HttpResponse, JobConfig, JobInfo, JobStatus, JobsInfo, JrpcRequest, NodeEnv,
+        RestRequest, ShResponse,
     },
-    rhai_plugin::RhaiPlugin,
+    plugin::Plugin,
+    plugin_config::PluginConfig,
+    rhai_plugin::{RhaiPlugin, PLUGIN_CONFIG_FN_NAME},
 };
 use eyre::bail;
 use std::{
@@ -149,6 +148,14 @@ impl Engine for LinterEngine {
 
     fn load_data(&self) -> eyre::Result<String> {
         Ok("".to_string())
+    }
+
+    fn save_config(&self, _value: &PluginConfig) -> eyre::Result<()> {
+        Ok(())
+    }
+
+    fn load_config(&self) -> eyre::Result<PluginConfig> {
+        Ok(Default::default())
     }
 
     fn log(&self, _level: Level, _message: &str) {}

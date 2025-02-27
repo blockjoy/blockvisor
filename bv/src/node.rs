@@ -114,7 +114,7 @@ impl<P: Pal> MaybeNode<P> {
                 pal.create_node_connection(node_id),
                 api_config,
                 |engine| RhaiPlugin::from_file(plugin_path, engine),
-                self.context.plugin_data.clone(),
+                self.context.clone(),
                 self.scheduler_tx.clone()
             )
             .await,
@@ -243,7 +243,7 @@ impl<P: Pal + Debug> Node<P> {
             node_conn,
             api_config,
             |engine| RhaiPlugin::from_file(plugin_path, engine),
-            context.plugin_data.clone(),
+            context.clone(),
             scheduler_tx,
         )
         .await

@@ -11,7 +11,7 @@ pub trait Plugin {
     fn init(&mut self) -> Result<()>;
 
     /// Method enforce `plugin_config()` evaluation. It may be called by engine on plugin reload.
-    fn evaluate_plugin_config(&mut self) -> Result<()>;
+    fn reload_plugin_config(&mut self) -> Result<()>;
 
     /// Upload protocol data to remote storage.
     fn upload(&self) -> Result<()>;

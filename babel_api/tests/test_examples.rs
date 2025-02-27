@@ -7,7 +7,7 @@ use babel_api::{
     rhai_plugin,
 };
 use bv_tests_utils::babel_engine_mock::MockBabelEngine;
-use eyre::Context;
+use eyre::{bail, Context};
 use mockall::*;
 use std::path::PathBuf;
 use std::{collections::HashMap, fs, path::Path};
@@ -115,7 +115,10 @@ fn test_rhai_syntax() {
 
 #[test]
 fn test_custom_download_upload() {
-    let dummy_babel = dummy_babel_engine();
+    let mut dummy_babel = dummy_babel_engine();
+    dummy_babel
+        .expect_load_config()
+        .returning(|| bail!("no config"));
     let mut plugin = rhai_plugin::RhaiPlugin::from_file(
         PathBuf::from("examples/custom_download_upload.rhai"),
         dummy_babel,
@@ -127,7 +130,10 @@ fn test_custom_download_upload() {
 
 #[test]
 fn test_init_minimal() {
-    let dummy_babel = dummy_babel_engine();
+    let mut dummy_babel = dummy_babel_engine();
+    dummy_babel
+        .expect_load_config()
+        .returning(|| bail!("no config"));
     let mut plugin = rhai_plugin::RhaiPlugin::from_file(
         PathBuf::from("examples/init_minimal.rhai"),
         dummy_babel,
@@ -138,7 +144,10 @@ fn test_init_minimal() {
 
 #[test]
 fn test_jobs() {
-    let dummy_babel = dummy_babel_engine();
+    let mut dummy_babel = dummy_babel_engine();
+    dummy_babel
+        .expect_load_config()
+        .returning(|| bail!("no config"));
     let mut plugin =
         rhai_plugin::RhaiPlugin::from_file(PathBuf::from("examples/jobs.rhai"), dummy_babel)
             .unwrap();
@@ -148,6 +157,9 @@ fn test_jobs() {
 #[test]
 fn test_polygon_functions() {
     let mut dummy_babel = MockBabelEngine::new();
+    dummy_babel
+        .expect_load_config()
+        .returning(|| bail!("no config"));
     dummy_babel.expect_node_env().returning(Default::default);
     dummy_babel.expect_run_sh().returning(|_, _| {
         Ok(ShResponse {
@@ -198,7 +210,8 @@ fn test_polygon_functions() {
 #[test]
 fn test_plugin_config() -> eyre::Result<()> {
     let mut babel = bv_tests_utils::babel_engine_mock::MockBabelEngine::new();
-
+    babel.expect_load_config().returning(|| bail!("no config"));
+    babel.expect_save_config().times(2).returning(|_| Ok(()));
     babel.expect_node_env().returning(|| NodeEnv {
         node_id: "node_id".to_string(),
         node_name: "node name".to_string(),

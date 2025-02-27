@@ -17,9 +17,10 @@ pub fn build_node_dir(bv_root: &Path, id: Uuid) -> PathBuf {
     build_nodes_dir(bv_root).join(id.to_string())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NodeContext {
     pub plugin_data: PathBuf,
+    pub plugin_config: PathBuf,
     pub nodes_dir: PathBuf,
     pub node_dir: PathBuf,
 }
@@ -30,6 +31,7 @@ impl NodeContext {
         let nodes_dir = build_nodes_dir(bv_root);
         Self {
             plugin_data: node_dir.join("plugin.data"),
+            plugin_config: node_dir.join("plugin_config.json"),
             nodes_dir,
             node_dir,
         }

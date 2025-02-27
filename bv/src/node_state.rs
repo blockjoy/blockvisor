@@ -1,5 +1,4 @@
-use crate::bv_config::ApptainerConfig;
-use crate::firewall;
+use crate::{bv_config::ApptainerConfig, firewall};
 use babel_api::utils::RamdiskConfiguration;
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};

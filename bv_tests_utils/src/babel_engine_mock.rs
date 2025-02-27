@@ -1,6 +1,9 @@
-use babel_api::engine::{
-    Engine, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, NodeEnv, RestRequest,
-    ShResponse,
+use babel_api::{
+    engine::{
+        Engine, HttpResponse, JobConfig, JobInfo, JobsInfo, JrpcRequest, NodeEnv, RestRequest,
+        ShResponse,
+    },
+    plugin_config::PluginConfig,
 };
 use eyre::Result;
 use mockall::*;
@@ -34,6 +37,8 @@ mock! {
         fn node_env(&self) -> NodeEnv;
         fn save_data(&self, value: &str) -> Result<()>;
         fn load_data(&self) -> Result<String>;
+        fn save_config(&self, value: &PluginConfig) -> Result<()>;
+        fn load_config(&self) -> Result<PluginConfig>;
         fn log(&self, level: tracing::Level, message: &str);
         fn add_task(
             &self,

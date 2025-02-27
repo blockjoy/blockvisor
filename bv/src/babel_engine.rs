@@ -12,6 +12,7 @@ use crate::{
     babel_engine_service::{self, BabelEngineServer},
     bv_config::SharedConfig,
     node::NODE_REQUEST_TIMEOUT,
+    node_context::NodeContext,
     node_state::{NodeImage, NodeProperties},
     pal::{BabelClient, NodeConnection},
     scheduler,
@@ -24,6 +25,7 @@ use babel_api::{
         ShResponse,
     },
     plugin::{Plugin, ProtocolStatus},
+    plugin_config::PluginConfig,
     utils::Binary,
 };
 use bv_utils::{
@@ -70,7 +72,7 @@ pub struct BabelEngine<N, P> {
     pub node_connection: N,
     api_config: SharedConfig,
     plugin: P,
-    plugin_data_path: PathBuf,
+    node_context: NodeContext,
     engine_rx: mpsc::Receiver<EngineRequest>,
     engine_tx: mpsc::Sender<EngineRequest>,
     server: Option<BabelEngineServer>,
@@ -86,7 +88,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         node_connection: N,
         api_config: SharedConfig,
         plugin_builder: F,
-        plugin_data_path: PathBuf,
+        node_context: NodeContext,
         scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
         let (engine_tx, engine_rx) = mpsc::channel(16);
@@ -95,7 +97,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             tx: engine_tx.clone(),
             params: node_info.properties.clone(),
             node_env: node_env.clone(),
-            plugin_data_path: plugin_data_path.clone(),
+            node_context: node_context.clone(),
         };
         let plugin = plugin_builder(engine)?;
         let mut babel_engine = Self {
@@ -103,7 +105,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             node_connection,
             api_config,
             plugin,
-            plugin_data_path,
+            node_context,
             engine_rx,
             engine_tx,
             server: None,
@@ -147,7 +149,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             tx: self.engine_tx.clone(),
             params: self.node_info.properties.clone(),
             node_env,
-            plugin_data_path: self.plugin_data_path.clone(),
+            node_context: self.node_context.clone(),
         };
         self.plugin = plugin_builder(engine)?;
         self.capabilities = self
@@ -156,10 +158,10 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         Ok(())
     }
 
-    pub async fn evaluate_plugin_config(&mut self) -> Result<()> {
+    pub async fn reload_plugin_config(&mut self) -> Result<()> {
         self.capabilities = self
             .on_plugin(move |plugin| {
-                plugin.evaluate_plugin_config()?;
+                plugin.reload_plugin_config()?;
                 Ok(plugin.capabilities())
             })
             .await?;
@@ -613,7 +615,7 @@ pub struct Engine {
     tx: mpsc::Sender<EngineRequest>,
     params: NodeProperties,
     node_env: NodeEnv,
-    plugin_data_path: PathBuf,
+    node_context: NodeContext,
 }
 
 type ResponseTx<T> = tokio::sync::oneshot::Sender<T>;
@@ -808,11 +810,26 @@ impl babel_api::engine::Engine for Engine {
     }
 
     fn save_data(&self, value: &str) -> Result<()> {
-        Ok(fs::write(&self.plugin_data_path, value)?)
+        Ok(fs::write(&self.node_context.plugin_data, value)?)
     }
 
     fn load_data(&self) -> Result<String> {
-        Ok(fs::read_to_string(&self.plugin_data_path)?)
+        Ok(fs::read_to_string(&self.node_context.plugin_data)?)
+    }
+
+    /// Save plugin config to persistent storage.
+    fn save_config(&self, value: &PluginConfig) -> Result<()> {
+        Ok(fs::write(
+            &self.node_context.plugin_config,
+            serde_json::to_string(&value)?,
+        )?)
+    }
+
+    /// Load plugin config from persistent storage.
+    fn load_config(&self) -> Result<PluginConfig> {
+        Ok(serde_json::from_str(&fs::read_to_string(
+            &self.node_context.plugin_config,
+        )?)?)
     }
 
     fn log(&self, level: Level, message: &str) {
@@ -1053,7 +1070,7 @@ mod tests {
             Ok(())
         }
 
-        fn evaluate_plugin_config(&mut self) -> Result<()> {
+        fn reload_plugin_config(&mut self) -> Result<()> {
             Ok(())
         }
 
@@ -1186,7 +1203,7 @@ mod tests {
     /// path to root dir used in test, instance of AsyncPanicChecker to make sure that all panics
     /// from other threads will be propagated.
     struct TestEnv {
-        data_path: PathBuf,
+        node_context: NodeContext,
         engine: BabelEngine<TestConnection, DummyPlugin>,
         rx: mpsc::Receiver<scheduler::Action>,
         _async_panic_checker: bv_tests_utils::AsyncPanicChecker,
@@ -1196,7 +1213,12 @@ mod tests {
         async fn new(tmp_root: PathBuf) -> Result<Self> {
             let vm_data_path = tmp_root.join("vm");
             fs::create_dir_all(&vm_data_path)?;
-            let data_path = tmp_root.join("data");
+            let node_context = NodeContext {
+                plugin_data: tmp_root.join("data"),
+                plugin_config: tmp_root.join("config"),
+                nodes_dir: Default::default(),
+                node_dir: Default::default(),
+            };
             let connection = TestConnection {
                 client: babel_api::babel::babel_client::BabelClient::with_interceptor(
                     test_channel(&tmp_root),
@@ -1237,13 +1259,13 @@ mod tests {
                     tmp_root.clone(),
                 ),
                 |engine| Ok(DummyPlugin { engine }),
-                data_path.clone(),
+                node_context.clone(),
                 tx,
             )
             .await?;
 
             Ok(Self {
-                data_path,
+                node_context,
                 engine,
                 rx,
                 _async_panic_checker: Default::default(),
@@ -1455,7 +1477,7 @@ mod tests {
         );
         assert_eq!(
             "custom plugin data",
-            fs::read_to_string(test_env.data_path)?
+            fs::read_to_string(test_env.node_context.plugin_data)?
         );
         assert_eq!(7, test_env.engine.height().await?);
         assert_eq!(77, test_env.engine.block_age().await?);

@@ -111,12 +111,13 @@ impl<E: Engine + Sync + Send + 'static> RhaiPlugin<E> {
         rhai_engine: rhai::Engine,
         plugin_path: Option<PathBuf>,
     ) -> Result<Self> {
+        let plugin_config = babel_engine.load_config().ok();
         let mut plugin = RhaiPlugin {
             bare: BarePlugin {
                 plugin_path,
                 babel_engine,
                 ast,
-                plugin_config: None,
+                plugin_config,
             },
             rhai_engine,
         };
@@ -596,7 +597,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
     }
 
     fn init(&mut self) -> Result<()> {
-        self.evaluate_plugin_config()?;
+        self.reload_plugin_config()?;
 
         if let Some(init_meta) = self
             .bare
@@ -616,7 +617,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
         }
     }
 
-    fn evaluate_plugin_config(&mut self) -> Result<()> {
+    fn reload_plugin_config(&mut self) -> Result<()> {
         let mut scope = self.build_scope();
         self.rhai_engine
             .run_ast_with_scope(&mut scope, &self.bare.ast)?;
@@ -648,6 +649,7 @@ impl<E: Engine + Sync + Send + 'static> Plugin for RhaiPlugin<E> {
             }
 
             plugin_config.validate()?;
+            self.bare.babel_engine.save_config(plugin_config)?;
         }
         Ok(())
     }
@@ -983,6 +985,8 @@ mod tests {
             fn node_env(&self) -> NodeEnv;
             fn save_data(&self, value: &str) -> Result<()>;
             fn load_data(&self) -> Result<String>;
+            fn save_config(&self, value: &PluginConfig) -> Result<()>;
+            fn load_config(&self) -> Result<PluginConfig>;
             fn log(&self, level: Level, message: &str);
             fn add_task(
                 &self,
@@ -1014,8 +1018,28 @@ mod tests {
             // no params
         }
 "#;
-        let plugin = RhaiPlugin::from_str(script, MockBabelEngine::new())?;
+
+        let mut babel = MockBabelEngine::new();
+        babel.expect_load_config().returning(|| {
+            Ok(PluginConfig {
+                config_files: None,
+                aux_services: None,
+                init: None,
+                download: None,
+                alternative_download: None,
+                post_download: None,
+                cold_init: None,
+                services: vec![],
+                pre_upload: None,
+                upload: None,
+                post_upload: None,
+                scheduled: None,
+            })
+        });
+        let plugin = RhaiPlugin::from_str(script, babel)?;
         let mut expected_capabilities = vec![
+            "init".to_string(),
+            "upload".to_string(),
             "function_A".to_string(),
             "function_b".to_string(),
             "functionC".to_string(),
@@ -1064,6 +1088,8 @@ mod tests {
 "#;
         let mut babel = MockBabelEngine::new();
         babel.expect_node_env().returning(Default::default);
+        babel.expect_load_config().returning(|| bail!("no config"));
+        babel.expect_load_config().returning(|| bail!("no config"));
         babel
             .expect_save_data()
             .with(predicate::eq(INIT_FN_NAME))
@@ -1158,6 +1184,7 @@ mod tests {
     }
 "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_load_config().returning(|| bail!("no config"));
         babel
             .expect_log()
             .with(
@@ -1457,6 +1484,8 @@ mod tests {
             }
             "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_load_config().returning(|| bail!("no config"));
+        babel.expect_save_config().once().returning(|_| Ok(()));
         babel.expect_node_env().returning(Default::default);
         babel.expect_get_jobs().once().returning(|| {
             Ok(HashMap::from_iter([(
@@ -1549,6 +1578,7 @@ mod tests {
     #[test]
     fn test_run_actions_without_jobs() -> Result<()> {
         let mut babel = MockBabelEngine::new();
+        babel.expect_load_config().returning(|| bail!("no config"));
         babel
             .expect_run_sh()
             .with(predicate::eq("echo action_cmd"), predicate::eq(None))
@@ -1616,6 +1646,8 @@ mod tests {
             fn init() {}
             "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_load_config().returning(|| bail!("no config"));
+        babel.expect_save_config().once().returning(|_| Ok(()));
         babel.expect_node_env().returning(Default::default);
         babel
             .expect_run_sh()
@@ -1802,6 +1834,8 @@ mod tests {
             }}
             "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_load_config().returning(|| bail!("no config"));
+        babel.expect_save_config().once().returning(|_| Ok(()));
         babel.expect_node_env().returning(|| NodeEnv {
             node_id: "node-id".to_string(),
             node_name: "node name".to_string(),
@@ -2018,6 +2052,10 @@ mod tests {
     #[test]
     fn test_errors_handling() -> Result<()> {
         let script = r#"
+            fn plugin_config() {#{
+                services: []
+            }}
+
             fn custom_method_with_exception(param) {
                 throw "some Rhai exception";
                 ""
@@ -2028,11 +2066,16 @@ mod tests {
             }
         "#;
         let mut babel = MockBabelEngine::new();
+        babel.expect_load_config().returning(|| bail!("no config"));
+        babel
+            .expect_save_config()
+            .once()
+            .returning(|_| bail!("failed to save plugin config"));
         babel.expect_node_env().returning(Default::default);
         babel
             .expect_load_data()
             .return_once(|| bail!("some Rust error"));
-        let plugin = RhaiPlugin::from_str(script, babel)?;
+        let mut plugin = RhaiPlugin::from_str(script, babel)?;
         assert_eq!(
             "Rhai function 'custom_method_with_exception' returned error",
             plugin
@@ -2055,6 +2098,10 @@ mod tests {
                 "{:#}",
                 plugin.call_custom_method("no_method", "").unwrap_err()
             )
+        );
+        assert_eq!(
+            "failed to save plugin config",
+            format!("{:#}", plugin.reload_plugin_config().unwrap_err())
         );
         Ok(())
     }

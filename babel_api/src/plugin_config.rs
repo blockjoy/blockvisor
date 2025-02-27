@@ -12,7 +12,7 @@ pub const UPLOAD_JOB_NAME: &str = "upload";
 pub const UPLOADING_STATE_NAME: &str = "uploading";
 pub const STARTING_STATE_NAME: &str = "starting";
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct PluginConfig {
     /// List of configuration files to be rendered from template with provided params.
     pub config_files: Option<Vec<ConfigFile>>,
