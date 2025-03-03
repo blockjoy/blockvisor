@@ -1,26 +1,20 @@
-version: '3'
-
 services:
   database:
-    image: 'postgres:latest'
+    image: postgres:17-alpine
     ports:
       - 25432:5432
     environment:
+      POSTGRES_DB: blockvisor_db
       POSTGRES_USER: blockvisor
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: blockvisor_db
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U blockvisor -d blockvisor_db"
-        ]
+      test: [ "CMD-SHELL", "pg_isready -U blockvisor -d blockvisor_db" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
   mqtt:
-    image: emqx/emqx-enterprise:5.0.0
+    image: emqx/emqx-enterprise:5.8.1
     ports:
       - 1883:1883
       - 8083:8083
@@ -28,23 +22,13 @@ services:
       - 8883:8883
       - 18083:18083
 
-
-  vault:
-    image: hashicorp/vault:1.17
-    ports:
-      - 28200:8200
-    environment:
-      VAULT_ADDR: "http://0.0.0.0:8200"
-      VAULT_DEV_ROOT_TOKEN_ID: "vault-root-token"
-    cap_add:
-      - IPC_LOCK
-
   api:
     image: api:latest
     pull_policy: never
     ports:
       - 8080:8080
     environment:
+      RUST_LOG: info,blockvisor=debug
       EMAIL_TEMPLATE_DIR: /emails
       CHARGEBEE_SECRET: asdfasdf
       STRIPE_SECRET: asdfasdf
@@ -59,7 +43,6 @@ services:
       JWT_SECRET: 1245456
       REFRESH_SECRET: 23942390
       UI_BASE_URL: https://localhost:3000
-      RUST_LOG: info,blockvisor=debug
       # cookbook service
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
@@ -69,8 +52,6 @@ services:
       ARCHIVE_BUCKET: archive-ci
       DIR_CHAINS_PREFIX: chains
       PRESIGNED_URL_EXPIRATION: 1h
-      # key service
-      KEY_SERVICE_URL: http://api:8080
       # mqtt
       MQTT_SERVER_ADDRESS: mqtt
       MQTT_SERVER_PORT: 1883
@@ -89,13 +70,51 @@ services:
       GRAFANA_LOKI_KEY: grafana-no-loki
       # logs
       LOG_ENVIRONMENT: dev
-      OPENTELEMETRY_ENDPOINT: http://api:8080
-      # vault
-      VAULT_SERVER_ADDRESS: "http://vault:8200"
-      VAULT_ACCESS_TOKEN: "vault-root-token"
-      VAULT_KV_MOUNT: "blockjoy"
-
+      OPENTELEMETRY_ENDPOINT: http://opentelemetry:4317
 
     depends_on:
       database:
         condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    ports:
+      - 23000:3000
+    volumes:
+      - ./docker/grafana.yaml:/etc/grafana/provisioning/datasources/prometheus.yaml
+    depends_on:
+      - prometheus
+
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    ports:
+      - 29090:9090
+    volumes:
+      - ./docker/prometheus.yaml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - opentelemetry
+
+  opentelemetry:
+    image: otel/opentelemetry-collector-contrib:0.113.0
+    command: ["--config=/etc/opentelemetry.yaml"]
+    ports:
+      - 24317:4317
+      - 28889:8889
+    volumes:
+      - ./docker/opentelemetry.yaml:/etc/opentelemetry.yaml
+    depends_on:
+      - loki
+      - tempo
+
+  loki:
+    image: grafana/loki:3.3.0
+    ports:
+      - 23100:3100
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    ports:
+      - 23200:3200
+    command: -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./docker/tempo.yaml:/etc/tempo/tempo.yaml

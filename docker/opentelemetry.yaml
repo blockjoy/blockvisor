@@ -1,0 +1,33 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+exporters:
+  debug:
+    verbosity: detailed
+
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    send_timestamps: true
+
+  otlp:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug, otlp]
+    metrics:
+      receivers: [otlp]
+      exporters: [debug, prometheus]
+    logs:
+      receivers: [otlp]
+      exporters: [debug, loki]
