@@ -38,20 +38,13 @@ jobs:
           make ci-cleanup
           RUST_LOG="off" make ci-setup
 
-      - uses: 'docker/login-action@v1'
-        with:
-          registry: 'us-docker.pkg.dev'
-          username: 'oauth2accesstoken'
-          password: '${{ steps.auth.outputs.access_token }}'
-
-      - name: Authenticate to docker registry
+      - name: Render api docker-compose
         run: |
           export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
           export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
           export AWS_ACCOUNT_URL=${{ secrets.AWS_ACCOUNT_URL }}
           export CF_TOKEN=${{ secrets.CF_TOKEN }}
           envsubst < docker-compose.yml.template > docker-compose.yml
-          echo '${{ steps.auth.outputs.access_token }}' | docker login -u oauth2accesstoken --password-stdin https://us-docker.pkg.dev
 
       - name: Fetch and Build API images
         run: |
