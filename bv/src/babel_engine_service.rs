@@ -124,7 +124,15 @@ impl babel_api::babel::babel_engine_server::BabelEngine for BabelEngineService {
         }) {
             Err(err) => {
                 warn!("{err:#}");
-                Err(Status::internal(err.to_string()))
+                Err(
+                    if let Some(tonic::Code::AlreadyExists) =
+                        err.downcast_ref::<Status>().map(|status| status.code())
+                    {
+                        Status::already_exists(err.to_string())
+                    } else {
+                        Status::internal(err.to_string())
+                    },
+                )
             }
             Ok(slots) => Ok(Response::new(slots)),
         }

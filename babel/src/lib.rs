@@ -23,7 +23,7 @@ use tracing::info;
 
 lazy_static::lazy_static! {
     static ref NON_RETRIABLE: Vec<tonic::Code> = vec![tonic::Code::Internal,
-        tonic::Code::InvalidArgument, tonic::Code::Unimplemented, tonic::Code::PermissionDenied];
+        tonic::Code::InvalidArgument, tonic::Code::Unimplemented, tonic::Code::PermissionDenied, tonic::Code::NotFound, tonic::Code::AlreadyExists];
 }
 
 #[macro_export]
