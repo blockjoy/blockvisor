@@ -38,13 +38,21 @@ jobs:
           make ci-cleanup
           RUST_LOG="off" make ci-setup
 
-      #      - name: Fetch and Build API images
+      #      - name: Fetch and Build API image
       #        run: |
       #          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-api.git blockvisor-api
       #          cd blockvisor-api
       #          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
       #          git submodule update --init
       #          docker build -t api -f ./docker/Dockerfile ./
+
+      - name: Fetch and Build FrontEnd image
+        run: |
+          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-app-web.git blockvisor-app-web
+          cd blockvisor-app-web
+          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
+          git submodule update --init
+          docker build -t app-web ./
 
       - name: Pull images
         run: >
@@ -56,6 +64,9 @@ jobs:
           echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
           echo "AWS_ACCOUNT_URL=${{ secrets.AWS_ACCOUNT_URL }}" >> .env
           echo "CF_TOKEN=${{ secrets.CF_TOKEN }}" >> .env
+          echo "NEXT_PUBLIC_MIXPANEL_TOKEN=${{ secrets.NEXT_PUBLIC_MIXPANEL_TOKEN }}" >> .env
+          echo "NEXT_PUBLIC_STRIPE_KEY=${{ secrets.NEXT_PUBLIC_STRIPE_KEY }}" >> .env
+          echo "NEXT_PUBLIC_PIPEDRIVE_API_KEY=${{ secrets.NEXT_PUBLIC_PIPEDRIVE_API_KEY }}" >> .env
           docker compose up -d
 
       - name: Test

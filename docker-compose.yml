@@ -76,6 +76,21 @@ services:
       database:
         condition: service_healthy
 
+  app-web:
+    image: app-web:latest
+    pull_policy: never
+    ports:
+      - 3000:3000
+    environment:
+      NODE_ENV: "production"
+      NEXT_PUBLIC_VERCEL_ENV: "dev"
+      NEXT_PUBLIC_API_URL: api
+      NEXT_PUBLIC_MQTT_URL: mqtt
+      NEXT_PUBLIC_MIXPANEL_PROJECT_URL: "http://localhost:3000/mp"
+      NEXT_PUBLIC_MIXPANEL_TOKEN: ${NEXT_PUBLIC_MIXPANEL_TOKEN}
+      NEXT_PUBLIC_STRIPE_KEY: ${NEXT_PUBLIC_STRIPE_KEY}
+      NEXT_PUBLIC_PIPEDRIVE_API_KEY: ${NEXT_PUBLIC_PIPEDRIVE_API_KEY}
+
   grafana:
     image: grafana/grafana:11.3.1
     ports:
@@ -96,7 +111,7 @@ services:
 
   opentelemetry:
     image: otel/opentelemetry-collector-contrib:0.113.0
-    command: ["--config=/etc/opentelemetry.yaml"]
+    command: [ "--config=/etc/opentelemetry.yaml" ]
     ports:
       - 24317:4317
       - 28889:8889
