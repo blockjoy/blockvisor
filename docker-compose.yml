@@ -13,7 +13,7 @@ services:
       timeout: 5s
       retries: 5
 
-  mqtt:
+  emqx:
     image: emqx/emqx-enterprise:5.8.1
     ports:
       - 1883:1883
@@ -24,6 +24,9 @@ services:
 
   api:
     image: api:latest
+    #    build:
+    #      context: ./blockvisor-api/
+    #      dockerfile: ./blockvisor-api/docker/Dockerfile
     pull_policy: never
     ports:
       - 8080:8080
@@ -53,7 +56,7 @@ services:
       DIR_CHAINS_PREFIX: chains
       PRESIGNED_URL_EXPIRATION: 1h
       # mqtt
-      MQTT_SERVER_ADDRESS: mqtt
+      MQTT_SERVER_ADDRESS: emqx
       MQTT_SERVER_PORT: 1883
       MQTT_USERNAME: public
       MQTT_PASSWORD: public
@@ -76,6 +79,31 @@ services:
       database:
         condition: service_healthy
 
+  envoy:
+    image: envoyproxy/envoy:v1.24-latest
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml
+    ports:
+      - 8090:8090
+      - 9901:9909
+
+  app-web:
+    image: app-web:latest
+    build:
+      context: ./blockvisor-app-web/
+      args:
+        NODE_ENV: production
+        NEXT_PUBLIC_VERCEL_ENV: dev
+        NEXT_PUBLIC_API_URL: http://${HOST_SERVICES_URL}:8090
+        NEXT_PUBLIC_MQTT_URL: ws://${HOST_SERVICES_URL}:8083/mqtt
+        EXT_PUBLIC_MIXPANEL_PROJECT_URL: http://${HOST_SERVICES_URL}:3000/mp
+        NEXT_PUBLIC_MIXPANEL_TOKEN: ${NEXT_PUBLIC_MIXPANEL_TOKEN}
+        NEXT_PUBLIC_STRIPE_KEY: ${NEXT_PUBLIC_STRIPE_KEY}
+        NEXT_PUBLIC_PIPEDRIVE_API_KEY: ${NEXT_PUBLIC_PIPEDRIVE_API_KEY}
+    pull_policy: never
+    ports:
+      - 3000:3000
+
   grafana:
     image: grafana/grafana:11.3.1
     ports:
@@ -96,7 +124,7 @@ services:
 
   opentelemetry:
     image: otel/opentelemetry-collector-contrib:0.113.0
-    command: ["--config=/etc/opentelemetry.yaml"]
+    command: [ "--config=/etc/opentelemetry.yaml" ]
     ports:
       - 24317:4317
       - 28889:8889

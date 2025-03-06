@@ -33,29 +33,40 @@ jobs:
         run: >
           sudo apt -y install build-essential pkg-config libssl-dev cmake musl-tools pigz awscli
 
-      - name: Build and Reinstall
-        run: |
-          make ci-cleanup
-          RUST_LOG="off" make ci-setup
-
-      #      - name: Fetch and Build API images
+      #      - name: Fetch API
       #        run: |
       #          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-api.git blockvisor-api
       #          cd blockvisor-api
       #          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
       #          git submodule update --init
-      #          docker build -t api -f ./docker/Dockerfile ./
+
+      - name: Fetch FrontEnd
+        run: |
+          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-app-web.git blockvisor-app-web
+          cd blockvisor-app-web
+          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
+          git submodule update --init
 
       - name: Pull images
-        run: >
-          docker compose pull
-
-      - name: Start test env
         run: |
           echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" > .env
           echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
           echo "AWS_ACCOUNT_URL=${{ secrets.AWS_ACCOUNT_URL }}" >> .env
           echo "CF_TOKEN=${{ secrets.CF_TOKEN }}" >> .env
+          echo "NEXT_PUBLIC_MIXPANEL_TOKEN=${{ secrets.NEXT_PUBLIC_MIXPANEL_TOKEN }}" >> .env
+          echo "NEXT_PUBLIC_STRIPE_KEY=${{ secrets.NEXT_PUBLIC_STRIPE_KEY }}" >> .env
+          echo "NEXT_PUBLIC_PIPEDRIVE_API_KEY=${{ secrets.NEXT_PUBLIC_PIPEDRIVE_API_KEY }}" >> .env
+          echo "HOST_SERVICES_URL=${{ vars.HOST_SERVICES_URL }}" >> .env
+          docker compose pull
+          docker compose build
+
+      - name: Build and Reinstall
+        run: |
+          make ci-cleanup
+          RUST_LOG="off" make ci-setup
+
+      - name: Start test env
+        run: |
           docker compose up -d
 
       - name: Test
