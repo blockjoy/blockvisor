@@ -17,33 +17,6 @@ use std::path::PathBuf;
 use std::{path::Path, str};
 use tokio::time::{sleep, Duration};
 
-#[test]
-#[serial]
-fn test_bvup_unknown_provision_token() {
-    let tmp_dir = TempDir::new().unwrap();
-    link_apptainer_config(&tmp_dir).unwrap();
-
-    let provision_token = "NOT_FOUND";
-    let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
-    let url = "http://localhost:8080";
-
-    // make sure blockvisord is not running
-    test_env::bv_run(&["stop"], "", None);
-    let mut cmd = Command::cargo_bin("bvup").unwrap();
-    cmd.args([provision_token, "--skip-download"])
-        .args(["--ifa", ifa])
-        .args(["--api", url])
-        .args(["--gateway-ip", "216.18.214.193"])
-        .args(["--host-ip", "216.18.214.194"])
-        .args(["--use-host-network"])
-        .args(["--region", "eu-1"])
-        .args(["--yes"])
-        .env("BV_ROOT", tmp_dir.as_os_str())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Invalid token"));
-}
-
 #[tokio::test]
 #[serial]
 async fn test_bv_service_e2e() {
@@ -118,6 +91,29 @@ async fn test_bv_service_e2e() {
         })
         .await
         .unwrap();
+
+    let tmp_dir = TempDir::new().unwrap();
+    link_apptainer_config(&tmp_dir).unwrap();
+
+    let provision_token = "NOT_FOUND";
+    let (ifa, _ip) = &local_ip_address::list_afinet_netifas().unwrap()[0];
+    let url = "http://localhost:8080";
+
+    // make sure blockvisord is not running
+    test_env::bv_run(&["stop"], "", None);
+    let mut cmd = Command::cargo_bin("bvup").unwrap();
+    cmd.args([provision_token, "--skip-download"])
+        .args(["--ifa", ifa])
+        .args(["--api", url])
+        .args(["--gateway-ip", "216.18.214.193"])
+        .args(["--host-ip", "216.18.214.194"])
+        .args(["--use-host-network"])
+        .args(["--region", "eu-1"])
+        .args(["--yes"])
+        .env("BV_ROOT", tmp_dir.as_os_str())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid token"));
 
     let provision_token = response.token;
     println!("host provision token: {provision_token}");
