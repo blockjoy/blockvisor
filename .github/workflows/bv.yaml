@@ -46,13 +46,13 @@ jobs:
           export CF_TOKEN=${{ secrets.CF_TOKEN }}
           envsubst < docker-compose.yml.template > docker-compose.yml
 
-      - name: Fetch and Build API images
-        run: |
-          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-api.git blockvisor-api
-          cd blockvisor-api
-          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
-          git submodule update --init
-          docker build -t api -f ./docker/Dockerfile ./
+      #      - name: Fetch and Build API images
+      #        run: |
+      #          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-api.git blockvisor-api
+      #          cd blockvisor-api
+      #          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
+      #          git submodule update --init
+      #          docker build -t api -f ./docker/Dockerfile ./
 
       - name: Pull images
         run: >
