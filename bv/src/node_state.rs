@@ -1,4 +1,4 @@
-use crate::{bv_config::ApptainerConfig, firewall};
+use crate::{bv_config::ApptainerConfig, firewall, utils};
 use babel_api::utils::RamdiskConfiguration;
 use chrono::serde::ts_seconds_option;
 use chrono::{DateTime, Utc};
@@ -186,7 +186,7 @@ impl NodeState {
             })
             .with_context(|| format!("Failed to read node state file `{}`", path.display()))?;
         if need_save {
-            fs::write(&path, &serde_json::to_string(&state)?).await?;
+            utils::careful_save(path, serde_json::to_string(&state)?.as_bytes()).await?;
         }
         Ok(state)
     }
@@ -196,7 +196,7 @@ impl NodeState {
             .join(self.id.to_string())
             .join(NODE_STATE_FILENAME);
         info!("Writing node state: {}", path.display());
-        fs::write(&path, &serde_json::to_string(self)?).await?;
+        utils::careful_save(&path, serde_json::to_string(self)?.as_bytes()).await?;
         Ok(())
     }
 }

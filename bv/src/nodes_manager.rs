@@ -11,7 +11,7 @@ use crate::{
     pal::Pal,
     scheduler,
     scheduler::{Action, Scheduled, Scheduler},
-    BV_VAR_PATH,
+    utils, BV_VAR_PATH,
 };
 use babel_api::{engine::JobInfo, engine::JobsInfo};
 use eyre::{anyhow, bail, Context, Result};
@@ -90,7 +90,9 @@ impl State {
     async fn save(&self, nodes_path: &Path) -> Result<()> {
         info!("Writing nodes common config file: {}", nodes_path.display());
         let config = serde_json::to_string(self).map_err(into_internal)?;
-        fs::write(nodes_path, config).await.map_err(into_internal)?;
+        utils::careful_save(nodes_path, config.as_bytes())
+            .await
+            .map_err(into_internal)?;
 
         Ok(())
     }

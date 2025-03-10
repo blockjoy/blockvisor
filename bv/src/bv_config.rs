@@ -1,4 +1,4 @@
-use crate::{api_config::ApiConfig, services::AuthToken};
+use crate::{api_config::ApiConfig, services::AuthToken, utils};
 use bv_utils::cmd::run_cmd;
 use cidr_utils::cidr::IpCidr;
 use eyre::{anyhow, bail, Context, Result};
@@ -149,8 +149,7 @@ impl Config {
         debug!("Ensuring config dir is present: {}", parent.display());
         fs::create_dir_all(parent).await?;
         debug!("Writing host config: {}", path.display());
-        let config = serde_json::to_string(&self)?;
-        fs::write(path, config).await?;
+        utils::careful_save(&path, serde_json::to_string(&self)?.as_bytes()).await?;
         Ok(())
     }
 }

@@ -1,9 +1,7 @@
-use bv_utils::{cmd::run_cmd, with_retry};
-use eyre::{bail, Context, Result};
+use bv_utils::cmd::run_cmd;
+use eyre::{bail, Result};
 use rand::Rng;
-use semver::Version;
 use std::{
-    cmp::Ordering,
     ffi::OsStr,
     path::{Path, PathBuf},
     time::Duration,
@@ -14,7 +12,7 @@ use tokio::{
     fs::{self},
     io::AsyncWriteExt,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::nib::ImageVariant;
 
@@ -47,20 +45,6 @@ pub fn get_process_pid(process_name: &str, cmd: &str) -> Result<Pid, GetProcessI
         1 => Ok(processes[0].pid()),
         _ => Err(GetProcessIdError::MoreThanOne),
     }
-}
-
-/// Get pids of the running VM processes.
-pub fn get_all_processes_pids(process_name: &str) -> Result<Vec<Pid>> {
-    let mut sys = System::new();
-    debug!("Retrieving pids for processes of `{process_name}`");
-    sys.refresh_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()));
-    Ok(sys
-        .processes_by_name(process_name)
-        .filter(|&process| {
-            process.status() != sysinfo::ProcessStatus::Zombie && process.name() == process_name
-        })
-        .map(|process| process.pid())
-        .collect())
 }
 
 pub struct Archive(PathBuf);
@@ -104,19 +88,6 @@ impl Archive {
     }
 }
 
-const DOWNLOAD_RETRY_MAX: u32 = 3;
-const DOWNLOAD_BACKOFF_BASE_SEC: u64 = 3;
-
-pub async fn download_archive_with_retry(url: &str, path: PathBuf) -> Result<Archive> {
-    with_retry!(
-        download_file(url, &path),
-        DOWNLOAD_RETRY_MAX,
-        DOWNLOAD_BACKOFF_BASE_SEC
-    )
-    .with_context(|| format!("download failed for {url}"))?;
-    Ok(Archive(path))
-}
-
 pub async fn download_archive(url: &str, path: PathBuf) -> Result<Archive> {
     download_file(url, &path).await?;
     Ok(Archive(path))
@@ -140,15 +111,6 @@ async fn download_file(url: &str, path: &PathBuf) -> Result<()> {
     debug!("Done downloading");
 
     Ok(())
-}
-
-pub fn semver_cmp(a: &str, b: &str) -> Ordering {
-    match (Version::parse(a), Version::parse(b)) {
-        (Ok(a), Ok(b)) => a.cmp(&b),
-        (Ok(_), Err(_)) => Ordering::Greater,
-        (Err(_), Ok(_)) => Ordering::Less,
-        (Err(_), Err(_)) => Ordering::Equal,
-    }
 }
 
 /// Take base interval and add random amount of seconds to it
@@ -188,60 +150,27 @@ pub fn verify_variant_sku(image_variant: &ImageVariant) -> eyre::Result<()> {
     ))
 }
 
-#[cfg(test)]
-pub mod tests {
-    use super::*;
-
-    #[test]
-    pub fn test_semver_sort() {
-        let mut versions = vec![
-            "1.2.0",
-            "1.2.3+2",
-            "1.2.3+10",
-            "1.3.0",
-            "2.0.0",
-            "1.0.0-build.3",
-            "1.0.0-build.20",
-            "1.0.0-build.100",
-            "1.0.0-alpha.1",
-            "1.0.0-1",
-            "1.0.0-beta.1",
-            "1.0.0-beta",
-            "1.0.0",
-            "not",
-            "being",
-            "sorted",
-            "0",
-            "1",
-            "3.4.0_bad_underscore.3",
-            "3.4.0_bad_underscore.10",
-        ];
-        versions.sort_by(|a, b| semver_cmp(b, a));
-
-        assert_eq!(
-            versions,
-            vec![
-                "2.0.0",
-                "1.3.0",
-                "1.2.3+10",
-                "1.2.3+2",
-                "1.2.0",
-                "1.0.0",
-                "1.0.0-build.100",
-                "1.0.0-build.20",
-                "1.0.0-build.3",
-                "1.0.0-beta.1",
-                "1.0.0-beta",
-                "1.0.0-alpha.1",
-                "1.0.0-1",
-                "not",
-                "being",
-                "sorted",
-                "0",
-                "1",
-                "3.4.0_bad_underscore.3",
-                "3.4.0_bad_underscore.10",
-            ]
-        );
+pub async fn careful_save(path: &Path, content: &[u8]) -> Result<()> {
+    let backup_path = path.with_extension(format!(
+        "{}_bak",
+        path.extension().unwrap_or_default().to_string_lossy()
+    ));
+    if path.exists() {
+        if backup_path.exists() {
+            fs::remove_file(&backup_path).await?;
+        }
+        fs::rename(path, &backup_path).await?;
     }
+    let res = fs::write(&path, content).await;
+    if backup_path.exists() {
+        if res.is_err() {
+            let _ = fs::remove_file(&path).await;
+            if let Err(err) = fs::rename(&backup_path, path).await {
+                warn!("careful_save can't roll back after failure: {err:#}");
+            }
+        } else if let Err(err) = fs::remove_file(&backup_path).await {
+            warn!("failed to cleanup backup after careful_save: {err:#}");
+        }
+    }
+    Ok(res?)
 }
