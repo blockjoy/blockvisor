@@ -61,6 +61,11 @@ pub enum LimitStatus {
     Exceeded,
 }
 
+pub struct SourcesList {
+    pub total_size: u64,
+    pub sources: Vec<FileLocation>,
+}
+
 impl<T: AsyncTimer> Backoff<T> {
     /// Create new backoff state object.
     pub fn new(timer: T, run: RunFlag, backoff_base_ms: u64, reset_timeout: Duration) -> Self {
@@ -186,10 +191,7 @@ pub async fn save_bin_stream<S: Stream<Item = Result<babel_api::utils::Binary, S
 }
 
 /// Prepare list of all source files, recursively walking down the source directory.
-pub fn sources_list(
-    source_path: &Path,
-    exclude: &[Pattern],
-) -> eyre::Result<(u64, Vec<FileLocation>)> {
+pub fn sources_list(source_path: &Path, exclude: &[Pattern]) -> eyre::Result<SourcesList> {
     let mut sources: Vec<_> = Default::default();
     let mut total_size = 0;
     'sources: for entry in walkdir::WalkDir::new(source_path) {
@@ -214,7 +216,10 @@ pub fn sources_list(
             total_size += size
         }
     }
-    Ok((total_size, sources))
+    Ok(SourcesList {
+        total_size,
+        sources,
+    })
 }
 
 #[cfg(test)]

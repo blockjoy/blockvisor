@@ -7,7 +7,7 @@ use crate::{
     job_runner::{ConnectionPool, Runner, TransferConfig},
     jobs::{load_chunks, load_job_data, save_chunk, save_job_data, RunnersState},
     pal::BabelEngineConnector,
-    utils::sources_list,
+    utils::{sources_list, SourcesList},
     with_selective_retry, BabelEngineClient,
 };
 use async_trait::async_trait;
@@ -87,6 +87,7 @@ pub struct Uploader<C> {
     exclude: Vec<Pattern>,
     config: TransferConfig,
     total_slots: u32,
+    sources_list: Option<SourcesList>,
     url_expires_secs: u32,
     data_version: Option<u64>,
 }
@@ -265,15 +266,18 @@ impl<C: BabelEngineConnector> Uploader<C> {
             .iter()
             .map(|pattern_str| Pattern::new(pattern_str))
             .collect::<Result<Vec<Pattern>, PatternError>>()?;
-        let total_slots = if let Some(number_of_chunks) = number_of_chunks {
+        let (total_slots, sources_list) = if let Some(number_of_chunks) = number_of_chunks {
             if number_of_chunks == 0 {
                 bail!("invalid number of chunks - need at leas one");
             }
-            number_of_chunks
+            (number_of_chunks, None)
         } else {
-            let (total_size, _) = sources_list(&source_dir, &exclude)?;
+            let sources_list = sources_list(&source_dir, &exclude)?;
             // recommended size of chunk is around 500MB
-            (1 + total_size / 500_000_000) as u32
+            (
+                (1 + sources_list.total_size / 500_000_000) as u32,
+                Some(sources_list),
+            )
         };
         let url_expires_secs = url_expires_secs.unwrap_or(3600 + (config.max_runners as u32) * 15);
         Ok(Self {
@@ -282,17 +286,22 @@ impl<C: BabelEngineConnector> Uploader<C> {
             exclude,
             config,
             total_slots,
+            sources_list,
             url_expires_secs,
             data_version,
         })
     }
 
     /// Prepare DownloadManifest blueprint with files to chunks mapping, based on provided slots.
-    fn prepare_manifest_blueprint(&self) -> Result<DownloadManifest> {
-        let (total_size, mut sources) = sources_list(&self.source_dir, &self.exclude)?;
-        sources.sort_by(|a, b| a.path.cmp(&b.path));
-        let chunk_size = total_size / self.total_slots as u64;
-        let last_chunk_size = chunk_size + total_size % self.total_slots as u64;
+    fn prepare_manifest_blueprint(&mut self) -> Result<DownloadManifest> {
+        let mut sources_list = if let Some(sources_list) = self.sources_list.take() {
+            sources_list
+        } else {
+            sources_list(&self.source_dir, &self.exclude)?
+        };
+        sources_list.sources.sort_by(|a, b| a.path.cmp(&b.path));
+        let chunk_size = sources_list.total_size / self.total_slots as u64;
+        let last_chunk_size = chunk_size + sources_list.total_size % self.total_slots as u64;
         let mut chunks: Vec<_> = Default::default();
         let mut index = 0;
         while index < self.total_slots {
@@ -301,7 +310,7 @@ impl<C: BabelEngineConnector> Uploader<C> {
             } else {
                 last_chunk_size
             };
-            let destinations = build_destinations(chunk_size, &mut sources);
+            let destinations = build_destinations(chunk_size, &mut sources_list.sources);
             if destinations.is_empty() {
                 // no more files - skip rest of the slots
                 break;
@@ -317,7 +326,7 @@ impl<C: BabelEngineConnector> Uploader<C> {
             index += 1;
         }
         Ok(DownloadManifest {
-            total_size,
+            total_size: sources_list.total_size,
             compression: self.config.compression,
             chunks,
         })
@@ -793,6 +802,7 @@ mod tests {
                         compression: None,
                     },
                     total_slots: total_slots as u32,
+                    sources_list: None,
                     url_expires_secs: 60,
                     data_version: None,
                 },
@@ -1220,7 +1230,7 @@ mod tests {
             .returning(|_| Ok(Response::new(())));
         let server = test_env.start_server(mock).await;
 
-        let job = test_env.upload_job(slots_count);
+        let mut job = test_env.upload_job(slots_count);
         // mark first two as uploaded
         let mut blueprint = job.runner.prepare_manifest_blueprint()?;
         save_job_data(
@@ -1339,7 +1349,7 @@ mod tests {
     #[tokio::test]
     async fn test_prepare_blueprint() -> Result<()> {
         let test_env = setup_test_env().await?;
-        let job = test_env.upload_job(2);
+        let mut job = test_env.upload_job(2);
         let mut blueprint = job.runner.prepare_manifest_blueprint()?;
         normalize_manifest(&mut blueprint);
         assert_eq!(
@@ -1404,10 +1414,11 @@ mod tests {
     async fn test_sources_list() -> Result<()> {
         let tmp_dir = TempDir::new()?.to_path_buf();
         dummy_sources(&tmp_dir)?;
-        let (total_size, mut sources) =
-            sources_list(&tmp_dir, &[Pattern::new("*_ignored/ignored_*")?])?;
-        assert_eq!(275, total_size);
-        sources.sort_by(|a, b| a.path.file_stem().unwrap().cmp(b.path.file_stem().unwrap()));
+        let mut sources_list = sources_list(&tmp_dir, &[Pattern::new("*_ignored/ignored_*")?])?;
+        assert_eq!(275, sources_list.total_size);
+        sources_list
+            .sources
+            .sort_by(|a, b| a.path.file_stem().unwrap().cmp(b.path.file_stem().unwrap()));
         assert_eq!(
             vec![
                 FileLocation {
@@ -1436,7 +1447,7 @@ mod tests {
                     size: 256,
                 },
             ],
-            sources
+            sources_list.sources
         );
         Ok(())
     }
