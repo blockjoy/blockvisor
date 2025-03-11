@@ -29,7 +29,7 @@ pub struct PrettyTableRow {
     pub status: VmStatus,
     #[table(title = "IP Address", color = "Yellow")]
     pub ip: String,
-    #[table(title = "Uptime (s)")]
+    #[table(title = "Uptime  [h:m:s]")]
     pub uptime: String,
 }
 

@@ -14,20 +14,21 @@ use crate::{
     services::protocol::ProtocolService,
 };
 use babel_api::engine::JobStatus;
-use bv_utils::cmd::ask_confirm;
-use bv_utils::rpc::RPC_CONNECT_TIMEOUT;
-use chrono::Utc;
+use bv_utils::{cmd::ask_confirm, rpc::RPC_CONNECT_TIMEOUT};
+use chrono::{DateTime, Utc};
 use cli_table::print_stdout;
 use eyre::{bail, Result};
-use std::collections::HashMap;
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     fs,
     ops::{Deref, DerefMut},
 };
 use tokio::process::Command;
-use tonic::transport::Endpoint;
-use tonic::{transport::Channel, Code};
+use tonic::{
+    transport::{Channel, Endpoint},
+    Code,
+};
 use uuid::Uuid;
 
 pub async fn process_host_command(
@@ -62,7 +63,7 @@ pub async fn process_host_command(
                 "Used disk:      {:>10.3} GB",
                 to_gb(metrics.used_disk_space_bytes)
             );
-            println!("Used IPs:      {:?}", metrics.used_ips);
+            println!("Used IPs:        {:?}", metrics.used_ips);
             println!("Load (1 min):   {:>10}", metrics.load_one);
             println!("Load (5 mins):  {:>10}", metrics.load_five);
             println!("Load (15 mins): {:>10}", metrics.load_fifteen);
@@ -74,7 +75,7 @@ pub async fn process_host_command(
                 "Network out:    {:>10.3} GB",
                 to_gb(metrics.network_sent_bytes)
             );
-            println!("Uptime:         {:>10} seconds", metrics.uptime_secs);
+            println!("Uptime [h:m:s]: {:>13}", fmt_seconds(metrics.uptime_secs));
         }
     }
 
@@ -111,11 +112,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                         ),
                         status: node.status,
                         ip: node.state.ip.to_string(),
-                        uptime: fmt_opt(
-                            node.state
-                                .started_at
-                                .map(|dt| Utc::now().signed_duration_since(dt).num_seconds()),
-                        ),
+                        uptime: fmt_opt(node.state.started_at.map(fmt_uptime)),
                     })
                 }
                 print_stdout(table.to_pretty_table())?;
@@ -408,16 +405,14 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             println!("Ip:             {}", node_info.state.ip);
             println!("Gateway:        {}", node_info.state.gateway);
             println!(
-                "Uptime:         {}s",
-                fmt_opt(
-                    node_info
-                        .state
-                        .started_at
-                        .map(|dt| Utc::now().signed_duration_since(dt).num_seconds())
-                )
+                "Uptime [h:m:s]: {}",
+                fmt_opt(node_info.state.started_at.map(fmt_uptime))
             );
             let metrics = client.get_node_metrics(id).await?.into_inner();
-            println!("Protocol Status:     {}", fmt_opt(metrics.protocol_status));
+            println!(
+                "Protocol Status:     {}",
+                fmt_opt(metrics.protocol_status.map(|status| format!("{status:?}")))
+            );
             println!("Block height:   {}", fmt_opt(metrics.height));
             println!("Block age:      {}", fmt_opt(metrics.block_age));
             println!("In consensus:   {}", fmt_opt(metrics.consensus));
@@ -591,7 +586,30 @@ impl NodeClient {
     }
 }
 
-fn fmt_opt<T: std::fmt::Debug>(opt: Option<T>) -> String {
-    opt.map(|t| format!("{t:?}"))
+fn fmt_opt<T: std::fmt::Display>(opt: Option<T>) -> String {
+    opt.map(|t| format!("{t}"))
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn fmt_uptime(uptime: DateTime<Utc>) -> String {
+    fmt_seconds(Utc::now().signed_duration_since(uptime).abs().num_seconds() as u64)
+}
+
+fn fmt_seconds(mut seconds: u64) -> String {
+    const MIN: u64 = 60;
+    const HOUR: u64 = MIN * 60;
+    const DAY: u64 = HOUR * 24;
+    let days = seconds / DAY;
+    seconds -= days * DAY;
+    let hours = seconds / HOUR;
+    seconds -= hours * HOUR;
+    let mins = seconds / MIN;
+    seconds -= mins * MIN;
+    let mut time = if days > 0 {
+        format!("{days}d ")
+    } else {
+        String::new()
+    };
+    time.push_str(&format!("{hours:02}:{mins:02}:{seconds:02}"));
+    time
 }
