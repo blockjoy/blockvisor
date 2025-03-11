@@ -24,9 +24,9 @@ services:
 
   api:
     image: api:latest
-    #    build:
-    #      context: ./blockvisor-api/
-    #      dockerfile: ./blockvisor-api/docker/Dockerfile
+    build:
+      context: ./blockvisor-api/
+      dockerfile: ./docker/Dockerfile
     pull_policy: never
     ports:
       - 8080:8080

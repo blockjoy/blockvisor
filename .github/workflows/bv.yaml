@@ -33,12 +33,12 @@ jobs:
         run: >
           sudo apt -y install build-essential pkg-config libssl-dev cmake musl-tools pigz awscli
 
-      #      - name: Fetch API
-      #        run: |
-      #          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-api.git blockvisor-api
-      #          cd blockvisor-api
-      #          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
-      #          git submodule update --init
+      - name: Fetch API
+        run: |
+          git clone https://oauth2:${{ secrets.CHECKOUT_BLOCKJOY }}@github.com/blockjoy/blockvisor-api.git blockvisor-api
+          cd blockvisor-api
+          if `git show-ref --quiet ${{ steps.branch-names.outputs.current_branch }}`; then git checkout ${{ steps.branch-names.outputs.current_branch }}; fi
+          git submodule update --init
 
       - name: Fetch FrontEnd
         run: |
