@@ -320,27 +320,17 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                             })
                             .collect::<Result<Vec<_>, std::io::Error>>()?
                     };
-                    let mut log_files = vec![];
-                    for job_name in jobs {
-                        log_files.append(
-                            &mut fs::read_dir(jobs_path.join(&job_name))?
-                                .filter_map(|entry| match entry {
-                                    Ok(entry) => {
-                                        if entry.file_name().to_string_lossy().starts_with("logs") {
-                                            Some(Ok(format!(
-                                                "{job_name}/{}",
-                                                entry.file_name().to_string_lossy()
-                                            )))
-                                        } else {
-                                            None
-                                        }
-                                    }
-                                    Err(err) => Some(Err(err)),
-                                })
-                                .collect::<Result<Vec<_>, std::io::Error>>()?,
-                        )
-                    }
-                    cmd.args(log_files);
+                    cmd.args(
+                        jobs.into_iter()
+                            .filter_map(|job_name| {
+                                jobs_path
+                                    .join(&job_name)
+                                    .join("logs")
+                                    .exists()
+                                    .then(|| format!("{job_name}/logs"))
+                            })
+                            .collect::<Vec<_>>(),
+                    );
                     cmd.spawn()?.wait().await?;
                 }
             }
