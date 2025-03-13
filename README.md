@@ -254,3 +254,120 @@ sequenceDiagram
     deactivate babel
     deactivate bv
 ```
+
+### Protocol Data Snapshots
+
+#### Overview
+
+Blockvisor includes protocol data snapshot tooling, optimized for large datasets. It enables automated uploads and downloads
+of dataset snapshots to S3-compatible object storage. This allows much quicker node provisioning by using pre-downloaded data.
+
+Blockvisor is agnostic of dataset structure, which may vary form protocol to protocol. On the other hand, cloud storage has limitations (e.g. on single object size). Additionally, dataset structure may not be optimal for massive data uploads or downloads.
+
+Hence, Blockvisor transforms filesystem data into list of chunks optimized for cloud transfer and storage. All necessary
+metadata mappings are stored in the download manifest. 
+Splitting the data into chunks enables concurrency and parallelism for the upload and download process, effectively speeding up the transfer while also maintaining compliance with cloud storage provider rate-limits. Because each provider has a different approach around limitations, the upload function may be fine-tuned according to each provider's requirements. Also, the chunks are compressed on the fly, which further reduces the amount of data that needs to be transferred, required storage and transfer times.
+
+An upload can run from any node running on a host that has the necessary upload permissions. It can be triggered manually with
+`bv node run upload` command, or periodically from an external cron-like job or from an internal, scheduled rhai task.
+See [Protocol Data Archives](babel_api/rhai_plugin_guide.md/#protocol-data-archives) and [Default upload](babel_api/rhai_plugin_guide.md/#default-upload) for more details on the built-in upload function.
+
+Download is ran as part of node initialization (see [Default init](babel_api/rhai_plugin_guide.md/#default-init) for more details).
+If protocol data is not downloaded yet (or initialized in other way) and there is a snapshot available for the node image variant,
+a download job will be started automatically. The jobs that are configured on the node which affect and use blockchain data will depend on the download function and will be started once it's completed.
+
+#### Cloud Storage Abstraction
+
+While it's the API that manages cloud storage access, Blockvisor doesn't authenticate with the cloud storage directly, rather it gets pre-signed urls form the API whenever it needs to upload or download datasets. That enables central access management and easier switching of S3 compatible cloud storage providers.
+
+![](data_snapshots.jpg)
+
+#### Manifest - data mapping
+
+The datasets are split into chunks whose parameters are computed for compatibility with the cloud storage provider. The way chunks will get reassembled, what the file locations are and other metadata is stored in download manifest.
+Each chunk may map into part of a single file or multiple files (i.e. original disk representation).
+Downloaded chunks, after decompression, are written into disk location(s) described by the destinations included in metadata.
+
+Example of chunk-file mapping:
+
+![](data_mapping_manifest.jpg)
+
+#### Node-Snapshot Mapping
+
+A specific data snapshot is associated with a given node variant via the `storage_key` field in the node `babel.yaml`.
+Based on that the API knows which data set matches the node that is requesting the data from any given image variant.
+
+Usually, in order to keep dataset up to date, uploads should be triggered periodically (e.g. via a scheduled task). In order to account for these consecutive uploads, the API will automatically version the datasets.
+
+Note: The API itself or Blockvisor won't handle any cleanups of old datasets, it's your responsibility to ensure that old datasets are removed when they are no longer needed.
+
+#### Chunks Granularity Impact
+
+While in theory chunk size can be arbitrary, in practice it may have significant impact on upload/download
+performance and reliability. Smaller chunks generate bigger manifest (more chunks to describe), but bigger chunks are harder
+to upload in single POST request. In the upload case, chunks size has also direct impact on memory consumption.
+If compression is enabled, chunk size is not known upfront, so the uploader needs to read all data into memory before being uploaded.
+As a consequence, memory consumption may rise up to the chunk size times the number of max_runners.
+Empirically, it was determined that chunk size around 500MB works best for mainstream cloud providers.
+
+#### DownloadJob Steps
+
+1. get manifest header
+2. ask API for a couple of chunks (with presigned urls)
+3. run parallel workers (number of workers defined by `max_runners` field in DownloadJob config)
+4. each worker:
+    - download chunk data from presigned url
+    - decompress on it the fly and pass to writer thread
+5. go back to step 2. or writer put data it into file system according to destination metadata form manifest
+
+```mermaid
+sequenceDiagram
+    participant bv as BlockvisorD
+    participant job as DownloadJob
+    participant api as API
+    participant storage as Storage
+
+    bv ->> job: start
+        job ->> api: get manifest header
+        activate api
+        api -->> job: manifest header
+        deactivate api
+    loop
+        job ->> api: get chunks
+        activate api
+        api -->> job: chunks
+        deactivate api
+        job ->> storage: GET chunk
+        job ->> job: decompress and write into file system
+    end
+```
+
+#### UploadJob Steps
+
+1. scan protocol data and prepare manifest blueprint
+2. ask API for a couple of upload slots (with presigned urls)
+3. run parallel workers (number of workers defined by `max_runners` field in UploadJob config)
+4. each worker:
+    - read data from FS and compress it
+    - upload chunk to presigned url
+5. go back to step 2. or send manifest blueprint to API
+
+```mermaid
+sequenceDiagram
+    participant job as UploadJob
+    participant bv as BlockvisorD
+    participant api as API
+    participant storage as Storage
+    
+    bv ->> job: start
+    job ->> job: skan file system
+    loop
+        job ->> api: get upload slots
+        activate api
+        api -->> job: slots
+        deactivate api
+        job ->> job: read data from file system
+        job ->> storage: POST chunk
+    end
+    job ->> api: put manifest blueprint
+```

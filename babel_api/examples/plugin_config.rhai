@@ -19,6 +19,8 @@ const A_DIR = node_env().protocol_data_path + "/A";
 const B_DIR = node_env().protocol_data_path + "/B";
 const NET =  global::NETS[node_env().node_variant];
 
+
+
 fn plugin_config() {#{
     /// [optional] List of configuration files to be rendered from template with provided params.
     /// See [Tera Docs](https://keats.github.io/tera/docs/#templates) for details on templating syntax.
