@@ -254,3 +254,123 @@ sequenceDiagram
     deactivate babel
     deactivate bv
 ```
+
+### Protocol Data Snapshots
+
+#### Overview
+
+BV include protocol data snapshot tooling, optimized for large data sets. I let periodically upload
+data set snapshot to could storage, so it can be later used by newly created nodes, to speedup provisioning process.
+
+Since data set structure may vary form protocol to protocol, not much can be assumed. On the other hand cloud storage
+typically has some limitations (e.g. on single object size). Additionally, dataset structure may not be optimal for massive
+data upload/download.
+
+Hence, BV transform data fom file system into list of chunks optimized for cloud transfer and storage. All necessary
+mapping metadata are stored in so-called manifest file.
+
+Upload can be run from any node running on a host with necessary privileges. It can be triggered manually with
+`bv node run upload` command, or periodically from cron job or scheduled rhai task.
+See [Protocol Data Archives](babel_api/rhai_plugin_guide.md/#protocol-data-archives) and [Default upload](babel_api/rhai_plugin_guide.md/#default-upload) for more details on upload function
+
+Download is run as part od node initialization (see [Default init](babel_api/rhai_plugin_guide.md/#default-init) for more details).
+If protocol data are not downloaded yet (or initialized in other way), and there is snapshot available for given node,
+download job will be started automatically.
+
+#### Cloud Storage Abstraction
+
+While it is the API that manage cloud storage access, BV doesn't communicate with it directly, but gets pre-signed urls form the API
+whenever it needs to upload or download anything. That helps to keep access management in one place, but also let easily switch
+cloud storage provider to any S3 compatible.
+
+![](data_snapshots.jpg)
+
+#### Manifest - data mapping
+
+As already mentioned data are stored on the cloud in chunks described in metadata called manifest.
+Each chunk may map into part of a single file or multiple files (i.e. original disk representation).
+Downloaded chunks, after decompression, are written into disk location(s) described by the destinations included in metadata.
+
+Example of chunk-file mapping:
+
+![](data_mapping_manifest.jpg)
+
+#### Node-Snapshot Mapping
+
+Specific data snapshot is associated with a given node via so-called `storage_key`.
+It is a key defined in `babel.yaml` for each node image variant. Base on that the API knows which data set match the node
+created from given image variant.
+
+NOTE: Data set for given `storage_key` may be uploaded periodically (with more recent data), hence snapshots are automatically
+versioned.
+
+#### Chunks Granularity Impact
+
+While in theory chunk size can be arbitrary, in practice it may have significant impact on upload/download
+performance and reliability. Smaller chunks generate bigger manifest (more chunks to describe), but bigger chunks are harder
+to upload in single POST request. In upload case chunks size has also direct impact on memory consumption.
+If compression is enabled chunk size is not know upfront, so uploader needs to read all data into memory before being sent.
+Because of that memory consumption may rise up to chunk size times max_runners.
+Empirically it was found that chunk size around 500MB works optimal.
+
+#### DownloadJob Steps
+
+1. get manifest header
+2. ask API for a couple of chunks (with presigned urls)
+3. run parallel workers (number of workers defined by `max_runners` field in DownloadJob config)
+4. each worker:
+    - download chunk data from presigned url
+    - decompress on it the fly and pass to writer thread
+5. go back to step 2. or writer put data it into file system according to destination metadata form manifest
+
+```mermaid
+sequenceDiagram
+    participant bv as BlockvisorD
+    participant job as DownloadJob
+    participant api as API
+    participant storage as Storage
+
+    bv ->> job: start
+        job ->> api: get manifest header
+        activate api
+        api -->> job: manifest header
+        deactivate api
+    loop
+        job ->> api: get chunks
+        activate api
+        api -->> job: chunks
+        deactivate api
+        job ->> storage: GET chunk
+        job ->> job: decompress and write into file system
+    end
+```
+
+#### UploadJob Steps
+
+1. scan protocol data and prepare manifest blueprint
+2. ask API for a couple of upload slots (with presigned urls)
+3. run parallel workers (number of workers defined by `max_runners` field in UploadJob config)
+4. each worker:
+    - read data from FS and compress it
+    - upload chunk to presigned url
+5. go back to step 2. or send manifest blueprint to API
+
+```mermaid
+sequenceDiagram
+    participant job as UploadJob
+    participant bv as BlockvisorD
+    participant api as API
+    participant storage as Storage
+    
+    bv ->> job: start
+    job ->> job: skan file system
+    loop
+        job ->> api: get upload slots
+        activate api
+        api -->> job: slots
+        deactivate api
+        job ->> job: read data from file system
+        job ->> storage: POST chunk
+    end
+    job ->> api: put manifest blueprint
+```

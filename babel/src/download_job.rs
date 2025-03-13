@@ -672,7 +672,7 @@ impl Writer {
         }
         if self.opened_files.len() >= self.max_opened_files {
             // can't have to many files opened at the same time, so close one with
-            // oldest timestamp
+            // the oldest timestamp
             if let Some(oldest) = self
                 .opened_files
                 .iter()
