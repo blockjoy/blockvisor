@@ -259,35 +259,32 @@ sequenceDiagram
 
 #### Overview
 
-BV include protocol data snapshot tooling, optimized for large data sets. I let periodically upload
-data set snapshot to could storage, so it can be later used by newly created nodes, to speedup provisioning process.
+Blockvisor includes protocol data snapshot tooling, optimized for large datasets. It enables automated uploads and downloads
+of dataset snapshots to S3-compatible object storage. This allows much quicker node provisioning by using pre-downloaded data.
 
-Since data set structure may vary form protocol to protocol, not much can be assumed. On the other hand cloud storage
-typically has some limitations (e.g. on single object size). Additionally, dataset structure may not be optimal for massive
-data upload/download.
+Blockvisor is agnostic of dataset structure, which may vary form protocol to protocol. On the other hand, cloud storage has limitations (e.g. on single object size). Additionally, dataset structure may not be optimal for massive data uploads or downloads.
 
-Hence, BV transform data fom file system into list of chunks optimized for cloud transfer and storage. All necessary
-mapping metadata are stored in so-called manifest file.
+Hence, Blockvisor transforms filesystem data into list of chunks optimized for cloud transfer and storage. All necessary
+metadata mappings are stored in the so-called `manifest.json` file. 
+Splitting the data into chunks enables concurrency and parallelism for the upload and download process, effectively speeding up the transfer while also maintaining compliance with cloud storage provider rate-limits. Because each provider has a different approach around limitations, the upload function may be fine-tuned according to each provider's requirements. Also, the chunks are compressed on the fly, which further reduces the amount of data that needs to be transferred, required storage and transfer times.
 
-Upload can be run from any node running on a host with necessary privileges. It can be triggered manually with
-`bv node run upload` command, or periodically from cron job or scheduled rhai task.
-See [Protocol Data Archives](babel_api/rhai_plugin_guide.md/#protocol-data-archives) and [Default upload](babel_api/rhai_plugin_guide.md/#default-upload) for more details on upload function
+An upload can run from any node running on a host that has the necessary upload permissions. It can be triggered manually with
+`bv node run upload` command, or periodically from an external cron-like job or from an internal, scheduled rhai task.
+See [Protocol Data Archives](babel_api/rhai_plugin_guide.md/#protocol-data-archives) and [Default upload](babel_api/rhai_plugin_guide.md/#default-upload) for more details on the built-in upload function.
 
-Download is run as part od node initialization (see [Default init](babel_api/rhai_plugin_guide.md/#default-init) for more details).
-If protocol data are not downloaded yet (or initialized in other way), and there is snapshot available for given node,
-download job will be started automatically.
+Download is ran as part of node initialization (see [Default init](babel_api/rhai_plugin_guide.md/#default-init) for more details).
+If protocol data is not downloaded yet (or initialized in other way) and there is a snapshot available for the node image variant,
+a download job will be started automatically. The jobs that are configured on the node which affect and use blockchain data will depend on the download function and will be started once it's completed.
 
 #### Cloud Storage Abstraction
 
-While it is the API that manage cloud storage access, BV doesn't communicate with it directly, but gets pre-signed urls form the API
-whenever it needs to upload or download anything. That helps to keep access management in one place, but also let easily switch
-cloud storage provider to any S3 compatible.
+While it's the API that manages cloud storage access, Blockvisor doesn't authenticate with the cloud storage directly, rather it gets pre-signed urls form the API whenever it needs to upload or download datasets. That enables central access management and easier switching of S3 compatible cloud storage providers.
 
 ![](data_snapshots.jpg)
 
 #### Manifest - data mapping
 
-As already mentioned data are stored on the cloud in chunks described in metadata called manifest.
+The datasets are split into chunks whose parameters are computed for compatibility with the cloud storage provider. The way chunks will get reassembled, what the file locations are and other metadata is stored in the `manifest.json` file.
 Each chunk may map into part of a single file or multiple files (i.e. original disk representation).
 Downloaded chunks, after decompression, are written into disk location(s) described by the destinations included in metadata.
 
@@ -297,21 +294,21 @@ Example of chunk-file mapping:
 
 #### Node-Snapshot Mapping
 
-Specific data snapshot is associated with a given node via so-called `storage_key`.
-It is a key defined in `babel.yaml` for each node image variant. Base on that the API knows which data set match the node
-created from given image variant.
+A specific data snapshot is associated with a given node variant via the `storage_key` field in the node `babel.yaml`.
+Based on that the API knows which data set matches the node that is requesting the data from any given image variant.
 
-NOTE: Data set for given `storage_key` may be uploaded periodically (with more recent data), hence snapshots are automatically
-versioned.
+Usually, in order to keep dataset up to date, uploads should be triggered periodically (e.g. via a scheduled task). In order to account for these consecutive uploads, the API will automatically version the datasets.
+
+Note: The API itself or Blockvisor won't handle any cleanups of old datasets, it's your responsibility to ensure that old datasets are removed when they are no longer needed.
 
 #### Chunks Granularity Impact
 
 While in theory chunk size can be arbitrary, in practice it may have significant impact on upload/download
 performance and reliability. Smaller chunks generate bigger manifest (more chunks to describe), but bigger chunks are harder
-to upload in single POST request. In upload case chunks size has also direct impact on memory consumption.
-If compression is enabled chunk size is not know upfront, so uploader needs to read all data into memory before being sent.
-Because of that memory consumption may rise up to chunk size times max_runners.
-Empirically it was found that chunk size around 500MB works optimal.
+to upload in single POST request. In the upload case, chunks size has also direct impact on memory consumption.
+If compression is enabled, chunk size is not known upfront, so the uploader needs to read all data into memory before being uploaded.
+As a consequence, memory consumption may rise up to the chunk size times the number of max_runners.
+Empirically, it was determined that chunk size around 500MB works best for mainstream cloud providers.
 
 #### DownloadJob Steps
 
