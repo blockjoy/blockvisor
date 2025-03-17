@@ -281,18 +281,18 @@ async fn main() -> Result<()> {
             }),
         };
 
-        let host = client.create_host(create).await?.into_inner();
-
+        let host_resp = client.create_host(create).await?.into_inner();
+        let Some(host) = host_resp.host else {
+            bail!("No `host` in response");
+        };
         let mut host_config = Config {
-            id: host
-                .host
-                .ok_or_else(|| anyhow!("No `host` in response"))?
-                .host_id,
-            private_org_id: cmd_args.private.then_some(host.provision_org_id),
+            id: host.host_id,
+            org_id: host.org_id,
+            private_org_id: cmd_args.private.then_some(host_resp.provision_org_id),
             name: host_info.name,
             api_config: ApiConfig {
-                token: host.token,
-                refresh_token: host.refresh,
+                token: host_resp.token,
+                refresh_token: host_resp.refresh,
                 blockjoy_api_url,
             },
             blockjoy_mqtt_url: None,

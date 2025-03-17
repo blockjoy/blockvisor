@@ -94,6 +94,8 @@ impl Default for ApptainerConfig {
 pub struct Config {
     /// Host uuid
     pub id: String,
+    /// Org id the host belongs to.
+    pub org_id: Option<String>,
     /// Org uuid to which private host belongs to.
     pub private_org_id: Option<String>,
     /// Host name

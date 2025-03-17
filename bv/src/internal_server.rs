@@ -255,7 +255,7 @@ where
     async fn start_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
         status_check().await?;
         let id = request.into_inner();
-        if self.is_dev_node(id).await? {
+        if self.is_dev_node(id).await {
             self.nodes_manager
                 .start(id, true)
                 .await
@@ -276,7 +276,7 @@ where
     async fn stop_node(&self, request: Request<(Uuid, bool)>) -> Result<Response<()>, Status> {
         status_check().await?;
         let (id, force) = request.into_inner();
-        if self.is_dev_node(id).await? {
+        if self.is_dev_node(id).await {
             self.nodes_manager
                 .stop(id, force)
                 .await
@@ -300,7 +300,7 @@ where
     ) -> Result<Response<()>, Status> {
         status_check().await?;
         let (id, version, build) = request.into_inner();
-        if self.is_dev_node(id).await? {
+        if self.is_dev_node(id).await {
             Err(Status::unimplemented("dev node upgrade is not supported"))
         } else {
             let node = self
@@ -349,7 +349,7 @@ where
     ) -> Result<Response<NodeDisplayInfo>, Status> {
         status_check().await?;
         let desired_node_state = request.into_inner();
-        if !self.is_dev_node(desired_node_state.id).await? {
+        if !self.is_dev_node(desired_node_state.id).await {
             Err(Status::unimplemented(
                 "can't upgrade non dev node with dev image",
             ))
@@ -366,7 +366,7 @@ where
     async fn delete_node(&self, request: Request<Uuid>) -> Result<Response<()>, Status> {
         status_check().await?;
         let id = request.into_inner();
-        if self.is_dev_node(id).await? {
+        if self.is_dev_node(id).await {
             self.nodes_manager
                 .delete(id)
                 .await
@@ -473,12 +473,25 @@ where
     ) -> Result<Response<String>, Status> {
         status_check().await?;
         let name = request.into_inner();
-        let id = self
-            .nodes_manager
-            .node_id_for_name(&name)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
-        Ok(Response::new(id.to_string()))
+        match self.nodes_manager.node_id_for_name(&name).await {
+            Ok(id) => Ok(Response::new(id.to_string())),
+            Err(err) => {
+                let remote_nodes = self
+                    .get_remote_nodes(None)
+                    .await
+                    .map_err(|e| Status::unknown(format!("{e:#}")))?;
+                remote_nodes
+                    .into_iter()
+                    .find_map(|node| {
+                        if node.state.name == name {
+                            Some(Response::new(node.state.id.to_string()))
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or(Status::not_found(format!("{err:#}")))
+            }
+        }
     }
 
     #[instrument(skip(self), ret(Debug))]
@@ -506,7 +519,7 @@ where
         let (id, method, param) = request.into_inner();
         let value = self
             .nodes_manager
-            .call_method(id, &method, &param, self.is_dev_node(id).await?)
+            .call_method(id, &method, &param, self.is_dev_node(id).await)
             .await
             .map_err(|e| match e {
                 nodes_manager::BabelError::MethodNotFound => {
@@ -571,18 +584,13 @@ where
     P::VirtualMachine: Send + Sync,
     P::RecoveryBackoff: Send + Sync + 'static,
 {
-    async fn is_dev_node(&self, id: Uuid) -> eyre::Result<bool, Status> {
-        Ok(self.dev_mode
-            || match self
-                .nodes_manager
-                .nodes_list()
-                .await
-                .get(&id)
-                .ok_or_else(|| Status::not_found(format!("node '{id}' not found")))?
-            {
-                MaybeNode::Node(node) => node.read().await.state.dev_mode,
-                MaybeNode::BrokenNode(state) => state.dev_mode,
-            })
+    async fn is_dev_node(&self, id: Uuid) -> bool {
+        self.dev_mode
+            || match self.nodes_manager.nodes_list().await.get(&id) {
+                Some(MaybeNode::Node(node)) => node.read().await.state.dev_mode,
+                Some(MaybeNode::BrokenNode(state)) => state.dev_mode,
+                None => false,
+            }
     }
 
     async fn connect_to_node_service(&self) -> Result<api::NodesServiceClient, Status> {
@@ -634,50 +642,56 @@ where
             Ok(Default::default())
         } else {
             let bv_config = self.config.config.read().await.clone();
-            let mut node_client = self.connect_to_node_service().await?;
-            node_client
-                .list(pb::NodeServiceListRequest {
-                    offset: 0,
-                    host_ids: vec![bv_config.id],
-                    limit: if node_id.is_some() {
-                        1
-                    } else {
-                        bv_config.net_conf.available_ips.len() as u64
-                    },
-                    search: node_id.map(|id| pb::NodeSearch {
-                        operator: common::SearchOperator::And.into(),
-                        node_id: Some(id.to_string()),
+            if let Some(org_id) = bv_config.private_org_id.or(bv_config.org_id) {
+                let mut node_client = self.connect_to_node_service().await?;
+                let nodes = node_client
+                    .list(pb::NodeServiceListRequest {
+                        org_ids: vec![org_id],
+                        offset: 0,
+                        host_ids: vec![bv_config.id],
+                        limit: if node_id.is_some() {
+                            1
+                        } else {
+                            bv_config.net_conf.available_ips.len() as u64
+                        },
+                        search: node_id.map(|id| pb::NodeSearch {
+                            operator: common::SearchOperator::And.into(),
+                            node_id: Some(id.to_string()),
+                            ..Default::default()
+                        }),
                         ..Default::default()
-                    }),
-                    ..Default::default()
-                })
-                .await?
-                .into_inner()
-                .nodes
-                .into_iter()
-                .filter_map(|node| {
-                    if let Some(status) = &node.node_status {
-                        if status.state() == common::NodeState::Deleted {
-                            return None;
+                    })
+                    .await?
+                    .into_inner()
+                    .nodes
+                    .into_iter();
+                nodes
+                    .filter_map(|node| {
+                        if let Some(status) = &node.node_status {
+                            if status.state() == common::NodeState::Deleted {
+                                return None;
+                            }
                         }
-                    }
-                    let status = node
-                        .node_status
-                        .as_ref()
-                        .map(|status| match status.state() {
-                            common::NodeState::Running => VmStatus::Running,
-                            common::NodeState::Stopped => VmStatus::Stopped,
-                            common::NodeState::Failed => VmStatus::Failed,
-                            _ => VmStatus::Busy,
-                        })
-                        .unwrap_or(VmStatus::Busy);
-                    Some(
-                        node.try_into()
-                            .map(|state| NodeDisplayInfo { status, state })
-                            .map_err(|e| Status::unknown(format!("{e:#}"))),
-                    )
-                })
-                .collect::<Result<Vec<NodeDisplayInfo>, Status>>()
+                        let status = node
+                            .node_status
+                            .as_ref()
+                            .map(|status| match status.state() {
+                                common::NodeState::Running => VmStatus::Running,
+                                common::NodeState::Stopped => VmStatus::Stopped,
+                                common::NodeState::Failed => VmStatus::Failed,
+                                _ => VmStatus::Busy,
+                            })
+                            .unwrap_or(VmStatus::Busy);
+                        Some(
+                            node.try_into()
+                                .map(|state| NodeDisplayInfo { status, state })
+                                .map_err(|e| Status::unknown(format!("{e:#}"))),
+                        )
+                    })
+                    .collect::<Result<Vec<NodeDisplayInfo>, Status>>()
+            } else {
+                Ok(Default::default())
+            }
         }
     }
 
@@ -706,8 +720,8 @@ where
         let mut created_nodes = node_client
             .create(pb::NodeServiceCreateRequest {
                 old_node_id: None,
-                org_id: config.private_org_id.ok_or(anyhow!(
-                    "create node is not supported on public hosts - use web frontend"
+                org_id: config.private_org_id.or(config.org_id).ok_or(anyhow!(
+                    "create node is not supported on public hosts without org assigned - use web frontend"
                 ))?,
                 new_values: properties,
                 image_id,
