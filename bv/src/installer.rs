@@ -530,7 +530,6 @@ mod tests {
     use crate::internal_server;
     use crate::node_metrics;
     use crate::node_state;
-    use crate::node_state::VmStatus;
     use assert_fs::TempDir;
     use babel_api::engine::JobsInfo;
     use bv_tests_utils::rpc::test_channel;
@@ -571,17 +570,13 @@ mod tests {
                 &self,
                 request: tonic::Request<()>,
             ) -> Result<tonic::Response<hosts::HostMetrics>, tonic::Status>;
-            async fn get_node_status(
-                &self,
-                request: tonic::Request<Uuid>,
-            ) -> Result<tonic::Response<VmStatus>, tonic::Status>;
             async fn get_node(
                 &self,
                 _request: tonic::Request<Uuid>,
             ) -> Result<tonic::Response<internal_server::NodeDisplayInfo>, tonic::Status>;
             async fn get_nodes(
                 &self,
-                _request: tonic::Request<()>,
+                _request: tonic::Request<bool>,
             ) -> Result<tonic::Response<Vec<internal_server::NodeDisplayInfo>>, tonic::Status>;
             async fn create_node(
                 &self,

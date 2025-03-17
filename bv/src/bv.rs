@@ -90,8 +90,12 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 serde_json::from_str(&fs::read_to_string(path)?)?;
             client.fix_legacy_nodes(mapping).await?;
         }
-        NodeCommand::List { running, tags } => {
-            let mut nodes = client.get_nodes(()).await?.into_inner();
+        NodeCommand::List {
+            running,
+            local,
+            tags,
+        } => {
+            let mut nodes = client.get_nodes(local).await?.into_inner();
             if running {
                 nodes.retain(|n| n.status == VmStatus::Running);
             }
@@ -177,7 +181,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
             if id_or_names.is_empty() {
                 if all {
                     id_or_names = client
-                        .get_nodes(())
+                        .get_nodes(true)
                         .await?
                         .into_inner()
                         .into_iter()
@@ -207,7 +211,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 if all {
                     if ask_confirm("Are you sure you want to delete all nodes?", yes)? {
                         id_or_names = client
-                            .get_nodes(())
+                            .get_nodes(true)
                             .await?
                             .into_inner()
                             .into_iter()
@@ -338,8 +342,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
         NodeCommand::Status { id_or_names } => {
             for id_or_name in id_or_names {
                 let id = client.resolve_id_or_name(&id_or_name).await?;
-                let status = client.get_node_status(id).await?;
-                let status = status.into_inner();
+                let status = client.get_node(id).await?.into_inner().status;
                 println!("{status}");
             }
         }
@@ -547,7 +550,7 @@ impl NodeClient {
     async fn get_node_ids(&mut self, id_or_names: Vec<String>) -> Result<Vec<Uuid>> {
         let mut ids: Vec<Uuid> = Default::default();
         if id_or_names.is_empty() {
-            for node in self.get_nodes(()).await?.into_inner() {
+            for node in self.get_nodes(true).await?.into_inner() {
                 ids.push(node.state.id);
             }
         } else {

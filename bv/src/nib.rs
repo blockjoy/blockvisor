@@ -567,7 +567,7 @@ impl DevNode {
             Endpoint::from_shared(bv_url)?.connect_timeout(BV_CONNECT_TIMEOUT),
         )
         .await?;
-        let nodes = bv_client.get_nodes(()).await?.into_inner();
+        let nodes = bv_client.get_nodes(true).await?.into_inner();
         let id = Uuid::new_v4();
         let (ip, gateway) = discover_ip_and_gateway(&bv_config, ip, gateway, &nodes, id).await?;
         let vm_config = VmConfig::build_from(&image_variant);
@@ -630,9 +630,10 @@ impl DevNode {
         while VmStatus::Running
             != self
                 .bv_client
-                .get_node_status(self.node_info.state.id)
+                .get_node(self.node_info.state.id)
                 .await?
                 .into_inner()
+                .status
         {
             if start.elapsed() < timeout {
                 sleep(Duration::from_secs(1)).await;

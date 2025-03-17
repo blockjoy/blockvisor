@@ -47,9 +47,8 @@ trait Service {
     fn health() -> ServiceStatus;
     fn start_update() -> ServiceStatus;
     fn get_host_metrics() -> hosts::HostMetrics;
-    fn get_node_status(id: Uuid) -> VmStatus;
     fn get_node(id: Uuid) -> NodeDisplayInfo;
-    fn get_nodes() -> Vec<NodeDisplayInfo>;
+    fn get_nodes(local: bool) -> Vec<NodeDisplayInfo>;
     fn create_node(req: CreateNodeRequest) -> NodeDisplayInfo;
     fn create_dev_node(req: NodeState) -> NodeDisplayInfo;
     fn start_node(id: Uuid);
@@ -183,18 +182,6 @@ where
     }
 
     #[instrument(skip(self), ret(Debug))]
-    async fn get_node_status(&self, request: Request<Uuid>) -> Result<Response<VmStatus>, Status> {
-        status_check().await?;
-        let id = request.into_inner();
-        let status = self
-            .nodes_manager
-            .status(id)
-            .await
-            .map_err(|e| Status::unknown(format!("{e:#}")))?;
-        Ok(Response::new(status))
-    }
-
-    #[instrument(skip(self), ret(Debug))]
     async fn get_node(&self, request: Request<Uuid>) -> Result<Response<NodeDisplayInfo>, Status> {
         status_check().await?;
         let id = request.into_inner();
@@ -206,19 +193,29 @@ where
                     .map_err(|e| Status::unknown(format!("{e:#}")))?,
             ))
         } else {
-            Err(Status::not_found(format!("Node {id} not found")))
+            self.get_remote_nodes(Some(id))
+                .await?
+                .pop()
+                .map(Response::new)
+                .ok_or(Status::not_found(format!("Node {id} not found")))
         }
     }
 
     #[instrument(skip(self), ret(Debug))]
     async fn get_nodes(
         &self,
-        _request: Request<()>,
+        request: Request<bool>,
     ) -> Result<Response<Vec<NodeDisplayInfo>>, Status> {
+        let local = request.into_inner();
         status_check().await?;
+        let mut nodes = if local {
+            Default::default()
+        } else {
+            self.get_remote_nodes(None).await?
+        };
         let nodes_lock = self.nodes_manager.nodes_list().await;
-        let mut nodes = vec![];
         for (id, node_lock) in nodes_lock.iter() {
+            nodes.retain(|node| node.state.id != *id);
             nodes.push(
                 self.get_node_display_info(*id, node_lock)
                     .await
@@ -627,6 +624,61 @@ where
                 status: VmStatus::Failed,
             },
         })
+    }
+
+    async fn get_remote_nodes(
+        &self,
+        node_id: Option<Uuid>,
+    ) -> Result<Vec<NodeDisplayInfo>, Status> {
+        if self.dev_mode {
+            Ok(Default::default())
+        } else {
+            let bv_config = self.config.config.read().await.clone();
+            let mut node_client = self.connect_to_node_service().await?;
+            node_client
+                .list(pb::NodeServiceListRequest {
+                    offset: 0,
+                    host_ids: vec![bv_config.id],
+                    limit: if node_id.is_some() {
+                        1
+                    } else {
+                        bv_config.net_conf.available_ips.len() as u64
+                    },
+                    search: node_id.map(|id| pb::NodeSearch {
+                        operator: common::SearchOperator::And.into(),
+                        node_id: Some(id.to_string()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })
+                .await?
+                .into_inner()
+                .nodes
+                .into_iter()
+                .filter_map(|node| {
+                    if let Some(status) = &node.node_status {
+                        if status.state() == common::NodeState::Deleted {
+                            return None;
+                        }
+                    }
+                    let status = node
+                        .node_status
+                        .as_ref()
+                        .map(|status| match status.state() {
+                            common::NodeState::Running => VmStatus::Running,
+                            common::NodeState::Stopped => VmStatus::Stopped,
+                            common::NodeState::Failed => VmStatus::Failed,
+                            _ => VmStatus::Busy,
+                        })
+                        .unwrap_or(VmStatus::Busy);
+                    Some(
+                        node.try_into()
+                            .map(|state| NodeDisplayInfo { status, state })
+                            .map_err(|e| Status::unknown(format!("{e:#}"))),
+                    )
+                })
+                .collect::<Result<Vec<NodeDisplayInfo>, Status>>()
+        }
     }
 
     async fn create_node(&self, req: CreateNodeRequest) -> eyre::Result<NodeDisplayInfo> {

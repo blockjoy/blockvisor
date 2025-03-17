@@ -77,6 +77,10 @@ pub enum NodeCommand {
         #[clap(long, short)]
         running: bool,
 
+        /// Display only nodes already created on this host.
+        #[clap(long)]
+        local: bool,
+
         /// Display only nodes with the given tag(s). May be specified multiple times.
         #[clap(long = "tag", value_name = "TAG")]
         tags: Vec<String>,

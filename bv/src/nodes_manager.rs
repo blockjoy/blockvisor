@@ -403,18 +403,6 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn status(&self, id: Uuid) -> Result<VmStatus> {
-        let nodes_lock = self.nodes.read().await;
-        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?;
-        Ok(if let MaybeNode::Node(node_lock) = maybe_node {
-            let node = node_lock.read().await;
-            node.status().await
-        } else {
-            VmStatus::Failed
-        })
-    }
-
-    #[instrument(skip(self))]
     async fn expected_status(&self, id: Uuid) -> Result<VmStatus> {
         let nodes_lock = self.nodes.read().await;
         let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?;
@@ -771,6 +759,17 @@ where
         }
 
         Ok((nodes, node_ids, node_state_cache))
+    }
+
+    async fn status(&self, id: Uuid) -> Result<VmStatus> {
+        let nodes_lock = self.nodes.read().await;
+        let maybe_node = nodes_lock.get(&id).ok_or_else(|| Error::NodeNotFound)?;
+        Ok(if let MaybeNode::Node(node_lock) = maybe_node {
+            let node = node_lock.read().await;
+            node.status().await
+        } else {
+            VmStatus::Failed
+        })
     }
 }
 
