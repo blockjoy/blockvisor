@@ -33,6 +33,8 @@ pub trait Babel {
     fn start_job(job_name: String);
     /// Stop background job with given unique name if running.
     fn stop_job(job_name: String);
+    /// Stop all background jobs.
+    fn stop_all_jobs();
     /// Skip background job with given unique name if running.
     fn skip_job(job_name: String);
     /// Cleanup background job with given unique name - remove any intermediate files,
@@ -42,6 +44,8 @@ pub trait Babel {
     fn job_info(job_name: String) -> JobInfo;
     /// Get maximum time it may take to gracefully shutdown job.
     fn get_job_shutdown_timeout(job_name: String) -> Duration;
+    /// Get maximum time it may take to gracefully shutdown all active jobs.
+    fn get_active_jobs_shutdown_timeout() -> Duration;
     /// Get jobs list.
     fn get_jobs() -> JobsInfo;
 

@@ -160,6 +160,14 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         Ok(Response::new(()))
     }
 
+    async fn stop_all_jobs(&self, _request: Request<()>) -> Result<Response<()>, Status> {
+        self.jobs_manager
+            .stop_all()
+            .await
+            .map_err(|err| Status::internal(format!("stop_all_jobs failed: {err:#}")))?;
+        Ok(Response::new(()))
+    }
+
     async fn skip_job(&self, request: Request<String>) -> Result<Response<()>, Status> {
         self.jobs_manager
             .skip(&request.into_inner())
@@ -192,6 +200,15 @@ impl<J: JobsManagerClient + Sync + Send + 'static, P: BabelPal + Sync + Send + '
         let job = request.into_inner();
         Ok(Response::new(
             self.jobs_manager.get_job_shutdown_timeout(&job).await,
+        ))
+    }
+
+    async fn get_active_jobs_shutdown_timeout(
+        &self,
+        _request: Request<()>,
+    ) -> Result<Response<Duration>, Status> {
+        Ok(Response::new(
+            self.jobs_manager.get_active_jobs_shutdown_timeout().await,
         ))
     }
 
@@ -441,6 +458,7 @@ mod tests {
             async fn start(&self, name: &str) -> Result<()>;
             async fn get_job_shutdown_timeout(&self, name: &str) -> Duration;
             async fn stop(&self, name: &str) -> Result<()>;
+            async fn stop_all(&self) -> Result<()>;
             async fn skip(&self, name: &str) -> Result<()>;
             async fn cleanup(&self, name: &str) -> Result<()>;
             async fn info(&self, name: &str) -> Result<JobInfo>;

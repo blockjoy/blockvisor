@@ -60,6 +60,10 @@ impl Engine for LinterEngine {
         Ok(())
     }
 
+    fn stop_all_jobs(&self) -> eyre::Result<()> {
+        Ok(())
+    }
+
     fn cleanup_job(&self, _job_name: &str) -> eyre::Result<()> {
         Ok(())
     }

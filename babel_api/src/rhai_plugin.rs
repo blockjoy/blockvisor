@@ -512,6 +512,7 @@ impl<E: Engine + Sync + Send + 'static> BarePlugin<E> {
         let Some(config) = self.plugin_config.clone() else {
             bail!("Missing {PLUGIN_CONFIG_FN_NAME} function")
         };
+        self.babel_engine.stop_all_jobs()?;
         self.render_configs_files(config.config_files)?;
         self.start_aux_services(config.aux_services)?;
         let mut services_needs = self.run_actions(config.init, vec![])?;
@@ -968,6 +969,7 @@ mod tests {
             fn create_job(&self, job_name: &str, job_config: JobConfig) -> Result<()>;
             fn start_job(&self, job_name: &str) -> Result<()>;
             fn stop_job(&self, job_name: &str) -> Result<()>;
+            fn stop_all_jobs(&self) -> Result<()>;
             fn cleanup_job(&self, job_name: &str) -> Result<()>;
             fn job_info(&self, job_name: &str) -> Result<engine::JobInfo>;
             fn get_jobs(&self) -> Result<engine::JobsInfo>;
@@ -1828,6 +1830,7 @@ mod tests {
             node_name: "node name".to_string(),
             ..Default::default()
         });
+        babel.expect_stop_all_jobs().once().returning(|| Ok(()));
         babel
             .expect_render_template()
             .with(

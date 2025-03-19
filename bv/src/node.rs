@@ -419,6 +419,28 @@ impl<P: Pal + Debug> Node<P> {
     }
 
     pub async fn update(&mut self, config_update: ConfigUpdate) -> commands::Result<()> {
+        let status = self.status().await;
+        if status == VmStatus::Failed {
+            return Err(commands::Error::Internal(anyhow!(
+                "can't update node in Failed state"
+            )));
+        }
+        let params_changed = !config_update.new_values.is_empty();
+        if params_changed {
+            if status == VmStatus::Running
+                && self
+                    .babel_engine
+                    .get_jobs()
+                    .await?
+                    .iter()
+                    .any(|(_, job)| job.status == JobStatus::Running && job.upgrade_blocking)
+            {
+                command_failed!(commands::Error::BlockingJobRunning {
+                    retry_hint: DEFAULT_UPGRADE_RETRY_HINT,
+                });
+            }
+            self.state.initialized = false;
+        }
         self.state.image.config_id = config_update.config_id;
         if let Some(display_name) = config_update.new_display_name {
             self.state.display_name = display_name;
@@ -448,10 +470,17 @@ impl<P: Pal + Debug> Node<P> {
                 self.state.expected_status = VmStatus::Failed;
             }
             self.save_state().await?;
-            res?
+            res?;
+        } else {
+            self.save_state().await?;
         }
         self.machine.update_node_env(&self.state);
         self.node_env = self.machine.node_env();
+        if params_changed && status == VmStatus::Running {
+            self.babel_engine.init().await?;
+            self.state.initialized = true;
+            self.save_state().await?;
+        }
         Ok(())
     }
 
@@ -1102,10 +1131,12 @@ pub mod tests {
                 request: Request<String>,
             ) -> Result<Response<()>, Status>;
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
+            async fn stop_all_jobs(&self, request: Request<()>) -> Result<Response<()>, Status>;
             async fn skip_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
             async fn get_job_shutdown_timeout(&self, request: Request<String>) -> Result<Response<Duration>, Status>;
+            async fn get_active_jobs_shutdown_timeout(&self, request: Request<()>) -> Result<Response<Duration>, Status>;
             async fn get_jobs(&self, request: Request<()>) -> Result<Response<JobsInfo>, Status>;
             async fn run_jrpc(
                 &self,
@@ -1862,6 +1893,14 @@ pub mod tests {
             .times(3)
             .returning(|_| Ok(Response::new(())));
         babel_mock
+            .expect_get_active_jobs_shutdown_timeout()
+            .times(2)
+            .returning(|_| Ok(Response::new(Duration::from_secs(1))));
+        babel_mock
+            .expect_stop_all_jobs()
+            .times(2)
+            .returning(|_| Ok(Response::new(())));
+        babel_mock
             .expect_run_sh()
             .withf(|req| req.get_ref() == "echo ok")
             .returning(|_| {
@@ -2079,6 +2118,8 @@ pub mod tests {
         pal.expect_create_vm().return_once(move |_, _| {
             let mut mock = MockTestVM::new();
             let plugin_path = plugin_path.clone();
+            mock.expect_state().once().returning(|| VmState::SHUTOFF);
+            mock.expect_state().times(2).returning(|| VmState::RUNNING);
             mock.expect_plugin_path()
                 .once()
                 .returning(move || plugin_path.clone());
@@ -2115,29 +2156,60 @@ pub mod tests {
         .await?;
         assert_eq!(VmStatus::Running, node.expected_status());
 
-        assert_eq!(node.state.firewall, node_state.firewall);
-        node.update(ConfigUpdate {
-            config_id: "new-cfg_id".to_string(),
-            new_display_name: Some("new name".to_string()),
-            new_firewall: Some(updated_firewall.clone()),
-            new_org_id: Some("new org_id".to_string()),
-            new_org_name: Some("org name".to_string()),
-            new_values: HashMap::from_iter([
-                ("new_key1".to_string(), "new value ".to_string()),
-                ("new_key2".to_string(), "new value 2".to_string()),
-            ]),
-        })
-        .await?;
-        assert_eq!(node.state.firewall, updated_firewall);
-        assert_eq!(node.state.display_name, "new name".to_string());
-        assert_eq!(node.state.org_id, "new org_id".to_string());
-        assert_eq!(node.state.org_name, "org name".to_string());
         assert_eq!(
-            node.state.properties.get("new_key1"),
-            Some("new value ".to_string()).as_ref()
+            "BV internal error: 'can't update node in Failed state'",
+            node.update(ConfigUpdate {
+                config_id: "new-cfg_id".to_string(),
+                new_display_name: None,
+                new_firewall: None,
+                new_org_id: None,
+                new_org_name: None,
+                new_values: Default::default(),
+            },)
+                .await
+                .unwrap_err()
+                .to_string()
         );
-        test_env.assert_node_state_saved(&node.state).await;
 
+        let mut babel_mock = MockTestBabelService::new();
+        babel_mock
+            .expect_get_jobs()
+            .times(2)
+            .returning(|_| Ok(Response::new(HashMap::default())));
+        babel_mock
+            .expect_get_active_jobs_shutdown_timeout()
+            .once()
+            .returning(|_| Ok(Response::new(Duration::from_millis(1))));
+        babel_mock
+            .expect_stop_all_jobs()
+            .once()
+            .returning(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_run_sh()
+            .withf(|req| req.get_ref() == "touch /blockjoy/.protocol_data.lock")
+            .once()
+            .returning(|_| {
+                Ok(Response::new(ShResponse {
+                    exit_code: 0,
+                    stdout: "".to_string(),
+                    stderr: "".to_string(),
+                }))
+            });
+        babel_mock
+            .expect_protocol_data_stamp()
+            .once()
+            .returning(|_| Ok(Response::new(Some(SystemTime::now()))));
+        babel_mock
+            .expect_create_job()
+            .times(2)
+            .returning(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_start_job()
+            .times(2)
+            .returning(|_| Ok(Response::new(())));
+        let server = test_env.start_server(babel_mock).await;
+
+        assert_eq!(node.state.firewall, node_state.firewall);
         assert_eq!(
             "BV internal error: 'failed to apply firewall config'",
             node.update(ConfigUpdate {
@@ -2146,15 +2218,46 @@ pub mod tests {
                 new_firewall: Some(firewall::Config::default()),
                 new_org_id: Some("failed_org_id".to_string()),
                 new_org_name: None,
-                new_values: Default::default(),
+                new_values: HashMap::from_iter([(
+                    "new_key0".to_string(),
+                    "new value 0".to_string()
+                ),]),
             },)
                 .await
                 .unwrap_err()
                 .to_string()
         );
         assert_eq!(0, node.state.firewall.rules.len());
+        assert!(!node.state.initialized);
         test_env.assert_node_state_saved(&node.state).await;
+        assert_eq!(VmStatus::Failed, node.expected_status());
 
+        node.state.initialized = true;
+        node.state.expected_status = VmStatus::Running;
+        node.update(ConfigUpdate {
+            config_id: "new-cfg_id".to_string(),
+            new_display_name: Some("new name".to_string()),
+            new_firewall: Some(updated_firewall.clone()),
+            new_org_id: Some("new org_id".to_string()),
+            new_org_name: Some("org name".to_string()),
+            new_values: HashMap::from_iter([
+                ("new_key1".to_string(), "new value 1".to_string()),
+                ("new_key2".to_string(), "new value 2".to_string()),
+            ]),
+        })
+        .await
+        .unwrap();
+        assert!(node.state.initialized);
+        assert_eq!(node.state.firewall, updated_firewall);
+        assert_eq!(node.state.display_name, "new name".to_string());
+        assert_eq!(node.state.org_id, "new org_id".to_string());
+        assert_eq!(node.state.org_name, "org name".to_string());
+        assert_eq!(
+            node.state.properties.get("new_key1"),
+            Some("new value 1".to_string()).as_ref()
+        );
+        test_env.assert_node_state_saved(&node.state).await;
+        server.assert().await;
         Ok(())
     }
 
@@ -2429,6 +2532,14 @@ pub mod tests {
             .expect_get_jobs()
             .once()
             .returning(|_| Ok(Response::new(HashMap::default())));
+        babel_mock
+            .expect_get_active_jobs_shutdown_timeout()
+            .once()
+            .returning(|_| Ok(Response::new(Duration::from_millis(1))));
+        babel_mock
+            .expect_stop_all_jobs()
+            .once()
+            .returning(|_| Ok(Response::new(())));
         let data_dir = test_env.tmp_root.clone();
         babel_mock.expect_run_sh().once().returning(move |_| {
             babel_api::utils::touch_protocol_data(&data_dir).unwrap();

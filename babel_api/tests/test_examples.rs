@@ -219,6 +219,7 @@ fn test_plugin_config() -> eyre::Result<()> {
         protocol_data_path: PathBuf::from("/blockjoy/protocol_data"),
         ..Default::default()
     });
+    babel.expect_stop_all_jobs().times(2).returning(|| Ok(()));
     babel
         .expect_render_template()
         .with(

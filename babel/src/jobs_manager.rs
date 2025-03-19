@@ -267,6 +267,7 @@ pub trait JobsManagerClient {
     async fn start(&self, name: &str) -> Result<()>;
     async fn get_job_shutdown_timeout(&self, name: &str) -> Duration;
     async fn stop(&self, name: &str) -> Result<()>;
+    async fn stop_all(&self) -> Result<()>;
     async fn skip(&self, name: &str) -> Result<()>;
     async fn cleanup(&self, name: &str) -> Result<()>;
     async fn info(&self, name: &str) -> Result<JobInfo>;
@@ -330,7 +331,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
                         PosixSignal::SIGTERM,
                     );
                 } else {
-                    terminate_job(name, *pid, &job.config).await?;
+                    terminate_job_process(name, *pid, &job.config).await?;
                 }
                 // job_runner process has been stopped, but job should be restarted on next jobs manager startup
                 job.state = JobState::Inactive(JobStatus::Running);
@@ -356,9 +357,10 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         info!("Requested '{name}' job to create: {config:?}",);
         let mut jobs_context = self.jobs_registry.lock().await;
 
-        if let Some(Job { state, .. }) = jobs_context.jobs.get(name) {
-            if let JobState::Active(_) = state {
-                bail!("can't create job '{name}' while it is already running")
+        if let Some(Job { state, config, .. }) = jobs_context.jobs.get(name) {
+            if let JobState::Active(pid) = state {
+                info!("Job '{name}' already running - stop and recreate with new config");
+                terminate_job_process(name, *pid, config).await?;
             }
         } else if jobs_context.jobs.len() >= MAX_JOBS {
             bail!("Exceeded max number of supported jobs: {MAX_JOBS}");
@@ -423,18 +425,18 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         info!("Requested '{name} job to stop'");
         let mut jobs_context = self.jobs_registry.lock().await;
         if let Some(job) = jobs_context.jobs.get_mut(name) {
-            match &mut job.state {
-                JobState::Active(pid) => {
-                    terminate_job(name, *pid, &job.config).await?;
-                    job.state = JobState::Inactive(JobStatus::Stopped);
-                }
-                JobState::Inactive(status) => {
-                    *status = JobStatus::Stopped;
-                }
-            }
-            job.save_status()?;
+            stop_job(name, job).await?;
         } else {
             bail!("can't stop, job '{name}' not found")
+        }
+        Ok(())
+    }
+
+    async fn stop_all(&self) -> Result<()> {
+        info!("Requested all jobs to stop'");
+        let mut jobs_context = self.jobs_registry.lock().await;
+        for (name, job) in &mut jobs_context.jobs {
+            stop_job(name, job).await?;
         }
         Ok(())
     }
@@ -445,7 +447,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         if let Some(job) = jobs_context.jobs.get_mut(name) {
             match &mut job.state {
                 JobState::Active(pid) => {
-                    terminate_job(name, *pid, &job.config).await?;
+                    terminate_job_process(name, *pid, &job.config).await?;
                     job.state = JobState::Inactive(JobStatus::Finished {
                         exit_code: Some(0),
                         message: "Skipped".to_string(),
@@ -517,7 +519,20 @@ fn build_job_info(job: &Job) -> JobInfo {
     }
 }
 
-async fn terminate_job(name: &str, pid: Pid, config: &JobConfig) -> Result<()> {
+async fn stop_job(name: &str, job: &mut Job) -> Result<()> {
+    match &mut job.state {
+        JobState::Active(pid) => {
+            terminate_job_process(name, *pid, &job.config).await?;
+            job.state = JobState::Inactive(JobStatus::Stopped);
+        }
+        JobState::Inactive(status) => {
+            *status = JobStatus::Stopped;
+        }
+    }
+    job.save_status()
+}
+
+async fn terminate_job_process(name: &str, pid: Pid, config: &JobConfig) -> Result<()> {
     let shutdown_timeout = Duration::from_secs(
         config
             .shutdown_timeout_secs
@@ -1076,40 +1091,6 @@ mod tests {
             test_env.client.info("test_job").await?
         );
 
-        // start failed
-        test_env
-            .client
-            .jobs_registry
-            .lock()
-            .await
-            .jobs
-            .get_mut("test_job")
-            .unwrap()
-            .state = JobState::Active(Pid::from_u32(0));
-        assert_eq!(
-            JobStatus::Running,
-            test_env.client.info("test_job").await?.status
-        );
-        let _ = test_env
-            .client
-            .create(
-                "test_job",
-                JobConfig {
-                    job_type: JobType::RunSh("different".to_string()),
-                    restart: RestartPolicy::Never,
-                    shutdown_timeout_secs: None,
-                    shutdown_signal: None,
-                    needs: Some(vec![]),
-                    wait_for: None,
-                    run_as: None,
-                    log_buffer_capacity_mb: None,
-                    log_timestamp: None,
-                    use_protocol_data: None,
-                    one_time: None,
-                },
-            )
-            .await
-            .unwrap_err();
         test_env.server.assert().await;
         Ok(())
     }

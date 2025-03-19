@@ -400,6 +400,14 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
+            EngineRequest::StopAllJobs { response_tx } => {
+                let _ = response_tx.send(match self.node_connection.babel_client().await {
+                    Ok(babel_client) => stop_all_jobs(babel_client)
+                        .await
+                        .map_err(|err| self.handle_connection_errors(err)),
+                    Err(err) => Err(err),
+                });
+            }
             EngineRequest::CleanupJob {
                 job_name,
                 response_tx,
@@ -597,6 +605,12 @@ async fn stop_job(client: &mut BabelClient, job_name: &str) -> Result<(), tonic:
     .map(|v| v.into_inner())
 }
 
+async fn stop_all_jobs(client: &mut BabelClient) -> Result<(), tonic::Status> {
+    let jobs_timeout = with_retry!(client.get_active_jobs_shutdown_timeout(()))?.into_inner();
+    with_retry!(client.stop_all_jobs(with_timeout((), jobs_timeout + NODE_REQUEST_TIMEOUT)))
+        .map(|v| v.into_inner())
+}
+
 async fn skip_job(client: &mut BabelClient, job_name: &str) -> Result<(), tonic::Status> {
     let job_timeout =
         with_retry!(client.get_job_shutdown_timeout(job_name.to_string()))?.into_inner();
@@ -633,6 +647,9 @@ enum EngineRequest {
     },
     StopJob {
         job_name: String,
+        response_tx: ResponseTx<Result<()>>,
+    },
+    StopAllJobs {
         response_tx: ResponseTx<Result<()>>,
     },
     CleanupJob {
@@ -721,6 +738,13 @@ impl babel_api::engine::Engine for Engine {
             job_name: job_name.to_string(),
             response_tx,
         })?;
+        response_rx.blocking_recv()?
+    }
+
+    fn stop_all_jobs(&self) -> Result<()> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .blocking_send(EngineRequest::StopAllJobs { response_tx })?;
         response_rx.blocking_recv()?
     }
 
@@ -1005,6 +1029,10 @@ mod tests {
                 &self,
                 request: Request<String>,
             ) -> Result<Response<Duration>, Status>;
+            async fn get_active_jobs_shutdown_timeout(
+                &self,
+                request: Request<()>,
+            ) -> Result<Response<Duration>, Status>;
             async fn create_job(
                 &self,
                 request: Request<(String, JobConfig)>,
@@ -1014,6 +1042,7 @@ mod tests {
                 request: Request<String>,
             ) -> Result<Response<()>, Status>;
             async fn stop_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
+            async fn stop_all_jobs(&self, request: Request<()>) -> Result<Response<()>, Status>;
             async fn skip_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn cleanup_job(&self, request: Request<String>) -> Result<Response<()>, Status>;
             async fn job_info(&self, request: Request<String>) -> Result<Response<JobInfo>, Status>;
@@ -1123,6 +1152,7 @@ mod tests {
             )?;
             self.engine.start_job(name)?;
             self.engine.stop_job(name)?;
+            self.engine.stop_all_jobs()?;
             self.engine.job_info(name)?;
             self.engine.get_jobs()?;
             self.engine.run_jrpc(
@@ -1346,6 +1376,12 @@ mod tests {
         babel_mock
             .expect_stop_job()
             .withf(|req| req.get_ref() == "custom_name")
+            .return_once(|_| Ok(Response::new(())));
+        babel_mock
+            .expect_get_active_jobs_shutdown_timeout()
+            .return_once(|_| Ok(Response::new(Duration::from_secs(1))));
+        babel_mock
+            .expect_stop_all_jobs()
             .return_once(|_| Ok(Response::new(())));
         babel_mock
             .expect_job_info()

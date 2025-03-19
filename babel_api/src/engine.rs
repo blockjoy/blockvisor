@@ -21,6 +21,8 @@ pub trait Engine {
     fn start_job(&self, job_name: &str) -> Result<()>;
     /// Stop background job with given unique name if running.
     fn stop_job(&self, job_name: &str) -> Result<()>;
+    /// Stop all background jobs.
+    fn stop_all_jobs(&self) -> Result<()>;
     /// Cleanup background job with given unique name - remove any intermediate files,
     /// so next time it will start from scratch.
     fn cleanup_job(&self, job_name: &str) -> Result<()>;

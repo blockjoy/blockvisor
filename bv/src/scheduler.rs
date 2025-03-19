@@ -160,7 +160,10 @@ async fn worker(
 
 fn handle_action(tasks: &mut Vec<(DateTime<TZ>, Scheduled)>, action: Action) {
     match action {
-        Action::Add(task) => tasks.push((TZ::now(), task)),
+        Action::Add(task) => {
+            tasks.retain(|(_, existing_task)| existing_task.name != task.name);
+            tasks.push((TZ::now(), task))
+        }
         Action::Delete(name) => tasks.retain(|(_, task)| task.name != name),
         Action::DeleteNode(id) => tasks.retain(|(_, task)| task.node_id != id),
     };
