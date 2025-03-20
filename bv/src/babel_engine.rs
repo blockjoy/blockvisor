@@ -235,7 +235,6 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
             "address" => self.address().await?,
             "consensus" => self.consensus().await?.to_string(),
             "protocol_status" => serde_json::to_string(&self.protocol_status().await?)?,
-            "application_status" => serde_json::to_string(&self.protocol_status().await?)?, // LEGACY node support - remove once all nodes upgraded
             "upload" => serde_json::to_string(&self.upload().await?)?,
             _ => {
                 let method_name = name.to_owned();
