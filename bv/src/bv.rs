@@ -19,7 +19,6 @@ use chrono::{DateTime, Utc};
 use cli_table::print_stdout;
 use eyre::{bail, Result};
 use std::{
-    collections::HashMap,
     ffi::OsStr,
     fs,
     ops::{Deref, DerefMut},
@@ -85,11 +84,6 @@ pub async fn process_host_command(
 pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Result<()> {
     let mut client = NodeClient::new(bv_url).await?;
     match command {
-        NodeCommand::FixLegacy { path } => {
-            let mapping: HashMap<String, (String, ProtocolImageKey)> =
-                serde_json::from_str(&fs::read_to_string(path)?)?;
-            client.fix_legacy_nodes(mapping).await?;
-        }
         NodeCommand::List {
             running,
             local,

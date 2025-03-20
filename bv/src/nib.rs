@@ -46,60 +46,6 @@ pub async fn process_image_command(
     command: ImageCommand,
 ) -> eyre::Result<()> {
     match command {
-        ImageCommand::GenerateMapping => {
-            let mut mapping: HashMap<String, (String, ProtocolImageKey)> = Default::default();
-            for entry in walkdir::WalkDir::new(std::env::current_dir()?) {
-                let entry = entry?;
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                if let Some(file_name) = path.file_name() {
-                    let file_name = file_name.to_string_lossy();
-                    if file_name.starts_with("babel") && file_name.ends_with("yaml") {
-                        if let Ok(image) = serde_yaml_ng::from_str::<nib_meta::Image>(
-                            &fs::read_to_string(path).await?,
-                        ) {
-                            let protocol_key = image.protocol_key;
-                            for variant in image.variants {
-                                let variant_key = variant.key;
-                                for pointer in variant.archive_pointers {
-                                    let nib_meta::StorePointer::StoreKey(store_key) =
-                                        pointer.pointer
-                                    else {
-                                        continue;
-                                    };
-                                    let Some(legacy_store_key) = pointer.legacy_store_key else {
-                                        continue;
-                                    };
-                                    if let Some((
-                                        _,
-                                        ProtocolImageKey {
-                                            protocol_key: first_protocol_key,
-                                            variant_key: first_variant_key,
-                                        },
-                                    )) = mapping.get(&legacy_store_key)
-                                    {
-                                        bail!("legacy_store_key '{legacy_store_key}' defined twice: first for {first_protocol_key}/{first_variant_key}, then for {protocol_key}/{variant_key}");
-                                    }
-                                    mapping.insert(
-                                        legacy_store_key,
-                                        (
-                                            store_key,
-                                            ProtocolImageKey {
-                                                protocol_key: protocol_key.clone(),
-                                                variant_key: variant_key.clone(),
-                                            },
-                                        ),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            println!("{}", serde_json::to_string(&mapping)?);
-        }
         ImageCommand::Create { protocol, variant } => {
             let mut parts = variant.rsplitn(3, "-");
             let node_type = parts.next().unwrap_or("Node Type");

@@ -80,7 +80,7 @@ fn init() {
     start_protocol(["download"]);
 }
 
-fn upload(param) {
+fn upload() {
     stop_protocol();
     start_job("upload", #{
         job_type: #{
@@ -107,5 +107,4 @@ fn upload(param) {
     });
     // start protocol services again once upload is finished
     start_protocol(["upload"]);
-    "Upload started!"
 }
