@@ -103,7 +103,7 @@ jobs:
         run: >
           RUST_LOG="off" cargo test -p babel -p bv_utils
 
-  protocols_tests:
+  babel_api_tests:
     name: Babel API Tests
     runs-on: ubuntu-latest
     steps:

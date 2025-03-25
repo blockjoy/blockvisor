@@ -7,7 +7,8 @@ use crate::{
     plugin_config::PluginConfig,
     rhai_plugin::{RhaiPlugin, PLUGIN_CONFIG_FN_NAME},
 };
-use eyre::bail;
+use eyre::{anyhow, bail};
+use std::collections::HashSet;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -21,6 +22,11 @@ pub fn check(
     node_properties: HashMap<String, String>,
 ) -> eyre::Result<()> {
     let mut warnings = vec![];
+    let defined_properties = node_properties.keys().cloned().collect::<HashSet<_>>();
+    let plugin_dir = plugin_path
+        .parent()
+        .ok_or(anyhow!("invalid plugin parent dir"))?
+        .to_path_buf();
     let mut rhai_plugin = RhaiPlugin::from_file(
         plugin_path,
         LinterEngine {
@@ -31,15 +37,95 @@ pub fn check(
     rhai_plugin.init()?;
     if rhai_plugin.bare.plugin_config.is_none() {
         warnings.push(format!(
-            "Deprecated API used: missing {PLUGIN_CONFIG_FN_NAME}"
+            "Deprecated API used: missing {PLUGIN_CONFIG_FN_NAME} function"
         ));
     }
-    // TODO define more checks
+    warnings.extend(
+        find_undefined_properties(&defined_properties, &plugin_dir)?
+            .into_iter()
+            .map(|property| {
+                format!(
+                    "{}:{}:{}: '{}' not defined in babel.yaml",
+                    property
+                        .path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    property.pos.line().unwrap_or_default(),
+                    property.pos.position().unwrap_or_default(),
+                    property.name
+                )
+            }),
+    );
     if warnings.is_empty() {
         Ok(())
     } else {
         bail!("{warnings:?}")
     }
+}
+
+#[derive(Eq, PartialEq, Hash)]
+struct UndefinedProperty {
+    path: PathBuf,
+    pos: rhai::Position,
+    name: String,
+}
+
+fn find_undefined_properties(
+    defined_properties: &HashSet<String>,
+    plugin_dir: &Path,
+) -> eyre::Result<HashSet<UndefinedProperty>> {
+    let mut undefined_properties = HashSet::<UndefinedProperty>::new();
+    let mut engine = rhai::Engine::new();
+    engine.set_max_expr_depths(64, 32);
+    for entry in walkdir::WalkDir::new(plugin_dir) {
+        let entry = entry?;
+        let path = entry.path();
+        let mut check_ast_node = |nodes: &[rhai::ASTNode<'_>]| -> bool {
+            undefined_properties.extend(find_used_properties(nodes).filter_map(|(pos, name)| {
+                if defined_properties.contains(name.as_str()) {
+                    None
+                } else {
+                    Some(UndefinedProperty {
+                        path: path.to_path_buf(),
+                        pos: pos.to_owned(),
+                        name: name.to_string(),
+                    })
+                }
+            }));
+            true
+        };
+        if path.extension().is_some_and(|ext| ext == "rhai") {
+            let ast = engine.compile_file(path.to_path_buf())?;
+            ast.walk(&mut check_ast_node);
+        }
+    }
+    Ok(undefined_properties)
+}
+
+fn find_used_properties<'a>(
+    nodes: &'a [rhai::ASTNode<'_>],
+) -> impl Iterator<Item = (&'a rhai::Position, &'a rhai::ImmutableString)> + 'a {
+    nodes.iter().filter_map(|node| {
+        if let rhai::ASTNode::Expr(rhai::Expr::Index(expr, _, _))
+        | rhai::ASTNode::Expr(rhai::Expr::Dot(expr, _, _)) = node
+        {
+            if let rhai::BinaryExpr {
+                lhs: rhai::Expr::FnCall(fn_call, _),
+                rhs,
+            } = expr.as_ref()
+            {
+                if fn_call.name == "node_params" {
+                    if let rhai::Expr::StringConstant(property, pos) = rhs {
+                        return Some((pos, property));
+                    } else if let rhai::Expr::Property(property, pos) = rhs {
+                        return Some((pos, &property.2));
+                    }
+                }
+            }
+        }
+        None
+    })
 }
 
 struct LinterEngine {
