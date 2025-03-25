@@ -16,7 +16,7 @@ org_id: null
 description: Example image description
 
 # [optional] The DNS scheme (e.g. "https", "wss") for node RPC requests.
-dns_scheme: Example image description
+dns_scheme: https
 
 # Image visibility, allowed values: `public`, `development`, `private`.
 visibility: development
@@ -57,7 +57,7 @@ firewall_config:
           # [optional] Brief ip description.
           name: authorize client ip
 
-      # List of ports for which rule apply.
+      # List of ports for which rule apply. Empty array means all ports.
       ports:
 
         # Port number.
@@ -151,7 +151,7 @@ variants:
     # NOTE 2: If expected metadata (`network`, `client`, `node-type`) are not explicitly defined here,
     #         Blockvisor will try to figure it out from variant `key` field, assuming following convention:
     #         <client>-<network>-<node-type>
-    #         where <network> and <node-type> may not contain `-`, but <client> can b lower-kebab-case.
+    #         where <network> and <node-type> may not contain `-`, but <client> can be lower-kebab-case.
     metadata:
       # Unique metadata key.
       # It is required to be lower-kebab-case.

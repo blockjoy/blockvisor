@@ -1,3 +1,4 @@
+use crate::nib_meta::StorePointer;
 use crate::{
     apptainer_machine::{self, PLUGIN_MAIN_FILENAME, PLUGIN_PATH},
     bv_config, firewall,
@@ -27,7 +28,7 @@ use std::{
 };
 use tokio::fs;
 use tokio::time::sleep;
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::{Channel, Endpoint, Uri};
 use tracing::info;
 use uuid::Uuid;
 
@@ -37,6 +38,7 @@ const BV_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const VARIANT_METADATA_NETWORK_KEY: &str = "network";
 const VARIANT_METADATA_CLIENT_KEY: &str = "client";
 const VARIANT_METADATA_NODE_TYPE_KEY: &str = "node-type";
+const LOWER_KEBAB_CASE: &str = "abcdefghijklmnopqrstuvwxyz1234567890-";
 
 pub async fn process_image_command(
     connector: impl ApiServiceConnector + Clone,
@@ -214,11 +216,12 @@ pub async fn process_image_command(
             tags,
             checks,
         } => {
+            println!("Read and validate babel.yaml");
             let image: nib_meta::Image =
                 serde_yaml_ng::from_str(&fs::read_to_string(&path).await?)?;
             let variant = pick_variant(image.variants.clone(), variant)?;
             let image_variant = ImageVariant::build(&image, variant.clone());
-            utils::verify_variant_sku(&image_variant)?;
+            image_variant.validate()?;
             let properties = build_properties(&image_variant.properties, props)?;
             let checks = checks.unwrap_or(vec![NodeChecks::Plugin, NodeChecks::JobsStatus]);
             let tmp_dir = tempdir::TempDir::new("nib_check")?;
@@ -266,7 +269,6 @@ pub async fn process_image_command(
                         Some(dev_node),
                     )
                 };
-
             println!("Checking plugin");
             let mut res = rhai_plugin_linter::check(
                 rootfs_path.join(PLUGIN_PATH).join(PLUGIN_MAIN_FILENAME),
@@ -315,9 +317,7 @@ pub async fn process_image_command(
                 .variants
                 .iter()
                 .map(|variant| ImageVariant::build(&image, variant.clone()))
-                .map(|image_variant| {
-                    utils::verify_variant_sku(&image_variant).map(|_| image_variant)
-                })
+                .map(|image_variant| image_variant.validate().map(|_| image_variant))
                 .collect::<eyre::Result<_>>()?;
             for image_variant in image_variants {
                 let image_key = ProtocolImageKey {
@@ -544,6 +544,93 @@ impl ImageVariant {
             metadata,
             dns_scheme: variant.dns_scheme.or(image.dns_scheme.clone()),
         }
+    }
+
+    fn validate(&self) -> eyre::Result<()> {
+        self.validate_variant_sku()?;
+        semver::Version::from_str(&self.version).with_context(|| "version must be semantic")?;
+        Uri::from_str(&self.container_uri).with_context(|| "invalid container_uri")?;
+        self.org_id.as_ref().map_or(Ok(Uuid::default()), |org_id| {
+            Uuid::parse_str(org_id).with_context(|| "invalid org_id")
+        })?;
+        self.validate_keys()?;
+        self.validate_ips()?;
+        if let Some(suspicious_rule) = self
+            .firewall_config
+            .rules
+            .iter()
+            .find(|rule| rule.ports.is_empty())
+        {
+            println!(
+                "WARNING! Rule {} has empty ports array. It means opening all ports. Are you sure?",
+                suspicious_rule.key
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_ips(&self) -> eyre::Result<()> {
+        for rule in &self.firewall_config.rules {
+            for ip in &rule.ips {
+                ensure!(
+                    cidr_utils::cidr::IpCidr::is_ip_cidr(&ip.ip),
+                    "invalid ip ({}) in rule '{}'",
+                    ip.ip,
+                    rule.key
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_variant_sku(&self) -> eyre::Result<()> {
+        Ok(ensure!(
+        self
+            .sku_code
+            .chars()
+            .all(|character| character == '-'
+                || character.is_ascii_digit()
+                || character.is_ascii_uppercase())
+            && self.sku_code.split("-").count() == 3,
+        "Invalid SKU format for variant '{}': '{}' (Should be formatted as 3 sections of uppercased ascii alphanumeric characters split by `-`, e.g.: `ETH-ERG-SF`)",
+        self.variant_key,
+        self.sku_code
+    ))
+    }
+
+    fn validate_keys(&self) -> eyre::Result<()> {
+        macro_rules! ensure_kebab_case {
+            ($name:expr, $value:expr) => {{
+                ensure!(
+                    $value.chars().all(|c| LOWER_KEBAB_CASE.contains(c)),
+                    "'{}: {}' isn't lower-kebab-case",
+                    $name,
+                    $value,
+                )
+            }};
+        }
+        ensure_kebab_case!("variant_key", self.variant_key);
+        ensure_kebab_case!("protocol_key", self.protocol_key);
+        for item in &self.metadata {
+            ensure_kebab_case!("metadata.key", item.key);
+        }
+        for item in &self.properties {
+            ensure_kebab_case!("properties.key", item.key);
+            if let nib_meta::UiType::Enum(variants) = &item.ui_type {
+                for variant in variants {
+                    ensure_kebab_case!(format!("in property '{}', value", item.key), variant.value);
+                }
+            }
+        }
+        for archive_pointer in &self.archive_pointers {
+            if let StorePointer::StoreKey(store_key) = &archive_pointer.pointer {
+                ensure_kebab_case!("archive_pointer.store_key", store_key);
+            }
+        }
+        for item in &self.firewall_config.rules {
+            ensure_kebab_case!("firewall.rule.key", item.key);
+        }
+        Ok(())
     }
 }
 

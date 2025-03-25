@@ -95,7 +95,6 @@ pub struct FirewallRule {
     pub action: Action,
     #[serde(default)]
     pub ips: Vec<IpName>,
-    #[serde(default)]
     pub ports: Vec<PortName>,
 }
 

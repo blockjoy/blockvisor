@@ -14,8 +14,6 @@ use tokio::{
 };
 use tracing::{debug, warn};
 
-use crate::nib::ImageVariant;
-
 // image download should never take more than 15min
 const ARCHIVE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
@@ -133,21 +131,6 @@ pub fn render_template(template: &str, destination: &Path, params: &[(&str, &str
     let destination_file = std::fs::File::create(destination)?;
     tera.render_to("template", &context, destination_file)?;
     Ok(())
-}
-
-pub fn verify_variant_sku(image_variant: &ImageVariant) -> eyre::Result<()> {
-    Ok(eyre::ensure!(
-        image_variant
-            .sku_code
-            .chars()
-            .all(|character| character == '-'
-                || character.is_ascii_digit()
-                || character.is_ascii_uppercase())
-            && image_variant.sku_code.split("-").count() == 3,
-        "Invalid SKU format for variant '{}': '{}' (Should be formatted as 3 sections of uppercased ascii alphanumeric characters split by `-`, e.g.: `ETH-ERG-SF`)",
-        image_variant.variant_key,
-        image_variant.sku_code
-    ))
 }
 
 pub async fn careful_save(path: &Path, content: &[u8]) -> Result<()> {
