@@ -159,6 +159,7 @@ impl Engine for LinterEngine {
             status: JobStatus::Pending {
                 waiting_for: vec![],
             },
+            timestamp: SystemTime::now(),
             progress: None,
             restart_count: 0,
             logs: vec![],
@@ -173,6 +174,7 @@ impl Engine for LinterEngine {
                 status: JobStatus::Pending {
                     waiting_for: vec![],
                 },
+                timestamp: SystemTime::now(),
                 progress: None,
                 restart_count: 0,
                 logs: vec![],

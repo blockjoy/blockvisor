@@ -159,7 +159,7 @@ mod tests {
         .run(test_run, &job_name, &jobs_dir)
         .await;
 
-        let status = jobs::load_status(&job_dir)?;
+        let (status, _) = jobs::load_status(&job_dir)?;
         assert_eq!(
             status,
             JobStatus::Finished {

@@ -1389,6 +1389,7 @@ mod tests {
             .return_once(|_| {
                 Ok(Response::new(JobInfo {
                     status: JobStatus::Running,
+                    timestamp: SystemTime::UNIX_EPOCH,
                     progress: Default::default(),
                     restart_count: 0,
                     logs: vec![],
@@ -1401,6 +1402,7 @@ mod tests {
                 JobInfo {
                     status: JobStatus::Running,
                     progress: Default::default(),
+                    timestamp: SystemTime::UNIX_EPOCH,
                     restart_count: 0,
                     logs: vec![],
                     upgrade_blocking: true,

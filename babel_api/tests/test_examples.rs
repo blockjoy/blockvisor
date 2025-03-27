@@ -10,6 +10,7 @@ use bv_tests_utils::babel_engine_mock::MockBabelEngine;
 use eyre::{bail, Context};
 use mockall::*;
 use std::path::PathBuf;
+use std::time::SystemTime;
 use std::{collections::HashMap, fs, path::Path};
 
 pub fn rhai_smoke(path: &Path) -> eyre::Result<()> {
@@ -34,6 +35,7 @@ fn dummy_babel_engine() -> MockBabelEngine {
                 exit_code: Some(0),
                 message: "".to_string(),
             },
+            timestamp: SystemTime::UNIX_EPOCH,
             progress: None,
             restart_count: 0,
             logs: vec![],
@@ -48,6 +50,7 @@ fn dummy_babel_engine() -> MockBabelEngine {
     babel.expect_job_info().returning(|_| {
         Ok(JobInfo {
             status: JobStatus::Running,
+            timestamp: SystemTime::UNIX_EPOCH,
             progress: None,
             restart_count: 0,
             logs: vec![],

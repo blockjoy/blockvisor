@@ -217,7 +217,7 @@ variants:
     description: Example image description
 
     # [optional] Override default DNS scheme with variant specific one.
-    dns_scheme: Example image description
+    dns_scheme: http
 
     # [optional] Override default visibility, allowed values: `public`, `development`, `private`.
     visibility: private

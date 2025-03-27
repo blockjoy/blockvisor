@@ -21,8 +21,15 @@ use bv_utils::{
 };
 use eyre::{bail, Context, ContextCompat, Report, Result};
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::{collections::HashMap, ffi::OsStr, path::Path, path::PathBuf, sync::Arc, time::Duration};
-use sysinfo::{Pid, PidExt, Process, System, SystemExt};
+use std::ffi::OsStr;
+use std::{
+    collections::HashMap,
+    path::Path,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
+use sysinfo::{Pid, PidExt, Process, ProcessExt, System, SystemExt};
 use tokio::{
     fs, select,
     sync::{mpsc, watch, Mutex},
@@ -126,17 +133,22 @@ async fn load_jobs(
         };
         match jobs::load_config(&job_dir) {
             Ok(config) => {
-                let state = if let Some((pid, _)) =
-                    find_processes(job_runner_bin_path, &[&name], ps).next()
-                {
+                let state = if let Some((pid, start_time)) =
+                    find_processes(job_runner_bin_path, &[&name], ps)
+                        .next()
+                        .map(|(pid, proc)| {
+                            (
+                                *pid,
+                                SystemTime::UNIX_EPOCH + Duration::from_secs(proc.start_time()),
+                            )
+                        }) {
                     info!("{name} - Active(PID: {pid})");
-                    JobState::Active(*pid)
+                    JobState::Active { pid, start_time }
                 } else {
-                    let status = jobs::load_status(&job_dir).unwrap_or(JobStatus::Pending {
-                        waiting_for: config.waiting_for(),
-                    });
+                    let (status, timestamp) = jobs::load_status(&job_dir)
+                        .unwrap_or((JobStatus::Running, SystemTime::now()));
                     info!("{name} - Inactive(status: {status:?})");
-                    JobState::Inactive(status)
+                    JobState::Inactive { status, timestamp }
                 };
                 jobs_context
                     .jobs
@@ -203,22 +215,31 @@ async fn load_jobs(
                             .jobs_dir
                             .join("status")
                             .join(format!("{}.progress", name));
-                        let state = if let Some((pid, _)) =
-                            find_processes(job_runner_bin_path, &[&name], ps).next()
-                        {
+                        let state = if let Some((pid, start_time)) =
+                            find_processes(job_runner_bin_path, &[&name], ps)
+                                .next()
+                                .map(|(pid, proc)| {
+                                    (
+                                        *pid,
+                                        SystemTime::UNIX_EPOCH
+                                            + Duration::from_secs(proc.start_time()),
+                                    )
+                                }) {
                             info!("{name} - Active(PID: {pid})");
-                            JobState::Active(*pid)
+                            JobState::Active { pid, start_time }
                         } else {
+                            let timestamp = legacy_status_path
+                                .metadata()
+                                .and_then(|meta| meta.modified())
+                                .unwrap_or(SystemTime::now());
                             let status = fs::read_to_string(&legacy_status_path)
                                 .await
                                 .and_then(|s| {
                                     serde_json::from_str::<JobStatus>(&s).map_err(Into::into)
                                 })
-                                .unwrap_or(JobStatus::Pending {
-                                    waiting_for: config.waiting_for(),
-                                });
+                                .unwrap_or(JobStatus::Running);
                             info!("{name} - Inactive(status: {status:?})");
-                            JobState::Inactive(status)
+                            JobState::Inactive { status, timestamp }
                         };
                         let mut job = Job {
                             config_path: path,
@@ -229,7 +250,7 @@ async fn load_jobs(
                             logs: Default::default(),
                             restart_stamps: Default::default(),
                         };
-                        if let JobState::Inactive(_) = state {
+                        if let JobState::Inactive { .. } = state {
                             if let Err(err) =
                                 migrate_job(&name, &mut job, &jobs_context.jobs_dir).await
                             {
@@ -295,7 +316,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
     async fn get_active_jobs_shutdown_timeout(&self) -> Duration {
         let jobs = &self.jobs_registry.lock().await.jobs;
         let total_timeout = jobs.iter().fold(Duration::default(), |acc, (_, job)| {
-            if let JobState::Active(_) = job.state {
+            if let JobState::Active { .. } = job.state {
                 acc + Duration::from_secs(
                     job.config
                         .shutdown_timeout_secs
@@ -318,7 +339,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         let _ = self.jobs_manager_state_tx.send(JobsManagerState::Shutdown);
         let jobs = &mut self.jobs_registry.lock().await.jobs;
         for (name, job) in jobs {
-            if let JobState::Active(pid) = &mut job.state {
+            if let JobState::Active { pid, .. } = &mut job.state {
                 if force {
                     kill_all_processes(
                         &self.job_runner_bin_path,
@@ -334,7 +355,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
                     terminate_job_process(name, *pid, &job.config).await?;
                 }
                 // job_runner process has been stopped, but job should be restarted on next jobs manager startup
-                job.state = JobState::Inactive(JobStatus::Running);
+                job.state.set_inactive(JobStatus::Running);
             }
         }
         Ok(())
@@ -358,7 +379,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         let mut jobs_context = self.jobs_registry.lock().await;
 
         if let Some(Job { state, config, .. }) = jobs_context.jobs.get(name) {
-            if let JobState::Active(pid) = state {
+            if let JobState::Active { pid, .. } = state {
                 info!("Job '{name}' already running - stop and recreate with new config");
                 terminate_job_process(name, *pid, config).await?;
             }
@@ -371,7 +392,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
                 .await
                 .with_context(|| format!("failed to create job dir {}", job_dir.display()))?;
         }
-        let job = Job::new(job_dir, config, JobState::Inactive(JobStatus::Stopped));
+        let job = Job::new(job_dir, config, JobState::inactive(JobStatus::Stopped));
         job.save_status()?;
         job.save_config().with_context(|| {
             format!("failed to create job '{name}', can't save job config to file")
@@ -385,12 +406,12 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         let mut jobs_context = self.jobs_registry.lock().await;
         let jobs = &mut jobs_context.jobs;
         if let Some(job) = jobs.get_mut(name) {
-            match &mut job.state {
-                JobState::Active(_) => return Ok(()),
-                JobState::Inactive(status) => {
-                    *status = JobStatus::Pending {
+            match &job.state {
+                JobState::Active { .. } => return Ok(()),
+                JobState::Inactive { .. } => {
+                    job.state.set_inactive(JobStatus::Pending {
                         waiting_for: job.config.waiting_for(),
-                    };
+                    });
                     job.save_status()?;
                 }
             }
@@ -408,7 +429,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
             .jobs
             .get(name)
             .and_then(|job| {
-                if let JobState::Active(_) = &job.state {
+                if let JobState::Active { .. } = &job.state {
                     Some(Duration::from_secs(
                         job.config
                             .shutdown_timeout_secs
@@ -445,21 +466,13 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         info!("Requested '{name} job to stop'");
         let mut jobs_context = self.jobs_registry.lock().await;
         if let Some(job) = jobs_context.jobs.get_mut(name) {
-            match &mut job.state {
-                JobState::Active(pid) => {
-                    terminate_job_process(name, *pid, &job.config).await?;
-                    job.state = JobState::Inactive(JobStatus::Finished {
-                        exit_code: Some(0),
-                        message: "Skipped".to_string(),
-                    });
-                }
-                JobState::Inactive(status) => {
-                    *status = JobStatus::Finished {
-                        exit_code: Some(0),
-                        message: "Skipped".to_string(),
-                    };
-                }
+            if let JobState::Active { pid, .. } = &job.state {
+                terminate_job_process(name, *pid, &job.config).await?;
             }
+            job.state.set_inactive(JobStatus::Finished {
+                exit_code: Some(0),
+                message: "Skipped".to_string(),
+            });
             job.save_status()?;
         } else {
             bail!("can't stop, job '{name}' not found")
@@ -476,7 +489,7 @@ impl<C: BabelEngineConnector + Send> JobsManagerClient for Client<C> {
         let Some(node_env) = &jobs_context.node_env else {
             bail!("can't cleanup, job '{name}', missing node_env")
         };
-        if let JobState::Inactive(_) = job.state {
+        if let JobState::Inactive { .. } = job.state {
             job.cleanup(node_env)
         } else {
             bail!("can't cleanup active job '{name}'");
@@ -498,16 +511,13 @@ fn build_job_info(job: &Job) -> JobInfo {
     let restart_count = job.restart_stamps.len();
     let progress = job.load_progress();
     let logs = job.logs.iter().rev().map(|(_, log)| log.clone()).collect();
+    let (status, timestamp) = match &job.state {
+        JobState::Active { start_time, .. } => (JobStatus::Running, *start_time),
+        JobState::Inactive { status, timestamp } => (status.clone(), *timestamp),
+    };
     JobInfo {
-        status: if let Job {
-            state: JobState::Inactive(status),
-            ..
-        } = job
-        {
-            status.clone()
-        } else {
-            JobStatus::Running
-        },
+        status,
+        timestamp,
         progress,
         restart_count,
         logs,
@@ -520,15 +530,10 @@ fn build_job_info(job: &Job) -> JobInfo {
 }
 
 async fn stop_job(name: &str, job: &mut Job) -> Result<()> {
-    match &mut job.state {
-        JobState::Active(pid) => {
-            terminate_job_process(name, *pid, &job.config).await?;
-            job.state = JobState::Inactive(JobStatus::Stopped);
-        }
-        JobState::Inactive(status) => {
-            *status = JobStatus::Stopped;
-        }
+    if let JobState::Active { pid, .. } = job.state {
+        terminate_job_process(name, pid, &job.config).await?;
     }
+    job.state.set_inactive(JobStatus::Stopped);
     job.save_status()
 }
 
@@ -663,7 +668,7 @@ impl<C: BabelEngineConnector> Manager<C> {
         let mut async_pids = vec![];
         for job in jobs_context.jobs.values() {
             if let Job {
-                state: JobState::Active(pid),
+                state: JobState::Active { pid, .. },
                 ..
             } = job
             {
@@ -680,7 +685,7 @@ impl<C: BabelEngineConnector> Manager<C> {
     ) {
         for (name, job) in jobs_context.jobs.iter_mut() {
             if let Job {
-                state: JobState::Active(job_pid),
+                state: JobState::Active { pid: job_pid, .. },
                 ..
             } = job
             {
@@ -700,49 +705,57 @@ impl<C: BabelEngineConnector> Manager<C> {
         let deps = jobs_context.jobs.clone();
         for (name, job) in jobs_context.jobs.iter_mut() {
             if let Job {
-                state: JobState::Inactive(status),
+                state: JobState::Inactive { status, .. },
                 config: JobConfig {
                     needs, wait_for, ..
                 },
                 ..
             } = job
             {
-                if matches!(status, JobStatus::Pending { .. }) {
-                    match deps_finished(name, &deps, needs, wait_for) {
-                        Ok(true) => {
-                            if needs.is_some() || wait_for.is_some() {
-                                info!("all '{name}' job dependencies finished");
+                match status {
+                    JobStatus::Pending { .. } => {
+                        match deps_finished(name, &deps, needs, wait_for) {
+                            Ok(true) => {
+                                if needs.is_some() || wait_for.is_some() {
+                                    info!("all '{name}' job dependencies finished");
+                                }
+                                self.start_job(name, job, &jobs_context.connector).await;
                             }
-                            self.start_job(name, job, &jobs_context.connector).await;
-                        }
-                        Ok(false) => {}
-                        Err(err) => {
-                            *status = JobStatus::Finished {
-                                exit_code: None,
-                                message: err.to_string(),
-                            };
-                            let save_result = job.save_status();
-                            let message = err.to_string();
-                            job.push_log(&message);
-                            warn!(message);
-                            if let Err(err) = save_result {
-                                // if we can't save status for some reason, just log
-                                let message =
-                                    format!("failed to save failed job '{name}' status: {err:#}");
+                            Ok(false) => {}
+                            Err(err) => {
+                                *status = JobStatus::Finished {
+                                    exit_code: None,
+                                    message: err.to_string(),
+                                };
+                                let save_result = job.save_status();
+                                let message = err.to_string();
                                 job.push_log(&message);
-                                error!(message);
-                                let mut client = jobs_context.connector.connect();
-                                let _ = with_retry!(client.bv_error(message.clone()));
+                                warn!(message);
+                                if let Err(err) = save_result {
+                                    // if we can't save status for some reason, just log
+                                    let message = format!(
+                                        "failed to save failed job '{name}' status: {err:#}"
+                                    );
+                                    job.push_log(&message);
+                                    error!(message);
+                                    let mut client = jobs_context.connector.connect();
+                                    let _ = with_retry!(client.bv_error(message.clone()));
+                                }
                             }
                         }
                     }
+                    JobStatus::Running { .. } => {
+                        self.handle_stopped_job(name, job, &jobs_context.connector)
+                            .await
+                    }
+                    _ => {}
                 }
             }
         }
     }
 
     async fn handle_stopped_job(&self, name: &str, job: &mut Job, connector: &C) {
-        let status = match job.load_status() {
+        let (status, timestamp) = match job.load_status() {
             Err(err) => {
                 let message = format!(
                     "can't load job '{name}' status from file after it stopped, with: {err:#}"
@@ -751,20 +764,23 @@ impl<C: BabelEngineConnector> Manager<C> {
                 error!(message);
                 let mut client = connector.connect();
                 let _ = with_retry!(client.bv_error(message.clone()));
-                match &job.config.restart {
-                    RestartPolicy::Never => JobStatus::Finished {
-                        exit_code: None,
-                        message,
+                (
+                    match &job.config.restart {
+                        RestartPolicy::Never => JobStatus::Finished {
+                            exit_code: None,
+                            message,
+                        },
+                        _ => JobStatus::Running,
                     },
-                    _ => JobStatus::Running,
-                }
+                    SystemTime::now(),
+                )
             }
-            Ok(status) => status,
+            Ok(status_with_timestamp) => status_with_timestamp,
         };
         match status {
             JobStatus::Finished { .. } | JobStatus::Stopped => {
                 info!("job '{name}' finished with {status:?}");
-                job.state = JobState::Inactive(status);
+                job.state = JobState::Inactive { status, timestamp };
             }
             _ => {
                 job.register_restart();
@@ -782,20 +798,18 @@ impl<C: BabelEngineConnector> Manager<C> {
             error!(message);
             let mut client = connector.connect();
             let _ = with_retry!(client.bv_error(message.clone()));
-            job.state = JobState::Inactive(JobStatus::Pending {
-                waiting_for: job.config.waiting_for(),
-            });
+            job.state.set_inactive(JobStatus::Running);
         } else {
             match self.start_job_runner(name).await {
                 Ok(pid) => {
                     info!("started job '{name}' with PID {pid}");
-                    job.state = JobState::Active(pid);
+                    job.state.set_active(pid);
                 }
                 Err(err) => {
                     let message = format!("failed to start job '{name}': {err:#}");
                     job.push_log(&message);
                     warn!(message);
-                    job.state = JobState::Inactive(JobStatus::Finished {
+                    job.state.set_inactive(JobStatus::Finished {
                         exit_code: None,
                         message,
                     });
@@ -867,13 +881,13 @@ fn deps_finished(
                 .with_context(|| format!("job '{name}' needs '{needed_name}', but it is not defined"))?
                 .state
             {
-                JobState::Inactive(JobStatus::Finished {
-                                       exit_code: Some(0), ..
-                                   }) => {}
-                JobState::Inactive(JobStatus::Finished { exit_code, message }) => bail!(
+                JobState::Inactive{ status: JobStatus::Finished {
+                    exit_code: Some(0), ..
+                }, .. } => {}
+                JobState::Inactive{ status: JobStatus::Finished { exit_code, message }, .. } => bail!(
                     "job '{name}' needs '{needed_name}', but it failed with {exit_code:?} - {message}"
                 ),
-                JobState::Inactive(JobStatus::Stopped) => {
+                JobState::Inactive{ status: JobStatus::Stopped, .. } => {
                     bail!("job '{name}' needs '{needed_name}', but it was stopped")
                 }
                 _ => return Ok(false),
@@ -886,8 +900,14 @@ fn deps_finished(
                 format!("job '{name}' waits for '{wait_for_name}', but it is not defined")
             })?;
             match &job.state {
-                JobState::Inactive(JobStatus::Finished { .. })
-                | JobState::Inactive(JobStatus::Stopped) => {}
+                JobState::Inactive {
+                    status: JobStatus::Finished { .. },
+                    ..
+                }
+                | JobState::Inactive {
+                    status: JobStatus::Stopped,
+                    ..
+                } => {}
                 _ => return Ok(false),
             }
         }
@@ -1069,7 +1089,13 @@ mod tests {
             test_env.client.info("test_job").await?.status
         );
         test_env.client.start("test_job").await?;
-        assert!(!status_path.exists());
+        let (saved_status, _) = jobs::load_status_file(&status_path).unwrap();
+        assert_eq!(
+            JobStatus::Pending {
+                waiting_for: vec![]
+            },
+            saved_status
+        );
         let saved_config = jobs::load_config(&test_job_dir)?;
         assert_eq!(config, saved_config);
         assert!(test_env
@@ -1078,17 +1104,19 @@ mod tests {
             .job_started_rx
             .has_changed()
             .unwrap());
+        let job_info = test_env.client.info("test_job").await?;
         assert_eq!(
             JobInfo {
                 status: JobStatus::Pending {
                     waiting_for: vec![]
                 },
+                timestamp: job_info.timestamp,
                 progress: Default::default(),
                 restart_count: 0,
                 logs: vec![],
                 upgrade_blocking: true,
             },
-            test_env.client.info("test_job").await?
+            job_info
         );
 
         test_env.server.assert().await;
@@ -1112,9 +1140,12 @@ mod tests {
             Job::new(
                 test_job_dir.clone(),
                 dummy_job_config(),
-                JobState::Inactive(JobStatus::Pending {
-                    waiting_for: vec![],
-                }),
+                JobState::Inactive {
+                    status: JobStatus::Pending {
+                        waiting_for: vec![],
+                    },
+                    timestamp: SystemTime::UNIX_EPOCH,
+                },
             ),
         );
         test_env.client.stop("test_job").await?;
@@ -1122,7 +1153,7 @@ mod tests {
             JobStatus::Stopped,
             test_env.client.info("test_job").await?.status
         );
-        let saved_status = jobs::load_status(&test_job_dir)?;
+        let (saved_status, _) = jobs::load_status(&test_job_dir)?;
         assert_eq!(JobStatus::Stopped, saved_status);
 
         // stop active
@@ -1131,7 +1162,10 @@ mod tests {
             Job::new(
                 active_job_dir.clone(),
                 dummy_job_config(),
-                JobState::Active(Pid::from_u32(0)),
+                JobState::Active {
+                    pid: Pid::from_u32(0),
+                    start_time: SystemTime::UNIX_EPOCH,
+                },
             ),
         );
         test_env.client.stop("test_active_job").await?;
@@ -1139,7 +1173,7 @@ mod tests {
             JobStatus::Stopped,
             test_env.client.info("test_active_job").await?.status
         );
-        let saved_status = jobs::load_status(&active_job_dir)?;
+        let (saved_status, _) = jobs::load_status(&active_job_dir)?;
         assert_eq!(JobStatus::Stopped, saved_status);
         test_env.server.assert().await;
         Ok(())
@@ -1158,6 +1192,8 @@ mod tests {
         };
         let pending_job_dir = test_env.jobs_dir.join("pending_job");
         fs::create_dir_all(&pending_job_dir).await?;
+        let crashed_job_dir = test_env.jobs_dir.join("crashed_job");
+        fs::create_dir_all(&crashed_job_dir).await?;
         let finished_job_dir = test_env.jobs_dir.join("finished_job");
         fs::create_dir_all(&finished_job_dir).await?;
         let active_job_dir = test_env.jobs_dir.join("active_job");
@@ -1176,6 +1212,13 @@ mod tests {
         // load active and inactive jobs
         let config = dummy_job_config();
         jobs::save_config(&config, &pending_job_dir)?;
+        jobs::save_status(
+            &JobStatus::Pending {
+                waiting_for: vec![],
+            },
+            &pending_job_dir,
+        )?;
+        jobs::save_config(&config, &crashed_job_dir)?;
         jobs::save_config(&config, &finished_job_dir)?;
         jobs::save_status(
             &JobStatus::Finished {
@@ -1212,20 +1255,37 @@ mod tests {
             Job::new(
                 pending_job_dir,
                 config.clone(),
-                JobState::Inactive(JobStatus::Pending {
-                    waiting_for: vec![]
-                })
+                JobState::Inactive {
+                    status: JobStatus::Pending {
+                        waiting_for: vec![]
+                    },
+                    timestamp: SystemTime::UNIX_EPOCH
+                }
             ),
             *jobs_context.jobs.get("pending_job").unwrap()
         );
         assert_eq!(
             Job::new(
+                crashed_job_dir,
+                config.clone(),
+                JobState::Inactive {
+                    status: JobStatus::Running,
+                    timestamp: SystemTime::UNIX_EPOCH
+                }
+            ),
+            *jobs_context.jobs.get("crashed_job").unwrap()
+        );
+        assert_eq!(
+            Job::new(
                 finished_job_dir,
                 config.clone(),
-                JobState::Inactive(JobStatus::Finished {
-                    exit_code: Some(1),
-                    message: "job message".to_string(),
-                }),
+                JobState::Inactive {
+                    status: JobStatus::Finished {
+                        exit_code: Some(1),
+                        message: "job message".to_string(),
+                    },
+                    timestamp: SystemTime::UNIX_EPOCH
+                }
             ),
             *jobs_context.jobs.get("finished_job").unwrap()
         );
@@ -1233,7 +1293,10 @@ mod tests {
             Job::new(
                 active_job_dir,
                 config.clone(),
-                JobState::Active(Pid::from_u32(job.id().unwrap())),
+                JobState::Active {
+                    pid: Pid::from_u32(job.id().unwrap()),
+                    start_time: SystemTime::UNIX_EPOCH
+                },
             ),
             *jobs_context.jobs.get("active_job").unwrap()
         );
@@ -1509,7 +1572,10 @@ mod tests {
             Job::new(
                 failed_job_dir,
                 dummy_job_config(),
-                JobState::Active(Pid::from_u32(0)),
+                JobState::Active {
+                    pid: Pid::from_u32(0),
+                    start_time: SystemTime::UNIX_EPOCH,
+                },
             ),
         );
 
@@ -1598,15 +1664,17 @@ mod tests {
         assert!(
             info.logs.first().unwrap().contains("can't load job 'test_job' status from file after it stopped, with: Failed to read job status file")
         );
+        let job_info = test_env.client.info("test_restarting_job").await?;
         assert_eq!(
             JobInfo {
                 status: JobStatus::Running,
+                timestamp: job_info.timestamp,
                 progress: Default::default(),
                 restart_count: 0,
                 logs: vec![],
                 upgrade_blocking: false,
             },
-            test_env.client.info("test_restarting_job").await?
+            job_info
         );
 
         test_env.kill_job("test_restarting_job");

@@ -4,6 +4,7 @@ use bv_utils::run_flag::RunFlag;
 use chrono::{DateTime, Local};
 use eyre::{Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
+use std::time::SystemTime;
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -37,10 +38,45 @@ pub struct JobsContext<C> {
     pub connector: C,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum JobState {
-    Active(Pid),
-    Inactive(JobStatus),
+    Active {
+        pid: Pid,
+        start_time: SystemTime,
+    },
+    Inactive {
+        status: JobStatus,
+        timestamp: SystemTime,
+    },
+}
+
+impl JobState {
+    pub fn set_active(&mut self, pid: Pid) {
+        *self = Self::Active {
+            pid,
+            start_time: SystemTime::now(),
+        };
+    }
+    pub fn set_inactive(&mut self, status: JobStatus) {
+        *self = Self::inactive(status);
+    }
+
+    pub fn inactive(status: JobStatus) -> Self {
+        Self::Inactive {
+            status,
+            timestamp: SystemTime::now(),
+        }
+    }
+}
+
+impl PartialEq for JobState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (JobState::Active { pid: a, .. }, JobState::Active { pid: b, .. }) => a.eq(b),
+            (JobState::Inactive { status: a, .. }, JobState::Inactive { status: b, .. }) => a.eq(b),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -110,17 +146,17 @@ impl Job {
 
     pub fn save_status(&self) -> Result<()> {
         match &self.state {
-            JobState::Active(_) => Ok(()),
-            JobState::Inactive(status) => match status {
-                JobStatus::Pending { .. } | JobStatus::Running => self.clear_status(),
-                JobStatus::Finished { .. } | JobStatus::Stopped => {
+            JobState::Active { .. } => Ok(()),
+            JobState::Inactive { status, .. } => match status {
+                JobStatus::Running => self.clear_status(),
+                JobStatus::Pending { .. } | JobStatus::Finished { .. } | JobStatus::Stopped => {
                     save_status_file(status, &self.status_path)
                 }
             },
         }
     }
 
-    pub fn load_status(&self) -> Result<JobStatus> {
+    pub fn load_status(&self) -> Result<(JobStatus, SystemTime)> {
         load_status_file(&self.status_path)
     }
 
@@ -171,15 +207,22 @@ pub fn save_config_file(config: &JobConfig, path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn load_status(job_dir: &Path) -> Result<JobStatus> {
+pub fn load_status(job_dir: &Path) -> Result<(JobStatus, SystemTime)> {
     load_status_file(&job_dir.join(STATUS_FILENAME))
 }
 
-pub fn load_status_file(path: &Path) -> Result<JobStatus> {
+pub fn load_status_file(path: &Path) -> Result<(JobStatus, SystemTime)> {
     info!("Reading job status file: {}", path.display());
-    fs::read_to_string(path)
-        .and_then(|s| serde_json::from_str::<JobStatus>(&s).map_err(Into::into))
-        .with_context(|| format!("Failed to read job status file `{}`", path.display()))
+    let timestamp = path
+        .metadata()
+        .and_then(|meta| meta.modified())
+        .unwrap_or(SystemTime::now());
+    Ok((
+        fs::read_to_string(path)
+            .and_then(|s| serde_json::from_str::<JobStatus>(&s).map_err(Into::into))
+            .with_context(|| format!("Failed to read job status file `{}`", path.display()))?,
+        timestamp,
+    ))
 }
 
 pub fn save_status(status: &JobStatus, job_dir: &Path) -> Result<()> {

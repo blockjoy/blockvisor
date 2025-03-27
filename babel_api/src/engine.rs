@@ -404,6 +404,8 @@ pub enum JobStatus {
 pub struct JobInfo {
     /// Job status.
     pub status: JobStatus,
+    /// Job status.
+    pub timestamp: SystemTime,
     /// Job progress
     pub progress: Option<JobProgress>,
     /// Restart count from last 24h.

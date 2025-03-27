@@ -244,9 +244,14 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 JobCommand::List => {
                     let jobs = client.get_node_jobs(id).await?.into_inner();
                     if !jobs.is_empty() {
-                        println!("{:<30} STATUS", "NAME");
+                        println!("{:<20} STATUS", "NAME");
                         for (name, info) in jobs {
-                            println!("{name:<30} {status}", status = info.status);
+                            let timestamp: DateTime<Utc> = info.timestamp.into();
+                            println!(
+                                "{name:<20} {timestamp}| {status}",
+                                timestamp = timestamp.format("%F %T %Z"),
+                                status = info.status,
+                            );
                         }
                     }
                 }
@@ -272,8 +277,13 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 }
                 JobCommand::Info { name } => {
                     let info = client.get_node_job_info((id, name)).await?.into_inner();
+                    let timestamp: DateTime<Utc> = info.timestamp.into();
 
-                    println!("status:           {}", info.status);
+                    println!(
+                        "status:           {}| {}",
+                        timestamp.format("%F %T %Z"),
+                        info.status,
+                    );
                     if let Some(progress) = info.progress {
                         println!("progress:         {progress}",);
                     }
@@ -413,7 +423,12 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                 println!("Jobs:");
                 for (name, mut info) in metrics.jobs {
                     println!("  - \"{name}\"");
-                    println!("    Status:         {}", info.status);
+                    let timestamp: DateTime<Utc> = info.timestamp.into();
+                    println!(
+                        "    Status:         {}| {}",
+                        timestamp.format("%F %T %Z"),
+                        info.status,
+                    );
                     println!("    Restarts:       {}", info.restart_count);
                     if let Some(progress) = info.progress {
                         println!("    Progress:       {progress}");

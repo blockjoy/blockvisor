@@ -127,7 +127,7 @@ async fn test_bv_cmd_jobs() -> Result<()> {
     println!("job info");
     test_env.bv_run(
         &["node", "job", vm_id, "info", "init_job"],
-        "status:           Stopped",
+        "| Stopped\nrestart_count:    0\nupgrade_blocking: true\nlogs:             <empty>",
     );
 
     println!("start job");

@@ -2610,6 +2610,7 @@ pub mod tests {
                 "upgrade_blocking_job_name".to_string(),
                 JobInfo {
                     status: JobStatus::Running,
+                    timestamp: SystemTime::UNIX_EPOCH,
                     progress: None,
                     restart_count: 0,
                     logs: vec![],

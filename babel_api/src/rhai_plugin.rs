@@ -1259,6 +1259,7 @@ mod tests {
                         exit_code: Some(1),
                         message: "error msg".to_string(),
                     },
+                    timestamp: SystemTime::UNIX_EPOCH,
                     progress: None,
                     restart_count: 0,
                     logs: vec![],
@@ -1270,6 +1271,7 @@ mod tests {
                 "custom_name".to_string(),
                 JobInfo {
                     status: JobStatus::Running,
+                    timestamp: SystemTime::UNIX_EPOCH,
                     progress: Default::default(),
                     restart_count: 0,
                     logs: vec![],
@@ -1442,7 +1444,7 @@ mod tests {
 
         let plugin = RhaiPlugin::from_str(script, babel).unwrap();
         assert_eq!(
-            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data|file content|psecret"#,
+            r#"json_as_param|#{"logs": [], "progress": (), "restart_count": 0, "status": #{"finished": #{"exit_code": 1, "message": "error msg"}}, "timestamp": #{"nanos_since_epoch": 0, "secs_since_epoch": 0}, "upgrade_blocking": false}|#{"custom_name": #{"logs": [], "progress": (), "restart_count": 0, "status": "running", "timestamp": #{"nanos_since_epoch": 0, "secs_since_epoch": 0}, "upgrade_blocking": true}}|jrpc_response|jrpc_with_map_and_timeout_response|jrpc_with_array_and_timeout_response|rest_response|200|rest_with_timeout_response|sh_response|sh_with_timeout_err|-1|sh_sanitized|255|{"key_A":"value_A"}|node_id|loaded data|file content|psecret"#,
             plugin
                 .call_custom_method("custom_method", r#"{"a":"json_as_param"}"#)
                 .unwrap()
@@ -1481,6 +1483,7 @@ mod tests {
                 "download".to_string(),
                 JobInfo {
                     status: JobStatus::Running,
+                    timestamp: SystemTime::UNIX_EPOCH,
                     progress: Default::default(),
                     restart_count: 0,
                     logs: vec![],
@@ -1494,6 +1497,7 @@ mod tests {
                     "protocol_service_a".to_string(),
                     JobInfo {
                         status: JobStatus::Running,
+                        timestamp: SystemTime::UNIX_EPOCH,
                         progress: Default::default(),
                         restart_count: 0,
                         logs: vec![],
@@ -1506,6 +1510,7 @@ mod tests {
                         status: JobStatus::Pending {
                             waiting_for: vec![],
                         },
+                        timestamp: SystemTime::UNIX_EPOCH,
                         progress: Default::default(),
                         restart_count: 0,
                         logs: vec![],
@@ -1519,6 +1524,7 @@ mod tests {
                 UPLOAD_JOB_NAME.to_string(),
                 JobInfo {
                     status: JobStatus::Running,
+                    timestamp: SystemTime::UNIX_EPOCH,
                     progress: Default::default(),
                     restart_count: 0,
                     logs: vec![],
