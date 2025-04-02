@@ -1,3 +1,3 @@
 [submodule "proto"]
 	path = bv/proto
-	url = git@github.com:blockjoy/api-proto.git
+	url = https://github.com/blockjoy/api-proto.git
