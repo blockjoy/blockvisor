@@ -12,7 +12,6 @@ use babel_api::engine::{NodeEnv, PosixSignal};
 use bv_utils::{
     cmd::run_cmd,
     system::{gracefully_terminate_process, is_process_running, kill_all_processes},
-    with_retry,
 };
 use eyre::{anyhow, bail, Context, Result};
 use std::{
@@ -136,83 +135,6 @@ pub async fn new(
                 node_state,
                 PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
                 PathBuf::from_str(PROTOCOL_DATA_PATH)?,
-            ),
-        },
-        config_backup: None,
-    })
-}
-
-// LEGACY node support - remove once all nodes upgraded
-pub async fn new_legacy(
-    bv_root: &Path,
-    net_conf: NetConf,
-    bv_context: &BvContext,
-    node_state: &NodeState,
-    babel_path: PathBuf,
-    config: ApptainerConfig,
-) -> Result<ApptainerMachine> {
-    let node_dir = node_context::build_node_dir(bv_root, node_state.id);
-    let chroot_dir = build_rootfs_dir(&node_dir);
-    let backup_chroot_dir = node_dir.join(BACKUP_ROOTFS_DIR);
-    let cgroups_path = node_dir.join(CGROUPS_CONF_FILE);
-    let apptainer_pid_path = node_dir.join(APPTAINER_PID_FILE);
-    let data_dir = node_dir.join(DATA_DIR);
-    // make sure that migrated nodes has locked protocol data
-    if !data_dir.exists() {
-        fs::create_dir_all(&data_dir).await?;
-    }
-    if node_state.initialized && babel_api::utils::protocol_data_stamp(&data_dir)?.is_none() {
-        babel_api::utils::touch_protocol_data(&data_dir)?;
-    }
-    // migrate plugin script
-    let mut script = fs::read_to_string(node_dir.join("babel.rhai"))
-        .await
-        .with_context(|| "failed to load legacy script")?;
-    let base_config_path = chroot_dir.join("var/lib/babel/base.rhai");
-    if base_config_path.exists() {
-        script.push_str(&fs::read_to_string(base_config_path).await?);
-    }
-    let plugin_dir = chroot_dir.join(PLUGIN_PATH);
-    if !plugin_dir.exists() {
-        fs::create_dir_all(&plugin_dir).await?;
-    }
-    fs::write(plugin_dir.join(PLUGIN_MAIN_FILENAME), script)
-        .await
-        .with_context(|| "failed to migrate legacy plugin script")?;
-    // emulate singularity image
-    let singularity_dir = chroot_dir.join(".singularity.d");
-    if !singularity_dir.exists() {
-        fs::create_dir_all(&singularity_dir).await?;
-        fs::write(
-            singularity_dir.join("Singularity"),
-            format!("bootstrap: rootfs\nfrom: {}\n", node_state.image.uri),
-        )
-        .await?;
-    }
-    Ok(ApptainerMachine {
-        node_dir,
-        babel_path,
-        chroot_dir,
-        backup_chroot_dir,
-        cgroups_path,
-        apptainer_pid_path,
-        apptainer_pid: None,
-        babel_pid: None,
-        data_dir,
-        vm_id: node_state.name.clone(), // set vm_id to vm_name, to keep container id backward compatibility
-        vm_name: node_state.name.clone(),
-        ip: node_state.ip,
-        net_conf,
-        apptainer_config: config,
-        config: Config {
-            image_uri: node_state.image.uri.clone(),
-            vm: node_state.vm_config.clone(),
-            cpus: node_state.assigned_cpus.clone(),
-            node_env: node_env::new(
-                bv_context,
-                node_state,
-                PathBuf::from_str(DATA_DRIVE_MOUNT_POINT)?,
-                PathBuf::from_str("/blockjoy/blockchain_data")?, // old data location
             ),
         },
         config_backup: None,
@@ -480,36 +402,6 @@ impl ApptainerMachine {
         }
         Ok(())
     }
-
-    // LEGACY node support - remove once all nodes upgraded
-    async fn umount_all(&mut self) -> Result<()> {
-        let chroot_dir = self.chroot_dir.to_string_lossy();
-        let chroot_dir = chroot_dir.trim_end_matches('/');
-        let mount_points = run_cmd("df", ["--all", "--output=target"])
-            .await
-            .map_err(|err| anyhow!("can't check if root fs is mounted, df: {err:#}"))?;
-        let mut mount_points = mount_points
-            .split_whitespace()
-            .filter(|mount_point| mount_point.starts_with(chroot_dir))
-            .collect::<Vec<_>>();
-        mount_points.sort_by_key(|k| std::cmp::Reverse(k.len()));
-        if !mount_points.is_empty() {
-            let _ = run_cmd("fuser", ["-km", chroot_dir]).await;
-            for mount_point in mount_points {
-                with_retry!(run_cmd("umount", [mount_point]), 2, 1000)
-                    .map_err(|err| anyhow!("failed to umount {mount_point}: {err:#}"))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn corresponding_host_data_path(&self, vm_data_path: &Path) -> PathBuf {
-        self.data_dir.join(
-            vm_data_path
-                .strip_prefix(DATA_DRIVE_MOUNT_POINT)
-                .unwrap_or(vm_data_path),
-        )
-    }
 }
 
 async fn is_built(path: &Path) -> Result<bool> {
@@ -584,21 +476,6 @@ impl pal::VirtualMachine for ApptainerMachine {
         if self.is_container_running().await {
             bail!("can't upgrade running vm")
         }
-        // LEGACY node support - remove once all nodes upgraded
-        if self.config.image_uri.starts_with("legacy://") {
-            self.umount_all().await?;
-            self.vm_id = node_state.id.to_string();
-        }
-        let desired_protocol_data_path = PathBuf::from_str(PROTOCOL_DATA_PATH)?;
-        if self.config.node_env.protocol_data_path != desired_protocol_data_path {
-            fs::rename(
-                self.corresponding_host_data_path(&self.config.node_env.protocol_data_path),
-                self.corresponding_host_data_path(&desired_protocol_data_path),
-            )
-            .await
-            .inspect_err(|err| error!("legacy node migration failed: {err:#}"))?;
-            self.config.node_env.protocol_data_path = desired_protocol_data_path;
-        }
 
         self.config_backup = Some(self.config.clone());
         self.config.image_uri = node_state.image.uri.clone();
@@ -632,22 +509,6 @@ impl pal::VirtualMachine for ApptainerMachine {
         }
         self.build().await?;
 
-        // LEGACY node support - remove once all nodes upgraded
-        if let Some(backup) = &self.config_backup {
-            if self.config.node_env.protocol_data_path != backup.node_env.protocol_data_path
-                && backup.node_env.protocol_data_path.exists()
-            {
-                fs::rename(
-                    self.corresponding_host_data_path(&backup.node_env.protocol_data_path),
-                    self.corresponding_host_data_path(&self.config.node_env.protocol_data_path),
-                )
-                .await
-                .inspect_err(|err| error!("legacy node rollback failed: {err:#}"))?;
-            }
-            if backup.image_uri.starts_with("legacy://") {
-                self.vm_id = self.vm_name.clone();
-            }
-        }
         Ok(())
     }
 
