@@ -91,7 +91,7 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
         node_context: NodeContext,
         scheduler_tx: mpsc::Sender<scheduler::Action>,
     ) -> Result<Self> {
-        let (engine_tx, engine_rx) = mpsc::channel(16);
+        let (engine_tx, engine_rx) = mpsc::channel(64);
         let engine = Engine {
             node_id: node_info.node_id,
             tx: engine_tx.clone(),
@@ -450,14 +450,24 @@ impl<N: NodeConnection, P: Plugin + Clone + Send + 'static> BabelEngine<N, P> {
                     Err(err) => Err(err),
                 });
             }
-            EngineRequest::AddTask(task) => {
-                let _ = self.scheduler_tx.send(scheduler::Action::Add(task)).await;
+            EngineRequest::AddTask { task, response_tx } => {
+                let _ = response_tx.send(
+                    self.scheduler_tx
+                        .send(scheduler::Action::Add(task))
+                        .await
+                        .map_err(|err| err.into()),
+                );
             }
-            EngineRequest::DeleteTask(task) => {
-                let _ = self
-                    .scheduler_tx
-                    .send(scheduler::Action::Delete(task))
-                    .await;
+            EngineRequest::DeleteTask {
+                task_name,
+                response_tx,
+            } => {
+                let _ = response_tx.send(
+                    self.scheduler_tx
+                        .send(scheduler::Action::Delete(task_name))
+                        .await
+                        .map_err(|err| err.into()),
+                );
             }
             EngineRequest::ProtocolDataStamp { response_tx } => {
                 let _ = response_tx.send(match self.node_connection.babel_client().await {
@@ -684,8 +694,14 @@ enum EngineRequest {
         params: String,
         response_tx: ResponseTx<Result<()>>,
     },
-    AddTask(scheduler::Scheduled),
-    DeleteTask(String),
+    AddTask {
+        task: scheduler::Scheduled,
+        response_tx: ResponseTx<Result<()>>,
+    },
+    DeleteTask {
+        task_name: String,
+        response_tx: ResponseTx<Result<()>>,
+    },
     ProtocolDataStamp {
         response_tx: ResponseTx<Result<Option<SystemTime>>>,
     },
@@ -873,9 +889,9 @@ impl babel_api::engine::Engine for Engine {
         function_name: &str,
         function_param: &str,
     ) -> Result<()> {
-        Ok(self
-            .tx
-            .blocking_send(EngineRequest::AddTask(scheduler::Scheduled {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx.blocking_send(EngineRequest::AddTask {
+            task: scheduler::Scheduled {
                 node_id: self.node_id,
                 name: task_name.to_string(),
                 schedule: cron::Schedule::from_str(schedule)?,
@@ -883,13 +899,19 @@ impl babel_api::engine::Engine for Engine {
                     name: function_name.to_string(),
                     param: function_param.to_string(),
                 },
-            }))?)
+            },
+            response_tx,
+        })?;
+        response_rx.blocking_recv()?
     }
 
     fn delete_task(&self, task_name: &str) -> Result<()> {
-        Ok(self
-            .tx
-            .blocking_send(EngineRequest::DeleteTask(task_name.to_string()))?)
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.tx.blocking_send(EngineRequest::DeleteTask {
+            task_name: task_name.to_string(),
+            response_tx,
+        })?;
+        response_rx.blocking_recv()?
     }
 
     fn protocol_data_stamp(&self) -> Result<Option<SystemTime>> {
@@ -1314,8 +1336,7 @@ mod tests {
         )
     }
 
-    #[allow(clippy::cmp_owned)]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test]
     async fn test_async_bridge_to_babel() -> Result<()> {
         let mut babel_mock = MockBabelService::new();
         let return_request = |req: Request<String>| {
@@ -1501,14 +1522,14 @@ mod tests {
         });
         assert_eq!(
             expected_action,
-            timeout(Duration::from_secs(15), test_env.rx.recv())
+            timeout(Duration::from_secs(3), test_env.rx.recv())
                 .await
                 .unwrap()
                 .unwrap()
         );
         assert_eq!(
             scheduler::Action::Delete("task_name".to_string()),
-            timeout(Duration::from_secs(15), test_env.rx.recv())
+            timeout(Duration::from_secs(3), test_env.rx.recv())
                 .await
                 .unwrap()
                 .unwrap()
