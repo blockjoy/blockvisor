@@ -21,7 +21,7 @@ use tokio::time::{sleep, Duration};
 #[serial]
 async fn test_bv_service_e2e() {
     let url = "http://localhost:8080";
-    let email = "tester@example.com";
+    let email = "tester@blockjoy.com";
     let password = "ilovemytests";
     let user_id = "1cff0487-412b-4ca4-a6cd-fdb9957d5d2f";
     let org_id = "53b28794-fb68-4cd1-8165-b98a51a19c46";
