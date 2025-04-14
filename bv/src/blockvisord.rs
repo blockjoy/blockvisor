@@ -318,7 +318,7 @@ where
             for (id, node) in nodes_manager.nodes_list().await.iter() {
                 match node {
                     MaybeNode::Node(node) => {
-                        if let Ok(node) = node.try_read() {
+                        if let Ok(mut node) = node.try_write() {
                             if node.state.dev_mode {
                                 // don't send updates for nodes in dev mode
                                 continue;
@@ -328,7 +328,19 @@ where
                                 "Collected node `{id}` info: s={status}, c={}",
                                 node.state.image.config_id
                             );
-                            updates.push((node.id(), node.state.image.config_id.clone(), status));
+                            let address = if status == VmStatus::Running
+                                && node.babel_engine.has_capability("address")
+                            {
+                                node.babel_engine.address().await.ok()
+                            } else {
+                                None
+                            };
+                            updates.push((
+                                node.id(),
+                                node.state.image.config_id.clone(),
+                                status,
+                                address,
+                            ));
                         } else {
                             debug!("Skipping node info collection, node `{id}` busy");
                         }
@@ -338,12 +350,12 @@ where
                             "Collected node `{id}` info: s=Broken, a={}",
                             state.image.config_id
                         );
-                        updates.push((*id, state.image.config_id.clone(), VmStatus::Failed));
+                        updates.push((*id, state.image.config_id.clone(), VmStatus::Failed, None));
                     }
                 }
             }
 
-            for (node_id, config_id, status) in updates {
+            for (node_id, config_id, status, p2p_address) in updates {
                 let vm_status = match status {
                     VmStatus::Running => Some(common::NodeState::Running),
                     VmStatus::Stopped => Some(common::NodeState::Stopped),
@@ -358,7 +370,7 @@ where
                         next: None,
                         protocol: None,
                     }),
-                    p2p_address: None,
+                    p2p_address,
                 };
 
                 if updates_cache.get(&node_id) == Some(&report) {
