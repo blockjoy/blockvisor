@@ -246,12 +246,7 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     if !jobs.is_empty() {
                         println!("{:<20} STATUS", "NAME");
                         for (name, info) in jobs {
-                            let timestamp: DateTime<Utc> = info.timestamp.into();
-                            println!(
-                                "{name:<20} {timestamp}| {status}",
-                                timestamp = timestamp.format("%F %T %Z"),
-                                status = info.status,
-                            );
+                            println!("{name:<20} {status}", status = info.status,);
                         }
                     }
                 }
