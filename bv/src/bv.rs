@@ -214,10 +214,27 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
                     return Ok(());
                 }
             } else if !tags.is_empty() {
-                if !ask_confirm(
-                    &format!("Are you sure you want to delete following node(s)?\n{id_or_names:?}"),
-                    yes,
-                )? {
+                id_or_names = client
+                    .get_nodes(true)
+                    .await?
+                    .into_inner()
+                    .into_iter()
+                    .filter_map(|n| {
+                        n.state
+                            .tags
+                            .iter()
+                            .any(|tag| tags.contains(tag))
+                            .then_some(n.state.id.to_string())
+                    })
+                    .collect();
+                if !id_or_names.is_empty()
+                    && !ask_confirm(
+                        &format!(
+                            "Are you sure you want to delete following node(s)?\n{id_or_names:?}"
+                        ),
+                        yes,
+                    )?
+                {
                     return Ok(());
                 }
             } else if all {
