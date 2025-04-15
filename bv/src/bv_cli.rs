@@ -155,11 +155,15 @@ pub enum NodeCommand {
     },
 
     /// Delete node and clean up resources.
-    #[clap(alias = "d", alias = "rm")]
+    #[clap(alias = "d", alias = "rm", group(ArgGroup::new("nodes_query").required(true).args(& ["id_or_names", "tags", "all"])))]
     Delete {
         /// One or more node id or names.
         #[clap(required(false))]
         id_or_names: Vec<String>,
+
+        /// One or more tags. Filter nodes by give tags.
+        #[clap(required(false))]
+        tags: Vec<String>,
 
         /// Delete all nodes on this host.
         #[clap(long, short)]

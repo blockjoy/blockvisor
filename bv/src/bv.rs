@@ -202,32 +202,36 @@ pub async fn process_node_command(bv_url: String, command: NodeCommand) -> Resul
         }
         NodeCommand::Delete {
             mut id_or_names,
+            tags,
             all,
             yes,
         } => {
-            // We only respect the `--all` flag when `id_or_names` is empty, in order to
-            // prevent a typo from accidentally deleting all nodes.
-            if id_or_names.is_empty() {
-                if all {
-                    if ask_confirm("Are you sure you want to delete all nodes?", yes)? {
-                        id_or_names = client
-                            .get_nodes(true)
-                            .await?
-                            .into_inner()
-                            .into_iter()
-                            .map(|n| n.state.id.to_string())
-                            .collect();
-                    } else {
-                        return Ok(());
-                    }
-                } else {
-                    bail!("<ID_OR_NAMES> can't be empty list");
+            if !id_or_names.is_empty() {
+                if !ask_confirm(
+                    &format!("Are you sure you want to delete following node(s)?\n{id_or_names:?}"),
+                    yes,
+                )? {
+                    return Ok(());
                 }
-            } else if !ask_confirm(
-                &format!("Are you sure you want to delete following node(s)?\n{id_or_names:?}"),
-                yes,
-            )? {
-                return Ok(());
+            } else if !tags.is_empty() {
+                if !ask_confirm(
+                    &format!("Are you sure you want to delete following node(s)?\n{id_or_names:?}"),
+                    yes,
+                )? {
+                    return Ok(());
+                }
+            } else if all {
+                if ask_confirm("Are you sure you want to delete all nodes?", yes)? {
+                    id_or_names = client
+                        .get_nodes(true)
+                        .await?
+                        .into_inner()
+                        .into_iter()
+                        .map(|n| n.state.id.to_string())
+                        .collect();
+                } else {
+                    return Ok(());
+                }
             }
             for id_or_name in id_or_names {
                 let id = client.resolve_id_or_name(&id_or_name).await?;
