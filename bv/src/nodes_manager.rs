@@ -993,7 +993,7 @@ mod tests {
         not_supported_state.image.min_babel_version = "777.77.7".to_string();
         assert_eq!(
             format!(
-                "BV internal error: 'image require never version of babel '777.77.7' while current is '{}' - upgrade bv first'",
+                "BV internal error: 'image require never version of babel '777.77.0' while current is '{}' - upgrade bv first'",
                 env!("CARGO_PKG_VERSION")
             ),
             nodes
@@ -1297,7 +1297,7 @@ mod tests {
         not_supported_state.image.min_babel_version = "777.77.7".to_string();
         assert_eq!(
             format!(
-                "BV internal error: 'image require never version of babel '777.77.7' while current is '{}' - upgrade bv first'",
+                "BV internal error: 'image require never version of babel '777.77.0' while current is '{}' - upgrade bv first'",
                 env!("CARGO_PKG_VERSION")
             ),
             nodes
