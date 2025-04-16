@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   publish:
-    name: Publish
+    name: Release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -27,6 +27,12 @@ jobs:
       - name: Setup packages
         run: >
           sudo apt -y install build-essential pkg-config libssl-dev cmake musl-tools pigz jq
+      - name: Install protoc
+        run: |
+          PB_REL="https://github.com/protocolbuffers/protobuf/releases"
+          curl -LO $PB_REL/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
+          unzip protoc-3.15.8-linux-x86_64.zip -d $HOME/.local
+          export PATH="$PATH:$HOME/.local/bin"
 
       - name: Build bundle file
         run: >
