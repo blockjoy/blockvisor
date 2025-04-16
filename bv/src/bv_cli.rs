@@ -62,14 +62,6 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum NodeCommand {
-    // LEGACY node support - remove once all nodes upgraded
-    /// Fix legacy nodes image metadata (to make it upgradeable), according to image mapping file.
-    FixLegacy {
-        /// Image definition file path.
-        #[clap(default_value = "image_mapping.json")]
-        path: PathBuf,
-    },
-
     /// Show nodes list.
     #[clap(alias = "ls")]
     List {

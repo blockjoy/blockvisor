@@ -41,8 +41,6 @@ pub struct ArchivePointer {
     pub pointer: StorePointer,
     #[serde(default)]
     pub new_archive_properties: Vec<String>,
-    // LEGACY node support - deprecate and add warning to nib image check, once all nodes upgraded
-    pub legacy_store_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
