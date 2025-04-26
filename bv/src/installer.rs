@@ -622,10 +622,6 @@ mod tests {
 
         #[tonic::async_trait]
         impl internal_server::service_server::Service for TestBV {
-            async fn fix_legacy_nodes(
-                &self,
-                request: tonic::Request<std::collections::HashMap<String, (String, node_state::ProtocolImageKey)>>,
-            ) -> Result<tonic::Response<Vec<internal_server::NodeDisplayInfo>>, tonic::Status>;
             async fn info(
                 &self,
                 request: tonic::Request<()>,
